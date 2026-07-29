@@ -119,9 +119,26 @@ impl XaiProtoBuilder {
         // Can only process one input file when using --dependency_out=FILE.
         for proto in protos {
             let mut command = Command::new(protoc.unwrap_or(Path::new("protoc")));
+
+            // `/dev/stdout` and `/dev/null` do not exist on Windows, so route
+            // protoc's outputs through real temp files there and read the
+            // dependency list back from disk instead of stdout.
+            #[cfg(windows)]
+            let capture_dir: Option<tempfile::TempDir> = Some(tempfile::TempDir::new()?);
+            #[cfg(not(windows))]
+            let capture_dir: Option<tempfile::TempDir> = None;
+
+            let (deps_out, desc_out) = match &capture_dir {
+                Some(dir) => (
+                    dir.path().join("deps.d").display().to_string(),
+                    dir.path().join("desc.pb").display().to_string(),
+                ),
+                None => ("/dev/stdout".to_string(), "/dev/null".to_string()),
+            };
+
             command
-                .arg("--dependency_out=/dev/stdout")
-                .arg("--descriptor_set_out=/dev/null");
+                .arg(format!("--dependency_out={deps_out}"))
+                .arg(format!("--descriptor_set_out={desc_out}"));
 
             // Add protoc's well-known types include directory first (if found).
             // This is needed for Bazel sandboxed builds where protoc and its
@@ -147,14 +164,17 @@ impl XaiProtoBuilder {
                 return Err(anyhow::anyhow!("protoc command failed"));
             }
 
-            let output =
-                String::from_utf8(output.stdout).context("protoc command output not UTF-8")?;
+            let raw = match &capture_dir {
+                Some(_) => fs::read(&deps_out).context("failed to read protoc dependency output")?,
+                None => output.stdout,
+            };
+            let output = String::from_utf8(raw).context("protoc command output not UTF-8")?;
 
             let mut lines = output.lines();
             let first_line = lines.next().context("protoc command output is empty")?;
-            let prefix = "/dev/null:";
-            let rem = first_line.strip_prefix(prefix).with_context(|| {
-                format!("protoc command output must start with /dev/null: {output:?}")
+            let prefix = format!("{desc_out}:");
+            let rem = first_line.strip_prefix(&prefix).with_context(|| {
+                format!("protoc command output must start with {prefix} {output:?}")
             })?;
             for line in iter::once(rem).chain(lines) {
                 let line = line.trim();

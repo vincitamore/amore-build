@@ -2131,9 +2131,9 @@ mod tests {
         assert_eq!(
             first_5,
             vec![
-                "Grok Build TUI",
+                "Selene Build TUI",
                 "",
-                "Usage: grok [OPTIONS] [PROMPT] [COMMAND]",
+                "Usage: selene [OPTIONS] [PROMPT] [COMMAND]",
                 "",
                 "Arguments:",
             ]
