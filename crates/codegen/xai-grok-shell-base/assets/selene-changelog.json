@@ -1,0 +1,17 @@
+[
+  {
+    "category": "features",
+    "description": "**Selene crescent** welcome logo — geometric braille moon and sparkle, both size tiers.",
+    "breaking_change": false
+  },
+  {
+    "category": "features",
+    "description": "**Kimi K3 (Modal)** is the compiled-in default model; the fork home lives at `~/.selene`.",
+    "breaking_change": false
+  },
+  {
+    "category": "fixes",
+    "description": "**Native Windows build** — protoc probe, `LNK1318` PDB link, stack reserve, harness fixes.",
+    "breaking_change": false
+  }
+]
