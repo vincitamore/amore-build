@@ -1,0 +1,12 @@
+{
+  "hookEventName": "stop",
+  "sessionId": "sess-nonorg",
+  "cwd": "__NONORG__",
+  "workspaceRoot": "__NONORG__",
+  "timestamp": "2026-07-30T00:00:00Z",
+  "promptId": "prompt-D",
+  "reason": "end_turn",
+  "stopHookActive": false,
+  "lastAssistantMessage": "all done",
+  "transcriptPath": "__BUSY_TRANSCRIPT__"
+}

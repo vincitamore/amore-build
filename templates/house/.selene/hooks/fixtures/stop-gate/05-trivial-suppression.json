@@ -1,0 +1,12 @@
+{
+  "hookEventName": "stop",
+  "sessionId": "sess-trivial",
+  "cwd": "__HOUSE__",
+  "workspaceRoot": "__HOUSE__",
+  "timestamp": "2026-07-30T00:00:00Z",
+  "promptId": "prompt-C",
+  "reason": "end_turn",
+  "stopHookActive": false,
+  "lastAssistantMessage": "quick ack",
+  "transcriptPath": "__TRIVIAL_TRANSCRIPT__"
+}

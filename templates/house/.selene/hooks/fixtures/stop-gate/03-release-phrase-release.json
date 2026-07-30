@@ -1,0 +1,12 @@
+{
+  "hookEventName": "stop",
+  "sessionId": "sess-release-phrase",
+  "cwd": "__HOUSE__",
+  "workspaceRoot": "__HOUSE__",
+  "timestamp": "2026-07-30T00:00:00Z",
+  "promptId": "prompt-B",
+  "reason": "end_turn",
+  "stopHookActive": false,
+  "lastAssistantMessage": "Wrapped up.\nMaintenance complete\n",
+  "transcriptPath": "__BUSY_TRANSCRIPT__"
+}

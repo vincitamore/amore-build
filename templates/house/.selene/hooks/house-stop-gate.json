@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bin/house-stop-gate.cmd",
+            "timeout": 60
+          }
+        ]
+      }
+    ]
+  }
+}

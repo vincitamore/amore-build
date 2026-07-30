@@ -1,0 +1,12 @@
+{
+  "hookEventName": "stop",
+  "sessionId": "sess-capture",
+  "cwd": "__HOUSE__",
+  "workspaceRoot": "__HOUSE__",
+  "timestamp": "2026-07-30T00:00:00Z",
+  "promptId": "prompt-E",
+  "reason": "end_turn",
+  "stopHookActive": false,
+  "lastAssistantMessage": "captured",
+  "transcriptPath": "__CAPTURE_TRANSCRIPT__"
+}

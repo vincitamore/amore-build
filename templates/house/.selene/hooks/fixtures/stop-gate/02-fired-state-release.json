@@ -1,0 +1,12 @@
+{
+  "hookEventName": "stop",
+  "sessionId": "sess-first-fire",
+  "cwd": "__HOUSE__",
+  "workspaceRoot": "__HOUSE__",
+  "timestamp": "2026-07-30T00:00:00Z",
+  "promptId": "prompt-A",
+  "reason": "end_turn",
+  "stopHookActive": true,
+  "lastAssistantMessage": "all done",
+  "transcriptPath": "__BUSY_TRANSCRIPT__"
+}

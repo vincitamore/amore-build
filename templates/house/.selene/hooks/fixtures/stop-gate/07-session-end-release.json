@@ -1,0 +1,12 @@
+{
+  "hookEventName": "stop",
+  "sessionId": "sess-end",
+  "cwd": "__HOUSE__",
+  "workspaceRoot": "__HOUSE__",
+  "timestamp": "2026-07-30T00:00:00Z",
+  "promptId": "prompt-Z",
+  "reason": "channel_closed",
+  "stopHookActive": false,
+  "lastAssistantMessage": "bye",
+  "transcriptPath": "__BUSY_TRANSCRIPT__"
+}

@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bin/house-session-init.cmd",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

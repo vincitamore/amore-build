@@ -1,0 +1,9 @@
+{
+  "hookEventName": "session_start",
+  "sessionId": "init-sess-2",
+  "cwd": "__HOUSE_WITH_DUE__",
+  "workspaceRoot": "__HOUSE_WITH_DUE__",
+  "timestamp": "2026-07-30T12:00:00Z",
+  "permissionMode": "default",
+  "source": "startup"
+}
