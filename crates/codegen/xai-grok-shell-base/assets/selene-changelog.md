@@ -8,6 +8,10 @@ describes.
 
 ## 2026-07-30
 
+- **Honest identity**: the system-prompt template no longer hardcodes
+  "released by xAI" — identity comes wholly from `system_prompt_label`
+  (per-model in `config.toml`; env `GROK_SYSTEM_PROMPT_LABEL` overrides).
+  `selene-k3` now introduces itself as Kimi K3 instead of role-playing Grok.
 - **Selene crescent** welcome logo — geometric braille moon and sparkle
   rasterized from real geometry (`scripts/gen_crescent.py`), both size tiers.
 - Fork-local changelog: the welcome screen and `/release-notes` now read this

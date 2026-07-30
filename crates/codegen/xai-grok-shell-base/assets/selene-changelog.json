@@ -1,5 +1,10 @@
 [
   {
+    "category": "fixes",
+    "description": "**Honest identity** — the system prompt no longer hardcodes \"released by xAI\"; `selene-k3` introduces itself as Kimi K3 via `system_prompt_label`.",
+    "breaking_change": false
+  },
+  {
     "category": "features",
     "description": "**Selene crescent** welcome logo — geometric braille moon and sparkle, both size tiers.",
     "breaking_change": false
