@@ -88,6 +88,7 @@ BINARY_EXTENSIONS = {
 # Basenames that *define* the patterns (must contain the strings; not leaks).
 SELF_CATALOG_NAMES = {
     "forbid-list.txt",
+    "forbid-list-release-gate.txt",
     "forbid-strip-map.txt",
 }
 

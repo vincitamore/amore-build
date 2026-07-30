@@ -46,6 +46,8 @@ jobs:
 
       - name: Install Rust toolchain (rust-toolchain.toml)
         uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.92.0"
 
       - name: Version inject (strip leading v from tag)
         shell: bash
@@ -119,9 +121,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: ubuntu-latest,  name: dioptra-linux-x64,    }
-          - { os: windows-latest, name: dioptra-windows-x64,  }
-          - { os: macos-15,       name: dioptra-darwin-arm64, }
+          - { os: ubuntu-latest,  name: dioptra-linux-x64,    suffix: linux-x64,    }
+          - { os: windows-latest, name: dioptra-windows-x64,  suffix: windows-x64,  }
+          - { os: macos-15,       name: dioptra-darwin-arm64, suffix: darwin-arm64, }
     defaults:
       run:
         working-directory: instruments/dioptra
@@ -166,7 +168,7 @@ jobs:
         run: |
           set -e
           BIN="${{ matrix.name }}"
-          DASH="dioptra-dash-${{ matrix.name#dioptra- }}"
+          DASH="dioptra-dash-${{ matrix.suffix }}"
           test -f "dist/$BIN"
           test -f "dist/$DASH"   # dash is required on every lane (D3-deferred CI proof)
           chmod +x "dist/$BIN" "dist/$DASH"
@@ -180,7 +182,7 @@ jobs:
         working-directory: instruments/dioptra
         run: |
           $bin = "${{ matrix.name }}.exe"
-          $dash = "dioptra-dash-${{ matrix.name#dioptra- }}.exe"
+          $dash = "dioptra-dash-${{ matrix.suffix }}.exe"
           if (-not (Test-Path "dist/$bin")) { throw "missing dist/$bin" }
           if (-not (Test-Path "dist/$dash")) { throw "missing dist/$dash (dash build is required on all lanes)" }
           New-Item -ItemType Directory -Force -Path release | Out-Null

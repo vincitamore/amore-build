@@ -36,6 +36,8 @@ jobs:
 
       - name: Install Rust toolchain (rust-toolchain.toml)
         uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.92.0"
 
       - name: Cargo cache
         uses: Swatinem/rust-cache@v2
