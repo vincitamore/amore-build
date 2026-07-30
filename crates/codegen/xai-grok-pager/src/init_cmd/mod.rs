@@ -45,6 +45,12 @@ pub struct InitArgs {
     /// Skip bundled skills under `.selene/skills/`.
     #[arg(long = "no-skills", conflicts_with = "skills")]
     pub no_skills: bool,
+    /// Install project hooks (default: on; explicit opt-in, no-op when already default).
+    #[arg(long = "hooks", conflicts_with = "no_hooks")]
+    pub hooks: bool,
+    /// Skip `.selene/hooks/**` install and global hooks-paths registration.
+    #[arg(long = "no-hooks", conflicts_with = "hooks")]
+    pub no_hooks: bool,
     /// Skip `context/principle-lattice.md` (lattice is default-on).
     #[arg(long = "no-lattice")]
     pub no_lattice: bool,
@@ -69,6 +75,8 @@ impl Default for InitArgs {
             refresh: false,
             skills: false,
             no_skills: false,
+            hooks: false,
+            no_hooks: false,
             no_lattice: false,
             with_dioptra: false,
             no_dioptra: false,
@@ -82,6 +90,11 @@ impl InitArgs {
     /// Skills install: default on; `--no-skills` off; `--skills` on.
     pub fn skills_enabled(&self) -> bool {
         !self.no_skills
+    }
+
+    /// Hooks install: default on; `--no-hooks` off; `--hooks` on.
+    pub fn hooks_enabled(&self) -> bool {
+        !self.no_hooks
     }
 
     /// Lattice install: default on; `--no-lattice` off.
@@ -151,13 +164,15 @@ pub enum FileAction {
     Preserve,
     /// Would write under dry-run.
     DryRunWrite,
+    /// Suppressed by a CLI opt-out (`--no-hooks`, etc.); still listed in the plan.
+    SkipOptOut,
 }
 
 impl FileAction {
     pub fn label(self) -> &'static str {
         match self {
             Self::Write => "written",
-            Self::SkipUnchanged => "skipped",
+            Self::SkipUnchanged | Self::SkipOptOut => "skipped",
             Self::Preserve => "preserved",
             Self::DryRunWrite => "would-write",
         }
@@ -325,10 +340,13 @@ pub fn run_with_context(
                     .insert(plan.rel_path.clone(), plan.content_sha256.clone());
                 wrote_any = true;
             }
-            FileAction::SkipUnchanged | FileAction::Preserve | FileAction::DryRunWrite => {
-                // Still record planned sha for new files in dry-run? Only update
-                // manifest for actual writes. For SkipUnchanged ensure manifest
-                // has the entry (first-run edge after partial install).
+            FileAction::SkipUnchanged
+            | FileAction::Preserve
+            | FileAction::DryRunWrite
+            | FileAction::SkipOptOut => {
+                // Only update manifest for actual writes. For SkipUnchanged ensure
+                // manifest has the entry (first-run edge after partial install).
+                // SkipOptOut never enters the manifest.
                 if plan.action == FileAction::SkipUnchanged
                     && !new_manifest.files.contains_key(&plan.rel_path)
                     && !args.dry_run
@@ -383,6 +401,15 @@ fn plan_files(
     let mut plans = Vec::with_capacity(selected.len());
     for entry in selected {
         let sha = xai_file_utils::sha256_hex(&entry.contents);
+        // `--no-hooks`: keep hooks lines visible in the plan as skipped; never write.
+        if is_hooks_rel(&entry.rel_path) && !args.hooks_enabled() {
+            plans.push(FilePlan {
+                rel_path: entry.rel_path.clone(),
+                action: FileAction::SkipOptOut,
+                content_sha256: sha,
+            });
+            continue;
+        }
         let dest = root.join(&entry.rel_path);
         let action = if !dest.exists() {
             FileAction::Write
@@ -415,6 +442,11 @@ fn plan_files(
         });
     }
     Ok(plans)
+}
+
+fn is_hooks_rel(rel: &str) -> bool {
+    let norm = rel.replace('\\', "/");
+    norm.starts_with(".selene/hooks/") || norm == ".selene/hooks"
 }
 
 /// Filter embedded entries by CLI flags + inject dioptra note when requested.
@@ -495,12 +527,24 @@ fn register_hooks_path(
     writer: &mut impl Write,
 ) -> Result<HooksRegistryReport> {
     let hooks_dir = root.join(".selene").join("hooks");
-    let has_hooks = plans.iter().any(|p| {
-        let n = p.rel_path.replace('\\', "/");
-        n.starts_with(".selene/hooks/") || n == ".selene/hooks"
-    });
-
     let registry_path = ctx.grok_home.join("hooks-paths");
+
+    // `--no-hooks` suppresses both file install and global registry write.
+    if !args.hooks_enabled() {
+        return Ok(HooksRegistryReport {
+            registry_path,
+            hooks_dir,
+            action: HooksRegistryAction::SkippedNoHooks,
+        });
+    }
+
+    let has_hooks = plans.iter().any(|p| {
+        is_hooks_rel(&p.rel_path)
+            && matches!(
+                p.action,
+                FileAction::Write | FileAction::DryRunWrite | FileAction::SkipUnchanged
+            )
+    });
 
     if !has_hooks {
         return Ok(HooksRegistryReport {
@@ -601,7 +645,9 @@ fn write_summary(
     for p in plans {
         match p.action {
             FileAction::Write => written.push(p.rel_path.as_str()),
-            FileAction::SkipUnchanged => skipped.push(p.rel_path.as_str()),
+            FileAction::SkipUnchanged | FileAction::SkipOptOut => {
+                skipped.push(p.rel_path.as_str())
+            }
             FileAction::Preserve => preserved.push(p.rel_path.as_str()),
             FileAction::DryRunWrite => would.push(p.rel_path.as_str()),
         }
@@ -727,12 +773,22 @@ mod unit_tests {
         args.no_lattice = true;
         assert!(!args.lattice_enabled());
         assert!(!keep_entry("context/principle-lattice.md", &args));
+
+        // Hooks stay in the pack (plan marks SkipOptOut); keep_entry does not drop them.
+        args = InitArgs::default();
+        args.no_hooks = true;
+        assert!(!args.hooks_enabled());
+        assert!(
+            keep_entry(".selene/hooks/demo.json", &args),
+            "hooks remain selectable so the plan can list them as skipped"
+        );
     }
 
     #[test]
-    fn default_args_skills_on_lattice_on_dioptra_off() {
+    fn default_args_skills_hooks_lattice_on_dioptra_off() {
         let args = InitArgs::default();
         assert!(args.skills_enabled());
+        assert!(args.hooks_enabled());
         assert!(args.lattice_enabled());
         assert!(!args.dioptra_enabled());
     }

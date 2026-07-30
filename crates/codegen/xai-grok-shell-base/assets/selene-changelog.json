@@ -1,7 +1,7 @@
 [
   {
     "category": "features",
-    "description": "**`selene init`** — offline install of the embedded cooperation harness into a git repo, with ownership-aware `--refresh`/`--force`, lattice default-on, and global hooks-paths registration.",
+    "description": "**`selene init`** — offline install of the embedded cooperation harness into a git repo, with ownership-aware `--refresh`/`--force`, lattice default-on, hooks default-on (`--no-hooks` opt-out), and global hooks-paths registration.",
     "breaking_change": false
   },
   {

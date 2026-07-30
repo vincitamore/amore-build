@@ -15,8 +15,8 @@ describes.
   (or `--yes`). Lattice is default-on (`--no-lattice` opt-out); skills
   default-on (`--no-skills`); dioptra pointer note opt-in (`--with-dioptra`).
   Registers project `.selene/hooks` in the global `hooks-paths` registry.
-  Flags: `--dry-run`, `--yes`, `--skills`/`--no-skills`, `--no-lattice`,
-  `--with-dioptra`/`--no-dioptra`.
+  Flags: `--dry-run`, `--yes`, `--skills`/`--no-skills`, `--hooks`/`--no-hooks`,
+  `--no-lattice`, `--with-dioptra`/`--no-dioptra`.
 - **`.selene` config-dir semantics** — the fork's native repo config dir is
   `.selene` at every surface upstream reads `.grok`: `skills/` + `commands/`,
   `rules/`, `hooks/`, `workflows/`, `agents/`, `plugins/` (project tier,

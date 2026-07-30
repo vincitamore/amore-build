@@ -349,6 +349,63 @@ fn no_skills_skips_skills_tree() {
 }
 
 #[test]
+fn no_hooks_skips_hooks_tree_and_registry() {
+    let h = Harness::new();
+    let mut out = Vec::new();
+    let report = init_cmd::run_with_context(
+        &InitArgs {
+            no_hooks: true,
+            yes: true,
+            ..InitArgs::default()
+        },
+        &h.ctx(),
+        &mut out,
+    )
+    .expect("init succeeds");
+    let stdout = String::from_utf8_lossy(&out);
+
+    // No hooks files on disk.
+    assert!(!h.exists(".selene/hooks/demo-hook.json"));
+    assert!(!h.exists(".selene/hooks/README.md"));
+    // Other harness files still install.
+    assert!(h.exists("AGENTS.md"));
+    assert!(h.exists(".selene/skills/demo-skill/SKILL.md"));
+    assert!(h.exists("context/current-state.md"));
+
+    // Plan still lists hooks lines, marked skipped (contract for dry-run / report).
+    let hook_plans: Vec<_> = report
+        .plans
+        .iter()
+        .filter(|p| p.rel_path.starts_with(".selene/hooks/"))
+        .collect();
+    assert!(
+        !hook_plans.is_empty(),
+        "plan must still show hooks lines under --no-hooks"
+    );
+    assert!(
+        hook_plans
+            .iter()
+            .all(|p| p.action == FileAction::SkipOptOut),
+        "hooks plans must be SkipOptOut: {:?}",
+        hook_plans
+            .iter()
+            .map(|p| (&p.rel_path, p.action))
+            .collect::<Vec<_>>()
+    );
+    assert!(
+        stdout.contains(".selene/hooks/") && stdout.contains("skipped"),
+        "summary must list hooks under skipped: {stdout}"
+    );
+
+    // No global hooks-paths registration.
+    assert_eq!(
+        report.hooks_registry.unwrap().action,
+        HooksRegistryAction::SkippedNoHooks
+    );
+    assert!(!h.grok_home.join("hooks-paths").exists());
+}
+
+#[test]
 fn dry_run_writes_nothing() {
     let h = Harness::new();
     let before = h.list_files();
