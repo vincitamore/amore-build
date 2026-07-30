@@ -1,0 +1,15 @@
+Selene Build
+Copyright 2026 The Selene Build contributors
+
+This product includes software developed by xAI:
+
+    Grok Build — https://github.com/xai-org/grok-build
+    Copyright 2023-2026 SpaceXAI
+    Licensed under the Apache License, Version 2.0 (see LICENSE)
+
+Selene Build is a permanent, independently maintained fork. See UPSTREAM.md
+for provenance, the sync relationship with the upstream project, and the
+non-affiliation statement.
+
+Crate names (`xai-grok-*`) are upstream's and are retained deliberately for
+diff hygiene; their presence implies no endorsement or affiliation.

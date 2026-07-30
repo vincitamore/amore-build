@@ -1,0 +1,76 @@
+name: ci
+
+# Build + test the selene binary surface on Linux and Windows.
+# Dioptra CI has its own lane (dioptra-ci.yml) scoped to instruments/dioptra/**.
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "instruments/dioptra/**"
+  pull_request:
+    paths-ignore:
+      - "instruments/dioptra/**"
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    name: ${{ matrix.os }} — build + test
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    env:
+      CARGO_TERM_COLOR: always
+      CARGO_INCREMENTAL: "0"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+
+      - name: Install Rust toolchain (rust-toolchain.toml)
+        uses: dtolnay/rust-toolchain@master
+
+      - name: Cargo cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ci-${{ github.run_id }}
+
+      - name: Build selene binary
+        run: cargo build --release -p xai-grok-pager-bin
+
+      # Windows: upstream brand-detection test assumes a unix host; skip it
+      # (documented fork test discipline — see CONTRIBUTING.md).
+      - name: Test pager crate (unit + integration)
+        run: cargo test -p xai-grok-pager --release -- --skip standalone_color_uses
+        if: matrix.os == 'windows-latest'
+
+      - name: Test pager crate (unit + integration)
+        run: cargo test -p xai-grok-pager --release
+        if: matrix.os == 'ubuntu-latest'
+
+      - name: Test config/env/hooks/agent/version crates
+        run: >-
+          cargo test --release
+          -p xai-grok-config -p xai-grok-env -p xai-grok-hooks
+          -p xai-grok-agent -p xai-grok-version -p xai-grok-update
+          -- --skip standalone_color_uses
+
+      - name: Smoke — selene --version stamps the build commit (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          target/release/selene --version
+          target/release/selene doctor --json | head -c 400
+          echo
+
+      - name: Smoke — selene --version stamps the build commit (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          target\release\selene.exe --version
+          target\release\selene.exe doctor --json | Select-Object -First 1

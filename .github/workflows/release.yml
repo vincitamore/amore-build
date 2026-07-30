@@ -1,0 +1,246 @@
+name: release
+
+# Tag-triggered release: selene binary ×5 targets + dioptra companion assets,
+# checksums, version inject, and the GitHub Release attach.
+#
+# Version: the tag drives the compiled version through GROK_VERSION
+# (xai-grok-version: option_env!("GROK_VERSION") → CARGO_PKG_VERSION). The tag
+# and the in-tree xai-grok-version crate version MUST agree (v0.1.0 ↔ 0.1.0).
+#
+# Dioptra: matrix mirrors dioptra-release-assets.yml (linux-x64, darwin-arm64,
+# windows-x64). Expansion lanes (darwin-x64, linux-arm64, dash artifacts) are a
+# follow-on — see instruments/dioptra/PORTING.md.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Simulated tag (workflow_dispatch only; no Release created)"
+        required: false
+        default: "v0.0.0-dryrun"
+
+permissions:
+  contents: write
+
+jobs:
+  selene:
+    name: selene — ${{ matrix.artifact }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest,    artifact: selene-linux-x64,    bin: selene,     }
+          - { os: ubuntu-24.04-arm, artifact: selene-linux-arm64,  bin: selene,     }
+          - { os: windows-latest,   artifact: selene-windows-x64,  bin: selene.exe, }
+          - { os: macos-15,         artifact: selene-darwin-arm64, bin: selene,     }
+          - { os: macos-15-intel,   artifact: selene-darwin-x64,   bin: selene,     }
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+
+      - name: Install Rust toolchain (rust-toolchain.toml)
+        uses: dtolnay/rust-toolchain@master
+
+      - name: Version inject (strip leading v from tag)
+        shell: bash
+        run: |
+          REF="${{ github.event.inputs.tag }}"
+          [ -n "$REF" ] || REF="${GITHUB_REF_NAME}"
+          echo "GROK_VERSION=${REF#v}" >> "$GITHUB_ENV"
+          echo "Version inject: ${REF#v}"
+
+      - name: Build
+        run: cargo build --release -p xai-grok-pager-bin
+
+      - name: Smoke — --version + doctor --json (unix)
+        if: matrix.os != 'windows-latest'
+        shell: bash
+        run: |
+          out="$(target/release/${{ matrix.bin }} --version)"
+          echo "$out"
+          echo "$out" | grep -q "$GROK_VERSION" || { echo "::error::version stamp missing $GROK_VERSION"; exit 1; }
+          target/release/${{ matrix.bin }} doctor --json | head -c 200
+          echo
+
+      - name: Smoke — --version + doctor --json (windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          $out = & "target\release\${{ matrix.bin }}" --version | Out-String
+          $out
+          if ($out -notmatch [regex]::Escape($env:GROK_VERSION)) { throw "version stamp missing $env:GROK_VERSION" }
+          & "target\release\${{ matrix.bin }}" doctor --json | Select-Object -First 1
+
+      - name: Package (unix — tar.gz)
+        if: matrix.os != 'windows-latest'
+        shell: bash
+        run: |
+          set -e
+          stage="pkg-${{ matrix.artifact }}"
+          mkdir -p "$stage"
+          cp "target/release/${{ matrix.bin }}" "$stage/"
+          cp LICENSE NOTICE README.md UPSTREAM.md "$stage/"
+          tar -czf "${{ matrix.artifact }}.tar.gz" -C "$stage" .
+          sha256sum "${{ matrix.artifact }}.tar.gz" > "${{ matrix.artifact }}.tar.gz.sha256"
+          rm -rf "$stage"
+
+      - name: Package (windows — zip)
+        if: matrix.os == 'windows-latest'
+        run: |
+          New-Item -ItemType Directory -Force -Path "pkg" | Out-Null
+          Copy-Item "target\release\${{ matrix.bin }}" "pkg\"
+          Copy-Item LICENSE, NOTICE, README.md, UPSTREAM.md "pkg\"
+          Compress-Archive -Path "pkg\*" -DestinationPath "${{ matrix.artifact }}.zip" -Force
+          $sha = (Get-FileHash "${{ matrix.artifact }}.zip" -Algorithm SHA256).Hash.ToLower()
+          "$sha  ${{ matrix.artifact }}.zip" | Out-File -FilePath "${{ matrix.artifact }}.zip.sha256" -Encoding ascii
+          Remove-Item -Recurse -Force "pkg"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            ${{ matrix.artifact }}.zip
+            ${{ matrix.artifact }}.zip.sha256
+            ${{ matrix.artifact }}.tar.gz
+            ${{ matrix.artifact }}.tar.gz.sha256
+          if-no-files-found: error
+
+  dioptra:
+    name: dioptra — ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest,  name: dioptra-linux-x64,    }
+          - { os: windows-latest, name: dioptra-windows-x64,  }
+          - { os: macos-15,       name: dioptra-darwin-arm64, }
+    defaults:
+      run:
+        working-directory: instruments/dioptra
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3"
+
+      - name: bun cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: dioptra-bun-${{ runner.os }}-${{ hashFiles('instruments/dioptra/bun.lock') }}
+          restore-keys: dioptra-bun-${{ runner.os }}-
+
+      - name: Install deps
+        run: bun install --frozen-lockfile
+
+      - name: Build compiled multi-tool (+ dash)
+        run: bun run scripts/build-compile.ts --with-dash
+
+      - name: Smoke — multi-tool + regula surface (unix)
+        if: matrix.os != 'windows-latest'
+        shell: bash
+        run: |
+          "dist/${{ matrix.name }}" --help
+          "dist/${{ matrix.name }}" commands --json | head -c 200
+          echo
+
+      - name: Smoke — multi-tool + regula surface (windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          & "dist/${{ matrix.name }}.exe" --help
+          & "dist/${{ matrix.name }}.exe" commands --json | Select-Object -First 1
+
+      - name: Package (unix — tar.gz with multi-tool + dash)
+        if: matrix.os != 'windows-latest'
+        working-directory: instruments/dioptra
+        shell: bash
+        run: |
+          set -e
+          BIN="${{ matrix.name }}"
+          DASH="dioptra-dash-${{ matrix.name#dioptra- }}"
+          test -f "dist/$BIN"
+          test -f "dist/$DASH"   # dash is required on every lane (D3-deferred CI proof)
+          chmod +x "dist/$BIN" "dist/$DASH"
+          mkdir -p release
+          tar -C dist -czf "release/$BIN.tar.gz" "$BIN" "$DASH"
+          sha256sum "release/$BIN.tar.gz" > "release/$BIN.tar.gz.sha256"
+          ls -la release/
+
+      - name: Package (windows — zip with multi-tool + dash)
+        if: matrix.os == 'windows-latest'
+        working-directory: instruments/dioptra
+        run: |
+          $bin = "${{ matrix.name }}.exe"
+          $dash = "dioptra-dash-${{ matrix.name#dioptra- }}.exe"
+          if (-not (Test-Path "dist/$bin")) { throw "missing dist/$bin" }
+          if (-not (Test-Path "dist/$dash")) { throw "missing dist/$dash (dash build is required on all lanes)" }
+          New-Item -ItemType Directory -Force -Path release | Out-Null
+          Compress-Archive -Path "dist/$bin","dist/$dash" -DestinationPath "release/$bin.zip" -Force
+          $sha = (Get-FileHash "release/$bin.zip" -Algorithm SHA256).Hash.ToLower()
+          "$sha  $bin.zip" | Out-File -FilePath "release/$bin.zip.sha256" -Encoding ascii
+          Get-Item release/* | Format-List Name, Length
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: |
+            instruments/dioptra/release/*.zip
+            instruments/dioptra/release/*.zip.sha256
+            instruments/dioptra/release/*.tar.gz
+            instruments/dioptra/release/*.tar.gz.sha256
+          if-no-files-found: error
+
+  release:
+    name: GitHub Release
+    needs: [selene, dioptra]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: "*"
+          merge-multiple: true
+          path: assets
+
+      - name: Compose release notes
+        shell: bash
+        run: |
+          cat > notes.md <<EOF
+          # Selene Build ${GITHUB_REF_NAME}
+
+          The Kimi-K3 cooperation harness, with native grok subagent freight.
+
+          **Source revision (SOURCE_REV):** \`${GITHUB_SHA}\`
+
+          | Asset | Notes |
+          |---|---|
+          | \`selene-{platform}\` | TUI agent binary — verify with the adjacent \`.sha256\` |
+          | \`dioptra-{platform}\` | Companion org/knowledge multi-tool (regula verbs included) |
+          | \`dioptra-dash-{platform}\` | Optional standalone dash (TTY) — multi-tool re-execs it when present |
+
+          Quickstart: see README (K3 paths first, Grok native second). Upstream
+          provenance + sync cadence: UPSTREAM.md. User-visible changes:
+          \`crates/codegen/xai-grok-shell-base/assets/selene-changelog.md\`.
+          EOF
+
+      - name: Create release + attach assets
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Selene Build ${{ github.ref_name }}
+          body_path: notes.md
+          files: assets/**
+          fail_on_unmatched_files: true
+          generate_release_notes: false
