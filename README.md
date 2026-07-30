@@ -70,7 +70,7 @@ is kept as a legacy fallback; `.selene` wins when both exist).
 
 ## Quickstart — Kimi K3 first
 
-The marketed default model path is **Kimi K3** (OpenRouter, Moonshot direct,
+The default model path is **Kimi K3** (OpenRouter, Moonshot direct,
 or an open-weight/Modal-style host). Native xAI grok is the **second rail**
 (subagent freight + first-party catalog).
 

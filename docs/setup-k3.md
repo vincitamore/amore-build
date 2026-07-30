@@ -1,8 +1,8 @@
 # Kimi K3 quickstart (headline provider path)
 
 Selene Build is the **Kimi-K3 cooperation harness**, with native grok subagent
-freight as a second rail. This page is the public on-ramp for the marketed
-default model path.
+freight as a second rail. This page is the public on-ramp for the default
+model path.
 
 | Product role | Model path |
 |--------------|------------|
@@ -68,6 +68,7 @@ max_completion_tokens = 16384
 
 | TOML field | Maps to | Evidence |
 |------------|---------|----------|
+| | | (line numbers as of `v0.1.0` / current `SOURCE_REV`) |
 | `model` | `ConfigModelOverride.model` | `crates/codegen/xai-grok-shell/src/agent/config.rs:4027` |
 | `base_url` | `ConfigModelOverride.base_url` | same `:4028` |
 | `name` | `ConfigModelOverride.name` | same `:4029` |

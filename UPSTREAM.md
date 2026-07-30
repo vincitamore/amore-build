@@ -77,7 +77,7 @@ release was rebased on. Consumers pin **upstream baseline + fork tip**
 
 ## 4. Rebase and cadence policy
 
-Operator-ratified. Binding for maintainers of this fork.
+Settled design policy, binding for maintainers of this fork.
 
 | Rule | Policy |
 |---|---|
@@ -101,8 +101,8 @@ User-visible labels follow the fork identity. Crate package names stay
 
 **Config-dir semantics.** Project roots use **`.selene`** where upstream reads
 **`.grok`**. **`.grok` is legacy fallback** so upstream-format trees keep
-working. Default user home is **`~/.selene`** (compiled in); `$GROK_HOME`
-still overrides when set.
+working. Default user home is **`~/.selene`** (compiled in); legacy
+`$GROK_HOME` still works (`$SELENE_HOME` wins when both are set).
 
 **Environment surface.** Product policy: **`SELENE_*` primaries**, **`GROK_*`**
 legacy aliases on dual-mapped keys. Not every historical `GROK_*` name has a

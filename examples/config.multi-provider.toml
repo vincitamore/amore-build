@@ -1,9 +1,9 @@
 # Selene Build — multi-provider example config
 # Copy fields you need into ~/.selene/config.toml (or $GROK_HOME/config.toml).
 #
-# Product posture (operator ruling): K3 is the headline path; native grok is
+# Product posture: K3 is the headline path; native grok is
 # the second rail (login / XAI_API_KEY). Baked catalog grok-4.5 is technical
-# fallback only — not the marketed default.
+# fallback only — not the default.
 #
 # EVERY custom [model.*] MUST set system_prompt_label. Unlabeled models resolve
 # to the product default identity and play the wrong persona.

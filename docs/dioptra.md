@@ -125,8 +125,8 @@ is not a substitute for installing dioptra.
 
 When dioptra is installed and detected, the Selene Build TUI can surface a
 shortcuts-bar hint that launches **`dioptra dash` in a new terminal**. The
-action label is **`dash`**. The bound key lives in the in-product shortcuts
-cheatsheet (do not hard-code a key here — check the cheatsheet in your build).
+action is **Ctrl+Shift+D** (label `dash`). The in-product shortcuts cheatsheet
+is the source of truth if the binding ever moves.
 When dioptra is **not** installed, that hint is **hidden**.
 
 ---
