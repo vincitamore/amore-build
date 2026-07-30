@@ -660,6 +660,23 @@ fn human_incomplete_fixture_is_exact_without_duplicate_probe_rows() {
     );
 }
 
+fn assert_path_collision_present(json: &serde_json::Value) {
+    let pc = json
+        .get("pathCollision")
+        .expect("doctor JSON must include pathCollision check");
+    assert_eq!(pc["binary"], "selene");
+    assert!(pc["status"].is_string());
+    assert!(pc["shadowed"].is_boolean());
+    assert!(pc["message"].is_string());
+}
+
+fn strip_path_collision(mut json: serde_json::Value) -> serde_json::Value {
+    if let Some(obj) = json.as_object_mut() {
+        obj.remove("pathCollision");
+    }
+    json
+}
+
 #[test]
 fn json_empty_fixture_pins_null_policy() {
     let mut report = healthy_report();
@@ -670,8 +687,9 @@ fn json_empty_fixture_pins_null_policy() {
     let mut output = Vec::new();
     write_report(&report, true, &mut output).unwrap();
     let json: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    assert_path_collision_present(&json);
     assert_eq!(
-        json,
+        strip_path_collision(json),
         serde_json::json!({
             "schemaVersion": "1",
             "facts": {
@@ -711,15 +729,29 @@ fn json_empty_fixture_pins_null_policy() {
 }
 
 #[test]
+fn doctor_json_includes_path_collision_check() {
+    let mut output = Vec::new();
+    write_report(&healthy_report(), true, &mut output).unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&output).unwrap();
+    assert_path_collision_present(&json);
+    // Live collect_report also attaches the probe as a finding when shadowed.
+    let mut live = Vec::new();
+    write_report(&collect_report(), true, &mut live).unwrap();
+    let live_json: serde_json::Value = serde_json::from_slice(&live).unwrap();
+    assert_path_collision_present(&live_json);
+}
+
+#[test]
 fn json_contract_is_structural_stable_ordered_and_ansi_free() {
     let report = mixed_report();
     let mut output = Vec::new();
     write_report(&report, true, &mut output).expect("serialize doctor report");
     let text = String::from_utf8(output).expect("JSON is UTF-8");
     let json: serde_json::Value = serde_json::from_str(&text).expect("valid JSON");
+    assert_path_collision_present(&json);
 
     assert_eq!(
-        json,
+        strip_path_collision(json),
         serde_json::json!({
             "schemaVersion": "1",
             "facts": {

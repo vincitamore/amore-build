@@ -400,7 +400,7 @@ pub struct LeaderArgs {
 }
 #[derive(Debug, Clone, Parser)]
 #[command(
-    name = "grok",
+    name = "selene",
     version = env!("VERSION_WITH_COMMIT"),
     about = "Selene Build TUI",
     disable_version_flag = true,
@@ -783,6 +783,21 @@ fn strip_cur_dir(path: PathBuf) -> PathBuf {
         .filter(|component| !matches!(component, std::path::Component::CurDir))
         .collect()
 }
+/// argv0 basenames that resolve to the same CLI surface.
+///
+/// Public product binary is `selene`; aliases keep multi-call / legacy
+/// installs working (`selene-build`, upstream `grok`, and `agent`).
+pub fn is_recognized_argv0(name: &str) -> bool {
+    let stem = name
+        .strip_suffix(".exe")
+        .or_else(|| name.strip_suffix(".EXE"))
+        .unwrap_or(name);
+    matches!(stem, "selene" | "selene-build" | "grok" | "agent")
+}
+
+/// Canonical clap program name when argv0 is unrecognized.
+pub const DEFAULT_BIN_NAME: &str = "selene";
+
 impl PagerArgs {
     /// Parse CLI arguments without applying side effects.
     pub fn parse_cli() -> Self {
@@ -792,8 +807,14 @@ impl PagerArgs {
             .map(std::path::Path::new)
             .and_then(|p| p.file_name())
             .and_then(|n| n.to_str())
-            .filter(|n| *n == "grok" || *n == "agent")
-            .unwrap_or("grok")
+            .filter(|n| is_recognized_argv0(n))
+            .unwrap_or(DEFAULT_BIN_NAME)
+            .to_owned();
+        // Strip .exe so clap's usage line stays clean on Windows multi-call.
+        let bin_name = bin_name
+            .strip_suffix(".exe")
+            .or_else(|| bin_name.strip_suffix(".EXE"))
+            .unwrap_or(&bin_name)
             .to_owned();
         Self::parse_from(std::iter::once(bin_name).chain(std::env::args().skip(1)))
     }
@@ -982,10 +1003,52 @@ impl PagerArgs {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clap::CommandFactory;
+
+    #[test]
+    fn help_text_names_selene() {
+        let help = PagerArgs::command().render_help().to_string();
+        assert!(
+            help.contains("selene") || help.contains("Usage: selene"),
+            "help must name the public binary selene; got:\n{help}"
+        );
+        // clap usage line uses the derive `name = "selene"`.
+        let usage = PagerArgs::command().render_usage().to_string();
+        assert!(
+            usage.contains("selene"),
+            "usage must name selene; got: {usage}"
+        );
+    }
+
+    #[test]
+    fn argv0_tolerance_resolves_all_four_names() {
+        for name in ["selene", "selene-build", "grok", "agent"] {
+            assert!(
+                is_recognized_argv0(name),
+                "{name} must be a recognized multi-call argv0"
+            );
+            let args = PagerArgs::try_parse_from([name, "--version"])
+                .unwrap_or_else(|e| panic!("{name}: parse failed: {e}"));
+            assert!(args.version, "{name}: --version must parse");
+            let doctor = PagerArgs::try_parse_from([name, "doctor"])
+                .unwrap_or_else(|e| panic!("{name}: doctor parse failed: {e}"));
+            assert!(
+                matches!(doctor.command, Some(Command::Doctor(_))),
+                "{name}: doctor must resolve"
+            );
+        }
+        // Windows multi-call may pass argv0 with .exe
+        assert!(is_recognized_argv0("selene.exe"));
+        assert!(is_recognized_argv0("grok.EXE"));
+        assert!(!is_recognized_argv0("selene-lua"));
+        assert!(!is_recognized_argv0("other"));
+        assert_eq!(DEFAULT_BIN_NAME, "selene");
+    }
+
     #[test]
     fn version_flags_parse_as_early_intent_without_exiting() {
         for flag in ["--version", "-v", "-V"] {
-            let args = PagerArgs::try_parse_from(["grok", flag]).expect("version flag parses");
+            let args = PagerArgs::try_parse_from(["selene", flag]).expect("version flag parses");
             assert!(args.version, "{flag} must set the early version intent");
             assert!(args.command.is_none());
         }

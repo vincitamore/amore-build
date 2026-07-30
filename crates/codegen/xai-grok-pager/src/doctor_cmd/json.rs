@@ -28,6 +28,33 @@ struct JsonReport<'a> {
     findings: Vec<JsonFinding<'a>>,
     probe_notes: Vec<JsonProbeNote<'a>>,
     counts: JsonCounts,
+    /// Always-present PATH-collision check for the public `selene` binary
+    /// (crates.io Lua-linter mitigation).
+    path_collision: JsonPathCollision,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct JsonPathCollision {
+    binary: &'static str,
+    status: &'static str,
+    shadowed: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    path: Option<String>,
+    message: String,
+}
+
+impl JsonPathCollision {
+    fn from_live_check() -> Self {
+        let result = super::path_collision::check_selene_path_collision();
+        Self {
+            binary: "selene",
+            status: result.status_label(),
+            shadowed: result.is_shadowed(),
+            path: result.path().map(|p| p.display().to_string()),
+            message: result.message(),
+        }
+    }
 }
 
 impl<'a> From<&'a DiagnosticReport> for JsonReport<'a> {
@@ -42,6 +69,7 @@ impl<'a> From<&'a DiagnosticReport> for JsonReport<'a> {
                 recommendations: report.recommendation_count(),
                 probe_notes: report.probe_notes.len(),
             },
+            path_collision: JsonPathCollision::from_live_check(),
         }
     }
 }

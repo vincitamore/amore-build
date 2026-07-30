@@ -7,6 +7,7 @@ use crate::diagnostics::{DiagnosticReport, FixActivation, FixPlan, ShellKind};
 
 mod human;
 mod json;
+pub mod path_collision;
 
 pub const SCHEMA_VERSION: &str = "1";
 
@@ -61,8 +62,14 @@ fn run_report(json_output: bool, writer: &mut impl Write) -> Result<()> {
 
 pub fn collect_report() -> DiagnosticReport {
     let terminal = crate::terminal::standalone_terminal_context();
-    let report = collect_report_with(crate::diagnostics::probes::collect_standalone(&terminal));
+    let mut report = collect_report_with(crate::diagnostics::probes::collect_standalone(&terminal));
+    path_collision::apply_path_collision_probe(&mut report);
     configured_report_for_terminal(report, &terminal)
+}
+
+/// Last path-collision probe result for JSON emission (always present).
+pub fn path_collision_result() -> path_collision::PathCollisionResult {
+    path_collision::check_selene_path_collision()
 }
 
 fn configured_report_for_terminal(

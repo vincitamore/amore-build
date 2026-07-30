@@ -25,23 +25,39 @@ pub enum UpdateRunMode {
 
 const PROMPT_UPDATE_NOW: &str = "Update now? [Y/n/d]";
 const MSG_AUTO_UPDATE_BACKGROUND: &str = "Auto-update running in background.";
-const MSG_RUN_UPDATE_MANUAL: &str = "Run `grok update` to get the latest version.";
-/// Manual-install one-liner for this platform's bootstrap installer.
-fn manual_install_cmd() -> &'static str {
-    if cfg!(windows) {
-        "irm https://x.ai/cli/install.ps1 | iex"
+/// Manual-update nudge — fork installs do not self-update; point operators at
+/// the selene-build GitHub Releases page (URL kept out of code; docs phase).
+const MSG_RUN_UPDATE_MANUAL: &str =
+    "This build does not auto-update. Download a newer release from the selene-build GitHub Releases page.";
+/// Fork policy: never self-update back to upstream, regardless of config.
+/// Config key `cli.auto_update` is still parsed for file compat, but every
+/// effective read is forced false (see [`effective_auto_update`]).
+const FORK_AUTO_UPDATE_HARD_OFF: bool = true;
+
+/// Effective auto-update flag for this fork: always `false`.
+///
+/// Keeps config-file parsing/compat for `cli.auto_update` while ensuring the
+/// runtime path can never re-enable upstream self-update.
+pub fn effective_auto_update(_config_value: Option<bool>) -> bool {
+    if FORK_AUTO_UPDATE_HARD_OFF {
+        false
     } else {
-        "curl -fsSL https://x.ai/cli/install.sh | bash"
+        _config_value.unwrap_or(true)
     }
 }
 
-/// Build a reinstall hint for a known installer type.
-fn reinstall_hint(installer: &str) -> String {
-    match installer {
-        "npm" => "Please reinstall via npm:\n  npm i -g @xai-official/grok".to_string(),
-        "gh-release" => "Please reinstall via GitHub Releases:\n  gh release download --repo xai-org-shared/grok-build --pattern 'grok-*' --output grok && chmod +x grok".to_string(),
-        _ => format!("Please reinstall via:\n  {}", manual_install_cmd()),
-    }
+/// User-facing notice for the fork's non-self-updating update surface.
+fn fork_update_notice(current_version: &str) -> String {
+    format!(
+        "Selene Build - v{current_version}\n\
+         Auto-update is disabled in this fork (it must not self-update back to upstream).\n\
+         Install newer builds from the selene-build GitHub Releases page."
+    )
+}
+
+/// Manual reinstall hint — fork-appropriate, no upstream xAI install URLs.
+fn reinstall_hint(_installer: &str) -> String {
+    "Please reinstall from the selene-build GitHub Releases page.".to_string()
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -64,38 +80,11 @@ pub fn print_update_status(status: &UpdateStatus, json: bool) -> anyhow::Result<
         return Ok(());
     }
 
+    // Fork: always surface the non-self-updating notice (never point at xAI).
+    println!("{}", fork_update_notice(&status.current_version));
     if let Some(error) = status.error.as_deref() {
-        println!(
-            "Grok Build - v{} [{}]",
-            status.current_version, status.channel
-        );
         println!("Update check failed: {error}");
-        return Ok(());
     }
-
-    let channel_label = format!(" [{}]", status.channel);
-
-    if status.update_available {
-        if let Some(latest_version) = status.latest_version.as_deref() {
-            println!(
-                "A new version of Grok Build is available: {} -> {}{}",
-                status.current_version, latest_version, channel_label
-            );
-        } else {
-            println!("A new version of Grok Build is available.");
-        }
-        return Ok(());
-    }
-
-    if let Some(latest_version) = status.latest_version.as_deref() {
-        println!(
-            "Grok Build - v{} (latest: {}){}",
-            status.current_version, latest_version, channel_label
-        );
-        return Ok(());
-    }
-
-    println!("Grok Build - v{}{}", status.current_version, channel_label);
     Ok(())
 }
 
@@ -103,8 +92,22 @@ pub async fn check_update_status(update_config: &UpdateConfig) -> UpdateStatus {
     let installer = get_installer().await.map(|value| value.to_string());
     let current_version = get_installed_grok_version();
     let current_config = config::load_config().await;
-    let auto_update = current_config.cli.auto_update;
+    // Fork: config key may still be present on disk; effective value is always false.
+    let auto_update = Some(effective_auto_update(current_config.cli.auto_update));
     let channel = update_config.channel.clone();
+
+    // Fork hard-off: never advertise an upstream update as available.
+    if FORK_AUTO_UPDATE_HARD_OFF {
+        return UpdateStatus {
+            current_version,
+            latest_version: None,
+            update_available: false,
+            installer,
+            channel,
+            auto_update,
+            error: None,
+        };
+    }
 
     let Some(ref inst) = installer else {
         return UpdateStatus {
@@ -281,6 +284,10 @@ pub async fn ensure_latest_on_disk(update_config: &UpdateConfig) -> Result<Ensur
         installed: None,
         relaunch_needed: false,
     };
+    // Fork hard-off: never converge disk install toward upstream.
+    if FORK_AUTO_UPDATE_HARD_OFF {
+        return Ok(outcome);
+    }
     let Some(installer) = get_installer().await else {
         return Ok(outcome);
     };
@@ -454,6 +461,11 @@ impl BackgroundUpdateCheck {
 /// TUI, the leader's hourly checker) already put the target version on disk,
 /// no download is started — only the restart hint is surfaced.
 pub async fn check_update_background(update_config: &UpdateConfig) -> BackgroundUpdateCheck {
+    // Fork hard-off: never background-download upstream builds.
+    if FORK_AUTO_UPDATE_HARD_OFF {
+        return BackgroundUpdateCheck::none();
+    }
+
     let Some(installer) = get_installer().await else {
         return BackgroundUpdateCheck::none();
     };
@@ -465,7 +477,7 @@ pub async fn check_update_background(update_config: &UpdateConfig) -> Background
     }
 
     let current_config = config::load_config().await;
-    if current_config.cli.auto_update == Some(false) {
+    if !effective_auto_update(current_config.cli.auto_update) {
         return BackgroundUpdateCheck::none();
     }
 
@@ -541,6 +553,11 @@ pub async fn run_update_if_available(
     interactive: bool,
     update_config: &UpdateConfig,
 ) -> Result<bool> {
+    // Fork hard-off: never self-update back to upstream.
+    if FORK_AUTO_UPDATE_HARD_OFF {
+        return Ok(false);
+    }
+
     let Some(inst) = get_installer().await else {
         // Skip update check if no known installer.
         return Ok(false);
@@ -554,13 +571,13 @@ pub async fn run_update_if_available(
 
     let current_config = config::load_config().await;
 
-    // Skip update check if auto-update is explicitly disabled.
-    if current_config.cli.auto_update == Some(false) {
+    // Skip update check if auto-update is effectively disabled (fork: always).
+    if !effective_auto_update(current_config.cli.auto_update) {
         return Ok(false);
     }
 
-    // Resolve effective auto_update: None defaults to true (first-run).
-    let auto_update = current_config.cli.auto_update.unwrap_or(true);
+    // Resolve effective auto_update: None defaults to true (first-run) on upstream.
+    let auto_update = effective_auto_update(current_config.cli.auto_update);
 
     if current_config.cli.auto_update.is_none()
         && let Err(e) = config::update_config(|st| {
@@ -598,7 +615,7 @@ pub async fn run_update_if_available(
     let channel_label = format!(" [{}]", update_config.channel);
     if auto_update {
         eprintln!(
-            "A new version of Grok Build is available: {} -> {}{}",
+            "A new version of Selene Build is available: {} -> {}{}",
             current_version, latest_version, channel_label
         );
         if interactive {
@@ -626,7 +643,7 @@ pub async fn run_update_if_available(
             return Ok(false);
         }
         eprintln!(
-            "A new version of Grok Build is available: {} -> {}{}",
+            "A new version of Selene Build is available: {} -> {}{}",
             current_version, latest_version, channel_label
         );
         if interactive {
@@ -1306,8 +1323,8 @@ async fn download_verified_from_base(
         anyhow::bail!(
             "downloaded binary failed to run.\n\
              Your current version is unchanged.\n\
-             To update manually: {}",
-            manual_install_cmd()
+             {}",
+            reinstall_hint("internal")
         );
     }
 
@@ -2359,6 +2376,13 @@ pub async fn run_update(
     channel_switch: Option<&str>,
     update_config: &mut UpdateConfig,
 ) -> Result<Option<String>> {
+    // Fork hard-off: the user-facing update surface never pulls upstream.
+    if FORK_AUTO_UPDATE_HARD_OFF {
+        let _ = (force, pinned_version, channel_switch, update_config);
+        eprintln!("{}", fork_update_notice(&get_installed_grok_version()));
+        return Ok(None);
+    }
+
     apply_channel_switch(channel_switch, update_config).await;
     let installer = match get_installer().await {
         Some(i) => i,
@@ -3557,44 +3581,50 @@ mod tests {
     // ──────────────────────────────────────────────────────────────────────
 
     #[test]
-    fn test_reinstall_hint_npm_mentions_npm_command() {
+    fn test_reinstall_hint_npm_is_fork_neutral() {
         let hint = reinstall_hint("npm");
-        assert!(hint.contains("npm i -g"), "should suggest npm i -g: {hint}");
         assert!(
-            hint.contains("@xai-official/grok"),
-            "should name the package: {hint}"
+            hint.contains("selene-build GitHub Releases"),
+            "fork reinstall must point at Releases: {hint}"
         );
+        assert!(
+            !hint.contains("@xai-official"),
+            "must not name upstream npm package: {hint}"
+        );
+        assert!(!hint.contains("x.ai/cli"), "must not name x.ai install URL: {hint}");
     }
 
     #[test]
-    fn test_reinstall_hint_gh_release_mentions_gh_command() {
+    fn test_reinstall_hint_gh_release_is_fork_neutral() {
         let hint = reinstall_hint("gh-release");
         assert!(
-            hint.contains("gh release download"),
-            "should suggest gh release download: {hint}"
+            hint.contains("selene-build GitHub Releases"),
+            "fork reinstall must point at Releases: {hint}"
         );
         assert!(
-            hint.contains("xai-org-shared/grok-build"),
-            "should name the repo: {hint}"
+            !hint.contains("xai-org-shared"),
+            "must not name upstream release repo: {hint}"
         );
+        assert!(!hint.contains("x.ai/cli"), "must not name x.ai install URL: {hint}");
     }
 
     #[test]
-    fn test_reinstall_hint_internal_mentions_platform_installer() {
+    fn test_reinstall_hint_internal_is_fork_neutral() {
         let hint = reinstall_hint("internal");
-        if cfg!(windows) {
-            assert!(hint.contains("irm"), "should suggest irm install: {hint}");
-            assert!(
-                hint.contains("install.ps1"),
-                "should reference install.ps1: {hint}"
-            );
-        } else {
-            assert!(hint.contains("curl"), "should suggest curl install: {hint}");
-            assert!(
-                hint.contains("install.sh"),
-                "should reference install.sh: {hint}"
-            );
-        }
+        assert!(
+            hint.contains("selene-build GitHub Releases"),
+            "fork reinstall must point at Releases: {hint}"
+        );
+        assert!(!hint.contains("x.ai/cli"), "must not name x.ai install URL: {hint}");
+        assert!(!hint.contains("@xai-official"), "must not name upstream npm: {hint}");
+    }
+
+    #[test]
+    fn test_effective_auto_update_always_false_in_fork() {
+        assert!(!effective_auto_update(None));
+        assert!(!effective_auto_update(Some(true)));
+        assert!(!effective_auto_update(Some(false)));
+        assert!(FORK_AUTO_UPDATE_HARD_OFF);
     }
 
     #[test]
@@ -4312,10 +4342,19 @@ mod tests {
             MSG_AUTO_UPDATE_BACKGROUND,
             "Auto-update running in background."
         );
-        assert_eq!(
-            MSG_RUN_UPDATE_MANUAL,
-            "Run `grok update` to get the latest version."
+        assert!(
+            MSG_RUN_UPDATE_MANUAL.contains("selene-build GitHub Releases"),
+            "manual update message must point at fork Releases: {MSG_RUN_UPDATE_MANUAL}"
         );
+        assert!(
+            !MSG_RUN_UPDATE_MANUAL.contains("x.ai"),
+            "manual update message must not mention x.ai: {MSG_RUN_UPDATE_MANUAL}"
+        );
+        let notice = fork_update_notice("0.1.0");
+        assert!(notice.contains("Selene Build"));
+        assert!(notice.contains("selene-build GitHub Releases"));
+        assert!(!notice.contains("x.ai"));
+        assert!(!notice.contains("@xai-official"));
     }
 
     // ──────────────────────────────────────────────────────────────────────

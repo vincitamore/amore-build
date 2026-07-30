@@ -150,11 +150,11 @@ pub struct PromptContext {
     #[serde(default = "default_system_prompt_label")]
     pub system_prompt_label: String,
 }
-/// Default identity on trim-tool-descriptions (`You are Grok`). The fork's
-/// template carries no vendor provenance — identity comes wholly from the
-/// label (per-model `system_prompt_label` in config; `selene-k3` sets its
-/// Kimi identity there).
-pub const DEFAULT_SYSTEM_PROMPT_LABEL: &str = "Grok";
+/// Default identity on trim-tool-descriptions (`You are Selene Build`).
+/// The public product default label is Selene Build; identity remains
+/// settable per-model via `system_prompt_label` in config (and the
+/// env/config resolution chain).
+pub const DEFAULT_SYSTEM_PROMPT_LABEL: &str = "Selene Build";
 fn default_system_prompt_label() -> String {
     DEFAULT_SYSTEM_PROMPT_LABEL.to_string()
 }

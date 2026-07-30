@@ -621,6 +621,38 @@ mod tests {
         );
     }
 
+    /// Dual-rail (public-release 0.5): api_key present + no OAuth/auth.json
+    /// session must resolve without hard-walling behind interactive login.
+    #[test]
+    fn dual_rail_api_key_without_oauth_session_resolves() {
+        // No cached_token ⇒ auth.json absent / empty. has_external_api_key
+        // covers XAI_API_KEY env and per-model api_key/env_key BYOK.
+        let inputs = AuthMethodsBuildInputs {
+            has_external_api_key: true,
+            has_cached_token: false,
+            has_enterprise_oidc: false,
+            preferred_method: None,
+            ..default_inputs()
+        };
+        let built = build_auth_methods(inputs);
+        assert_eq!(default_id(&built), Some(XAI_API_KEY_METHOD_ID));
+        assert!(
+            !AuthMethodKind::from_id(built.methods[0].id()).needs_interactive_login(),
+            "BYOK must not force OAuth login when api_key is present and auth file is absent"
+        );
+        // Credential resolution: model-level api_key, no session token (auth file absent).
+        let mut model = crate::agent::config::ModelEntry::fallback(
+            "byok-model",
+            &crate::agent::config::EndpointsConfig::default(),
+        );
+        model.api_key = Some("sk-test-byok".into());
+        model.info.base_url = "https://api.example.com/v1".into();
+        let creds = crate::agent::config::resolve_credentials(&model, /* session */ None);
+        assert_eq!(creds.api_key.as_deref(), Some("sk-test-byok"));
+        assert_eq!(creds.base_url, "https://api.example.com/v1");
+        assert_eq!(creds.auth_type, xai_chat_state::AuthType::ApiKey);
+    }
+
     /// BYOK + cached session token: xai.api_key stays first in the methods
     /// list (skips login screen), but `default_auth_method_id` is
     /// `cached_token` (keeps OIDC refresh alive).

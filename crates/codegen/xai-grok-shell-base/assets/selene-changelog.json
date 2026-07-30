@@ -1,6 +1,21 @@
 [
   {
     "category": "features",
+    "description": "**Binary rename to `selene`** — public CLI is `selene` (argv0 also accepts `selene-build`, `grok`, `agent`); version output names selene; doctor PATH-collision check for the crates.io Lua-linter name clash.",
+    "breaking_change": true
+  },
+  {
+    "category": "features",
+    "description": "**Default system-prompt label** is `Selene Build` (overridable per-model / env).",
+    "breaking_change": false
+  },
+  {
+    "category": "fixes",
+    "description": "**Auto-update hard-off** — fork never self-updates to upstream; update surface points at the selene-build GitHub Releases page; xAI reinstall hints purged.",
+    "breaking_change": false
+  },
+  {
+    "category": "features",
     "description": "**`selene init`** — offline install of the embedded cooperation harness into a git repo, with ownership-aware `--refresh`/`--force`, lattice default-on, hooks default-on (`--no-hooks` opt-out), and global hooks-paths registration.",
     "breaking_change": false
   },
@@ -17,7 +32,7 @@
   },
   {
     "category": "fixes",
-    "description": "**Honest identity** — the system prompt no longer hardcodes \"released by xAI\"; `selene-k3` introduces itself as Kimi K3 via `system_prompt_label`.",
+    "description": "**Honest identity** — the system prompt no longer hardcodes \"released by xAI\"; identity comes wholly from `system_prompt_label` (per-model overridable).",
     "breaking_change": false
   },
   {
@@ -27,7 +42,7 @@
   },
   {
     "category": "features",
-    "description": "**Kimi K3 (Modal)** is the compiled-in default model; the fork home lives at `~/.selene`.",
+    "description": "Fork home lives at `~/.selene`; multi-provider BYOK substrate retained (private model pins not shipped as compiled-in defaults).",
     "breaking_change": false
   },
   {
