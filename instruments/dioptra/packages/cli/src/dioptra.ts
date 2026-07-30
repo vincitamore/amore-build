@@ -80,8 +80,13 @@ if (argv[0] === "daemon") {
       out.push(args[i]);
     }
   }
+  // Prefer source entry; fall back to compiled multi-tool re-exec (DIOPTRA_DAEMON_BIN
+  // or same-path sibling) is for release installs — source tree always has DAEMON_ENTRY.
   if (!existsSync(DAEMON_ENTRY)) {
-    process.stderr.write(`dioptra daemon: missing ${DAEMON_ENTRY}\n`);
+    process.stderr.write(
+      `dioptra daemon: missing ${DAEMON_ENTRY}\n` +
+        `(use the compiled binary: dioptra-{os}-{arch} daemon … — see PORTING.md §Compile)\n`,
+    );
     process.exit(64);
   }
   // org root: optional positional still supported by daemon

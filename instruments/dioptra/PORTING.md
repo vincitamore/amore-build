@@ -86,10 +86,64 @@ and residual surfaces; regenerating generic doctrine is out of D1 scope.
 | Debt | Owner unit | Status |
 |------|------------|--------|
 | Foreign-root guard redesign — tiered trust (reads any root; mutations need house markers or opt-in) | **D2** | **DONE** (2026-07-30) — seam `@selene/regula` `root-trust.ts`; CLI write verbs call `ensureMutationTrust`; daemon co-location guard removed (reads unflagged); opt-in via `--allow-foreign-root` / `DIOPTRA_ALLOW_FOREIGN_ROOT=1` / `~/.dioptra/allowed-roots.json` |
-| OpenTUI native dep per-OS resolution + dll redeploy story | D3 (was D2 pre-reassign) | open |
-| Install story (`bun build --compile` / release assets / wizard step) | D5 | open |
+| OpenTUI native dep per-OS resolution + `bun build --compile` distribution | **D3** | **DONE** (2026-07-30) — multi-tool CLI+daemon compile; optional dash artifact embeds OpenTUI native via `{ type: "file" }` (proved windows-x64); source build always documented; remainder: CI matrix for linux/darwin + optional patched-dll redeploy on `@opentui` pin bumps |
+| Install story (release assets / wizard step / PATH) | D5 | open (D3 ships the compile recipe; D5 owns packaging/install UX) |
 | Athanor residual verbs (optional null-surface cleanup) | product follow-on | open |
 | `triggered-by: dream` migration for private trees still using the old label | house migrate when consuming public tree | open |
+
+## Compile distribution (Phase 1.5 D3)
+
+Ruling 7 release story: per-OS assets `dioptra-{os}-{arch}` (and optional `dioptra-dash-{os}-{arch}`).
+
+### Recipe
+
+```bash
+cd instruments/dioptra
+bun install
+bun run scripts/build-compile.ts            # CLI + daemon only
+bun run scripts/build-compile.ts --with-dash  # + OpenTUI dash artifact
+# → dist/dioptra-{os}-{arch}[.exe]
+# → dist/dioptra-dash-{os}-{arch}[.exe]   (with --with-dash)
+```
+
+Cross-compile (Bun): `--target bun-linux-x64` / `bun-darwin-arm64` / etc.
+
+| Artifact | Entry | Embeds | Notes |
+|----------|-------|--------|-------|
+| `dioptra-{os}-{arch}` | `packages/cli/src/standalone.ts` | CLI verbs, `@selene/regula`, Bun daemon | In-process routing (no sibling `.ts` spawns). `daemon` / `task list` / `status` / … |
+| `dioptra-dash-{os}-{arch}` | `packages/tui/src/dash-standalone.ts` | OpenTUI + React dash | TTY required for interactive use. Auto-spawns daemon via sibling multi-tool or `$DIOPTRA_DAEMON_BIN`. |
+
+Source build (always documented; escape hatch):
+
+```bash
+bun packages/cli/src/dioptra.ts daemon --port 3852 <org_root>
+bun packages/cli/src/dioptra.ts task list --json
+bun packages/tui/src/index.tsx   # dash
+```
+
+### OpenTUI native surface — resolution
+
+**Mechanism that works:** `@opentui/core-win32-x64` (and peer OS packages) export the native library via:
+
+```js
+// @opentui/core-win32-x64/index.bun.js
+const module = await import("./opentui.dll", { with: { type: "file" } })
+export default module.default
+```
+
+`bun build --compile` embeds that file into `$bunfs` and `bun:ffi` `dlopen`s the embedded path. No manual extract-to-cache required on the proved host (windows x64, Bun 1.3.14, `@opentui/core@0.4.5`).
+
+**Why dash is a separate artifact (not gated out as impossible):** keeps the multi-tool lean (~99 MB vs ~110 MB dash); OpenTUI pulls React + renderer. Multi-tool `dioptra dash` will re-exec a sibling dash binary when present, else prints the build recipe (exit 64).
+
+**Remainder (precisely scoped, not a blocker for D3):**
+
+1. **linux/darwin CI proof** — same `{ type: "file" }` path for `libopentui.so` / `.dylib`; not exercised on this host.
+2. **Patched UAF dll** — tree still carries `patches/@opentui__core@0.4.2.patch` + `patches/opentui-dll-native-fix/`; workspace currently resolves `@opentui/core@0.4.5` (`latest`). Re-pin + re-validate the patch on version bumps; redeploy via `patches/opentui-dll-native-fix/deploy.sh` after `pnpm install` when the patched dll is required.
+3. **Extra grammars** — `packages/tui/src/code-grammars.ts` resolves `tree-sitter-wasms` via `createRequire`/`node_modules` (source-only). Compiled dash ships OpenTUI's default parsers only.
+
+### Gates (D3)
+
+See dual-write handle/output for paste-of-record.
 
 ## Gates (D1)
 

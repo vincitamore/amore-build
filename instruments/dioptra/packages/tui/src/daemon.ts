@@ -115,18 +115,50 @@ export function resolveOrgRoot(start: string = process.cwd()): string {
  * Resolve the daemon spawn command. Default: the **Bun daemon**
  * (`packages/daemon/src/index.ts`, run under the same bun executable hosting
  * this TUI — `process.execPath`). `$DIOPTRA_DAEMON_BIN` remains the explicit
- * escape hatch: when set (and existing) it is spawned directly as a
- * standalone binary with the same `<orgRoot> --port N` argv — that is how to
- * make the dash supervise the legacy `vitrum-daemon.exe` again.
+ * escape hatch:
+ * - pure daemon binary (legacy style): spawned with `<orgRoot> --port N`
+ * - compiled multi-tool `dioptra-{os}-{arch}`: spawned with `daemon <orgRoot> --port N`
+ *   (basename starts with `dioptra`)
+ *
+ * When the TUI itself is a compiled binary (no monorepo entry on disk), also
+ * probe sibling release assets next to `process.execPath` (e.g. dist/).
  */
 export function resolveDaemonCommand(): { cmd: string; baseArgs: string[] } | null {
   if (process.env.DIOPTRA_DAEMON_BIN && existsSync(process.env.DIOPTRA_DAEMON_BIN)) {
-    return { cmd: process.env.DIOPTRA_DAEMON_BIN, baseArgs: [] };
+    return dioptraSpawnPlan(process.env.DIOPTRA_DAEMON_BIN);
   }
   // this module lives at instruments/dioptra/packages/tui/src/daemon.ts → ../../daemon
   const entry = join(import.meta.dir, '..', '..', 'daemon', 'src', 'index.ts');
   if (existsSync(entry)) return { cmd: process.execPath, baseArgs: [entry] };
+
+  // Compiled dash: look for sibling multi-tool next to this executable.
+  const execDir = dirname(process.execPath);
+  const candidates = [
+    join(execDir, 'dioptra.exe'),
+    join(execDir, 'dioptra'),
+    join(execDir, 'dioptra-windows-x64.exe'),
+    join(execDir, 'dioptra-linux-x64'),
+    join(execDir, 'dioptra-darwin-arm64'),
+    join(execDir, 'dioptra-darwin-x64'),
+  ];
+  for (const c of candidates) {
+    if (c === process.execPath) continue;
+    if (existsSync(c)) return dioptraSpawnPlan(c);
+  }
   return null;
+}
+
+/** Multi-tool dioptra binaries need the `daemon` subcommand; pure daemon bins do not. */
+function dioptraSpawnPlan(bin: string): { cmd: string; baseArgs: string[] } {
+  const base = bin.replace(/\\/g, '/').split('/').pop()?.toLowerCase() ?? '';
+  if (base.startsWith('dioptra') && !base.includes('dash')) {
+    return { cmd: bin, baseArgs: ['daemon'] };
+  }
+  // dash binary must not re-exec itself as daemon
+  if (base.includes('dash')) {
+    return { cmd: bin, baseArgs: [] }; // will fail loudly if mis-set — prefer sibling multi-tool
+  }
+  return { cmd: bin, baseArgs: [] };
 }
 
 function waitUntilUp(url: string, timeoutMs: number): Promise<void> {
