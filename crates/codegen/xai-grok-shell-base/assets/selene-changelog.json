@@ -1,9 +1,15 @@
 [
   {
     "category": "features",
+    "description": "**`selene init`** — offline install of the embedded cooperation harness into a git repo, with ownership-aware `--refresh`/`--force`, lattice default-on, and global hooks-paths registration.",
+    "breaking_change": false
+  },
+  {
+    "category": "features",
     "description": "**.selene semantics** — fork-native `.selene` repo config dir (skills/commands, rules, hooks, workflows, agents, plugins) with `.grok` kept as legacy fallback at every surface.",
     "breaking_change": false
   },
+
   {
     "category": "fixes",
     "description": "**Windows tests** — `parse_login_env_capture` tests cfg-gated to match their unix-only helper.",

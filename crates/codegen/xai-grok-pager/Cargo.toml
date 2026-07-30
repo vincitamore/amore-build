@@ -45,6 +45,10 @@ serde_json = { workspace = true }
 toml = { workspace = true }
 toml_edit = { workspace = true, features = ["serde"] }
 
+# Offline cooperation-harness pack for `init` (templates/house → binary).
+# Chosen over rust-embed: neither was in Cargo.lock; protocol prefers include_dir.
+include_dir = "0.7"
+
 # ANSI parsing (tracing pane)
 ansi-to-tui = { workspace = true }
 
@@ -203,6 +207,10 @@ harness = false
 [[test]]
 name = "doctor_early_dispatch"
 path = "tests/doctor_early_dispatch.rs"
+
+[[test]]
+name = "init_ownership"
+path = "tests/init_ownership.rs"
 
 [[test]]
 name = "pty_e2e_smoke"

@@ -1779,6 +1779,16 @@ fn dispatch_doctor_if_requested(args: &PagerArgs) -> bool {
     }
     true
 }
+fn dispatch_init_if_requested(args: &PagerArgs) -> bool {
+    let Some(Command::Init(init_args)) = &args.command else {
+        return false;
+    };
+    if let Err(error) = xai_grok_pager::init_cmd::run(init_args.clone()) {
+        eprintln!("Error: {error:#}");
+        std::process::exit(1);
+    }
+    true
+}
 fn main() {
     if let Some(code) = xai_grok_pager::app::mermaid_worker::maybe_run_render_subprocess() {
         std::process::exit(code);
@@ -1787,7 +1797,10 @@ fn main() {
         std::process::exit(code);
     }
     let args = PagerArgs::parse_cli();
-    if dispatch_version_if_requested(&args) || dispatch_doctor_if_requested(&args) {
+    if dispatch_version_if_requested(&args)
+        || dispatch_doctor_if_requested(&args)
+        || dispatch_init_if_requested(&args)
+    {
         return;
     }
     xai_grok_pager_minimal::install();
@@ -1975,6 +1988,9 @@ async fn async_main(args: PagerArgs) -> Result<()> {
             }
             Command::Doctor(_) => {
                 unreachable!("doctor was consumed before runtime startup")
+            }
+            Command::Init(_) => {
+                unreachable!("init was consumed before runtime startup")
             }
             Command::Inspect { json } => {
                 let cwd = std::env::current_dir().unwrap_or_default();

@@ -17,6 +17,8 @@ pub enum Command {
     },
     /// Check terminal, clipboard, color, and input support without starting Grok
     Doctor(crate::doctor_cmd::DoctorArgs),
+    /// Install the cooperation harness into the current git repository
+    Init(crate::init_cmd::InitArgs),
     /// Manage running leader processes
     Leader(LeaderMgmtArgs),
     /// Sign out and clear cached credentials

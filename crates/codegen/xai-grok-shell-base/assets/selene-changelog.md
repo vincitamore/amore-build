@@ -8,6 +8,15 @@ describes.
 
 ## 2026-07-30
 
+- **`selene init`** — offline install of the embedded cooperation harness
+  (`templates/house/`) into any git repo. Ownership-aware: never silently
+  overwrites; `--refresh` only rewrites files still matching the install
+  manifest (`.selene/house-install.json`); `--force` overwrites with confirm
+  (or `--yes`). Lattice is default-on (`--no-lattice` opt-out); skills
+  default-on (`--no-skills`); dioptra pointer note opt-in (`--with-dioptra`).
+  Registers project `.selene/hooks` in the global `hooks-paths` registry.
+  Flags: `--dry-run`, `--yes`, `--skills`/`--no-skills`, `--no-lattice`,
+  `--with-dioptra`/`--no-dioptra`.
 - **`.selene` config-dir semantics** — the fork's native repo config dir is
   `.selene` at every surface upstream reads `.grok`: `skills/` + `commands/`,
   `rules/`, `hooks/`, `workflows/`, `agents/`, `plugins/` (project tier,
