@@ -1,0 +1,19 @@
+{
+  "name": "@selene/daemon",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "The dioptra Bun index/read daemon — parses via @selene/regula, serves the org index over HTTP. Golden-master parity with the legacy Rust daemon via @selene/parity.",
+  "main": "src/index.ts",
+  "scripts": {
+    "test": "bun test",
+    "start": "bun src/index.ts"
+  },
+  "dependencies": {
+    "@selene/regula": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "latest",
+    "bun-types": "latest"
+  }
+}

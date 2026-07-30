@@ -1,0 +1,246 @@
+diff --git a/packages/core/src/zig/yoga.zig b/packages/core/src/zig/yoga.zig
+index 3f8b4b5..a23b9e3 100644
+--- a/packages/core/src/zig/yoga.zig
++++ b/packages/core/src/zig/yoga.zig
+@@ -82,10 +82,73 @@ pub const ExternalYogaLayout = extern struct {
+ const CallbackContext = struct {
+     measure_callback: ?*const anyopaque = null,
+     dirtied_callback: ?*const anyopaque = null,
++    // OPUS UAF FIX v4: last successful measure result, replayed when the DEP-execute
++    // guard skips a dead trampoline. Returning NaN there triggered Yoga's
++    // "Measure function returned invalid dimension" warning on STDOUT every layout
++    // pass (screen-corrupting spam in a TUI); replaying the cached size degrades
++    // invisibly instead (0x0 only if the node was never successfully measured).
++    last_width: f32 = 0,
++    last_height: f32 = 0,
+ };
+ 
+ const JsMeasureCallback = *const fn (?*anyopaque, f32, u32, f32, u32) callconv(.c) void;
+ const JsDirtiedCallback = *const fn () callconv(.c) void;
++
++// OPUS UAF FIX: JS-reentrancy-safe teardown. internalMeasureFunc/internalDirtiedFunc call INTO
++// JS mid-layout-walk; JS work during that re-entry can free yoga nodes the walk has not visited
++// yet. Freeing a node's CallbackContext (c_allocator.destroy) while the walk is active lets the
++// walk read recycled heap through YGNodeGetContext and EXECUTE a garbage callback pointer
++// (field-proven: two full-memory dumps, DEP execute violations at internalMeasureFunc's
++// trampoline call). Fix: while any yogaNodeCalculateLayout is on the stack, frees are DEFERRED -
++// the node is made inert immediately (measure/dirtied funcs unset, context fields nulled) and
++// the actual YGNodeFree/context destroy runs after the outermost walk returns. Buffer overflow
++// (>4096 deferred frees in one walk) leaks the nodes instead of freeing mid-walk - safe by
++// construction, unreachable in practice.
++var layout_depth: usize = 0;
++var deferred_free_count: usize = 0;
++var deferred_free_nodes: [4096]YGNodeRef = undefined;
++var deferred_free_recursive_flags: [4096]bool = undefined;
++
++fn makeNodeInert(node: YGNodeRef) void {
++    c.YGNodeSetMeasureFunc(node, null);
++    c.YGNodeSetDirtiedFunc(node, null);
++    if (getContext(node)) |ctx| {
++        ctx.measure_callback = null;
++        ctx.dirtied_callback = null;
++    }
++}
++
++fn makeInertRecursive(node: YGNodeRef) void {
++    const child_count = c.YGNodeGetChildCount(node);
++    var index: usize = 0;
++    while (index < child_count) : (index += 1) {
++        makeInertRecursive(c.YGNodeGetChild(node, index));
++    }
++    makeNodeInert(node);
++}
++
++fn deferFree(node: YGNodeRef, recursive: bool) void {
++    if (deferred_free_count < deferred_free_nodes.len) {
++        deferred_free_nodes[deferred_free_count] = node;
++        deferred_free_recursive_flags[deferred_free_count] = recursive;
++        deferred_free_count += 1;
++    }
++}
++
++fn flushDeferredFrees() void {
++    var i: usize = 0;
++    while (i < deferred_free_count) : (i += 1) {
++        const node = deferred_free_nodes[i];
++        if (deferred_free_recursive_flags[i]) {
++            freeContextRecursive(node);
++            c.YGNodeFreeRecursive(node);
++        } else {
++            freeContext(node);
++            c.YGNodeFree(node);
++        }
++    }
++    deferred_free_count = 0;
++}
+ const callback_allocator = std.heap.c_allocator;
+ var opentui_config: YGConfigRef = null;
+ var opentui_config_mutex: std.Thread.Mutex = .{};
+@@ -197,20 +260,27 @@ fn getOrCreateContext(node: YGNodeRef) *CallbackContext {
+ }
+ 
+ fn freeContext(node: YGNodeRef) void {
++    // OPUS UAF FIX v2: NEVER destroy the CallbackContext. Yoga 3 clones nodes internally during
++    // layout of reparented subtrees, and clones SHARE the context pointer - destroying the
++    // original's context leaves the clone dangling into recycled heap (field-proven: dump #2's
++    // "context" was a recycled foreign allocation). Neutralize the fields and detach instead;
++    // a stale context pointer then always reads {null, null} = safe skip in the measure/dirtied
++    // trampolines. Cost: one 16-byte struct leaked per node lifetime.
+     const existing = c.YGNodeGetContext(node);
+     if (existing) |ptr| {
+         const ctx: *CallbackContext = @ptrCast(@alignCast(ptr));
+-        callback_allocator.destroy(ctx);
++        ctx.measure_callback = null;
++        ctx.dirtied_callback = null;
+         c.YGNodeSetContext(node, null);
+     }
+ }
+ 
+ fn freeContextIfUnused(node: YGNodeRef) void {
++    // OPUS UAF FIX v2: see freeContext - detach only, never destroy (clone-shared pointers).
+     const existing = c.YGNodeGetContext(node);
+     if (existing) |ptr| {
+         const ctx: *CallbackContext = @ptrCast(@alignCast(ptr));
+         if (ctx.measure_callback == null and ctx.dirtied_callback == null) {
+-            callback_allocator.destroy(ctx);
+             c.YGNodeSetContext(node, null);
+         }
+     }
+@@ -226,6 +296,52 @@ fn freeContextRecursive(node: YGNodeRef) void {
+     freeContext(node);
+ }
+ 
++// OPUS UAF FIX v3: DEP-execute guard on the trampoline calls. Field-proven (full-memory
++// dump #3, 2026-07-02): a LIVE node's LIVE context held a byte-intact Bun JSCallback
++// trampoline whose page had lost executability (Bun 1.3.14 compiles FFI trampolines into
++// heap-backed pages, AllocationProtect=PAGE_READWRITE, individual pages flipped executable
++// on demand; runtime page-protection churn can revert live neighbors). Nothing this binding
++// manages dangles - lifecycle fixes (v1 deferred frees, v2 leaked contexts) cannot close the
++// class. So: verify the callback target's page is executable immediately before every call
++// and degrade (skip + capped stderr note) instead of crashing the process. Cost: one
++// VirtualQuery syscall (~1-2us) per measure/dirtied invocation - negligible against layout.
++const builtin = @import("builtin");
++var guard_trip_count: usize = 0;
++
++fn callbackExecutable(p: *const anyopaque) bool {
++    if (builtin.os.tag != .windows) return true;
++    const win = std.os.windows;
++    var mbi: win.MEMORY_BASIC_INFORMATION = undefined;
++    const got = win.kernel32.VirtualQuery(@constCast(p), &mbi, @sizeOf(win.MEMORY_BASIC_INFORMATION));
++    if (got == 0) return false;
++    const exec_mask: u32 = 0x10 | 0x20 | 0x40 | 0x80; // EXECUTE | _READ | _READWRITE | _WRITECOPY
++    const page_guard: u32 = 0x100;
++    return (mbi.Protect & exec_mask) != 0 and (mbi.Protect & page_guard) == 0;
++}
++
++fn guardTrip(kind: []const u8, p: *const anyopaque) void {
++    guard_trip_count += 1;
++    if (guard_trip_count <= 32) {
++        // v4: include region forensics in the trip note - the upstream exhibit wants
++        // Protect/AllocationBase/RegionSize per event (2026-07-02 live capture showed
++        // SIX distinct trampolines across ~28 pages dying in ONE event = a range-wide
++        // allocator operation, not a single-page W^X window).
++        var protect: u32 = 0;
++        var alloc_base: usize = 0;
++        var region_size: usize = 0;
++        if (builtin.os.tag == .windows) {
++            const win = std.os.windows;
++            var mbi: win.MEMORY_BASIC_INFORMATION = undefined;
++            if (win.kernel32.VirtualQuery(@constCast(p), &mbi, @sizeOf(win.MEMORY_BASIC_INFORMATION)) != 0) {
++                protect = mbi.Protect;
++                alloc_base = @intFromPtr(mbi.AllocationBase);
++                region_size = mbi.RegionSize;
++            }
++        }
++        std.debug.print("[opentui-guard] non-executable {s} trampoline 0x{x} skipped (trip {d}, prot=0x{x}, allocBase=0x{x}, regionSize=0x{x})\n", .{ kind, @intFromPtr(p), guard_trip_count, protect, alloc_base, region_size });
++    }
++}
++
+ fn internalMeasureFunc(
+     node: YGNodeConstRef,
+     width: f32,
+@@ -238,8 +354,23 @@ fn internalMeasureFunc(
+ 
+     if (getContext(node)) |ctx| {
+         if (ctx.measure_callback) |callback| {
+-            const trampoline: JsMeasureCallback = @ptrCast(@alignCast(callback));
+-            trampoline(null, width, enumValue(width_mode), height, enumValue(height_mode));
++            if (callbackExecutable(callback)) {
++                const trampoline: JsMeasureCallback = @ptrCast(@alignCast(callback));
++                trampoline(null, width, enumValue(width_mode), height, enumValue(height_mode));
++                // v4: cache the last good result for guard-trip replay.
++                if (std.math.isFinite(tls_measure_width) and std.math.isFinite(tls_measure_height)) {
++                    ctx.last_width = tls_measure_width;
++                    ctx.last_height = tls_measure_height;
++                }
++            } else {
++                guardTrip("measure", callback);
++                // v4: replay the last good size instead of NaN. NaN made Yoga print
++                // "Measure function returned invalid dimension" to STDOUT on every
++                // layout pass - screen-corrupting spam in a TUI (live-exhibited
++                // 2026-07-02). The cached size degrades invisibly.
++                tls_measure_width = ctx.last_width;
++                tls_measure_height = ctx.last_height;
++            }
+         }
+     }
+ 
+@@ -249,8 +380,12 @@ fn internalMeasureFunc(
+ fn internalDirtiedFunc(node: YGNodeConstRef) callconv(.c) void {
+     if (getContext(node)) |ctx| {
+         if (ctx.dirtied_callback) |callback| {
+-            const trampoline: JsDirtiedCallback = @ptrCast(@alignCast(callback));
+-            trampoline();
++            if (callbackExecutable(callback)) {
++                const trampoline: JsDirtiedCallback = @ptrCast(@alignCast(callback));
++                trampoline();
++            } else {
++                guardTrip("dirtied", callback);
++            }
+         }
+     }
+ }
+@@ -308,16 +443,31 @@ pub export fn yogaNodeCreateWithConfig(config: YGConfigConstRef) YGNodeRef {
+ }
+ 
+ pub export fn yogaNodeFree(node: YGNodeRef) void {
++    if (layout_depth > 0) {
++        makeNodeInert(node);
++        deferFree(node, false);
++        return;
++    }
+     freeContext(node);
+     c.YGNodeFree(node);
+ }
+ 
+ export fn yogaNodeFreeRecursive(node: YGNodeRef) void {
++    if (layout_depth > 0) {
++        makeInertRecursive(node);
++        deferFree(node, true);
++        return;
++    }
+     freeContextRecursive(node);
+     c.YGNodeFreeRecursive(node);
+ }
+ 
+ export fn yogaNodeReset(node: YGNodeRef) void {
++    if (layout_depth > 0) {
++        makeNodeInert(node);
++        c.YGNodeReset(node);
++        return;
++    }
+     freeContext(node);
+     c.YGNodeReset(node);
+ }
+@@ -351,6 +501,11 @@ export fn yogaNodeGetParent(node: YGNodeRef) YGNodeRef {
+ }
+ 
+ pub export fn yogaNodeCalculateLayout(node: YGNodeRef, width: f32, height: f32, direction: u32) void {
++    layout_depth += 1;
++    defer {
++        layout_depth -= 1;
++        if (layout_depth == 0) flushDeferredFrees();
++    }
+     c.YGNodeCalculateLayout(node, width, height, toDirection(direction));
+ }
+ 

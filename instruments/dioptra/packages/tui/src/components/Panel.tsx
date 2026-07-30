@@ -1,0 +1,52 @@
+import type { ReactNode } from 'react';
+import { usePalette } from '../ThemeProvider';
+
+interface PanelProps {
+  /** Section header, rendered in the primary accent (the GUI's bold card title). */
+  title?: string;
+  /** Optional right-aligned header annotation (muted) — e.g. a timestamp or count. */
+  headerRight?: string;
+  children: ReactNode;
+  flexGrow?: number;
+  flexShrink?: number;
+  width?: number | `${number}%` | 'auto';
+  marginTop?: number;
+  marginRight?: number;
+  /** Use the active border color (hover/selected affordance). */
+  active?: boolean;
+}
+
+/**
+ * The repeating container unit of the Vitrum design language: a flat 1px-bordered
+ * box with hard corners, a primary-accent header, and no fill beyond the theme bg.
+ * Mirrors the GUI's `.border px-4 py-3` card. Borders go subtle by default, active
+ * on focus. Every member composes from this so the views stay coherent.
+ */
+export function Panel({ title, headerRight, children, flexGrow, flexShrink, width, marginTop, marginRight, active }: PanelProps) {
+  const t = usePalette();
+  return (
+    <box
+      flexDirection="column"
+      border
+      borderStyle="single"
+      borderColor={active ? t.borderActive : t.border}
+      backgroundColor={t.background}
+      paddingLeft={1}
+      paddingRight={1}
+      flexGrow={flexGrow}
+      flexShrink={flexShrink}
+      width={width}
+      marginTop={marginTop}
+      marginRight={marginRight}
+    >
+      {title ? (
+        <box flexDirection="row">
+          <text fg={t.primary}>{title}</text>
+          <box flexGrow={1} />
+          {headerRight ? <text fg={t.muted}>{headerRight}</text> : null}
+        </box>
+      ) : null}
+      {children}
+    </box>
+  );
+}

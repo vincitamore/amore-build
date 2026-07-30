@@ -1,0 +1,15 @@
+{
+  "name": "@selene/dioptra-workspace",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@9.0.0",
+  "scripts": {
+    "test": "pnpm --filter @selene/regula --filter @selene/cli --filter @selene/tui --filter @selene/daemon --filter @selene/parity test"
+  },
+  "patchedDependencies": {
+    "@opentui/core@0.4.2": "patches/@opentui__core@0.4.2.patch"
+  },
+  "workspaces": [
+    "packages/*"
+  ]
+}

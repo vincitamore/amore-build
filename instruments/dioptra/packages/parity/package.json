@@ -1,0 +1,19 @@
+{
+  "name": "@selene/parity",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Golden-master parity harness — records the legacy Rust daemon's HTTP surface (the spec) and diffs any target daemon (the Bun replacement) against it.",
+  "main": "src/index.ts",
+  "bin": {
+    "parity": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "bunx tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "latest",
+    "bun-types": "latest"
+  }
+}

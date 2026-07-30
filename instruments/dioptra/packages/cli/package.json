@@ -1,0 +1,20 @@
+{
+  "name": "@selene/cli",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Selene house CLI \u2014 sole global bin `dioptra` (org verbs + sight + daemon; default :3852)",
+  "bin": {
+    "dioptra": "./src/dioptra.ts"
+  },
+  "scripts": {
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@selene/regula": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "latest",
+    "bun-types": "latest"
+  }
+}

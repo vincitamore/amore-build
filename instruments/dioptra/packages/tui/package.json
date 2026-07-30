@@ -1,0 +1,28 @@
+{
+  "name": "@selene/tui",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "The Vitrum OpenTUI dashboard — the operator's terminal surface. Reads the daemon, mutates via @selene/regula, renders the knowledge graph with a braille canvas.",
+  "scripts": {
+    "test": "bun test",
+    "dash": "bun src/index.tsx",
+    "smoke": "bun run src/graph-view/smoke.tsx"
+  },
+  "dependencies": {
+    "@opentui/core": "latest",
+    "@opentui/react": "latest",
+    "@selene/regula": "workspace:*",
+    "d3-force": "^3.0.0",
+    "katex": "^0.16.22",
+    "marked": "^18.0.5",
+    "react": "19.2.7",
+    "tree-sitter-wasms": "^0.1.13"
+  },
+  "devDependencies": {
+    "@types/d3-force": "^3.0.10",
+    "@types/node": "latest",
+    "@types/react": "latest",
+    "bun-types": "latest"
+  }
+}

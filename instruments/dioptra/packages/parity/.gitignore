@@ -1,0 +1,6 @@
+# Goldens are EPHEMERAL by doctrine — the org tree is a living corpus, so a
+# recorded body is only valid within the corpus moment it was recorded in.
+# record -> replay happens within one moment; the goldens are never a tracked
+# artifact. The tracked spec is src/inventory.ts + src/cases.ts + the manifest
+# SCHEMA (src/manifest.ts). See README.md § "Why goldens are ephemeral".
+golden/
