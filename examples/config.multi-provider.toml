@@ -1,0 +1,153 @@
+# Selene Build — multi-provider example config
+# Copy fields you need into ~/.selene/config.toml (or $GROK_HOME/config.toml).
+#
+# Product posture (operator ruling): K3 is the headline path; native grok is
+# the second rail (login / XAI_API_KEY). Baked catalog grok-4.5 is technical
+# fallback only — not the marketed default.
+#
+# EVERY custom [model.*] MUST set system_prompt_label. Unlabeled models resolve
+# to the product default identity and play the wrong persona.
+#
+# Prefer env_key over literal api_key. Each env_key comment names the process
+# environment variable that must be set before `selene` runs.
+#
+# Pricing / availability notes in docs/setup-k3.md are as of 2026-07-30;
+# re-verify before relying on them.
+#
+# Schema: [model.<id>] → ConfigModelOverride
+#   crates/codegen/xai-grok-shell/src/agent/config.rs (ConfigModelOverride)
+# Shared blocks: [model_providers.<id>] → ModelProviderConfig
+#   crates/codegen/xai-grok-shell/src/agent/model_providers.rs
+
+# ---------------------------------------------------------------------------
+# Default: pick ONE headline K3 path after you set the matching env var.
+# ---------------------------------------------------------------------------
+[models]
+default = "k3-openrouter"
+# default = "k3-moonshot"
+# default = "k3-together"
+# default = "k3-fireworks"
+# default = "k3-modal"
+# default = "grok-4.5"   # technical fallback / freight only — not marketed default
+
+# ---------------------------------------------------------------------------
+# Shared OpenRouter connection defaults (optional DRY for multiple OR models)
+# env: OPENROUTER_API_KEY
+# ---------------------------------------------------------------------------
+[model_providers.openrouter]
+base_url = "https://openrouter.ai/api/v1"
+env_key = "OPENROUTER_API_KEY"
+# Optional OpenRouter ranking headers (static; no secrets):
+# extra_headers = { "HTTP-Referer" = "https://example.com", "X-Title" = "Selene Build" }
+
+# ---------------------------------------------------------------------------
+# (1) K3 via OpenRouter — preferred on-ramp
+# Wire model id: moonshotai/kimi-k3
+# env: OPENROUTER_API_KEY  (https://openrouter.ai/keys)
+# Probe: selene -m k3-openrouter -p "Reply with exactly: K3-OR-OK"
+# ---------------------------------------------------------------------------
+[model.k3-openrouter]
+model = "moonshotai/kimi-k3"
+model_provider = "openrouter"
+name = "Kimi K3 (OpenRouter)"
+system_prompt_label = "Kimi K3, a Moonshot AI model"
+context_window = 1048576
+max_completion_tokens = 16384
+# api_backend defaults to "chat_completions" — correct for OpenRouter
+
+# ---------------------------------------------------------------------------
+# (2) K3 via Moonshot direct — canonical 1M-context API
+# Wire model id: kimi-k3
+# env: MOONSHOT_API_KEY  (https://platform.kimi.ai — top-up may be required)
+# Probe: selene -m k3-moonshot -p "Reply with exactly: K3-MS-OK"
+# ---------------------------------------------------------------------------
+[model.k3-moonshot]
+model = "kimi-k3"
+base_url = "https://api.moonshot.ai/v1"
+name = "Kimi K3 (Moonshot)"
+env_key = "MOONSHOT_API_KEY"
+system_prompt_label = "Kimi K3, a Moonshot AI model"
+context_window = 1048576
+max_completion_tokens = 16384
+# Optional cost control (vendor: low | high | max; default max):
+# reasoning_effort = "high"
+
+# ---------------------------------------------------------------------------
+# (3a) K3 via Together AI — open-weight host tier
+# Wire model id: moonshotai/Kimi-K3
+# env: TOGETHER_API_KEY
+# Probe: selene -m k3-together -p "Reply with exactly: K3-TG-OK"
+# ---------------------------------------------------------------------------
+[model.k3-together]
+model = "moonshotai/Kimi-K3"
+base_url = "https://api.together.xyz/v1"
+name = "Kimi K3 (Together)"
+env_key = "TOGETHER_API_KEY"
+system_prompt_label = "Kimi K3, a Moonshot AI model"
+context_window = 1048576
+max_completion_tokens = 16384
+
+# ---------------------------------------------------------------------------
+# (3b) K3 via Fireworks AI — open-weight host tier
+# Wire model id: accounts/fireworks/models/kimi-k3
+# env: FIREWORKS_API_KEY
+# Probe: selene -m k3-fireworks -p "Reply with exactly: K3-FW-OK"
+# ---------------------------------------------------------------------------
+[model.k3-fireworks]
+model = "accounts/fireworks/models/kimi-k3"
+base_url = "https://api.fireworks.ai/inference/v1"
+name = "Kimi K3 (Fireworks)"
+env_key = "FIREWORKS_API_KEY"
+system_prompt_label = "Kimi K3, a Moonshot AI model"
+context_window = 1048576
+max_completion_tokens = 16384
+
+# ---------------------------------------------------------------------------
+# (3c) K3 via Modal — YOUR Shared API or Auto Endpoint base URL
+# Wire model id: moonshotai/Kimi-K3
+# env: MODAL_TOKEN  (Shared API auth or Auto Endpoint proxy token Bearer wk-….ws-…)
+# base_url: replace placeholder — no global public hostname is hardcoded here
+#   Shared API: product/dashboard OpenAI-compat URL for moonshotai/Kimi-K3
+#   Auto Endpoint: modal endpoint create --model moonshotai/Kimi-K3
+#                 then modal endpoint list / dashboard for https://…/v1
+# Probe: selene -m k3-modal -p "Reply with exactly: K3-MD-OK"
+# ---------------------------------------------------------------------------
+[model.k3-modal]
+model = "moonshotai/Kimi-K3"
+base_url = "https://YOUR-ENDPOINT.modal.direct/v1"
+name = "Kimi K3 (Modal)"
+env_key = "MODAL_TOKEN"
+system_prompt_label = "Kimi K3, a Moonshot AI model"
+context_window = 1048576
+max_completion_tokens = 16384
+
+# ---------------------------------------------------------------------------
+# Native grok rail — second path (login-covered or XAI_API_KEY)
+# Interactive: selene login  → session in ~/.selene/auth.json
+# Headless:    export XAI_API_KEY=xai-...   (https://console.x.ai)
+# Probe: selene -m grok-4.5 -p "Reply with exactly: GROK-OK"
+#
+# No base_url / env_key here: first-party catalog entry uses session JWT or
+# global XAI_API_KEY. Custom third-party models MUST set their own env_key.
+# ---------------------------------------------------------------------------
+[model.grok-4.5]
+# Override only the label when you want an explicit pin in the picker;
+# omit this whole table if the baked catalog entry is enough.
+system_prompt_label = "Grok 4.5"
+name = "Grok 4.5 (xAI)"
+
+# ---------------------------------------------------------------------------
+# Anthropic Messages — WORKAROUND-TIER only (not a K3 path)
+# ConfigModelOverride has no auth_scheme field; use messages + headers.
+# env: ANTHROPIC_API_KEY  (via env_http_headers → x-api-key)
+# Probe: selene -m claude-workaround -p "Reply with exactly: CLAUDE-OK"
+# ---------------------------------------------------------------------------
+# [model.claude-workaround]
+# model = "claude-sonnet-4-6"
+# base_url = "https://api.anthropic.com/v1"
+# name = "Claude (Messages workaround)"
+# api_backend = "messages"
+# system_prompt_label = "Claude"
+# context_window = 200000
+# extra_headers = { "anthropic-version" = "2023-06-01" }
+# env_http_headers = { "x-api-key" = "ANTHROPIC_API_KEY" }
