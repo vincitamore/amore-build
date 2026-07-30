@@ -8,6 +8,10 @@ describes.
 
 ## 2026-07-30
 
+- **Setup wizard hardening** — atomic `config.toml` write (temp+rename);
+  `--dry-run` creates no home dirs; `selene setup --force` re-runs past
+  done/skipped state; `[agent] setup_on_first_run` is a typed config field
+  (no unrecognized-key warning).
 - **First-run setup wizard + `selene setup`** — auto-guided TUI on first
   interactive launch when no credentials resolve (no `auth.json` session, no
   `XAI_API_KEY`, no resolvable config `[model.*]` key). Steps: K3 provider

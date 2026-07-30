@@ -83,6 +83,10 @@ pub struct WriteReport {
 ///
 /// Refuses to clobber a non-empty unparseable file. Overwrites an existing
 /// `[model.<id>]` table for the same id (idempotent re-run).
+///
+/// Real writes are atomic: temp file in the same directory then `rename`.
+/// `--dry-run` builds the document in memory only — no directory creation,
+/// no temp files, no rename.
 pub fn write_model_entry(config_path: &Path, plan: &ModelEntryPlan, dry_run: bool) -> Result<WriteReport> {
     if plan.system_prompt_label.trim().is_empty() {
         bail!("system_prompt_label is mandatory for custom [model.*] entries");
@@ -91,9 +95,12 @@ pub fn write_model_entry(config_path: &Path, plan: &ModelEntryPlan, dry_run: boo
         bail!("env_key is required (prefer env over literal api_key)");
     }
 
-    if let Some(parent) = config_path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("create {}", parent.display()))?;
+    // Dry-run: never create parents or touch disk.
+    if !dry_run {
+        if let Some(parent) = config_path.parent() {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("create {}", parent.display()))?;
+        }
     }
 
     let mut doc = read_or_empty(config_path)?;
@@ -127,8 +134,8 @@ pub fn write_model_entry(config_path: &Path, plan: &ModelEntryPlan, dry_run: boo
     }
 
     if !dry_run {
-        std::fs::write(config_path, doc.to_string())
-            .with_context(|| format!("write {}", config_path.display()))?;
+        atomic_write(config_path, doc.to_string().as_bytes())
+            .with_context(|| format!("atomic write {}", config_path.display()))?;
     }
 
     Ok(WriteReport {
@@ -137,6 +144,27 @@ pub fn write_model_entry(config_path: &Path, plan: &ModelEntryPlan, dry_run: boo
         env_key: plan.env_key.clone(),
         dry_run,
     })
+}
+
+/// Write `contents` to `path` via same-dir temp + rename (crash-safe).
+///
+/// Temp name: `{filename}.tmp-{pid}` in the same directory as `path`, so
+/// rename stays on one volume.
+fn atomic_write(path: &Path, contents: &[u8]) -> Result<()> {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let stem = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("file");
+    let tmp = parent.join(format!("{stem}.tmp-{}", std::process::id()));
+    std::fs::write(&tmp, contents)
+        .with_context(|| format!("write temp {}", tmp.display()))?;
+    std::fs::rename(&tmp, path).with_context(|| {
+        // Best-effort cleanup so a failed rename does not leave a stale temp.
+        let _ = std::fs::remove_file(&tmp);
+        format!("rename {} → {}", tmp.display(), path.display())
+    })?;
+    Ok(())
 }
 
 fn read_or_empty(path: &Path) -> Result<toml_edit::DocumentMut> {
@@ -213,7 +241,7 @@ pub fn write_dioptra_pointer(
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        std::fs::write(&path, body)?;
+        atomic_write(&path, body.as_bytes())?;
     }
     Ok(path)
 }
@@ -253,6 +281,40 @@ mod tests {
         let path = dir.path().join("config.toml");
         write_model_entry(&path, &ModelEntryPlan::moonshot(), true).unwrap();
         assert!(!path.exists());
+    }
+
+    #[test]
+    fn dry_run_creates_no_parent_dir() {
+        let dir = tempdir().unwrap();
+        let nested = dir.path().join("never-created").join("config.toml");
+        write_model_entry(&nested, &ModelEntryPlan::openrouter(), true).unwrap();
+        assert!(
+            !dir.path().join("never-created").exists(),
+            "dry-run must not create parent directories"
+        );
+        assert!(!nested.exists());
+    }
+
+    #[test]
+    fn atomic_write_happy_path_no_temp_left() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        fs::write(&path, "[ui]\ntheme = \"dark\"\n").unwrap();
+        write_model_entry(&path, &ModelEntryPlan::openrouter(), false).unwrap();
+        let body = fs::read_to_string(&path).unwrap();
+        assert!(body.contains("k3-openrouter"), "{body}");
+        assert!(body.contains("theme"), "sibling preserved: {body}");
+        // No leftover temp files from atomic write.
+        let leftovers: Vec<_> = fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| n.contains(".tmp-"))
+            .collect();
+        assert!(
+            leftovers.is_empty(),
+            "temp files must be renamed away: {leftovers:?}"
+        );
     }
 
     #[test]

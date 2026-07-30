@@ -1741,6 +1741,11 @@ pub struct AgentSelectionConfig {
     /// Global system-prompt identity label. Per-model override wins.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub system_prompt_label: Option<String>,
+    /// When `false`, suppress the auto-guided first-run setup wizard.
+    /// Absent / `true` allows auto-fire (subject to TTY/CI/credentials guards).
+    /// Written and advertised by `selene setup` / first-run onboarding.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub setup_on_first_run: Option<bool>,
 }
 /// Configuration for session behavior.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -10519,6 +10524,34 @@ agent_type = "cursor"
             unused.iter().any(|k| k == "features.not_a_real_feature"),
             "real typos still surface: {unused:?}"
         );
+    }
+    /// First-run wizard escape hatch (`[agent] setup_on_first_run`) must be a
+    /// typed field — not flagged by the unrecognized-key scan on every launch.
+    #[test]
+    fn agent_setup_on_first_run_is_recognized() {
+        let unused = unused_keys_from_toml(
+            r#"
+            [agent]
+            setup_on_first_run = false
+            name = "grok-build"
+        "#,
+        );
+        assert!(
+            !unused
+                .iter()
+                .any(|k| k == "agent.setup_on_first_run" || k.ends_with("setup_on_first_run")),
+            "setup_on_first_run must be typed on AgentSelectionConfig: {unused:?}"
+        );
+        // Serde-typed parse: field lands as Some(false).
+        let raw: toml::Value = toml::from_str(
+            r#"
+            [agent]
+            setup_on_first_run = false
+        "#,
+        )
+        .unwrap();
+        let cfg = Config::new_from_toml_cfg(&raw).expect("parse");
+        assert_eq!(cfg.agent.setup_on_first_run, Some(false));
     }
     #[test]
     fn config_warns_on_field_typos() {

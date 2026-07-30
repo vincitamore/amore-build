@@ -113,10 +113,22 @@ pub fn run_with_home(args: &SetupArgs, home: &std::path::Path, out: &mut impl Wr
         }
     }
 
+    // Without `--force`, done/skipped state blocks a second interactive/headless
+    // run (help text). Dry-run still inspects. `--force` bypasses for one run.
     if !args.force {
         if let Some(state) = WizardState::load(home)? {
-            if state.suppresses_auto_fire() && args.dry_run {
-                // Still allow dry-run inspection.
+            if state.suppresses_auto_fire() && !args.dry_run {
+                let status = match state.status {
+                    WizardStatus::Done => "done",
+                    WizardStatus::Skipped => "skipped",
+                    WizardStatus::InProgress => "in_progress",
+                };
+                writeln!(
+                    out,
+                    "Setup already {status} (see {}). Use --force to re-run, or --reset to clear.",
+                    WizardState::path_in(home).display()
+                )?;
+                return Ok(());
             }
         }
     }
@@ -285,5 +297,70 @@ mod tests {
         i.ci_env = true;
         assert!(!should_auto_launch_wizard(&i));
         let _ = Cursor::new(""); // keep import warm if optimized
+    }
+
+    #[test]
+    fn without_force_done_state_blocks_rerun() {
+        let dir = tempdir().unwrap();
+        WizardState::new(WizardStatus::Done)
+            .save(dir.path())
+            .unwrap();
+        let mut out = Vec::new();
+        let args = SetupArgs {
+            headless: true,
+            ..SetupArgs::default()
+        };
+        run_with_home(&args, dir.path(), &mut out).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert!(
+            text.contains("already done") || text.contains("--force"),
+            "expected blocked message, got:\n{text}"
+        );
+        // Must not have re-written flow output as if a full run happened.
+        assert!(
+            !text.contains("Step 1/3"),
+            "blocked re-run must not execute flow:\n{text}"
+        );
+    }
+
+    #[test]
+    fn force_reruns_past_done_state() {
+        let dir = tempdir().unwrap();
+        WizardState::new(WizardStatus::Done)
+            .save(dir.path())
+            .unwrap();
+        let mut out = Vec::new();
+        let args = SetupArgs {
+            force: true,
+            headless: true,
+            dry_run: true,
+            ..SetupArgs::default()
+        };
+        run_with_home(&args, dir.path(), &mut out).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert!(
+            text.contains("OpenRouter") || text.contains("headless"),
+            " --force must re-run flow past done state:\n{text}"
+        );
+    }
+
+    #[test]
+    fn dry_run_still_allowed_when_done_without_force() {
+        let dir = tempdir().unwrap();
+        WizardState::new(WizardStatus::Skipped)
+            .save(dir.path())
+            .unwrap();
+        let mut out = Vec::new();
+        let args = SetupArgs {
+            headless: true,
+            dry_run: true,
+            ..SetupArgs::default()
+        };
+        run_with_home(&args, dir.path(), &mut out).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert!(
+            text.contains("OpenRouter") || text.contains("Step"),
+            "dry-run inspects even when state suppresses auto-fire:\n{text}"
+        );
     }
 }

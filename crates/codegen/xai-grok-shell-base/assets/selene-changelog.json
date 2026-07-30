@@ -1,5 +1,10 @@
 [
   {
+    "category": "fixes",
+    "description": "**Setup wizard hardening** — atomic config.toml write (temp+rename); dry-run creates no dirs; --force re-runs past done state; [agent] setup_on_first_run typed (no unrecognized-key warn).",
+    "breaking_change": false
+  },
+  {
     "category": "features",
     "description": "**First-run setup wizard + `selene setup`** — auto-guided TUI when no credentials resolve (K3 provider, Grok rail, Dioptra pointer); hard guards for headless/CI/disable-config/state; `setup --managed` for team managed config; never auto-fires on `-p`/piped.",
     "breaking_change": false
