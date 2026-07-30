@@ -93,6 +93,10 @@ pub fn discover_hook_source_paths(
             project.push(root.join(".claude").join("settings.json"));
             project.push(root.join(".claude").join("settings.local.json"));
         }
+        // Selene Build: `.selene/hooks` (fork-native) precedes `.grok/hooks`
+        // (legacy fallback); both load, registry dedup handles byte-identical
+        // hooks registered in both.
+        project.push(root.join(".selene").join("hooks"));
         project.push(root.join(".grok").join("hooks"));
         if include_cursor {
             project.push(root.join(".cursor").join("hooks.json"));

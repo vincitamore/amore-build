@@ -458,8 +458,9 @@ fn is_global_config_dir(dir: &Path, grok_home: &Path) -> bool {
 
 /// Vendor config dir names that sit directly under `$HOME` and carry large
 /// non-skill trees. Kept in sync with the home-level dirs added by
-/// `collect_skill_config_dirs`.
-const HOME_VENDOR_DIRS: &[&str] = &[".grok", ".agents", ".claude", ".cursor"];
+/// `collect_skill_config_dirs`. Selene Build adds fork-native `.selene` and
+/// keeps `.grok` as the legacy fallback.
+const HOME_VENDOR_DIRS: &[&str] = &[".selene", ".grok", ".agents", ".claude", ".cursor"];
 
 /// Testable core of [`is_global_config_dir`] with `$HOME` injected.
 fn is_global_config_dir_impl(dir: &Path, grok_home: &Path, home: Option<&Path>) -> bool {
@@ -756,6 +757,7 @@ mod tests {
         assert!(g(&home.join(".claude")));
         assert!(g(&home.join(".cursor")));
         assert!(g(&home.join(".agents")));
+        assert!(g(&home.join(".selene")));
 
         // A user [skills].paths entry under $HOME: NOT global (stays recursive).
         assert!(!g(&home.join("my-skills")));

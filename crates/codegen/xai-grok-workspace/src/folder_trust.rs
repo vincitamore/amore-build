@@ -399,7 +399,10 @@ fn collect_repo_config_kinds(cwd: &Path, first_only: bool) -> Vec<&'static str> 
     // resolve trusted and run ungated. Presence mirrors discovery's "something to
     // gate" check.
     let hook_root = chain.git_root.as_deref().unwrap_or(cwd);
-    if path_present_or_uncertain(&hook_root.join(".grok").join("hooks"))
+    // Selene Build: `.selene/hooks` (fork-native) and `.grok/hooks` (legacy
+    // fallback) are both hook discovery sources; both must gate.
+    if path_present_or_uncertain(&hook_root.join(".selene").join("hooks"))
+        || path_present_or_uncertain(&hook_root.join(".grok").join("hooks"))
         || hook_root.join(".cursor").join("hooks.json").is_file()
     {
         hit!("hooks");
@@ -429,7 +432,11 @@ fn collect_repo_config_kinds(cwd: &Path, first_only: bool) -> Vec<&'static str> 
     if directory_present_or_uncertain(&grok.join("personas")) {
         hit!("personas");
     }
-    if directory_present_or_uncertain(&hook_root.join(".grok").join("workflows")) {
+    // Selene Build: fork-native `.selene/workflows` gates alongside legacy
+    // `.grok/workflows`.
+    if directory_present_or_uncertain(&hook_root.join(".selene").join("workflows"))
+        || directory_present_or_uncertain(&hook_root.join(".grok").join("workflows"))
+    {
         hit!("workflows");
     }
     // `~/.claude.json` `projects.<cwd>.mcpServers`.

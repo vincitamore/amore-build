@@ -256,12 +256,16 @@ pub fn project_plugin_dirs(cwd: Option<&Path>) -> (Vec<PathBuf>, Option<PathBuf>
     (project_plugin_dirs_in(&chain.dirs), chain.git_root)
 }
 
-/// Existing project plugin parent dirs (`.grok/plugins`, `.claude/plugins`)
+/// Existing project plugin parent dirs (`.selene/plugins` [Selene Build
+/// fork-native], `.grok/plugins` [legacy fallback], `.claude/plugins`)
 /// under each dir of a precomputed cwd→git-root chain
 /// ([`crate::repo::RepoDirChain`]). The folder-trust gate reuses its one shared
 /// chain here so detection and discovery can never drift.
 pub fn project_plugin_dirs_in(chain_dirs: &[PathBuf]) -> Vec<PathBuf> {
-    crate::repo::existing_subdirs_along(chain_dirs, &[".grok/plugins", ".claude/plugins"])
+    crate::repo::existing_subdirs_along(
+        chain_dirs,
+        &[".selene/plugins", ".grok/plugins", ".claude/plugins"],
+    )
 }
 
 /// Discover all plugins from the filesystem.

@@ -48,8 +48,10 @@ pub struct SkillsConfig {
 
 /// List all discovered skills with their metadata.
 ///
-/// Priority order: Local (cwd/.grok/skills, cwd/.agents/skills, cwd/.claude/skills) → Intermediate dirs →
-/// Repo (repo_root/.grok/skills, repo_root/.agents/skills, repo_root/.claude/skills) → User (~/.grok/skills, ~/.agents/skills, ~/.claude/skills)
+/// Priority order: Local (cwd/.selene/skills, cwd/.grok/skills, cwd/.agents/skills, cwd/.claude/skills) → Intermediate dirs →
+/// Repo (repo_root/.selene/skills, repo_root/.grok/skills, repo_root/.agents/skills, repo_root/.claude/skills) → User ($GROK_HOME/skills [= ~/.selene/skills], ~/.grok/skills, ~/.agents/skills, ~/.claude/skills)
+/// (Selene Build: `.selene` is the fork-native root and outranks `.grok` at
+/// every tier; `.grok` remains scanned as the legacy fallback.)
 /// → additional paths from `config.paths`
 /// → Server (injected `config.server_skill_dirs`)
 /// → Bundled (injected `config.bundled_skill_dirs` + `~/.grok/bundled`; lowest precedence).
@@ -168,8 +170,8 @@ pub fn collect_skill_config_dirs(
     };
 
     // Vendor dirs (`.claude`/`.cursor`) are gated by the resolved compat
-    // config; `.grok` and `.agents` are always present. When all cells are on
-    // this list equals the historical `[".grok", ".agents", ".claude", ".cursor"]`.
+    // config; `.selene` (fork-native), `.grok` (legacy fallback), and
+    // `.agents` are always present.
     let config_dir_names = compat.skill_config_dirs();
 
     // Priority 1 & 2: Walk from cwd up to the git root.
@@ -199,12 +201,16 @@ pub fn collect_skill_config_dirs(
         }
     }
 
-    // Priority 3: Global user dirs. `.grok` comes from `grok_home` (which may
-    // be overridden), so it's handled separately; `.agents` is always added,
-    // while `.claude`/`.cursor` are gated by the skills compat cells.
+    // Priority 3: Global user dirs. The primary home comes from `grok_home`
+    // (which may be overridden; `~/.selene` by default in Selene Build). The
+    // upstream home `~/.grok` is also always scanned as the legacy fallback
+    // (canonical-path dedup collapses the common `$GROK_HOME=~/.grok` case);
+    // `.agents` is always added, while `.claude`/`.cursor` are gated by the
+    // skills compat cells.
     try_add(grok_home);
     #[allow(deprecated)]
     if let Some(home) = std::env::home_dir() {
+        try_add(home.join(".grok"));
         try_add(home.join(".agents"));
         if compat.claude.skills {
             try_add(home.join(".claude"));
@@ -2439,17 +2445,26 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let cwd = tmp.path();
         // Not a git repo → falls to the cwd-only branch (no upward walk).
-        for name in [".grok", ".agents", ".claude", ".cursor"] {
+        for name in [".selene", ".grok", ".agents", ".claude", ".cursor"] {
             fs::create_dir_all(cwd.join(name)).unwrap();
         }
 
         let ends_with = |dirs: &[PathBuf], suffix: &str| dirs.iter().any(|d| d.ends_with(suffix));
 
-        // All on → both vendor dirs present (byte-for-byte legacy behavior).
+        // All on → both vendor dirs present (byte-for-byte legacy behavior),
+        // and fork-native `.selene` precedes legacy `.grok` within the tier.
         let all =
             collect_skill_config_dirs(Some(cwd), None, tmp.path(), &[], CompatConfig::default());
         assert!(ends_with(&all, ".claude"), "claude missing: {all:?}");
         assert!(ends_with(&all, ".cursor"), "cursor missing: {all:?}");
+        assert!(ends_with(&all, ".selene"), "selene missing: {all:?}");
+        let pos = |dirs: &[PathBuf], suffix: &str| {
+            dirs.iter().position(|d| d.ends_with(suffix)).unwrap()
+        };
+        assert!(
+            pos(&all, ".selene") < pos(&all, ".grok"),
+            "selene must outrank grok within the tier: {all:?}"
+        );
 
         // cursor.skills off → .cursor dropped, .claude kept.
         let mut compat = CompatConfig::default();

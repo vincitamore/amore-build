@@ -192,10 +192,11 @@ fn discover_auto_sources(cwd: &str, skills: &[SkillInfo]) -> Vec<(String, usize)
     // .claude/skills/ paths. Equivalent locations should be opted in via
     // [paths] extra_skill_dirs in config.toml (written by /import-claude).
     let imported = crate::claude_import::is_claude_import_marked();
+    // Selene Build: `.selene` (fork-native) precedes `.grok` (legacy fallback).
     let local_dir_names: &[&str] = if imported {
-        &[".grok", ".agents"]
+        &[".selene", ".grok", ".agents"]
     } else {
-        &[".grok", ".agents", ".claude"]
+        &[".selene", ".grok", ".agents", ".claude"]
     };
 
     let mut sources: Vec<(String, usize)> = Vec::new();

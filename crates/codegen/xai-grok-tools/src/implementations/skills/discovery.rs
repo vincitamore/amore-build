@@ -849,9 +849,10 @@ pub fn discover_skills_for_paths(
     already_checked: &mut HashSet<PathBuf>,
     compat: CompatConfig,
 ) -> Vec<SkillInfo> {
-    // `.grok` and `.agents` are always scanned; `.claude` is gated on the
-    // claude-vendor skills cell. (`.cursor` is excluded here by design — see fn docs.)
-    let mut config_dir_names: Vec<&str> = vec![".grok", ".agents"];
+    // Selene Build: fork-native `.selene` first, legacy `.grok` fallback, then
+    // `.agents`; `.claude` is gated on the claude-vendor skills cell.
+    // (`.cursor` is excluded here by design — see fn docs.)
+    let mut config_dir_names: Vec<&str> = vec![".selene", ".grok", ".agents"];
     if compat.claude.skills {
         config_dir_names.push(".claude");
     }

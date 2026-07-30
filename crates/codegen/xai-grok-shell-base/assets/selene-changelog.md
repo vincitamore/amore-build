@@ -8,6 +8,12 @@ describes.
 
 ## 2026-07-30
 
+- **`.selene` config-dir semantics** — the fork's native repo config dir is
+  `.selene` at every surface upstream reads `.grok`: `skills/` + `commands/`,
+  `rules/`, `hooks/`, `workflows/`, `agents/`, `plugins/` (project tier,
+  folder-trust gated as before), plus user-tier `~/.grok/skills` scanned as a
+  legacy fallback. Precedence: `.selene` outranks `.grok` everywhere; `.grok`
+  stays working for upstream-format repos and the upstream-grok freight lane.
 - **Honest identity**: the system-prompt template no longer hardcodes
   "released by xAI" — identity comes wholly from `system_prompt_label`
   (per-model in `config.toml`; env `GROK_SYSTEM_PROMPT_LABEL` overrides).
@@ -17,7 +23,9 @@ describes.
 - Fork-local changelog: the welcome screen and `/release-notes` now read this
   compiled-in document instead of fetching xAI's CDN feed.
 - **Native Windows**: pty-harness test-support import gated `cfg(unix)` so
-  the full test closure compiles on Windows.
+  the full test closure compiles on Windows; `parse_login_env_capture` tests
+  gated to match their `cfg(unix)` helper (same upstream Windows-blindness
+  class).
 
 ## 2026-07-29
 
