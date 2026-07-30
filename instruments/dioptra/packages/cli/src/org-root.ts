@@ -6,8 +6,9 @@ import { dirname, join, resolve } from 'path';
  * for org markers — `(AGENTS.md|AGENT.md|CLAUDE.md)` beside a `tasks/` dir. Returns null when
  * neither resolves — callers REFUSE rather than fall back to cwd (a silent cwd
  * fallback would scaffold tasks/ into whatever directory the command happened to
- * run from). AGENTS.md is selene's orientation surface; AGENT.md + CLAUDE.md remain
- * accepted as sibling-house lineage (foreign-root refusals happen elsewhere).
+ * run from). Marker recognition for walk-up is separate from mutation trust
+ * (`@selene/regula` root-trust): reads work on any resolved root; writes need a
+ * house root or explicit opt-in.
  */
 export function resolveOrgRoot(start: string = process.cwd()): string | null {
   const env = process.env.DIOPTRA_ORG_ROOT;

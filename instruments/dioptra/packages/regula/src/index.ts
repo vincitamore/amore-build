@@ -11,3 +11,4 @@ export * from './reminder';
 export * from './forge';
 export * from './lint';
 export * from './status';
+export * from './root-trust';

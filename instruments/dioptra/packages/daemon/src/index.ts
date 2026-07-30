@@ -41,6 +41,9 @@ Options:
                 cwd for a dir holding AGENTS.md|AGENT.md|CLAUDE.md beside tasks/).
   --port N      Listen port (default 3852).
   --no-watch    Do not start the file watcher (index is boot-frozen).
+  --allow-foreign-root
+                Accepted no-op (legacy). Reads work on any root; mutation trust
+                is enforced by the CLI/regula seam, not the daemon.
   --help        Show this help.`;
 
 interface Args {
@@ -48,6 +51,7 @@ interface Args {
   port: number;
   help: boolean;
   noWatch: boolean;
+  /** Legacy flag — daemon is read-only; always accepted, never gates boot. */
   allowForeignRoot: boolean;
 }
 
@@ -60,6 +64,8 @@ function parseArgs(argv: string[]): Args {
     } else if (a === '--no-watch') {
       out.noWatch = true;
     } else if (a === '--allow-foreign-root') {
+      // Tiered trust (D2): daemon is READ-only — foreign roots are fine unflagged.
+      // Keep accepting the flag so older launchers don't break.
       out.allowForeignRoot = true;
     } else if (a === '--port') {
       out.port = Number(argv[++i]);
@@ -127,22 +133,12 @@ function main(): void {
     process.exit(64);
   }
 
-  // House-root guard (2026-07-22): this daemon's source lives inside exactly one
-  // house tree. Serving any OTHER org root is almost always an accident — the
-  // foreign-root incident: a house bin run from another tree
-  // resolved that tree and served it on the house port, silently crossing
-  // every downstream surface. Refuse unless explicitly overridden.
-  const houseRoot = resolve(import.meta.dir, '../../../../..');
-  if (resolve(orgRoot) !== houseRoot && !args.allowForeignRoot) {
-    console.error(
-      `[daemon] REFUSING foreign org root: ${orgRoot}
-` +
-        `[daemon] this daemon's house tree is: ${houseRoot}
-` +
-        `[daemon] run the daemon that lives inside the target tree, or pass --allow-foreign-root to override.`,
-    );
-    process.exit(78); // EX_CONFIG
-  }
+  // Tiered trust (Phase 1.5 D2): the daemon is a READ surface (index / search /
+  // graph / dash). Any resolvable org root is fine — no co-location / houseRoot
+  // guard. Mutation trust lives in @selene/regula root-trust, called by CLI
+  // write verbs (and optional TUI). --allow-foreign-root remains a no-op here
+  // for launcher compatibility (`args.allowForeignRoot` is accepted, unused).
+  void args.allowForeignRoot;
 
   const { index, stats } = buildIndex(orgRoot);
   console.log(

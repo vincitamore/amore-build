@@ -1,8 +1,16 @@
 #!/usr/bin/env bun
-import { RegulaError } from '@selene/regula';
+import { ensureMutationTrust, RegulaError } from '@selene/regula';
 import { resolveOrgRoot } from './org-root';
 import { COMMANDS, manifest, resolveCommand } from './commands';
-import { EXIT, exitForRegulaCode, fail, ok, parseArgs, unknownFlags } from './contract';
+import {
+  EXIT,
+  exitForRegulaCode,
+  fail,
+  GLOBAL_BOOLEAN_FLAGS,
+  ok,
+  parseArgs,
+  unknownFlags,
+} from './contract';
 import { DaemonError } from './daemon';
 import { completionScript, resolveCompletions } from './completion';
 
@@ -20,6 +28,11 @@ function helpText(): Record<string, unknown> {
   return {
     usage: 'dioptra <command> [args] [--flags]',
     commands: COMMANDS.map((c) => `${c.name}${c.isWrite ? '' : ' (read)'} — ${c.summary}`),
+    notes: [
+      'Reads (status, list, search, graph, …) work on any resolved org root.',
+      'Mutations require a house root (AGENTS.md|AGENT.md|CLAUDE.md + tasks/) or opt-in:',
+      '  --allow-foreign-root | DIOPTRA_ALLOW_FOREIGN_ROOT=1 | ~/.dioptra/allowed-roots.json',
+    ],
   };
 }
 
@@ -55,8 +68,9 @@ if ('error' in resolved) {
 }
 
 const { spec, rest } = resolved;
-const args = parseArgs(rest, [...spec.booleanFlags, 'json', 'quiet']);
+const args = parseArgs(rest, [...spec.booleanFlags, ...GLOBAL_BOOLEAN_FLAGS]);
 const quiet = args.flags.quiet === true;
+const allowForeignRoot = args.flags['allow-foreign-root'] === true;
 
 // Unknown-flag policy: REFUSE on write verbs (a silently-dropped flag on a write doesn't
 // express intent), WARN on reads.
@@ -80,6 +94,24 @@ if (!orgRoot) {
     quiet,
   );
   process.exit(EXIT.USAGE);
+}
+
+// Tiered trust: READ verbs skip the guard. MUTATION verbs go through the single seam
+// (regula root-trust) — house markers, --allow-foreign-root, env, or allow-list.
+if (spec.isWrite) {
+  try {
+    await ensureMutationTrust(orgRoot, {
+      allowForeignRoot,
+      // Prompt only on a real TTY; non-interactive fails closed with the flag/env remedy.
+      interactive: Boolean(process.stdin.isTTY),
+    });
+  } catch (e) {
+    if (e instanceof RegulaError) {
+      emitFail(e.code, e.message, spec.name, quiet);
+      process.exit(exitForRegulaCode(e.code));
+    }
+    throw e;
+  }
 }
 
 try {

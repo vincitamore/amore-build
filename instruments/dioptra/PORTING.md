@@ -83,13 +83,13 @@ and residual surfaces; regenerating generic doctrine is out of D1 scope.
 
 ## Known debts (NEXT units own these)
 
-| Debt | Owner unit |
-|------|------------|
-| OpenTUI native dep per-OS resolution + dll redeploy story | D2 |
-| Foreign-root guard redesign (daemon currently assumes monorepo layout / house markers) | D3 |
-| Install story (`bun build --compile` / release assets / wizard step) | D5 |
-| Athanor residual verbs (optional null-surface cleanup) | product follow-on |
-| `triggered-by: dream` migration for private trees still using the old label | house migrate when consuming public tree |
+| Debt | Owner unit | Status |
+|------|------------|--------|
+| Foreign-root guard redesign — tiered trust (reads any root; mutations need house markers or opt-in) | **D2** | **DONE** (2026-07-30) — seam `@selene/regula` `root-trust.ts`; CLI write verbs call `ensureMutationTrust`; daemon co-location guard removed (reads unflagged); opt-in via `--allow-foreign-root` / `DIOPTRA_ALLOW_FOREIGN_ROOT=1` / `~/.dioptra/allowed-roots.json` |
+| OpenTUI native dep per-OS resolution + dll redeploy story | D3 (was D2 pre-reassign) | open |
+| Install story (`bun build --compile` / release assets / wizard step) | D5 | open |
+| Athanor residual verbs (optional null-surface cleanup) | product follow-on | open |
+| `triggered-by: dream` migration for private trees still using the old label | house migrate when consuming public tree | open |
 
 ## Gates (D1)
 

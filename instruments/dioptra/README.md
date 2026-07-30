@@ -21,7 +21,9 @@ Public home of the instrument inside the `selene-build` repo
 | `patches/` | pnpm patched dependencies (`@opentui/core` UAF mitigation) + the opentui.dll native fix |
 
 See **PORTING.md** for what the public port dropped (lineage residual surfaces)
-and known follow-on debts (OpenTUI native, foreign-root guard, install story).
+and known follow-on debts (OpenTUI native, install story). Foreign-root trust is
+tiered: daemon reads work on any root; mutations need house markers or
+`--allow-foreign-root` / `DIOPTRA_ALLOW_FOREIGN_ROOT=1` / `~/.dioptra/allowed-roots.json`.
 
 ## Run
 
@@ -33,7 +35,8 @@ and known follow-on debts (OpenTUI native, foreign-root guard, install story).
 
 Env: `DIOPTRA_PORT` / `DIOPTRA_URL` / `DIOPTRA_ORG_ROOT` / `DIOPTRA_TIMEOUT_MS` /
 `DIOPTRA_DAEMON_BIN` / `DIOPTRA_WATCH_DEBOUNCE_MS` / `DIOPTRA_THEME` /
-`DIOPTRA_TUI_DEBUG` / `DIOPTRA_BROWSER`. State lives under `~/.dioptra`.
+`DIOPTRA_TUI_DEBUG` / `DIOPTRA_BROWSER` / `DIOPTRA_ALLOW_FOREIGN_ROOT`.
+State lives under `~/.dioptra` (including `allowed-roots.json` for mutation opt-in).
 
 ## History
 

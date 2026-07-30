@@ -38,7 +38,8 @@ function help(): void {
       "  dioptra --help",
       "",
       "Org root: $DIOPTRA_ORG_ROOT or walk-up for (AGENTS.md|AGENT.md|CLAUDE.md)+tasks/.",
-      "Daemon default port 3852.",
+      "Daemon default port 3852 (reads any root; no foreign-root flag required).",
+      "Mutations: house markers, or --allow-foreign-root / DIOPTRA_ALLOW_FOREIGN_ROOT=1.",
       "",
     ].join("\n"),
   );

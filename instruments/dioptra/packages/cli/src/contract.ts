@@ -86,11 +86,18 @@ export function parseArgs(args: string[], booleanFlags: string[] = []): ParsedAr
  * the global json/quiet). Policy at the callsite: WARN on read verbs, REFUSE (exit 64) on
  * write verbs — a silently-dropped flag on a write doesn't express intent.
  */
+/** Global boolean flags accepted on every verb (not per-command registry entries). */
+export const GLOBAL_BOOLEAN_FLAGS = ['json', 'quiet', 'allow-foreign-root'] as const;
+
 export function unknownFlags(
   parsed: Record<string, string | boolean>,
   spec: { flags: Record<string, string>; booleanFlags: string[] },
 ): string[] {
-  const known = new Set([...Object.keys(spec.flags), ...spec.booleanFlags, 'json', 'quiet']);
+  const known = new Set([
+    ...Object.keys(spec.flags),
+    ...spec.booleanFlags,
+    ...GLOBAL_BOOLEAN_FLAGS,
+  ]);
   return Object.keys(parsed).filter((f) => !known.has(f));
 }
 

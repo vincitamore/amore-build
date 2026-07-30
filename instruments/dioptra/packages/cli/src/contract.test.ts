@@ -40,9 +40,14 @@ test('RegulaError codes map to ratified exit codes', () => {
   expect(exitForRegulaCode('CONFLICT')).toBe(EXIT.ACTIONABLE);
 });
 
-test('unknownFlags flags what the registry does not know; json/quiet/booleans/values pass', () => {
+test('unknownFlags flags what the registry does not know; json/quiet/allow-foreign-root/booleans/values pass', () => {
   const spec = { flags: { title: 't', tags: 't' }, booleanFlags: ['all'] };
-  expect(unknownFlags({ title: 'x', tags: 'a', all: true, json: true, quiet: true }, spec)).toEqual([]);
+  expect(
+    unknownFlags(
+      { title: 'x', tags: 'a', all: true, json: true, quiet: true, 'allow-foreign-root': true },
+      spec,
+    ),
+  ).toEqual([]);
   expect(unknownFlags({ title: 'x', titel: 'typo', 'blocked-on': 'y' }, spec)).toEqual(['titel', 'blocked-on']);
 });
 
