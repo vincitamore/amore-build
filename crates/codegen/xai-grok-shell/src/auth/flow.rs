@@ -666,7 +666,7 @@ async fn run_auth_flow_inner(
         "auth: no OAuth2 configuration available (neither enterprise OIDC nor xAI OAuth2 configured)"
     );
     anyhow::bail!(
-        "No OAuth2 configuration available. Run `grok login` to authenticate, or contact your administrator if you use enterprise SSO."
+        "No OAuth2 configuration available. Run `selene login` to authenticate, or contact your administrator if you use enterprise SSO."
     )
 }
 

@@ -778,7 +778,7 @@ pub fn render_welcome(
                 content_area,
                 buf,
                 Some((
-                    "Grok Build is not yet available for this account.",
+                    "Grok agent access is not yet available for this account.",
                     theme.gray_bright,
                 )),
                 &menu,
@@ -969,7 +969,7 @@ fn render_welcome_trust(
         // Two lines so the warning never clips at narrow / compact widths
         // (a single ~78-char line would truncate "...posing security risks").
         Line::from(Span::styled(
-            "Grok Build may run or modify contents in this directory,",
+            "Selene Build may run or modify contents in this directory,",
             Style::default().fg(theme.gray),
         ))
         .alignment(Alignment::Center),

@@ -7,7 +7,7 @@ use std::path::PathBuf;
 /// Top-level commands for the pager binary.
 #[derive(Debug, Clone, Subcommand)]
 pub enum Command {
-    /// Run Grok without the interactive UI
+    /// Run Selene Build without the interactive UI
     Agent(Box<AgentArgs>),
     /// Show the configuration Grok discovers for this directory
     Inspect {
@@ -23,7 +23,7 @@ pub enum Command {
     Leader(LeaderMgmtArgs),
     /// Sign out and clear cached credentials
     Logout,
-    /// Sign in to Grok
+    /// Sign in with your xAI account
     Login {
         /// Ignored (kept for backwards compatibility). OAuth2 is now the only auth method.
         #[arg(long, hide = true)]
@@ -78,10 +78,10 @@ clipboard (containers, SSH) and your terminal does not handle OSC 52 itself
 sync with your window size.
 
 Examples:
-  grok wrap docker exec -it my-container bash
-  grok wrap kubectl exec -it my-pod -- bash
+  selene wrap docker exec -it my-container bash
+  selene wrap kubectl exec -it my-pod -- bash
 
-See ~/.grok/README.md for more information.
+See ~/.selene/README.md for more information.
 ")]
     Wrap(WrapArgs),
     /// Export a session transcript as Markdown
@@ -137,7 +137,7 @@ See ~/.grok/README.md for more information.
     ///
     /// Centralised, agent-native overview of every session (top-level and
     /// subagents). Disabled when `[dashboard].enabled = false` in
-    /// `~/.grok/config.toml` or when the `GROK_AGENT_DASHBOARD=0` env
+    /// `~/.selene/config.toml` or when the `GROK_AGENT_DASHBOARD=0` env
     /// var is set.
     Dashboard,
 }
@@ -709,8 +709,8 @@ pub struct PagerArgs {
     /// Experimental: scrollback-native rendering. Finalized blocks are printed
     /// into the terminal's native scrollback (use the terminal's own scroll /
     /// selection); a small pinned region holds the prompt + running turn.
-    /// Session-scoped only — does not write config. To default plain `grok` to
-    /// minimal, set `[ui] screen_mode = "minimal"` in ~/.grok/config.toml.
+    /// Session-scoped only — does not write config. To default plain `selene` to
+    /// minimal, set `[ui] screen_mode = "minimal"` in ~/.selene/config.toml.
     #[arg(long = "minimal")]
     pub minimal: bool,
     /// Open in the standard fullscreen TUI for this session, overriding a

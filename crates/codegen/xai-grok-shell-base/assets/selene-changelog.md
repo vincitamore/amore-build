@@ -8,6 +8,13 @@ describes.
 
 ## 2026-07-30
 
+- **Identity sweep: command spellings, paths, product-name surfaces** —
+  user-visible command references in help and errors now say `selene`
+  (`selene login` / `selene setup` / `selene wrap` / …), home paths point to
+  `~/.selene/`, and product-name surfaces re-voice to Selene Build: folder
+  trust warning, minimal-mode welcome title, OAuth callback page text,
+  built-in agent descriptions, billing/account copy (purchase and entitlement
+  wording names xAI factually), and the feedback acknowledgement.
 - **Dioptra TUI companion seam** — when Dioptra is on PATH or pointed at by
   `~/.selene/dioptra-companion.toml` (from `selene setup`), the shortcuts bar
   shows a `dash` hint (Ctrl+Shift+D). The binding opens `dioptra dash` in a

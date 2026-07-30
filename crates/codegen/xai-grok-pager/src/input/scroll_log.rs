@@ -276,7 +276,7 @@ fn open_writer(path: &Path) -> std::io::Result<BufWriter<File>> {
     Ok(BufWriter::new(File::create(path)?))
 }
 
-/// `~/.grok/logs/scroll-log-<utc-ts>.jsonl` — the input-debug dump's dir
+/// `~/.selene/logs/scroll-log-<utc-ts>.jsonl` — the input-debug dump's dir
 /// and timestamp conventions ([`crate::input_log`]). Also the target of the
 /// `/debug log` runtime toggle ([`super::mouse::MouseScrollState`]).
 pub(crate) fn default_log_path() -> PathBuf {

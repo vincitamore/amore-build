@@ -367,7 +367,7 @@ async fn test_headless_free_usage_exhausted_prints_paywall_message() {
     assert_no_crashes(&result.stderr);
     let combined = format!("{}\n{}", result.stdout, result.stderr);
     assert!(
-        combined.contains("reached your free Grok Build usage limit"),
+        combined.contains("reached your free xAI usage limit"),
         "expected the free-usage paywall message\nstdout:\n{}\nstderr tail:\n{}",
         result.stdout,
         stderr_tail(&result.stderr, 1000)
