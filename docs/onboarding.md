@@ -372,4 +372,5 @@ selene init --yes
 ```
 
 Related product docs: hooks vocabulary in the in-tree user guide
-(`10-hooks.md`), skills overview (`08-skills.md`).
+(`10-hooks.md`), skills overview (`08-skills.md`). Optional companion:
+[dioptra.md](dioptra.md).
