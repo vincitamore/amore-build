@@ -1,6 +1,11 @@
 [
   {
     "category": "features",
+    "description": "**First-run setup wizard + `selene setup`** — auto-guided TUI when no credentials resolve (K3 provider, Grok rail, Dioptra pointer); hard guards for headless/CI/disable-config/state; `setup --managed` for team managed config; never auto-fires on `-p`/piped.",
+    "breaking_change": false
+  },
+  {
+    "category": "features",
     "description": "**SELENE_* env identity** — product env vars use SELENE_* primary with GROK_* silent legacy aliases (HOME, DEFAULT_MODEL, SYSTEM_PROMPT_LABEL, AUTH_*, SHELL, CAMPAIGNS, CLI_*, managed-config); XAI_* provider keys unchanged; default home ~/.selene.",
     "breaking_change": false
   },

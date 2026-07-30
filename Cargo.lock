@@ -13498,6 +13498,7 @@ dependencies = [
  "urlencoding",
  "uuid",
  "wait-timeout",
+ "which",
  "windows-sys 0.59.0",
  "xai-acp-lib",
  "xai-crash-handler",

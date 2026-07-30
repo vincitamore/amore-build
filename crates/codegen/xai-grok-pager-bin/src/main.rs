@@ -1789,6 +1789,21 @@ fn dispatch_init_if_requested(args: &PagerArgs) -> bool {
     }
     true
 }
+/// Early-dispatch first-run wizard (`selene setup` without `--managed`/`--json`).
+/// Managed config stays on the async command path.
+fn dispatch_setup_wizard_if_requested(args: &PagerArgs) -> bool {
+    let Some(Command::Setup(setup_args)) = &args.command else {
+        return false;
+    };
+    if setup_args.is_managed_path() {
+        return false;
+    }
+    if let Err(error) = xai_grok_pager::setup_cmd::run(setup_args) {
+        eprintln!("Error: {error:#}");
+        std::process::exit(1);
+    }
+    true
+}
 fn main() {
     if let Some(code) = xai_grok_pager::app::mermaid_worker::maybe_run_render_subprocess() {
         std::process::exit(code);
@@ -1800,6 +1815,7 @@ fn main() {
     if dispatch_version_if_requested(&args)
         || dispatch_doctor_if_requested(&args)
         || dispatch_init_if_requested(&args)
+        || dispatch_setup_wizard_if_requested(&args)
     {
         return;
     }
@@ -1992,15 +2008,17 @@ async fn async_main(args: PagerArgs) -> Result<()> {
             Command::Init(_) => {
                 unreachable!("init was consumed before runtime startup")
             }
+            // Non-managed setup is early-dispatched; managed falls through below.
             Command::Inspect { json } => {
                 let cwd = std::env::current_dir().unwrap_or_default();
                 xai_grok_shell::inspect::inspect(&cwd, json).await?;
                 return Ok(());
             }
-            Command::Setup { json } => {
+            Command::Setup(setup_args) => {
+                // Wizard path is early-dispatched; only managed config reaches here.
                 init_tracing_simple("cli");
                 let _otel_guard = xai_grok_telemetry::otel_layer::otel_guard();
-                run_setup_command(json).await;
+                run_setup_command(setup_args.json).await;
                 return Ok(());
             }
             Command::Mcp(mcp_args) => {
@@ -2140,6 +2158,7 @@ async fn async_main(args: PagerArgs) -> Result<()> {
         args.prompt_file.as_deref(),
     )?;
     if let Some(prompt) = headless_prompt {
+        // Hard guard: first-run wizard NEVER fires on `-p` / headless prompt paths.
         init_tracing_simple(HEADLESS_ENTRYPOINT);
         let _otel_guard = xai_grok_telemetry::otel_layer::otel_guard();
         enforce_version_policy_or_exit();
@@ -2197,6 +2216,17 @@ async fn async_main(args: PagerArgs) -> Result<()> {
             },
         )
         .await;
+    }
+    // Interactive path only: auto-guided first-run setup when no credentials resolve.
+    // Guards (TTY, CI, disable config, state file) are inside maybe_auto_run_first_launch.
+    match xai_grok_pager::setup_cmd::maybe_auto_run_first_launch(/* is_headless_prompt */ false) {
+        Ok(true) => {
+            // Wizard finished; continue into the TUI so the user can use the new config.
+        }
+        Ok(false) => {}
+        Err(e) => {
+            eprintln!("selene: first-run setup skipped ({e:#})");
+        }
     }
     enforce_version_policy_or_exit();
     let _otel_guard = xai_grok_telemetry::otel_layer::otel_guard();

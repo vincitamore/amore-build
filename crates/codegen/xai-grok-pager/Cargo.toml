@@ -49,6 +49,9 @@ toml_edit = { workspace = true, features = ["serde"] }
 # Chosen over rust-embed: neither was in Cargo.lock; protocol prefers include_dir.
 include_dir = "0.7"
 
+# PATH lookup for first-run Dioptra companion detection (`selene setup`).
+which = { workspace = true }
+
 # ANSI parsing (tracing pane)
 ansi-to-tui = { workspace = true }
 

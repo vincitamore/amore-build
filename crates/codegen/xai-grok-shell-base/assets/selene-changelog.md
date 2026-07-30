@@ -8,6 +8,17 @@ describes.
 
 ## 2026-07-30
 
+- **First-run setup wizard + `selene setup`** — auto-guided TUI on first
+  interactive launch when no credentials resolve (no `auth.json` session, no
+  `XAI_API_KEY`, no resolvable config `[model.*]` key). Steps: K3 provider
+  (OpenRouter → Moonshot → open-weight host), Grok native rail
+  (`selene login` / `XAI_API_KEY`), Dioptra companion pointer (recommended,
+  opt-out; release asset shape `dioptra-{os}-{arch}`, no auto-download in v1).
+  Never fires headless (`-p`/piped), in CI, when
+  `[agent] setup_on_first_run = false`, or after wizard state is done/skipped
+  under `~/.selene`. Explicit path: `selene setup` (headless prints steps);
+  `--reset` clears state; team managed config moved to `selene setup --managed`
+  (legacy `selene setup --json` still works).
 - **`SELENE_*` env identity layer** — product env vars resolve as `SELENE_*`
   primary with `GROK_*` as silent legacy aliases (`SELENE_HOME`,
   `SELENE_DEFAULT_MODEL`, `SELENE_SYSTEM_PROMPT_LABEL`, `SELENE_AUTH_*`,

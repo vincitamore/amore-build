@@ -56,13 +56,11 @@ pub enum Command {
     Models,
     /// List, search, or restore sessions
     Sessions(crate::sessions_cmd::SessionsArgs),
-    /// Fetch and install managed configuration
-    Setup {
-        /// Print the fetched configuration as JSON instead of installing it;
-        /// writes nothing to ~/.grok.
-        #[arg(long)]
-        json: bool,
-    },
+    /// First-run credentials setup (K3 provider + Grok rail + Dioptra).
+    ///
+    /// Team managed configuration: `selene setup --managed` (or legacy
+    /// `selene setup --json`).
+    Setup(crate::setup_cmd::SetupArgs),
     /// Share a session and print the share URL
     #[command(hide = true)]
     Share(crate::share_cmd::ShareArgs),

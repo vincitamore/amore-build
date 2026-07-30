@@ -15,6 +15,7 @@ pub mod doctor_cmd;
 pub mod export_cmd;
 pub mod house_embed;
 pub mod init_cmd;
+pub mod setup_cmd;
 pub mod git_info;
 pub mod headless;
 pub mod hyperlink_route;
