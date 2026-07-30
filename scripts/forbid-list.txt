@@ -1,6 +1,15 @@
 # Canonical tier-1 forbid patterns for the public-release campaign.
-# One exact substring pattern per line. Lines starting with # are comments.
-# Blank lines are ignored. Matching is case-sensitive unless noted.
+# One pattern per line. Lines starting with # are comments. Blank lines ignored.
+#
+# Syntax:
+#   <text>       exact case-sensitive substring match
+#   wb:<text>    word-boundary regex: \b<re.escape(text)>\b, also case-sensitive
+#                (so wb:OMP does not match "omp" or "COMPRESS"; list both
+#                casings as separate lines when needed)
+#
+# Prefer wb: for short tokens that collide with English/code substrings.
+# Keep path-ish and multi-char identifiers exact (C:\Users\, .omp, ncu-,
+# grok-dispatch, :8765, …) — word boundaries would wreck them.
 #
 # Source of truth: forge/sessions/public-release.protocol.md (FORBID LIST).
 # Architecture extras (selene-k3, .omp/skills) from public-release-shape L1/L2.
@@ -20,17 +29,20 @@ Documents/selene
 ~/selene/bin
 
 # --- sibling / private house names ---
-materia
-Materia
+# wb: avoids materialize / Materialized false positives
+wb:materia
+wb:Materia
 aether
 Aether
 custos
 
 # --- private house ports / OMP / dispatch ---
 :8765
-8765
+# wb: avoids hashes like 87654321 / digest nibbles
+wb:8765
 .omp
-OMP
+# wb: avoids COMPRESS / COMPOSE / … false positives
+wb:OMP
 grok-dispatch
 
 # --- private model / provider footing (not public defaults) ---
@@ -38,9 +50,10 @@ modal-k3
 selene-k3
 
 # --- NCU house identifiers ---
+# ncu- exact (identifier prefix) + ncu wb (bare word); NCU exact (all-caps token)
 ncu-
 NCU
-ncu
+wb:ncu
 
 # --- private-house session lore ---
 Kimi K3 sessions

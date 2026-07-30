@@ -4,6 +4,10 @@
 Walks a tree, reports every tier-1 hit as ``file:line: pattern``, exits 1
 on any hit. Tier-2 patterns are reported as warnings only (exit unaffected).
 
+List-file syntax: bare lines are case-sensitive exact substrings; lines
+prefixed ``wb:`` are case-sensitive word-boundary matches
+(``\\b`` + re.escape(body) + ``\\b``).
+
 Stdlib-only, cross-platform (Windows / macOS / Linux).
 """
 
@@ -11,9 +15,11 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import sys
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, List, Sequence, Tuple
+from typing import Iterable, List, Optional, Sequence, Tuple
 
 # Directories never entered (name match at any depth).
 SKIP_DIR_NAMES = {
@@ -100,14 +106,52 @@ def repo_root_from_script() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
-def load_patterns(list_path: Path) -> List[str]:
-    patterns: List[str] = []
+# Prefix for word-boundary patterns in the list file (see forbid-list.txt header).
+WB_PREFIX = "wb:"
+
+
+@dataclass(frozen=True)
+class Pattern:
+    """One tier-1 rule.
+
+    display: label printed in hit reports (preserves list-file spelling, e.g. wb:token).
+    exact: non-None for substring mode (case-sensitive ``in``).
+    regex: non-None for word-boundary mode (case-sensitive ``re.search``).
+    """
+
+    display: str
+    exact: Optional[str] = None
+    regex: Optional[re.Pattern[str]] = None
+
+    def matches(self, line: str) -> bool:
+        if self.exact is not None:
+            return self.exact in line
+        assert self.regex is not None
+        return self.regex.search(line) is not None
+
+
+def load_patterns(list_path: Path) -> List[Pattern]:
+    """Load tier-1 patterns. ``wb:<text>`` → case-sensitive word-boundary regex;
+    bare lines → case-sensitive exact substring."""
+    patterns: List[Pattern] = []
     text = list_path.read_text(encoding="utf-8")
-    for raw in text.splitlines():
+    for raw_lineno, raw in enumerate(text.splitlines(), start=1):
         line = raw.strip()
         if not line or line.startswith("#"):
             continue
-        patterns.append(line)
+        if line.startswith(WB_PREFIX):
+            body = line[len(WB_PREFIX) :]
+            if not body:
+                print(
+                    f"error: {list_path}:{raw_lineno}: empty pattern after {WB_PREFIX!r}",
+                    file=sys.stderr,
+                )
+                sys.exit(2)
+            # Case-sensitive: no re.IGNORECASE. Separate list lines for casings.
+            rx = re.compile(r"\b" + re.escape(body) + r"\b")
+            patterns.append(Pattern(display=line, regex=rx))
+        else:
+            patterns.append(Pattern(display=line, exact=line))
     return patterns
 
 
@@ -146,9 +190,9 @@ def iter_text_files(root: Path) -> Iterable[Path]:
 
 
 def scan_file(
-    path: Path, patterns: Sequence[str]
+    path: Path, patterns: Sequence[Pattern]
 ) -> List[Tuple[int, str, str]]:
-    """Return list of (line_no, pattern, line_text) hits."""
+    """Return list of (line_no, pattern_display, line_text) hits."""
     try:
         raw = path.read_bytes()
     except (OSError, PermissionError) as exc:
@@ -165,16 +209,19 @@ def scan_file(
         return []
 
     hits: List[Tuple[int, str, str]] = []
-    # Skip empty patterns.
-    active = [p for p in patterns if p]
-    if not active:
+    if not patterns:
         return hits
 
     for lineno, line in enumerate(text.splitlines(), start=1):
-        for pat in active:
-            if pat in line:
-                hits.append((lineno, pat, line))
+        for pat in patterns:
+            if pat.matches(line):
+                hits.append((lineno, pat.display, line))
     return hits
+
+
+def patterns_from_exact_strings(strings: Sequence[str]) -> List[Pattern]:
+    """Wrap bare strings as exact-substring patterns (tier-2, etc.)."""
+    return [Pattern(display=s, exact=s) for s in strings if s]
 
 
 def rel_display(path: Path, base: Path) -> str:
@@ -231,6 +278,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     tier1_hits: List[Tuple[str, int, str]] = []
     tier2_hits: List[Tuple[str, int, str]] = []
+    tier2_patterns = (
+        patterns_from_exact_strings(TIER2_PATTERNS) if not args.no_tier2 else []
+    )
 
     list_resolved = list_path.resolve()
     files = list(iter_text_files(root))
@@ -250,8 +300,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             tier1_hits.append((rel, lineno, pat))
             print(f"{rel}:{lineno}: {pat}")
 
-        if not args.no_tier2:
-            for lineno, pat, _line in scan_file(path, TIER2_PATTERNS):
+        if tier2_patterns:
+            for lineno, pat, _line in scan_file(path, tier2_patterns):
                 rel = rel_display(path, display_base)
                 tier2_hits.append((rel, lineno, pat))
 
