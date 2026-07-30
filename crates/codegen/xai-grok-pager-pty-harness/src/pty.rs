@@ -8,7 +8,12 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use portable_pty::{CommandBuilder, ExitStatus, PtySize, native_pty_system};
-use xai_grok_test_support::{TestProcessTree, TestSandbox, process_has_exited_without_reap};
+use xai_grok_test_support::{TestProcessTree, TestSandbox};
+// The reap-free exit probe is unix-only in test-support; every use site below
+// is already #[cfg(unix)]-scoped, so the import is gated to match (same
+// Windows-blindness class as the protoc/link_opener fixes).
+#[cfg(unix)]
+use xai_grok_test_support::process_has_exited_without_reap;
 
 const PTY_DROP_REAP_TIMEOUT: Duration = Duration::from_millis(250);
 const PTY_REAP_POLL: Duration = Duration::from_millis(10);
