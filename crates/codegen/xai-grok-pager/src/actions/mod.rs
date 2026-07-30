@@ -140,6 +140,10 @@ pub enum ActionId {
     DashboardToggleAutoApprove,
     DashboardOpenLocationPicker,
     DashboardToggleWorktree,
+
+    /// Open Dioptra companion dashboard (`dioptra dash`) in a new OS terminal.
+    /// Registered only when dioptra resolves for this session.
+    OpenDioptraDash,
 }
 /// When an action is available / visible.
 ///
@@ -438,11 +442,19 @@ impl ActionRegistry {
     ///
     /// Pass multiple contexts to collect hints from all applicable levels.
     /// E.g., for scrollback mode: `&[ScrollbackFocused, AgentScreen, Always]`.
+    ///
+    /// Dioptra `dash` is registered only when the companion resolves (see
+    /// [`defaults`]); this filter is a second guard so the bar never shows a
+    /// dead hint if availability flips mid-process under test overrides.
     pub fn hints(&self, contexts: &[When]) -> Vec<&ActionDef> {
         let mut hints: Vec<&ActionDef> = self
             .actions
             .iter()
             .filter(|def| def.hint_priority.is_some() && contexts.contains(&def.context))
+            .filter(|def| {
+                // Hidden-when-absent: never render dash without a live companion.
+                def.id != ActionId::OpenDioptraDash || crate::dioptra_companion::is_available()
+            })
             .collect();
         hints.sort_by_key(|def| def.hint_priority.unwrap_or(255));
         hints
@@ -911,5 +923,30 @@ mod tests {
             registry.lookup(&ctrl_x, When::AgentScreen),
             Some(ActionId::ShortcutsHelp)
         );
+    }
+
+    #[test]
+    fn dioptra_dash_action_hidden_when_absent() {
+        assert!(defaults::open_dioptra_dash_action_if(false).is_none());
+        let def = defaults::open_dioptra_dash_action_if(true).expect("present");
+        assert_eq!(def.id, ActionId::OpenDioptraDash);
+        assert_eq!(def.label, "dash");
+        assert_eq!(def.hint_priority, Some(8));
+        assert_eq!(def.context, When::AgentScreen);
+    }
+
+    #[test]
+    fn dioptra_dash_registration_tracks_session_availability() {
+        let registry = ActionRegistry::defaults();
+        let registered = registry.find(ActionId::OpenDioptraDash).is_some();
+        assert_eq!(
+            registered,
+            crate::dioptra_companion::is_available(),
+            "dash must be registered iff companion resolves this session"
+        );
+        // Hints never include dash without availability.
+        let hints = registry.hints(&[When::AgentScreen, When::Always]);
+        let has_dash = hints.iter().any(|h| h.id == ActionId::OpenDioptraDash);
+        assert_eq!(has_dash, crate::dioptra_companion::is_available());
     }
 }

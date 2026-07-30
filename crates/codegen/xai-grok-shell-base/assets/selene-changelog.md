@@ -8,6 +8,15 @@ describes.
 
 ## 2026-07-30
 
+- **Dioptra TUI companion seam** — when Dioptra is on PATH or pointed at by
+  `~/.selene/dioptra-companion.toml` (from `selene setup`), the shortcuts bar
+  shows a `dash` hint (Ctrl+Shift+D). The binding opens `dioptra dash` in a
+  **new OS terminal** (Windows Terminal / `cmd start` / PowerShell; macOS
+  Terminal via osascript; Linux `$TERMINAL` then common emulators) — never
+  inside the TUI. When Dioptra is absent the hint is hidden and the key does
+  nothing. Detection is session-cached (no PATH scan per keypress).
+- **Doctor header re-voice** — human `selene doctor` header reads
+  `Selene Doctor` (was `Grok Doctor`).
 - **Setup wizard hardening** — atomic `config.toml` write (temp+rename);
   `--dry-run` creates no home dirs; `selene setup --force` re-runs past
   done/skipped state; `[agent] setup_on_first_run` is a typed config field

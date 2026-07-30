@@ -1,5 +1,15 @@
 [
   {
+    "category": "features",
+    "description": "**Dioptra TUI companion seam** — session-cached detect (pointer file then PATH); shortcuts-bar `dash` hint only when present; Ctrl+Shift+D opens `dioptra dash` in a new OS terminal (never in-process); spawn failure surfaces as a toast.",
+    "breaking_change": false
+  },
+  {
+    "category": "fixes",
+    "description": "**Doctor header re-voice** — human doctor output header is `Selene Doctor` (was `Grok Doctor`).",
+    "breaking_change": false
+  },
+  {
     "category": "fixes",
     "description": "**Setup wizard hardening** — atomic config.toml write (temp+rename); dry-run creates no dirs; --force re-runs past done state; [agent] setup_on_first_run typed (no unrecognized-key warn).",
     "breaking_change": false

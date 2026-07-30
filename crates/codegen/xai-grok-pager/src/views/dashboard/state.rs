@@ -4479,7 +4479,9 @@ fn dashboard_action_for_id(
         | ActionId::DashboardOverlayExit
         | ActionId::DashboardOverlayPrev
         | ActionId::DashboardOverlayNext
-        | ActionId::DashboardOverlayStop => None,
+        | ActionId::DashboardOverlayStop
+        // Dioptra dash is agent-screen only; never arrives on the dashboard.
+        | ActionId::OpenDioptraDash => None,
     }
 }
 

@@ -9,9 +9,10 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 
 use super::state::{WizardState, WizardStatus};
+use crate::dioptra_companion::detect_dioptra_on_path;
+
 use super::writer::{
-    ModelEntryPlan, detect_dioptra_on_path, dioptra_asset_shape, write_dioptra_pointer,
-    write_model_entry,
+    ModelEntryPlan, dioptra_asset_shape, write_dioptra_pointer, write_model_entry,
 };
 
 /// Summary of what the wizard did (for the final screen + tests).

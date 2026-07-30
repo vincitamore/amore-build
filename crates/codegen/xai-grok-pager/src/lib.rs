@@ -9,6 +9,7 @@ pub mod client_identity;
 pub mod completions_cmd;
 mod config_toml_edit;
 pub mod diagnostics;
+pub mod dioptra_companion;
 pub mod diff;
 pub mod docs;
 pub mod doctor_cmd;

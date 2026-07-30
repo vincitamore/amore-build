@@ -1234,6 +1234,12 @@ pub(super) fn default_actions(
         },
     ]);
 
+    // Dioptra companion — register only when the bin resolves this session so
+    // the shortcuts bar / cheatsheet stay clean when the companion is absent.
+    if let Some(def) = open_dioptra_dash_action() {
+        actions.push(def);
+    }
+
     // Minimal has no interactive scrollback or dashboard surface. Keep its
     // logical prompt, agent-screen, and legitimate global actions, but do not
     // register bindings whose target UI cannot exist in this process mode.
@@ -1247,4 +1253,34 @@ pub(super) fn default_actions(
     }
 
     actions
+}
+
+/// Dioptra dash action when the companion is available; `None` when absent
+/// (hidden-when-absent for bar + keybind).
+pub(super) fn open_dioptra_dash_action() -> Option<ActionDef> {
+    open_dioptra_dash_action_if(crate::dioptra_companion::is_available())
+}
+
+/// Pure constructor for tests + registration (no PATH side effects when `false`).
+pub(super) fn open_dioptra_dash_action_if(available: bool) -> Option<ActionDef> {
+    if !available {
+        return None;
+    }
+    Some(ActionDef {
+        id: ActionId::OpenDioptraDash,
+        label: "dash",
+        description: "Open Dioptra dash in a new terminal",
+        // Ctrl+Shift+D — free of existing defaults; mnemonic for "dash".
+        default_key: key!('d', CONTROL | SHIFT),
+        alt_keys: vec![],
+        category: Category::Panels,
+        context: When::AgentScreen,
+        // Mid-priority: visible when present, never crowds essentials.
+        hint_priority: Some(8),
+        hint_key_display: Some("Ctrl+Shift+D"),
+        requires_confirmation: false,
+        long_help: Some(
+            "Opens the Dioptra companion dashboard (`dioptra dash`) in a new OS terminal window — never inside Selene's TUI.\nOnly available when Dioptra is on PATH or pointed at by ~/.selene/dioptra-companion.toml (from selene setup).\nWhen Dioptra is not installed the shortcut is omitted from the bar and does nothing.",
+        ),
+    })
 }

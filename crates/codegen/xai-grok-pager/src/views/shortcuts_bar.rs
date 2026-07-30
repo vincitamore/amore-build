@@ -5,6 +5,13 @@
 //!
 //! When a `PendingAction` is active (double-press confirmation),
 //! the bar replaces all hints with "press again to {label}".
+//!
+//! ## Dioptra companion (`dash`)
+//!
+//! The optional Dioptra dash hint is **not** injected here. It is produced by
+//! [`crate::actions::ActionRegistry::hint_items`] only when the companion
+//! resolves for the session (pointer file or PATH). When absent the action is
+//! unregistered, so this bar never renders a dead `dash` label.
 
 use std::borrow::Cow;
 
@@ -315,6 +322,15 @@ mod tests {
         let hints = vec![h("a", key!('a')), h("b", key!('b')), h("c", key!('c'))];
         let out = compute_effective_hints(&hints, None);
         assert_eq!(out.len(), 3);
+    }
+
+    /// When the action registry omits dash (companion absent), the bar has no
+    /// `dash` label to render — hidden-when-absent is enforced upstream.
+    #[test]
+    fn dash_label_absent_from_empty_hint_list() {
+        let hints: Vec<HintItem> = vec![];
+        let out = compute_effective_hints(&hints, None);
+        assert!(out.iter().all(|item| item.label != "dash"));
     }
 
     #[test]

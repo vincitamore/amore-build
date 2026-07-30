@@ -203,11 +203,7 @@ pub fn dioptra_asset_shape() -> String {
     format!("dioptra-{os}-{arch}")
 }
 
-/// Detect `dioptra` on PATH (best-effort).
-#[must_use]
-pub fn detect_dioptra_on_path() -> Option<std::path::PathBuf> {
-    which::which("dioptra").ok()
-}
+// `detect_dioptra_on_path` re-homed to `crate::dioptra_companion` (TUI seam).
 
 /// Write the companion pointer config. Returns the path written (or that would be).
 pub fn write_dioptra_pointer(

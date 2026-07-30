@@ -1381,6 +1381,18 @@ impl AgentView {
                 );
                 InputOutcome::Action(Action::ToggleMouseCapture)
             }
+            ActionId::OpenDioptraDash => {
+                // Never in-process; new OS terminal. Failure → toast, never panic.
+                match crate::dioptra_companion::open_dash() {
+                    Ok(()) => {
+                        self.show_toast("Opened Dioptra dash in a new terminal");
+                    }
+                    Err(msg) => {
+                        self.show_toast(&msg);
+                    }
+                }
+                InputOutcome::Changed
+            }
             other => resolve_action(Some(other)).unwrap_or(InputOutcome::Unchanged),
         }
     }

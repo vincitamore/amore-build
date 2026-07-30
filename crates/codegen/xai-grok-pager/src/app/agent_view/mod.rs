@@ -2135,7 +2135,8 @@ fn resolve_action(action_id: Option<ActionId>) -> Option<InputOutcome> {
         | ActionId::DashboardOverlayStop
         | ActionId::DashboardToggleAutoApprove
         | ActionId::DashboardOpenLocationPicker
-        | ActionId::DashboardToggleWorktree => return None,
+        | ActionId::DashboardToggleWorktree
+        | ActionId::OpenDioptraDash => return None,
     };
     Some(InputOutcome::Action(action))
 }
