@@ -99,6 +99,7 @@ pub(super) fn demote_ignored_blocks(
                 hook_name,
                 elapsed,
                 http_info,
+                additional_context: None,
             },
             other => other,
         })

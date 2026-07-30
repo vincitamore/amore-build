@@ -13245,6 +13245,7 @@ dependencies = [
  "tracing",
  "urlencoding",
  "which",
+ "xai-grok-env",
  "xai-grok-version",
  "xai-tty-utils",
 ]
@@ -13899,6 +13900,7 @@ dependencies = [
  "xai-grok-compaction",
  "xai-grok-config",
  "xai-grok-config-types",
+ "xai-grok-env",
  "xai-grok-hooks",
  "xai-grok-http",
  "xai-grok-mcp",

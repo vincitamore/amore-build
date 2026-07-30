@@ -1825,6 +1825,20 @@ pub(super) async fn run_session(
                                     &ctx,
                                 )
                                 .await;
+                                // Forward SessionStart hookSpecificOutput.additionalContext
+                                // into the conversation as system-reminder items so the
+                                // model sees house orientation / due-reminder context.
+                                let contexts =
+                                    xai_grok_hooks::result::HookRunResult::additional_contexts(
+                                        &results,
+                                    );
+                                for ctx_text in contexts {
+                                    session.chat_state_handle.push_user_message(
+                                        xai_grok_sampling_types::ConversationItem::system_reminder(
+                                            ctx_text,
+                                        ),
+                                    );
+                                }
                                 session.send_hook_execution("session_start", None, None, &results).await;
                             }
                         }

@@ -10,6 +10,18 @@
 //!
 //! Public builds expose production endpoints. Values resolve as a `GROK_*`
 //! env-var override when set, else the compiled production default.
+//!
+//! ## Product env identity ([`identity`])
+//!
+//! Selene Build reads `SELENE_*` as primary with `GROK_*` as silent legacy
+//! aliases. See [`identity`] for the mapping table and resolution helpers.
+
+pub mod identity;
+
+pub use identity::{
+    alias_pair, alias_table_snapshot, env_bool as aliased_env_bool, is_mapped_suffix, is_set, var,
+    var_os,
+};
 /// The endpoint set for one backend environment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GrokBuildEndpoints {
@@ -100,7 +112,7 @@ impl std::fmt::Display for GrokBuildEnvironment {
 #[cfg(any(test, feature = "test-support"))]
 static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 #[cfg(any(test, feature = "test-support"))]
-fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+pub(crate) fn env_lock() -> std::sync::MutexGuard<'static, ()> {
     ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner())
 }
 /// RAII env-var override for tests: constructors snapshot the prior value

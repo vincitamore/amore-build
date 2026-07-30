@@ -1,9 +1,13 @@
+/// Legacy env name; primary is `SELENE_SYSTEM_PROMPT_LABEL` (identity layer).
 pub const ENV_SYSTEM_PROMPT_LABEL: &str = "GROK_SYSTEM_PROMPT_LABEL";
+/// Primary env name for the system-prompt identity label.
+pub const ENV_SYSTEM_PROMPT_LABEL_PRIMARY: &str = "SELENE_SYSTEM_PROMPT_LABEL";
 
 pub const DEFAULT_SYSTEM_PROMPT_LABEL: &str = xai_grok_agent::DEFAULT_SYSTEM_PROMPT_LABEL;
 
 /// Resolve system-prompt identity label.
-/// Precedence: env → config per-model → `[agent]` → GB per-model → GB global →
+/// Precedence: env (`SELENE_SYSTEM_PROMPT_LABEL` primary / `GROK_SYSTEM_PROMPT_LABEL`
+/// legacy) → config per-model → `[agent]` → GB per-model → GB global →
 /// public default (`Selene Build` via [`DEFAULT_SYSTEM_PROMPT_LABEL`]).
 /// Empty/whitespace falls through.
 ///
@@ -45,7 +49,7 @@ pub fn resolve_system_prompt_label_from_tiers(
             (!t.is_empty()).then(|| t.to_string())
         })
     };
-    std::env::var(ENV_SYSTEM_PROMPT_LABEL)
+    xai_grok_env::var(ENV_SYSTEM_PROMPT_LABEL_PRIMARY)
         .ok()
         .and_then(|s| non_empty(Some(s)))
         .or_else(|| non_empty(user_per_model))
@@ -58,20 +62,28 @@ pub fn resolve_system_prompt_label_from_tiers(
 #[cfg(test)]
 mod system_prompt_label_tests {
     use super::{
-        DEFAULT_SYSTEM_PROMPT_LABEL, ENV_SYSTEM_PROMPT_LABEL,
+        DEFAULT_SYSTEM_PROMPT_LABEL, ENV_SYSTEM_PROMPT_LABEL, ENV_SYSTEM_PROMPT_LABEL_PRIMARY,
         resolve_system_prompt_label_from_tiers,
     };
 
-    /// Serialize access to `GROK_SYSTEM_PROMPT_LABEL` and clear it for tier tests.
+    /// Serialize access to label env vars and clear both for tier tests.
     /// `env_wins_over_all_tiers` mutates the env; without this lock, parallel tests
     /// that expect the var unset (e.g. `gb_per_model_beats_gb_global`) flake.
     fn with_env_cleared<R>(f: impl FnOnce() -> R) -> R {
         let _guard = ENV_LOCK.lock().unwrap();
-        let prev = std::env::var(ENV_SYSTEM_PROMPT_LABEL).ok();
+        let prev_primary = std::env::var(ENV_SYSTEM_PROMPT_LABEL_PRIMARY).ok();
+        let prev_legacy = std::env::var(ENV_SYSTEM_PROMPT_LABEL).ok();
         // Safety: test-only, locked.
-        unsafe { std::env::remove_var(ENV_SYSTEM_PROMPT_LABEL) };
+        unsafe {
+            std::env::remove_var(ENV_SYSTEM_PROMPT_LABEL_PRIMARY);
+            std::env::remove_var(ENV_SYSTEM_PROMPT_LABEL);
+        }
         let r = f();
-        match prev {
+        match prev_primary {
+            Some(v) => unsafe { std::env::set_var(ENV_SYSTEM_PROMPT_LABEL_PRIMARY, v) },
+            None => unsafe { std::env::remove_var(ENV_SYSTEM_PROMPT_LABEL_PRIMARY) },
+        }
+        match prev_legacy {
             Some(v) => unsafe { std::env::set_var(ENV_SYSTEM_PROMPT_LABEL, v) },
             None => unsafe { std::env::remove_var(ENV_SYSTEM_PROMPT_LABEL) },
         }
@@ -152,15 +164,41 @@ mod system_prompt_label_tests {
     fn env_wins_over_all_tiers() {
         let _guard = ENV_LOCK.lock().unwrap();
         // Safety: test-only, locked.
-        unsafe { std::env::set_var(ENV_SYSTEM_PROMPT_LABEL, "FromEnv") };
+        unsafe {
+            std::env::remove_var(ENV_SYSTEM_PROMPT_LABEL_PRIMARY);
+            std::env::set_var(ENV_SYSTEM_PROMPT_LABEL, "FromEnv");
+        }
         let got = resolve_system_prompt_label_from_tiers(
             Some("PerModel".into()),
             Some("Global".into()),
             Some("GbPer".into()),
             Some("GbGlobal".into()),
         );
-        unsafe { std::env::remove_var(ENV_SYSTEM_PROMPT_LABEL) };
+        unsafe {
+            std::env::remove_var(ENV_SYSTEM_PROMPT_LABEL);
+            std::env::remove_var(ENV_SYSTEM_PROMPT_LABEL_PRIMARY);
+        }
         assert_eq!(got, "FromEnv");
+    }
+
+    #[test]
+    fn selene_primary_wins_over_grok_legacy() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        unsafe {
+            std::env::set_var(ENV_SYSTEM_PROMPT_LABEL_PRIMARY, "SelenePrimary");
+            std::env::set_var(ENV_SYSTEM_PROMPT_LABEL, "GrokLegacy");
+        }
+        let got = resolve_system_prompt_label_from_tiers(
+            Some("PerModel".into()),
+            Some("Global".into()),
+            None,
+            None,
+        );
+        unsafe {
+            std::env::remove_var(ENV_SYSTEM_PROMPT_LABEL_PRIMARY);
+            std::env::remove_var(ENV_SYSTEM_PROMPT_LABEL);
+        }
+        assert_eq!(got, "SelenePrimary");
     }
 
     static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());

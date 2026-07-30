@@ -8,6 +8,17 @@ describes.
 
 ## 2026-07-30
 
+- **`SELENE_*` env identity layer** — product env vars resolve as `SELENE_*`
+  primary with `GROK_*` as silent legacy aliases (`SELENE_HOME`,
+  `SELENE_DEFAULT_MODEL`, `SELENE_SYSTEM_PROMPT_LABEL`, `SELENE_AUTH_*`,
+  `SELENE_SHELL`, `SELENE_CAMPAIGNS`, `SELENE_CLI_*`, managed-config TTL /
+  fail-closed, etc.). Provider keys (`XAI_API_KEY`, `XAI_*`) stay unaliased.
+  Default home remains `~/.selene` when unset.
+- **SessionStart hook `additionalContext`** — Observe-mode SessionStart hooks
+  that emit `hookSpecificOutput.additionalContext` now inject that text into
+  the session conversation (system-reminder), so house session-init hooks can
+  surface due reminders / orientation. `.selene/hooks` discovery parity with
+  `.grok/hooks` verified.
 - **Binary rename to `selene`** — public CLI artifact is `selene` (repo
   remains `selene-build`). argv0 multi-call tolerates `selene`,
   `selene-build`, `grok`, and `agent`. Version output names `selene` (commit

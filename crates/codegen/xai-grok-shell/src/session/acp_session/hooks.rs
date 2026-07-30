@@ -367,6 +367,7 @@ impl SessionActor {
                     http_info: None,
                 },
                 None => HookRunResult::Success {
+                    additional_context: None,
                     hook_name: hook_name.clone(),
                     elapsed,
                     http_info: None,

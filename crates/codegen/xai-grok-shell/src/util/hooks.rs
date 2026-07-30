@@ -148,3 +148,73 @@ pub fn assemble_hooks(
         errors,
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use xai_grok_tools::types::compat::CompatConfig;
+
+    /// `.selene/hooks` (fork-native) is discovered with the same project-tier
+    /// semantics as `.grok/hooks` (legacy), and precedes it.
+    #[test]
+    fn discover_includes_selene_hooks_before_grok_hooks() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".selene").join("hooks")).unwrap();
+        std::fs::create_dir_all(root.join(".grok").join("hooks")).unwrap();
+        let paths = discover_hook_source_paths(Some(root), &CompatConfig::default());
+
+        let selene = root.join(".selene").join("hooks");
+        let grok = root.join(".grok").join("hooks");
+        assert!(
+            paths.project.iter().any(|p| p == &selene),
+            ".selene/hooks must be a project source; got {:?}",
+            paths.project
+        );
+        assert!(
+            paths.project.iter().any(|p| p == &grok),
+            ".grok/hooks must remain a legacy project source; got {:?}",
+            paths.project
+        );
+        let si = paths.project.iter().position(|p| p == &selene).unwrap();
+        let gi = paths.project.iter().position(|p| p == &grok).unwrap();
+        assert!(
+            si < gi,
+            ".selene/hooks must precede .grok/hooks (si={si}, gi={gi})"
+        );
+    }
+
+    /// End-to-end at the discovery+registry seam: a SessionStart hook declared
+    /// only under `.selene/hooks` is loadable (parity with `.grok/hooks`).
+    /// Uses project sources only so a developer's `~/.selene/hooks` cannot
+    /// inflate the count.
+    #[test]
+    fn selene_hooks_declaration_to_discovery_parity() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let hooks_dir = root.join(".selene").join("hooks");
+        std::fs::create_dir_all(&hooks_dir).unwrap();
+        std::fs::write(
+            hooks_dir.join("session-init.json"),
+            r#"{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"echo ok"}]}]}}"#,
+        )
+        .unwrap();
+
+        let source_paths = discover_hook_source_paths(Some(root), &CompatConfig::default());
+        let (_global, project) = source_paths.as_sources(true);
+        let (specs, errors) =
+            xai_grok_hooks::discovery::collect_specs_from_sources(&[], &project);
+        assert!(
+            errors.is_empty(),
+            "unexpected load errors for .selene/hooks: {errors:?}"
+        );
+        let registry = xai_grok_hooks::discovery::registry_from_specs_deduped(specs);
+        let n = registry
+            .hooks_for(xai_grok_hooks::event::HookEventName::SessionStart)
+            .len();
+        assert_eq!(
+            n, 1,
+            "SessionStart hook under .selene/hooks must be discovered (got {n})"
+        );
+    }
+}

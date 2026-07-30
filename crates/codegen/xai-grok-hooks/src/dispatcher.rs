@@ -124,6 +124,7 @@ pub async fn dispatch_pre_tool_use(
                     hook_name: spec.name.clone(),
                     elapsed,
                     http_info,
+                    additional_context: None,
                 });
             }
             HookRunnerResult::Failed(err) => {
@@ -140,7 +141,7 @@ pub async fn dispatch_pre_tool_use(
                     http_info,
                 });
             }
-            HookRunnerResult::Success | HookRunnerResult::Stop(_) => {
+            HookRunnerResult::Success { .. } | HookRunnerResult::Stop(_) => {
                 tracing::info!(
                     hook_name = %spec.name,
                     elapsed_ms = elapsed.as_millis() as u64,
@@ -150,6 +151,7 @@ pub async fn dispatch_pre_tool_use(
                     hook_name: spec.name.clone(),
                     elapsed,
                     http_info,
+                    additional_context: None,
                 });
             }
         }
@@ -310,6 +312,7 @@ pub async fn dispatch_stop(
                         hook_name: spec.name.clone(),
                         elapsed,
                         http_info,
+                        additional_context: None,
                     }),
                 }
                 out.absorb(
@@ -339,11 +342,12 @@ pub async fn dispatch_stop(
                     http_info,
                 });
             }
-            HookRunnerResult::Success | HookRunnerResult::Decision(_) => {
+            HookRunnerResult::Success { .. } | HookRunnerResult::Decision(_) => {
                 out.results.push(HookRunResult::Success {
                     hook_name: spec.name.clone(),
                     elapsed,
                     http_info,
+                    additional_context: None,
                 });
             }
         }
@@ -391,16 +395,20 @@ pub async fn dispatch_non_blocking(
             runner::run_hook(spec, envelope, ctx, GateKind::Observe).await;
 
         match result {
-            HookRunnerResult::Success => {
+            HookRunnerResult::Success {
+                additional_context,
+            } => {
                 tracing::info!(
                     hook_name = %spec.name,
                     elapsed_ms = elapsed.as_millis() as u64,
+                    has_additional_context = additional_context.is_some(),
                     "hook completed"
                 );
                 results.push(HookRunResult::Success {
                     hook_name: spec.name.clone(),
                     elapsed,
                     http_info,
+                    additional_context,
                 });
             }
             HookRunnerResult::Failed(err) => {
@@ -427,6 +435,7 @@ pub async fn dispatch_non_blocking(
                     hook_name: spec.name.clone(),
                     elapsed,
                     http_info,
+                    additional_context: None,
                 });
             }
         }
@@ -1098,6 +1107,55 @@ mod tests {
         assert_eq!(results.len(), 2);
         assert!(matches!(results[0], HookRunResult::Failed { .. }));
         assert!(matches!(results[1], HookRunResult::Success { .. }));
+    }
+
+    /// e2e (hooks-crate seam): SessionStart command hook emits
+    /// `hookSpecificOutput.additionalContext` → dispatch surfaces it on
+    /// `HookRunResult::Success` for session-context assembly.
+    #[tokio::test]
+    async fn session_start_additional_context_forwarded() {
+        let dir = tempfile::tempdir().unwrap();
+        // Write a tiny script file so we avoid shell-quote differences between
+        // sh / pwsh for inline JSON. Prefer python; fall back to a .cmd/.sh.
+        let py = dir.path().join("emit_ctx.py");
+        std::fs::write(
+            &py,
+            "print('{\"hookSpecificOutput\":{\"hookEventName\":\"SessionStart\",\"additionalContext\":\"[HOUSE SESSION INIT] due: demo\"}}')\n",
+        )
+        .unwrap();
+        let command = format!("python \"{}\"", py.display());
+        let mut spec = make_command_spec("session-init", None, true, &command);
+        spec.event = HookEventName::SessionStart;
+        spec.source_dir = dir.path().to_path_buf();
+        let registry = registry_from_specs(vec![spec]);
+        let envelope = session_start_envelope();
+        let results = dispatch_non_blocking(
+            &registry,
+            HookEventName::SessionStart,
+            &envelope,
+            &run_ctx(),
+        )
+        .await;
+        assert_eq!(results.len(), 1, "expected one SessionStart result: {results:?}");
+        assert!(
+            matches!(&results[0], HookRunResult::Success { .. }),
+            "SessionStart hook must succeed (is python on PATH?); got {:?}",
+            results[0]
+        );
+        let contexts = HookRunResult::additional_contexts(&results);
+        assert_eq!(
+            contexts,
+            vec!["[HOUSE SESSION INIT] due: demo".to_string()],
+            "SessionStart additionalContext must reach the dispatch result; got {results:?}"
+        );
+
+        // String-level seam the shell uses: collected contexts are the payload
+        // pushed into the conversation as system-reminder items.
+        let session_initial_context = contexts.join("\n");
+        assert!(
+            session_initial_context.contains("[HOUSE SESSION INIT] due: demo"),
+            "session initial context assembly must contain hook additionalContext"
+        );
     }
 
     #[test]

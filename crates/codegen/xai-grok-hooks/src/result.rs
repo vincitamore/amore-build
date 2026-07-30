@@ -51,6 +51,9 @@ pub enum HookRunResult {
         hook_name: String,
         elapsed: Duration,
         http_info: Option<HttpInfo>,
+        /// Present when an Observe-mode hook (e.g. `SessionStart`) emitted
+        /// `hookSpecificOutput.additionalContext`.
+        additional_context: Option<String>,
     },
     Skipped {
         hook_name: String,
@@ -69,4 +72,20 @@ pub enum HookRunResult {
         elapsed: Duration,
         http_info: Option<HttpInfo>,
     },
+}
+
+impl HookRunResult {
+    /// Collect non-empty additionalContext strings from successful observe runs.
+    pub fn additional_contexts(results: &[Self]) -> Vec<String> {
+        results
+            .iter()
+            .filter_map(|r| match r {
+                Self::Success {
+                    additional_context: Some(ctx),
+                    ..
+                } if !ctx.trim().is_empty() => Some(ctx.clone()),
+                _ => None,
+            })
+            .collect()
+    }
 }

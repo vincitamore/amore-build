@@ -545,7 +545,7 @@ impl EndpointsConfig {
 impl Default for EndpointsConfig {
     fn default() -> Self {
         Self {
-            cli_chat_proxy_base_url: std::env::var("GROK_CLI_CHAT_PROXY_BASE_URL").ok(),
+            cli_chat_proxy_base_url: xai_grok_env::var("SELENE_CLI_CHAT_PROXY_BASE_URL").ok(),
             xai_api_base_url: std::env::var("GROK_XAI_API_BASE_URL")
                 .unwrap_or_else(|_| XAI_API_BASE_URL_DEFAULT.to_owned()),
             alpha_test_key: None,
@@ -675,8 +675,12 @@ pub(crate) const FIRST_PARTY_CREDENTIAL_ENV_VARS: &[&str] = &[
     "GROK_INTERNAL_OTLP_HEADERS",
 ];
 /// Read an env var as a trimmed string. Returns `None` if unset or empty/whitespace-only.
+///
+/// Uses the Selene identity layer so mapped `SELENE_*` primaries win over
+/// `GROK_*` legacy aliases (e.g. `GROK_DEFAULT_MODEL` / `SELENE_DEFAULT_MODEL`,
+/// `GROK_CLI_*` / `SELENE_CLI_*`). Unmapped names are plain env reads.
 pub(crate) fn env_string(name: &str) -> Option<String> {
-    let value = std::env::var(name).ok()?;
+    let value = xai_grok_env::var(name).ok()?;
     let trimmed = value.trim();
     if trimmed.is_empty() {
         None

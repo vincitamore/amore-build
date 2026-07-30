@@ -26,8 +26,10 @@ fn fail_closed_flag(requirements: &toml::Value) -> bool {
 }
 
 /// Env override for [`FAIL_CLOSED_KEY`]. Named for prefix-alignment
-/// with `GROK_MANAGED_CONFIG_URL`; only applies to `requirements.toml`.
-pub(crate) const FAIL_CLOSED_ENV: &str = "GROK_MANAGED_CONFIG_FAIL_CLOSED";
+/// with managed-config env surface; only applies to `requirements.toml`.
+/// Resolved via the identity layer: `SELENE_MANAGED_CONFIG_FAIL_CLOSED`
+/// primary, `GROK_MANAGED_CONFIG_FAIL_CLOSED` legacy.
+pub(crate) const FAIL_CLOSED_ENV: &str = "SELENE_MANAGED_CONFIG_FAIL_CLOSED";
 
 /// Where a requirements layer came from: a file on disk, or the macOS MDM
 /// managed-preferences layer (admin-forced, no file). The typed split keeps a

@@ -73,12 +73,10 @@ pub use validation::{
 pub use version_overrides::{VersionOverrideError, apply_version_overrides};
 
 /// Parse an env var as a boolean. `None` if unset or unrecognized.
+///
+/// Uses the Selene identity layer: mapped `GROK_*` / `SELENE_*` names resolve
+/// with `SELENE_*` primary and `GROK_*` legacy fallback; unmapped names are
+/// plain env reads.
 pub fn env_bool(name: &str) -> Option<bool> {
-    let value = std::env::var(name).ok()?;
-    match value.trim().to_ascii_lowercase().as_str() {
-        "" => None,
-        "1" | "true" | "yes" | "on" | "enabled" => Some(true),
-        "0" | "false" | "no" | "off" | "disabled" => Some(false),
-        _ => None,
-    }
+    xai_grok_env::aliased_env_bool(name)
 }

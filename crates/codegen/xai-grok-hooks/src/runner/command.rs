@@ -268,7 +268,15 @@ pub async fn run_command_hook(
             match mode {
                 GateKind::Observe => {
                     if exit_code == 0 {
-                        return (HookRunnerResult::Success, elapsed);
+                        // SessionStart (and other Observe events) may emit
+                        // hookSpecificOutput.additionalContext for session-context
+                        // assembly. Plain stdout is still ignored.
+                        let additional_context =
+                            super::parse_observe_additional_context(&stdout);
+                        return (
+                            HookRunnerResult::success_with_context(additional_context),
+                            elapsed,
+                        );
                     }
                     (
                         HookRunnerResult::Failed(format!("exit code {exit_code}")),
@@ -992,7 +1000,12 @@ mod tests {
         let (result, _) = tokio::time::timeout(std::time::Duration::from_secs(10), run)
             .await
             .expect("hook must not deadlock on a large envelope");
-        assert!(matches!(result, HookRunnerResult::Success));
+        assert!(matches!(
+            result,
+            HookRunnerResult::Success {
+                additional_context: None
+            }
+        ));
     }
 
     /// Verify that setsid() prevents hook child processes from opening
@@ -1024,7 +1037,12 @@ mod tests {
         let (result, _duration) = run_command_hook(&spec, &envelope, &ctx, GateKind::Observe).await;
 
         assert!(
-            matches!(result, HookRunnerResult::Success),
+            matches!(
+                result,
+                HookRunnerResult::Success {
+                    additional_context: _
+                }
+            ),
             "hook child should not be able to open /dev/tty after setsid(), got {:?}",
             result
         );
@@ -1094,7 +1112,12 @@ mod tests {
         let (result, _) = run_command_hook(&spec, &envelope, &ctx, GateKind::Observe).await;
 
         assert!(
-            matches!(result, HookRunnerResult::Success),
+            matches!(
+                result,
+                HookRunnerResult::Success {
+                    additional_context: _
+                }
+            ),
             "hook with ${{VAR}} interpolation should be expanded via sh -c, got {:?}",
             result
         );
@@ -1157,7 +1180,12 @@ mod tests {
         let (result, _) = run_command_hook(&spec, &envelope, &ctx, GateKind::Observe).await;
 
         assert!(
-            matches!(result, HookRunnerResult::Success),
+            matches!(
+                result,
+                HookRunnerResult::Success {
+                    additional_context: _
+                }
+            ),
             "hook should see CLAUDE_PROJECT_DIR set to the workspace root, got {:?}",
             result
         );
@@ -1375,7 +1403,12 @@ mod tests {
         }
 
         assert!(
-            matches!(result, HookRunnerResult::Success),
+            matches!(
+                result,
+                HookRunnerResult::Success {
+                    additional_context: _
+                }
+            ),
             "hook with ~/... path should be expanded via sh -c, got {:?}",
             result
         );
@@ -1424,7 +1457,12 @@ mod tests {
         let (result, _) = run_command_hook(&spec, &envelope, &ctx, GateKind::Observe).await;
 
         assert!(
-            matches!(result, HookRunnerResult::Success),
+            matches!(
+                result,
+                HookRunnerResult::Success {
+                    additional_context: _
+                }
+            ),
             "hook with parameter-expansion default must run, got {:?}",
             result
         );

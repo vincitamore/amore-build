@@ -25,9 +25,30 @@ pub struct RunContext<'a> {
 pub enum HookRunnerResult {
     Decision(HookDecision),
     Stop(StopHookOutcome),
-    Success,
+    /// Non-blocking success. `additional_context` is set when an Observe-mode
+    /// hook (notably `SessionStart`) emits
+    /// `hookSpecificOutput.additionalContext`.
+    Success {
+        additional_context: Option<String>,
+    },
     /// Failed: the caller fails open.
     Failed(String),
+}
+
+impl HookRunnerResult {
+    /// Observe/tool success with no context payload.
+    pub fn success() -> Self {
+        Self::Success {
+            additional_context: None,
+        }
+    }
+
+    /// Observe success carrying SessionStart-style additional context.
+    pub fn success_with_context(context: Option<String>) -> Self {
+        Self::Success {
+            additional_context: context.filter(|c| !c.trim().is_empty()),
+        }
+    }
 }
 
 /// JSON from `PreToolUse` gate hooks:
@@ -77,8 +98,32 @@ pub(crate) struct StopHookJson {
 
 #[derive(Debug, Default, Deserialize)]
 pub(crate) struct StopHookSpecificOutputJson {
+    /// Optional event name (SessionStart/Stop/…); accepted so house scripts
+    /// can emit the documented wire shape. additionalContext is load-bearing.
+    #[serde(default, rename = "hookEventName")]
+    #[allow(dead_code)]
+    pub hook_event_name: Option<String>,
     #[serde(default, rename = "additionalContext")]
     pub additional_context: Option<String>,
+}
+
+/// Thin observe-stdout JSON: `{"hookSpecificOutput":{"additionalContext":"…"}}`.
+#[derive(Debug, Default, Deserialize)]
+pub(crate) struct ObserveHookJson {
+    #[serde(default, rename = "hookSpecificOutput")]
+    pub hook_specific_output: Option<StopHookSpecificOutputJson>,
+}
+
+/// Extract non-empty `hookSpecificOutput.additionalContext` from observe stdout.
+pub(crate) fn parse_observe_additional_context(stdout: &str) -> Option<String> {
+    let trimmed = stdout.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let json: ObserveHookJson = serde_json::from_str(trimmed).ok()?;
+    json.hook_specific_output
+        .and_then(|o| o.additional_context)
+        .filter(|c| !c.trim().is_empty())
 }
 
 /// Interpret a [`StopHookJson`] as a [`StopHookOutcome`].
@@ -131,5 +176,31 @@ pub async fn run_hook(
             (result, elapsed, None)
         }
         crate::config::HandlerType::Http => http::run_http_hook(spec, envelope, ctx, mode).await,
+    }
+}
+
+#[cfg(test)]
+mod observe_context_tests {
+    use super::*;
+
+    #[test]
+    fn parse_session_start_additional_context() {
+        let raw = r#"{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"[HOUSE SESSION INIT]\nDue reminders: none"}}"#;
+        assert_eq!(
+            parse_observe_additional_context(raw).as_deref(),
+            Some("[HOUSE SESSION INIT]\nDue reminders: none")
+        );
+    }
+
+    #[test]
+    fn parse_observe_empty_and_plain_stdout_ignored() {
+        assert_eq!(parse_observe_additional_context(""), None);
+        assert_eq!(parse_observe_additional_context("hello world"), None);
+        assert_eq!(
+            parse_observe_additional_context(
+                r#"{"hookSpecificOutput":{"additionalContext":"   "}}"#
+            ),
+            None
+        );
     }
 }

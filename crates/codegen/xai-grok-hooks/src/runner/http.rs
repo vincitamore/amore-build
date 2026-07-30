@@ -247,14 +247,25 @@ pub async fn run_http_hook(
     );
 
     if mode == GateKind::Observe {
-        let http_info = Some(make_info(Some(status_code), None));
-        if status.is_success() {
-            return (HookRunnerResult::Success, elapsed, http_info);
+        if !status.is_success() {
+            return (
+                HookRunnerResult::Failed(format!("HTTP status {}", status)),
+                elapsed,
+                Some(make_info(Some(status_code), None)),
+            );
         }
+        // Read body so SessionStart-style additionalContext can be forwarded.
+        let body = response.text().await.unwrap_or_default();
+        let preview = if body.trim().is_empty() {
+            None
+        } else {
+            Some(truncate_preview(&body))
+        };
+        let additional_context = super::parse_observe_additional_context(&body);
         return (
-            HookRunnerResult::Failed(format!("HTTP status {}", status)),
+            HookRunnerResult::success_with_context(additional_context),
             elapsed,
-            http_info,
+            Some(make_info(Some(status_code), preview)),
         );
     }
 
@@ -285,7 +296,8 @@ pub async fn run_http_hook(
     let result = match mode {
         GateKind::Tool => parse_http_blocking_result(&response_text, status, &spec.name),
         GateKind::Stop => parse_http_stop_result(&response_text, status, &spec.name),
-        GateKind::Observe => HookRunnerResult::Success,
+        // Observe handled above (early return).
+        GateKind::Observe => HookRunnerResult::success(),
     };
     (result, elapsed, http_info)
 }

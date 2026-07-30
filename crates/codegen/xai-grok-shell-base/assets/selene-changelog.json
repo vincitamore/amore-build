@@ -1,6 +1,16 @@
 [
   {
     "category": "features",
+    "description": "**SELENE_* env identity** — product env vars use SELENE_* primary with GROK_* silent legacy aliases (HOME, DEFAULT_MODEL, SYSTEM_PROMPT_LABEL, AUTH_*, SHELL, CAMPAIGNS, CLI_*, managed-config); XAI_* provider keys unchanged; default home ~/.selene.",
+    "breaking_change": false
+  },
+  {
+    "category": "features",
+    "description": "**SessionStart additionalContext** — SessionStart hooks emitting hookSpecificOutput.additionalContext inject into session context; .selene/hooks discovery parity with .grok/hooks.",
+    "breaking_change": false
+  },
+  {
+    "category": "features",
     "description": "**Binary rename to `selene`** — public CLI is `selene` (argv0 also accepts `selene-build`, `grok`, `agent`); version output names selene; doctor PATH-collision check for the crates.io Lua-linter name clash.",
     "breaking_change": true
   },
