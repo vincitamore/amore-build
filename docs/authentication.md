@@ -6,9 +6,9 @@ they do not require each other.
 | Rail | What it covers | How you enroll |
 |------|----------------|----------------|
 | **OAuth session** (`selene login`) | First-party model catalog + native grok subagent freight | Interactive browser (PKCE) or device-code |
-| **BYOK** (bring your own key) | Any `[model.*]` with its own key, including the K3 headline path | Env / TOML — **never** needs OAuth |
+| **BYOK** (bring your own key) | Any `[model.*]` with its own key, including the Kimi K3 headline path | Env / TOML — **never** needs OAuth |
 
-For the marketed K3 setup (OpenRouter / Moonshot / hosts), see
+For the marketed Kimi K3 setup (OpenRouter / Moonshot / hosts), see
 [setup-k3.md](setup-k3.md). For what `selene init` installs into a repo, see
 [onboarding.md](onboarding.md).
 

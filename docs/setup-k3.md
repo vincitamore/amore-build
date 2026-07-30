@@ -10,8 +10,9 @@ default model path.
 | **Native freight (second)** | xAI grok via `selene login` or `XAI_API_KEY` |
 | **Technical fallback only** | Baked catalog `grok-4.5` — never market this as the product default |
 
-Config lives at **`~/.selene/config.toml`** (override with `$GROK_HOME`). Prefer
-**`env_key`** over a literal `api_key` so secrets stay out of the file.
+Config lives at **`~/.selene/config.toml`** (override with `$SELENE_HOME`;
+legacy `$GROK_HOME` still works). Prefer **`env_key`** over a literal
+`api_key` so secrets stay out of the file.
 
 > **Identity rule (mandatory):** every custom `[model.<name>]` block for K3
 > **must** set `system_prompt_label`. An unlabeled model resolves to the
@@ -29,9 +30,9 @@ Config lives at **`~/.selene/config.toml`** (override with `$GROK_HOME`). Prefer
 2. **Moonshot direct** — canonical K3 API, 1M context, native features  
 3. **Open-weight hosts** — Modal / Together / Fireworks when you already use them or need residency/dedicated capacity  
 
-All three are **OpenAI-compatible** Chat Completions paths. Selene’s default
-`api_backend` is `chat_completions`; you do not need to set it for these
-providers.
+All three are **OpenAI-compatible** Chat Completions paths. Selene Build's
+default `api_backend` is `chat_completions`; you do not need to set it for
+these providers.
 
 ---
 
@@ -389,7 +390,7 @@ for Selene’s OpenAI-compat K3 paths above.
 
 ## What not to do
 
-- Do **not** expect a private house Modal slug or pre-baked K3 pin in the public
+- Do **not** expect a private Modal slug or pre-baked K3 pin in the public
   binary — BYOK config is the product surface.
 - Do **not** omit `system_prompt_label` on custom K3 models.
 - Do **not** put API keys in git-tracked TOML; use `env_key`.

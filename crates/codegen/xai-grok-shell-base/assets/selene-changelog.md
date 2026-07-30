@@ -1,6 +1,6 @@
 # Selene Build — fork changelog
 
-Selene Build is a permanent personal fork of xAI's open-source grok-build
+Selene Build is a permanent engineered fork of xAI's open-source grok-build
 harness (Apache-2.0). Upstream syncs land as periodic monorepo sync commits;
 everything below is the fork's own delta, newest first. This document is
 compiled into the binary — update it in the same change as the work it
@@ -84,8 +84,8 @@ describes.
 - Forked from `xai-org/grok-build`. Identity pass: Selene Build branding,
   `selene` theme (truecolor), compiled-in home `~/.selene`.
 - Multi-provider BYOK substrate retained; first-run model setup (including
-  third-party Kimi paths) is a docs/wizard concern — the house's private
-  model pin is not shipped as a compiled-in default.
+  third-party Kimi paths) is a docs/wizard concern — private model pins are
+  not shipped as compiled-in defaults.
 - Telemetry and feedback off; auto-update off — a fork must not "update"
   back to upstream.
 - Windows build fixes: protoc dep-probe `/dev/stdout` routing, `LNK1318`

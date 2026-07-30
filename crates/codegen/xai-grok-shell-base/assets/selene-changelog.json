@@ -44,7 +44,11 @@
     "description": "**.selene semantics** — fork-native `.selene` repo config dir (skills/commands, rules, hooks, workflows, agents, plugins) with `.grok` kept as legacy fallback at every surface.",
     "breaking_change": false
   },
-
+  {
+    "category": "features",
+    "description": "**Dual-rail auth** — BYOK (XAI_API_KEY or per-model env_key / base_url) works with no OAuth grant; not hard-walled behind interactive login.",
+    "breaking_change": false
+  },
   {
     "category": "fixes",
     "description": "**Windows tests** — `parse_login_env_capture` tests cfg-gated to match their unix-only helper.",
