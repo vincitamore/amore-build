@@ -86,8 +86,12 @@ and residual surfaces; regenerating generic doctrine is out of D1 scope.
 | Debt | Owner unit | Status |
 |------|------------|--------|
 | Foreign-root guard redesign — tiered trust (reads any root; mutations need house markers or opt-in) | **D2** | **DONE** (2026-07-30) — seam `@selene/regula` `root-trust.ts`; CLI write verbs call `ensureMutationTrust`; daemon co-location guard removed (reads unflagged); opt-in via `--allow-foreign-root` / `DIOPTRA_ALLOW_FOREIGN_ROOT=1` / `~/.dioptra/allowed-roots.json` |
-| OpenTUI native dep per-OS resolution + `bun build --compile` distribution | **D3** | **DONE** (2026-07-30) — multi-tool CLI+daemon compile; optional dash artifact embeds OpenTUI native via `{ type: "file" }` (proved windows-x64); source build always documented; remainder: CI matrix for linux/darwin + optional patched-dll redeploy on `@opentui` pin bumps |
-| Install story (release assets / wizard step / PATH) | D5 | open (D3 ships the compile recipe; D5 owns packaging/install UX) |
+| OpenTUI native dep per-OS resolution + `bun build --compile` distribution | **D3** | **DONE** (2026-07-30) — multi-tool CLI+daemon compile; optional dash artifact embeds OpenTUI native via `{ type: "file" }` (proved windows-x64); source build always documented |
+| CI + release-asset lane (path-scoped matrix, package tar.gz/zip, Phase-3 seam) | **D5** | **DONE** (2026-07-30) — `.github/workflows/dioptra-ci.yml` + `dioptra-release-assets.yml`; all lanes strict (linux/darwin dash fail = job fail = D3 deferred proof) |
+| Full regula org-verb surface in public multi-tool (`task\|inbox\|reminder\|knowledge`) | product / D3+D5 | **INCLUDED** (operator 2026-07-30) — one multi-tool artifact, no gating; CI smoke exercises `commands --json` + daemon health |
+| Install UX remainder (wizard PATH step / end-user install docs) | product follow-on / Phase 3 | open — D5 ships CI proof + release-asset producer; attach-to-Release is Phase-3 `release.yml` |
+| Patched UAF OpenTUI dll pin | ops / pin bump | open — tree carries `patches/@opentui__core@0.4.2.patch` + `patches/opentui-dll-native-fix/`; workspace resolves `@opentui/core@0.4.5` (`latest`). Re-pin + re-validate + redeploy via `deploy.sh` when the patched dll is required |
+| Extra code-grammar wasms (`tree-sitter-wasms`) | product follow-on | open — source-only via `packages/tui/src/code-grammars.ts` (`createRequire`/`node_modules`); compiled dash ships OpenTUI default parsers only |
 | Athanor residual verbs (optional null-surface cleanup) | product follow-on | open |
 | `triggered-by: dream` migration for private trees still using the old label | house migrate when consuming public tree | open |
 
@@ -135,13 +139,28 @@ export default module.default
 
 **Why dash is a separate artifact (not gated out as impossible):** keeps the multi-tool lean (~99 MB vs ~110 MB dash); OpenTUI pulls React + renderer. Multi-tool `dioptra dash` will re-exec a sibling dash binary when present, else prints the build recipe (exit 64).
 
-**Remainder (precisely scoped, not a blocker for D3):**
+**Remainder (precisely scoped; CI/release now owned by D5):**
 
-1. **linux/darwin CI proof** — same `{ type: "file" }` path for `libopentui.so` / `.dylib`; not exercised on this host.
-2. **Patched UAF dll** — tree still carries `patches/@opentui__core@0.4.2.patch` + `patches/opentui-dll-native-fix/`; workspace currently resolves `@opentui/core@0.4.5` (`latest`). Re-pin + re-validate the patch on version bumps; redeploy via `patches/opentui-dll-native-fix/deploy.sh` after `pnpm install` when the patched dll is required.
+1. **linux/darwin dash CI proof** — same `{ type: "file" }` path for `libopentui.so` / `.dylib`; exercised by matrix in `dioptra-ci.yml` / `dioptra-release-assets.yml` (strict — fail the job, do not skip).
+2. **Patched UAF dll** — tree still carries `patches/@opentui__core@0.4.2.patch` + `patches/opentui-dll-native-fix/`; workspace currently resolves `@opentui/core@0.4.5` (`latest`). Re-pin + re-validate the patch on version bumps; redeploy via `patches/opentui-dll-native-fix/deploy.sh` after install when the patched dll is required.
 3. **Extra grammars** — `packages/tui/src/code-grammars.ts` resolves `tree-sitter-wasms` via `createRequire`/`node_modules` (source-only). Compiled dash ships OpenTUI's default parsers only.
 
+### CI + release assets (Phase 1.5 D5)
+
+| Workflow | Trigger | Role |
+|----------|---------|------|
+| `.github/workflows/dioptra-ci.yml` | push/PR path-scoped to `instruments/dioptra/**` (+ workflow files) | matrix ubuntu/windows/macos: setup-bun 1.3.x + cache → `bun install --frozen-lockfile` → `bun test` → `build-compile --with-dash` → assert both artifacts → smoke (`--help`, `commands --json`, daemon on distinct 39xx port + `/api/health` 200 + clean shutdown) |
+| `.github/workflows/dioptra-release-assets.yml` | tag `v*` + `workflow_dispatch` | same matrix → package `tar.gz` (unix) / `zip` (windows) → `upload-artifact` stable names `dioptra-{os}-{arch}`; **no `contents: write`** |
+
+**Phase-3 seam:** `release.yml` downloads these artifacts and attaches them to the GitHub Release. D5 does not publish releases.
+
+**Regula:** full org-verb surface **INCLUDED** in the multi-tool (operator 2026-07-30) — not gated out of the public artifact.
+
 ### Gates (D3)
+
+See dual-write handle/output for paste-of-record.
+
+### Gates (D5)
 
 See dual-write handle/output for paste-of-record.
 

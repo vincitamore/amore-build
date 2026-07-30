@@ -1,0 +1,147 @@
+# dioptra-release-assets.yml — per-OS release binary producer (Phase 1.5 D5)
+#
+# Phase-3 integration seam: `.github/workflows/release.yml` (Phase 3) will
+# download these artifacts via `actions/download-artifact` and attach them to
+# the GitHub Release (`gh release upload` / softprops/action-gh-release).
+# This workflow is intentionally self-sufficient WITHOUT `contents: write` —
+# release attach is NOT this job's responsibility. Do not add contents:write
+# here; keep the packaging lane separate from the release-publish lane.
+#
+# Triggers: tag `v*` push + workflow_dispatch.
+# Matrix: ubuntu/windows/macos — ALL lanes strict (continue-on-error: false).
+# A dash-build failure on linux/darwin MUST fail the job — that failure IS the
+# D3-deferred CI proof. Windows-x64 is not special-cased either.
+#
+# Package layout (stable names for Phase-3 consume):
+#   dioptra-{os}-{arch}.tar.gz   (linux/darwin) — multi-tool + dash
+#   dioptra-{os}-{arch}.zip      (windows)      — multi-tool + dash
+# Artifact upload name: dioptra-{os}-{arch}
+
+name: dioptra-release-assets
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: instruments/dioptra
+
+jobs:
+  package:
+    name: package (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 50
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        timeout-minutes: 5
+
+      - name: Setup Bun 1.3.x
+        uses: oven-sh/setup-bun@v2
+        timeout-minutes: 5
+        with:
+          bun-version: "1.3.x"
+
+      - name: Cache bun install
+        uses: actions/cache@v4
+        timeout-minutes: 5
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-dioptra-bun-${{ hashFiles('instruments/dioptra/bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-dioptra-bun-
+
+      - name: bun install (frozen)
+        timeout-minutes: 10
+        run: bun install --frozen-lockfile
+
+      - name: build-compile --with-dash (strict — dash fail fails job)
+        timeout-minutes: 25
+        run: bun run scripts/build-compile.ts --with-dash
+
+      - name: Resolve asset shape + package (unix)
+        if: runner.os != 'Windows'
+        timeout-minutes: 5
+        shell: bash
+        id: pkg_unix
+        run: |
+          set -euo pipefail
+          case "$(uname -s)" in Darwin*) OS=darwin ;; *) OS=linux ;; esac
+          case "$(uname -m)" in arm64|aarch64) ARCH=arm64 ;; *) ARCH=x64 ;; esac
+          BIN="dioptra-${OS}-${ARCH}"
+          DASH="dioptra-dash-${OS}-${ARCH}"
+          test -f "dist/${BIN}" || { echo "FAIL: missing dist/${BIN}"; ls -la dist/; exit 1; }
+          test -f "dist/${DASH}" || { echo "FAIL: missing dist/${DASH} (dash build is required on all lanes)"; ls -la dist/; exit 1; }
+          chmod +x "dist/${BIN}" "dist/${DASH}"
+          mkdir -p release
+          tar -C dist -czf "release/${BIN}.tar.gz" "${BIN}" "${DASH}"
+          ls -la "release/${BIN}.tar.gz"
+          echo "asset_os=${OS}" >> "$GITHUB_OUTPUT"
+          echo "asset_arch=${ARCH}" >> "$GITHUB_OUTPUT"
+          echo "asset_name=${BIN}" >> "$GITHUB_OUTPUT"
+          echo "package_path=instruments/dioptra/release/${BIN}.tar.gz" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve asset shape + package (windows)
+        if: runner.os == 'Windows'
+        timeout-minutes: 5
+        shell: pwsh
+        id: pkg_win
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $arch = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'arm64' } else { 'x64' }
+          $os = 'windows'
+          $bin = "dioptra-${os}-${arch}.exe"
+          $dash = "dioptra-dash-${os}-${arch}.exe"
+          if (-not (Test-Path "dist/$bin")) { throw "missing dist/$bin" }
+          if (-not (Test-Path "dist/$dash")) { throw "missing dist/$dash (dash build is required on all lanes)" }
+          New-Item -ItemType Directory -Force -Path release | Out-Null
+          $zipName = "dioptra-${os}-${arch}.zip"
+          $zipPath = Join-Path "release" $zipName
+          if (Test-Path $zipPath) { Remove-Item -Force $zipPath }
+          Compress-Archive -Path "dist/$bin","dist/$dash" -DestinationPath $zipPath -Force
+          Get-Item $zipPath | Format-List Name, Length
+          "asset_os=$os" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "asset_arch=$arch" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "asset_name=dioptra-${os}-${arch}" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "package_path=instruments/dioptra/release/$zipName" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Upload release package (unix)
+        if: runner.os != 'Windows'
+        uses: actions/upload-artifact@v4
+        timeout-minutes: 10
+        with:
+          name: ${{ steps.pkg_unix.outputs.asset_name }}
+          path: ${{ steps.pkg_unix.outputs.package_path }}
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload release package (windows)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        timeout-minutes: 10
+        with:
+          name: ${{ steps.pkg_win.outputs.asset_name }}
+          path: ${{ steps.pkg_win.outputs.package_path }}
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload raw binaries (Phase-3 convenience)
+        uses: actions/upload-artifact@v4
+        timeout-minutes: 10
+        with:
+          name: dioptra-raw-${{ runner.os }}-${{ runner.arch }}
+          path: |
+            instruments/dioptra/dist/dioptra-*
+          if-no-files-found: error
+          retention-days: 14
