@@ -1,0 +1,46 @@
+# Canonical tier-1 forbid patterns for the public-release campaign.
+# One exact substring pattern per line. Lines starting with # are comments.
+# Blank lines are ignored. Matching is case-sensitive unless noted.
+#
+# Source of truth: forge/sessions/public-release.protocol.md (FORBID LIST).
+# Architecture extras (selene-k3, .omp/skills) from public-release-shape L1/L2.
+#
+# Zero occurrences of these strings are allowed in product files at public tag.
+
+# --- operator / house PII & identity ---
+AlexMoyer
+vincitamore
+amoyer
+
+# --- absolute personal paths ---
+C:\Users\
+C:/Users/
+Documents\selene
+Documents/selene
+~/selene/bin
+
+# --- sibling / private house names ---
+materia
+Materia
+aether
+Aether
+custos
+
+# --- private house ports / OMP / dispatch ---
+:8765
+8765
+.omp
+OMP
+grok-dispatch
+
+# --- private model / provider footing (not public defaults) ---
+modal-k3
+selene-k3
+
+# --- NCU house identifiers ---
+ncu-
+NCU
+ncu
+
+# --- private-house session lore ---
+Kimi K3 sessions

@@ -1,0 +1,29 @@
+# Public-release gate: fail on tier-1 forbid-list hits.
+# Owned by campaign unit U6 (task 1.1). See scripts/forbid_check.py.
+
+name: forbid-grep
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  forbid-list:
+    name: forbid-list (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run forbid_check.py (tier-1 fails the job)
+        shell: bash
+        run: python scripts/forbid_check.py
