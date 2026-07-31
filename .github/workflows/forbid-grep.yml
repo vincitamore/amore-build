@@ -34,3 +34,9 @@ jobs:
           python scripts/forbid_check.py --path templates
           python scripts/forbid_check.py --path scripts
           if [ -d docs ]; then python scripts/forbid_check.py --path docs; fi
+          if [ -d examples ]; then python scripts/forbid_check.py --path examples; fi
+          # Root markdown is an authored surface too (the policy named it; the
+          # first cut of this gate did not scan it).
+          for f in README.md SECURITY.md CONTRIBUTING.md UPSTREAM.md NOTICE; do
+            if [ -f "$f" ]; then python scripts/forbid_check.py --path "$f"; fi
+          done

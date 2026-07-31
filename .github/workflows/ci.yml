@@ -39,10 +39,12 @@ jobs:
         with:
           toolchain: "1.92.0"
 
+      # shared-key must be STABLE across runs — keying it on run_id gave every
+      # run a fresh miss (every CI build was cold).
       - name: Cargo cache
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: ci-${{ github.run_id }}
+          shared-key: ci
 
       - name: Build selene binary
         run: cargo build --release -p xai-grok-pager-bin
@@ -76,3 +78,15 @@ jobs:
         run: |
           target\release\selene.exe --version
           target\release\selene.exe doctor --json | Select-Object -First 1
+
+      # Keep the built binary reachable for local inspection (docs captures,
+      # bisecting a report against a known commit) without a full local build.
+      - name: Upload built binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: selene-ci-${{ matrix.os }}
+          path: |
+            target/release/selene
+            target/release/selene.exe
+          if-no-files-found: error
+          retention-days: 7
