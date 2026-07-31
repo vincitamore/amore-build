@@ -72,12 +72,14 @@ these providers.
 
 GLM-5.2 is a reasoning model: reasoning tokens are billed and budgeted as
 completion tokens, out of the same pool `max_completion_tokens` caps.
-OpenRouter reports a provider ceiling of 128000 for this model, but pinning
-the config default to that ceiling is not the safer choice — it is the
-looser one. A cap set too tight truncates the response mid-thought, before
-the reasoning pass has finished, rather than mid-answer. Set **32768**: real
-headroom for a typical turn without shipping the full provider ceiling as
-the standing default.
+OpenRouter reports a provider ceiling of **128000** for this model. Set it
+there. A cap below the model's capability truncates the reasoning pass
+before the visible answer begins, and nothing in the output tells you it
+happened — you get a shorter, worse answer that looks like the model's best
+work. This field is a ceiling, not a target: raising it costs nothing on
+turns that do not need the room. If you want to bound spend, bound it
+deliberately somewhere you will see it, rather than by quietly clipping how
+far the model is allowed to think.
 
 ### `~/.arcus/config.toml`
 
@@ -93,7 +95,7 @@ env_key = "OPENROUTER_API_KEY"
 system_prompt_label = "Arcus Build"
 context_window = 1048576
 # Reasoning tokens count against this. Too tight truncates mid-thought.
-max_completion_tokens = 32768
+max_completion_tokens = 128000
 # Optional ranking headers (OpenRouter docs):
 # extra_headers = { "HTTP-Referer" = "https://example.com", "X-Title" = "Arcus Build" }
 ```
@@ -156,7 +158,7 @@ name = "GLM-5.2 (Z.ai)"
 env_key = "ZAI_API_KEY"
 system_prompt_label = "Arcus Build"
 context_window = 1048576
-max_completion_tokens = 32768
+max_completion_tokens = 128000
 ```
 
 ### Verify
@@ -187,7 +189,7 @@ name = "Open host"
 env_key = "YOUR_HOST_API_KEY"
 system_prompt_label = "Arcus Build"
 context_window = 1048576
-max_completion_tokens = 32768
+max_completion_tokens = 128000
 ```
 
 `env_key` names the environment variable Arcus reads for the bearer token —
@@ -216,7 +218,7 @@ model_provider = "openrouter"
 name = "GLM-5.2 (OpenRouter)"
 system_prompt_label = "Arcus Build"
 context_window = 1048576
-max_completion_tokens = 32768
+max_completion_tokens = 128000
 ```
 
 | TOML field | Maps to | Evidence |
@@ -333,9 +335,9 @@ TOML surface.
 
 - **Output tokens dominate cost** on a reasoning model, because the
   reasoning pass itself draws from completion budget before the visible
-  answer does. A `max_completion_tokens` cap set too tight truncates
-  mid-thought rather than mid-answer — see the OpenRouter section above for
-  why 32768 beats the reported provider ceiling as a config default.
+  answer does. A `max_completion_tokens` cap below the model's
+  ceiling truncates the reasoning pass invisibly — set it to the provider
+  ceiling and bound spend somewhere you can see it.
 - Keep long **stable prefixes** (AGENTS.md, project doctrine) so that any
   provider-side prompt-caching discount applies where the host offers one —
   GLM-5.2 on OpenRouter prices cached input well below cache-miss input (see

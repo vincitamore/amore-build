@@ -56,8 +56,9 @@ name = "GLM-5.2 (OpenRouter)"
 system_prompt_label = "Arcus Build"
 context_window = 1048576
 # Reasoning tokens count against this cap. OpenRouter reports a provider
-# ceiling of 128000; 32768 leaves headroom without truncating mid-thought.
-max_completion_tokens = 32768
+# ceiling of 128000. Set it there: a lower cap truncates the reasoning pass
+# invisibly, and this field is a ceiling, not a target.
+max_completion_tokens = 128000
 # api_backend defaults to "chat_completions" — correct for OpenRouter
 
 # ---------------------------------------------------------------------------
@@ -73,7 +74,7 @@ name = "GLM-5.2 (Z.ai)"
 env_key = "ZAI_API_KEY"
 system_prompt_label = "Arcus Build"
 context_window = 1048576
-max_completion_tokens = 32768
+max_completion_tokens = 128000
 
 # ---------------------------------------------------------------------------
 # (3) Any other OpenAI-compatible host
@@ -89,7 +90,7 @@ name = "Open host"
 env_key = "YOUR_HOST_API_KEY"
 system_prompt_label = "Arcus Build"
 context_window = 1048576
-max_completion_tokens = 32768
+max_completion_tokens = 128000
 
 # ---------------------------------------------------------------------------
 # Native grok rail — second path (login-covered or XAI_API_KEY)

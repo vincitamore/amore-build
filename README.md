@@ -128,8 +128,9 @@ name = "GLM-5.2 (OpenRouter)"
 env_key = "OPENROUTER_API_KEY"
 system_prompt_label = "Arcus Build"
 context_window = 1048576
-# Reasoning tokens count against this. Too tight truncates mid-thought.
-max_completion_tokens = 32768
+# Reasoning tokens draw from this too. Below the model's ceiling it
+# truncates the reasoning pass invisibly — it is a ceiling, not a target.
+max_completion_tokens = 128000
 ```
 
 Full recipes, pricing stamps, alternate hosts, and verify commands:

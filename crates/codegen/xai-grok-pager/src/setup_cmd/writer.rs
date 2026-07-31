@@ -43,7 +43,7 @@ impl ModelEntryPlan {
             env_key: "OPENROUTER_API_KEY".into(),
             system_prompt_label: HOUSE_LABEL.into(),
             context_window: 1_048_576,
-            max_completion_tokens: 16_384,
+            max_completion_tokens: 128_000,
             set_as_default: true,
         }
     }
@@ -58,7 +58,7 @@ impl ModelEntryPlan {
             env_key: "ZAI_API_KEY".into(),
             system_prompt_label: HOUSE_LABEL.into(),
             context_window: 1_048_576,
-            max_completion_tokens: 16_384,
+            max_completion_tokens: 128_000,
             set_as_default: true,
         }
     }
@@ -73,7 +73,7 @@ impl ModelEntryPlan {
             env_key,
             system_prompt_label: HOUSE_LABEL.into(),
             context_window: 1_048_576,
-            max_completion_tokens: 16_384,
+            max_completion_tokens: 128_000,
             set_as_default: true,
         }
     }
