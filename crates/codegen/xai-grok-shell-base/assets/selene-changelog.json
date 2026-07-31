@@ -1,6 +1,11 @@
 [
   {
     "category": "fixes",
+    "description": "**Repo-self references restored** — manual-update message names the GitHub Releases URL; SECURITY.md links the private-advisory form; README has the clone URL.",
+    "breaking_change": false
+  },
+  {
+    "category": "fixes",
     "description": "**Identity sweep** — user-visible command spellings now say `selene` (login/setup/wrap/…), home paths point to ~/.selene/, trust warning + agent descriptions + billing copy re-voice to Selene Build; xAI entitlement wording stays factual.",
     "breaking_change": false
   },

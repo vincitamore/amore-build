@@ -26,9 +26,9 @@ pub enum UpdateRunMode {
 const PROMPT_UPDATE_NOW: &str = "Update now? [Y/n/d]";
 const MSG_AUTO_UPDATE_BACKGROUND: &str = "Auto-update running in background.";
 /// Manual-update nudge — fork installs do not self-update; point operators at
-/// the selene-build GitHub Releases page (URL kept out of code; docs phase).
-const MSG_RUN_UPDATE_MANUAL: &str =
-    "This build does not auto-update. Download a newer release from the selene-build GitHub Releases page.";
+/// the selene-build GitHub Releases page (URL inserted under the operator's
+/// repo-self-URL carve, 2026-07-30).
+const MSG_RUN_UPDATE_MANUAL: &str = "This build does not auto-update. Download a newer release from the selene-build GitHub Releases page: https://github.com/vincitamore/selene-build/releases";
 /// Fork policy: never self-update back to upstream, regardless of config.
 /// Config key `cli.auto_update` is still parsed for file compat, but every
 /// effective read is forced false (see [`effective_auto_update`]).

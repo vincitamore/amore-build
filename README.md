@@ -40,6 +40,9 @@ Requirements:
 - **protoc** — resolved via DotSlash, or a `protoc` on `PATH` / `$PROTOC`.
 
 ```sh
+git clone https://github.com/vincitamore/selene-build.git
+cd selene-build
+
 cargo install dotslash   # once, if needed
 cargo run -p xai-grok-pager-bin              # build + launch the TUI
 cargo build -p xai-grok-pager-bin --release  # release binary
@@ -53,7 +56,8 @@ release build the artifact is typically
 ### Release assets
 
 Prebuilt assets ship with **`v0.1.0`** (and later tags) on the project's
-GitHub Releases page. Install the binary for your OS/arch and put it on
+[GitHub Releases page](https://github.com/vincitamore/selene-build/releases).
+Install the binary for your OS/arch and put it on
 `PATH`.
 
 > **PATH note:** crates.io already publishes a Lua linter named `selene`.

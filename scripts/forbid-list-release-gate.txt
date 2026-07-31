@@ -1,5 +1,7 @@
 # Curated release-gate tier-1 forbid patterns — run WHOLE-TREE at public tag:
 #   python scripts/forbid_check.py --list scripts/forbid-list-release-gate.txt
+# Repo-self URL exception applies here as well (operator ruling 2026-07-30 —
+# see allowlist in forbid_check.py).
 # Baseline: scripts/forbid-list.txt (scoped-CI list; authored surfaces).
 # Curations (2026-07-30, integrator — rehearsals showed 102 hits, all in these
 # noise classes after the junk-file sweep):

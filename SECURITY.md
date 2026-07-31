@@ -5,7 +5,7 @@
 Report suspected security issues through **GitHub private vulnerability
 advisories** on this repository:
 
-**Security → Advisories → "Report a vulnerability"**
+**[Security → Advisories → "Report a vulnerability"](https://github.com/vincitamore/selene-build/security/advisories/new)**
 
 Please do not file public issues for security reports, and do not post details
 in discussions, PRs, or any other public channel, until a fix is public.

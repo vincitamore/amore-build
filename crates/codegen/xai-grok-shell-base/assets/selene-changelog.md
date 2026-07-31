@@ -8,6 +8,10 @@ describes.
 
 ## 2026-07-30
 
+- **Repo-self references restored** — the compiled manual-update message now
+  names the GitHub Releases URL; README links the clone URL and Releases
+  page; SECURITY.md links the private-advisory form (repo-self-URL exception
+  in the forbid gate: the product's own public URL is allowed).
 - **Identity sweep: command spellings, paths, product-name surfaces** —
   user-visible command references in help and errors now say `selene`
   (`selene login` / `selene setup` / `selene wrap` / …), home paths point to

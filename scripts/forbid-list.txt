@@ -15,6 +15,12 @@
 # Architecture extras (selene-k3, .omp/skills) from public-release-shape L1/L2.
 #
 # Zero occurrences of these strings are allowed in product files at public tag.
+#
+# Exception (operator ruling 2026-07-30, GA queue): the repo's own public URL
+# `github.com/vincitamore/selene-build` (and paths under it, e.g. /releases,
+# /security/advisories) is allowed in product files even though `vincitamore`
+# is tier-1 — enforced as an URL-subtract allowlist inside forbid_check.py,
+# so the exception cannot smuggle adjacent forbidden text.
 
 # --- operator / house PII & identity ---
 AlexMoyer

@@ -90,7 +90,18 @@ SELF_CATALOG_NAMES = {
     "forbid-list.txt",
     "forbid-list-release-gate.txt",
     "forbid-strip-map.txt",
+    "forbid_check.py",
 }
+
+# Repo-self URL allowlist (operator ruling 2026-07-30, GA queue): the repo's
+# public identity `github.com/vincitamore/selene-build` is NOT a leak — the
+# tier-1 `vincitamore` ban targets local paths/usernames and house lore, not
+# the published repository URL. A hit is suppressed only when the allowed
+# substring(s) account for every occurrence on the line (URL-subtract then
+# re-test), so the exception cannot smuggle adjacent forbidden text.
+ALLOW_SUBSTRINGS = (
+    "github.com/vincitamore/selene-build",
+)
 
 # Tier-2 context-review strings (protocol). Warnings only; never fail the gate.
 TIER2_PATTERNS: Tuple[str, ...] = (
@@ -216,6 +227,11 @@ def scan_file(
     for lineno, line in enumerate(text.splitlines(), start=1):
         for pat in patterns:
             if pat.matches(line):
+                stripped = line
+                for allowed in ALLOW_SUBSTRINGS:
+                    stripped = stripped.replace(allowed, "")
+                if not pat.matches(stripped):
+                    continue
                 hits.append((lineno, pat.display, line))
     return hits
 
