@@ -28,7 +28,10 @@ jobs:
   selene:
     name: selene — ${{ matrix.artifact }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 90
+    # Release lanes always build cold (no cache is shared into a tag run) and a
+    # cold build of this workspace has been measured past 60 minutes on a
+    # 2-core runner. Timeouts surface as `cancelled`, not `failure`.
+    timeout-minutes: 150
     strategy:
       fail-fast: false
       matrix:

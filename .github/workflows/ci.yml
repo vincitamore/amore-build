@@ -20,7 +20,11 @@ jobs:
   build-test:
     name: ${{ matrix.os }} — build + test
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 60
+    # A cold release build of this workspace exceeds 60 minutes on a 2-core
+    # runner, and a job that times out never saves its cache — so a too-short
+    # timeout is self-perpetuating: every run starts cold and dies at the same
+    # mark. Generous ceiling; the cache makes real runs far shorter.
+    timeout-minutes: 150
     strategy:
       fail-fast: false
       matrix:
