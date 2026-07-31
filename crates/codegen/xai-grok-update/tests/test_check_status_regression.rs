@@ -25,6 +25,14 @@
 //!
 //! These tests verify the JSON contract so any refactor to `UpdateStatus`,
 //! `check_update_status`, or the npm dispatch path will surface a diff.
+//!
+//! **Fork note.** Selene Build hard-disables self-update
+//! (`FORK_AUTO_UPDATE_HARD_OFF`): `check_update_status` returns before any
+//! registry is consulted, so every scenario below — 403, stale, newer,
+//! rollback — now produces the same silence. The scenarios are kept rather
+//! than deleted: they are the conditions upstream cared about, and each one
+//! is now an assertion that the fork stays silent under it. Remove the
+//! hard-off and this file fails loudly, which is the intent.
 
 #![cfg(unix)]
 
@@ -47,6 +55,42 @@ fn setup() -> FakeBinGuard {
     // tests.
     unsafe { std::env::set_var("GROK_INSTALLER", "npm") };
     FakeBinGuard::install_npm()
+}
+
+/// The fork's contract (`FORK_AUTO_UPDATE_HARD_OFF`): `check_update_status`
+/// short-circuits *before* touching a registry, so no registry state — 403,
+/// stale, newer, or rollback — can change what it reports. Installer and
+/// channel are still identified; nothing is ever advertised as available.
+///
+/// These tests kept upstream's scenarios deliberately: each one is a registry
+/// condition upstream cared about, and each must now produce the same silence.
+/// If the hard-off is ever removed, they fail loudly — which is the point, a
+/// fork must never self-update back to upstream.
+fn assert_hard_off(status: &xai_grok_update::UpdateStatus) {
+    assert_eq!(status.current_version, "0.1.181");
+    assert_eq!(
+        status.latest_version, None,
+        "the fork advertises no upstream version"
+    );
+    assert!(
+        !status.update_available,
+        "the fork must never advertise an update"
+    );
+    assert_eq!(status.installer.as_deref(), Some("npm"));
+    assert_eq!(status.channel, "stable");
+    assert!(
+        status.error.is_none(),
+        "no registry is consulted, so there is no registry error to report"
+    );
+}
+
+fn assert_hard_off_json(json: &serde_json::Value) {
+    assert_eq!(json["currentVersion"], "0.1.181");
+    assert!(json["latestVersion"].is_null());
+    assert_eq!(json["updateAvailable"], false);
+    assert_eq!(json["installer"], "npm");
+    assert_eq!(json["channel"], "stable");
+    assert!(json["error"].is_null());
 }
 
 fn make_update_config() -> UpdateConfig {
@@ -82,23 +126,9 @@ async fn check_status_surfaces_npm_403_in_error_field() {
     let cfg = make_update_config();
     let status = check_update_status(&cfg).await;
 
-    assert_eq!(status.current_version, "0.1.181");
-    assert_eq!(status.latest_version, None, "no version when fetch fails");
-    assert!(!status.update_available, "no update when fetch fails");
-    assert_eq!(status.installer.as_deref(), Some("npm"));
-    assert_eq!(status.channel, "stable");
-    let err = status
-        .error
-        .as_deref()
-        .expect("error must be populated when npm fails");
-    assert!(
-        err.contains("npm view") && err.contains("failed"),
-        "error must say what failed: {err}"
-    );
-    assert!(
-        err.contains("403") || err.contains("E403") || err.contains("Forbidden"),
-        "error must include the underlying HTTP detail: {err}"
-    );
+    // Upstream surfaced the registry error here. This fork never reaches the
+    // registry, so there is no error to surface — and none to leak.
+    assert_hard_off(&status);
 }
 
 #[tokio::test]
@@ -115,18 +145,7 @@ async fn check_status_npm_403_serializes_to_user_visible_json() {
     let json = serde_json::to_value(&status).unwrap();
 
     // Lock in every key the user's tooling depends on.
-    assert_eq!(json["currentVersion"], "0.1.181");
-    assert!(json["latestVersion"].is_null());
-    assert_eq!(json["updateAvailable"], false);
-    assert_eq!(json["installer"], "npm");
-    assert_eq!(json["channel"], "stable");
-    let err = json["error"]
-        .as_str()
-        .expect("error key must be a string when fetch fails");
-    assert!(
-        err.contains("E403") || err.contains("403"),
-        "error must include 403: {err}"
-    );
+    assert_hard_off_json(&json);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -150,14 +169,8 @@ async fn check_status_returns_no_update_when_registry_has_older_version() {
     let cfg = make_update_config();
     let status = check_update_status(&cfg).await;
 
-    assert_eq!(status.current_version, "0.1.181");
-    assert_eq!(status.latest_version.as_deref(), Some("0.1.4"));
-    assert!(
-        !status.update_available,
-        "older latest must NOT be reported as update available"
-    );
-    assert_eq!(status.installer.as_deref(), Some("npm"));
-    assert!(status.error.is_none(), "no error on successful fetch");
+    // A stale registry cannot mislead a build that never asks it.
+    assert_hard_off(&status);
 }
 
 #[tokio::test]
@@ -170,12 +183,7 @@ async fn check_status_stale_version_serializes_to_user_visible_json() {
     let status = check_update_status(&cfg).await;
     let json = serde_json::to_value(&status).unwrap();
 
-    assert_eq!(json["currentVersion"], "0.1.181");
-    assert_eq!(json["latestVersion"], "0.1.4");
-    assert_eq!(json["updateAvailable"], false);
-    assert_eq!(json["installer"], "npm");
-    assert_eq!(json["channel"], "stable");
-    assert!(json["error"].is_null());
+    assert_hard_off_json(&json);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -193,10 +201,10 @@ async fn check_status_reports_update_when_registry_has_newer_version() {
     let cfg = make_update_config();
     let status = check_update_status(&cfg).await;
 
-    assert_eq!(status.current_version, "0.1.181");
-    assert_eq!(status.latest_version.as_deref(), Some("0.1.182"));
-    assert!(status.update_available, "newer version must be reported");
-    assert!(status.error.is_none());
+    // The load-bearing case for a fork: even a genuinely NEWER upstream
+    // release must not be advertised, or the fork would walk users back to
+    // upstream. Upstream asserted the opposite here.
+    assert_hard_off(&status);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -219,13 +227,6 @@ async fn check_status_npm_never_reports_downgrade_as_update() {
     let cfg = make_update_config();
     let status = check_update_status(&cfg).await;
 
-    assert_eq!(status.current_version, "0.1.181");
-    assert_eq!(status.latest_version.as_deref(), Some("0.1.179"));
-    assert!(
-        !status.update_available,
-        "npm must NOT report a downgrade as update available — stale registries \
-         would force-downgrade users to ancient versions"
-    );
-    assert_eq!(status.installer.as_deref(), Some("npm"));
-    assert!(status.error.is_none());
+    // Rollback safety is subsumed: nothing is advertised at all.
+    assert_hard_off(&status);
 }
