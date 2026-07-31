@@ -333,7 +333,7 @@ pub fn lookup_auth(map: &AuthStore, scope: &str) -> Option<GrokAuth> {
 /// Early-invalidation buffer. Override with `GROK_AUTH_EARLY_INVALIDATION_SECS`
 /// for testing (e.g. `=5` to shrink the buffer to 5 seconds).
 pub(super) fn early_invalidation() -> Duration {
-    xai_grok_env::var("SELENE_AUTH_EARLY_INVALIDATION_SECS")
+    xai_grok_env::var("ARCUS_AUTH_EARLY_INVALIDATION_SECS")
         .ok()
         .and_then(|v| v.parse::<u64>().ok())
         .map(|s| Duration::seconds(s as i64))

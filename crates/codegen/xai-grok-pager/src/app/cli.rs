@@ -7,7 +7,7 @@ use std::path::PathBuf;
 /// Top-level commands for the pager binary.
 #[derive(Debug, Clone, Subcommand)]
 pub enum Command {
-    /// Run Selene Build without the interactive UI
+    /// Run Arcus Build without the interactive UI
     Agent(Box<AgentArgs>),
     /// Show the configuration Grok discovers for this directory
     Inspect {
@@ -56,10 +56,10 @@ pub enum Command {
     Models,
     /// List, search, or restore sessions
     Sessions(crate::sessions_cmd::SessionsArgs),
-    /// First-run credentials setup (K3 provider + Grok rail + Dioptra).
+    /// First-run credentials setup (K3 provider + Grok rail + Iris).
     ///
-    /// Team managed configuration: `selene setup --managed` (or legacy
-    /// `selene setup --json`).
+    /// Team managed configuration: `arcus setup --managed` (or legacy
+    /// `arcus setup --json`).
     Setup(crate::setup_cmd::SetupArgs),
     /// Share a session and print the share URL
     #[command(hide = true)]
@@ -78,10 +78,10 @@ clipboard (containers, SSH) and your terminal does not handle OSC 52 itself
 sync with your window size.
 
 Examples:
-  selene wrap docker exec -it my-container bash
-  selene wrap kubectl exec -it my-pod -- bash
+  arcus wrap docker exec -it my-container bash
+  arcus wrap kubectl exec -it my-pod -- bash
 
-See ~/.selene/README.md for more information.
+See ~/.arcus/README.md for more information.
 ")]
     Wrap(WrapArgs),
     /// Export a session transcript as Markdown
@@ -137,7 +137,7 @@ See ~/.selene/README.md for more information.
     ///
     /// Centralised, agent-native overview of every session (top-level and
     /// subagents). Disabled when `[dashboard].enabled = false` in
-    /// `~/.selene/config.toml` or when the `GROK_AGENT_DASHBOARD=0` env
+    /// `~/.arcus/config.toml` or when the `GROK_AGENT_DASHBOARD=0` env
     /// var is set.
     Dashboard,
 }
@@ -398,9 +398,9 @@ pub struct LeaderArgs {
 }
 #[derive(Debug, Clone, Parser)]
 #[command(
-    name = "selene",
+    name = "arcus",
     version = env!("VERSION_WITH_COMMIT"),
-    about = "Selene Build TUI",
+    about = "Arcus Build TUI",
     disable_version_flag = true,
     next_display_order = None,
     help_template = "\
@@ -709,8 +709,8 @@ pub struct PagerArgs {
     /// Experimental: scrollback-native rendering. Finalized blocks are printed
     /// into the terminal's native scrollback (use the terminal's own scroll /
     /// selection); a small pinned region holds the prompt + running turn.
-    /// Session-scoped only — does not write config. To default plain `selene` to
-    /// minimal, set `[ui] screen_mode = "minimal"` in ~/.selene/config.toml.
+    /// Session-scoped only — does not write config. To default plain `arcus` to
+    /// minimal, set `[ui] screen_mode = "minimal"` in ~/.arcus/config.toml.
     #[arg(long = "minimal")]
     pub minimal: bool,
     /// Open in the standard fullscreen TUI for this session, overriding a
@@ -783,18 +783,18 @@ fn strip_cur_dir(path: PathBuf) -> PathBuf {
 }
 /// argv0 basenames that resolve to the same CLI surface.
 ///
-/// Public product binary is `selene`; aliases keep multi-call / legacy
-/// installs working (`selene-build`, upstream `grok`, and `agent`).
+/// Public product binary is `arcus`; aliases keep multi-call / legacy
+/// installs working (`arcus-build`, upstream `grok`, and `agent`).
 pub fn is_recognized_argv0(name: &str) -> bool {
     let stem = name
         .strip_suffix(".exe")
         .or_else(|| name.strip_suffix(".EXE"))
         .unwrap_or(name);
-    matches!(stem, "selene" | "selene-build" | "grok" | "agent")
+    matches!(stem, "arcus" | "arcus-build" | "grok" | "agent")
 }
 
 /// Canonical clap program name when argv0 is unrecognized.
-pub const DEFAULT_BIN_NAME: &str = "selene";
+pub const DEFAULT_BIN_NAME: &str = "arcus";
 
 impl PagerArgs {
     /// Parse CLI arguments without applying side effects.
@@ -1004,23 +1004,23 @@ mod tests {
     use clap::CommandFactory;
 
     #[test]
-    fn help_text_names_selene() {
+    fn help_text_names_arcus() {
         let help = PagerArgs::command().render_help().to_string();
         assert!(
-            help.contains("selene") || help.contains("Usage: selene"),
-            "help must name the public binary selene; got:\n{help}"
+            help.contains("arcus") || help.contains("Usage: arcus"),
+            "help must name the public binary arcus; got:\n{help}"
         );
-        // clap usage line uses the derive `name = "selene"`.
+        // clap usage line uses the derive `name = "arcus"`.
         let usage = PagerArgs::command().render_usage().to_string();
         assert!(
-            usage.contains("selene"),
-            "usage must name selene; got: {usage}"
+            usage.contains("arcus"),
+            "usage must name arcus; got: {usage}"
         );
     }
 
     #[test]
     fn argv0_tolerance_resolves_all_four_names() {
-        for name in ["selene", "selene-build", "grok", "agent"] {
+        for name in ["arcus", "arcus-build", "grok", "agent"] {
             assert!(
                 is_recognized_argv0(name),
                 "{name} must be a recognized multi-call argv0"
@@ -1036,17 +1036,17 @@ mod tests {
             );
         }
         // Windows multi-call may pass argv0 with .exe
-        assert!(is_recognized_argv0("selene.exe"));
+        assert!(is_recognized_argv0("arcus.exe"));
         assert!(is_recognized_argv0("grok.EXE"));
-        assert!(!is_recognized_argv0("selene-lua"));
+        assert!(!is_recognized_argv0("arcus-lua"));
         assert!(!is_recognized_argv0("other"));
-        assert_eq!(DEFAULT_BIN_NAME, "selene");
+        assert_eq!(DEFAULT_BIN_NAME, "arcus");
     }
 
     #[test]
     fn version_flags_parse_as_early_intent_without_exiting() {
         for flag in ["--version", "-v", "-V"] {
-            let args = PagerArgs::try_parse_from(["selene", flag]).expect("version flag parses");
+            let args = PagerArgs::try_parse_from(["arcus", flag]).expect("version flag parses");
             assert!(args.version, "{flag} must set the early version intent");
             assert!(args.command.is_none());
         }

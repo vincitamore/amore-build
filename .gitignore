@@ -1,3 +1,27 @@
+# Build output
 /target
 **/*.rs.bk
+
+# OS / editor noise
 .DS_Store
+Thumbs.db
+*.swp
+*~
+
+# Crash dumps from MSYS-hosted shells
+*.stackdump
+
+# MSYS-mangled path artifacts.
+#
+# `sh -c` on Windows resolves to git-bash, whose MSYS layer flattens an absolute
+# Windows path passed inside a command string ("C:\Users\...\env.txt") into a
+# single relative token, substituting U+F03A for the drive colon. A redirect in a
+# test command then writes that token into the crate directory. The emitting
+# tests are POSIX-gated (see notifications/hooks.rs), so these should no longer
+# appear -- this rule is the backstop, because the files carry a full environment
+# dump including the user name and any secret-bearing variables.
+**
+
+# Sweep / scratch
+/.sweep-scratch/
+sweep-*.log

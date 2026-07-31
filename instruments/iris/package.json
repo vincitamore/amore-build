@@ -1,0 +1,16 @@
+{
+  "name": "@arcus/iris-workspace",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@9.0.0",
+  "scripts": {
+    "test": "pnpm --filter @arcus/regula --filter @arcus/cli --filter @arcus/tui --filter @arcus/daemon --filter @arcus/parity test",
+    "build:compile": "bun run scripts/build-compile.ts"
+  },
+  "patchedDependencies": {
+    "@opentui/core@0.4.2": "patches/@opentui__core@0.4.2.patch"
+  },
+  "workspaces": [
+    "packages/*"
+  ]
+}

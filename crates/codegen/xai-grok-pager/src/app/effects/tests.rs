@@ -2152,7 +2152,7 @@ fn format_session_info_api_key_without_env() {
             "{text}"
         );
     assert!(
-            text.contains("Run `selene login` to use your SuperGrok subscription instead."),
+            text.contains("Run `arcus login` to use your SuperGrok subscription instead."),
             "{text}"
         );
     assert!(!text.contains("grok.com"), "{text}");
@@ -2167,7 +2167,7 @@ fn format_session_info_api_key_auth_notes_console_billing() {
             "{text}"
         );
     assert!(
-            text.contains("Run `selene login` to use your SuperGrok subscription instead."),
+            text.contains("Run `arcus login` to use your SuperGrok subscription instead."),
             "{text}"
         );
     assert!(!text.contains("Also present: XAI_API_KEY"), "{text}");

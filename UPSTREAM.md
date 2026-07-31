@@ -1,17 +1,17 @@
 # Upstream relationship
 
-Definitive statement of how **Selene Build** relates to its upstream source.
+Definitive statement of how **Arcus Build** relates to its upstream source.
 Provenance and policy surface — not marketing.
 
 ## 1. What this is
 
-**Selene Build** is a perpetual friendly fork of xAI's open-sourced Grok Build
+**Arcus Build** is a perpetual friendly fork of xAI's open-sourced Grok Build
 harness (`xai-org/grok-build`, Apache License 2.0).
 
 | | |
 |---|---|
-| **Product / repo** | Selene Build (`selene-build`) |
-| **Primary binary** | `selene` (argv0 also tolerates `selene-build`, `grok`, `agent`) |
+| **Product / repo** | Arcus Build (`arcus-build`) |
+| **Primary binary** | `arcus` (argv0 also tolerates `arcus-build`, `grok`, `agent`) |
 | **Upstream** | [xai-org/grok-build](https://github.com/xai-org/grok-build) |
 | **License** | Apache-2.0 — see [`LICENSE`](LICENSE) |
 | **Crates** | Upstream names kept (`xai-grok-*` and related `xai-*`). Product rename is binary/docs/config-surface only, not the crate graph. |
@@ -40,12 +40,12 @@ obligation set.
 
 ### Non-affiliation
 
-**Selene Build is not affiliated with, endorsed by, or supported by xAI or
+**Arcus Build is not affiliated with, endorsed by, or supported by xAI or
 X Corp.**
 
-- Independent fork: bugs, support, and feature work for Selene Build are not
+- Independent fork: bugs, support, and feature work for Arcus Build are not
   xAI's responsibility.
-- Do not open issues or PRs on `xai-org/grok-build` for Selene Build behavior,
+- Do not open issues or PRs on `xai-org/grok-build` for Arcus Build behavior,
   branding, templates, or fork-only features.
 - **Trademarks** (xAI, Grok, X, and related marks) belong to their owners.
   Apache-2.0 source use does not grant trademark rights.
@@ -95,16 +95,16 @@ thin delta, re-verify fork surfaces, update `SOURCE_REV` when the pin moves.
 
 Honest delta versus stock `xai-org/grok-build`:
 
-**Identity and branding.** Product and binary are Selene Build / `selene`.
+**Identity and branding.** Product and binary are Arcus Build / `arcus`.
 User-visible labels follow the fork identity. Crate package names stay
 `xai-grok-*`.
 
-**Config-dir semantics.** Project roots use **`.selene`** where upstream reads
+**Config-dir semantics.** Project roots use **`.arcus`** where upstream reads
 **`.grok`**. **`.grok` is legacy fallback** so upstream-format trees keep
-working. Default user home is **`~/.selene`** (compiled in); legacy
-`$GROK_HOME` still works (`$SELENE_HOME` wins when both are set).
+working. Default user home is **`~/.arcus`** (compiled in); legacy
+`$GROK_HOME` still works (`$ARCUS_HOME` wins when both are set).
 
-**Environment surface.** Product policy: **`SELENE_*` primaries**, **`GROK_*`**
+**Environment surface.** Product policy: **`ARCUS_*` primaries**, **`GROK_*`**
 legacy aliases on dual-mapped keys. Not every historical `GROK_*` name has a
 twin; resolution follows `xai-grok-config` and related crates.
 
@@ -112,19 +112,19 @@ twin; resolution follows `xai-grok-config` and related crates.
 **embedded at build time** into the binary (`xai-grok-pager` embed machinery)
 for offline install.
 
-**`selene init`.** Installs the embedded harness into a target repo
+**`arcus init`.** Installs the embedded harness into a target repo
 (ownership/refresh policy; offline for the pack itself).
 
 **First-run setup.** Interactive first-run / setup guidance for credentials and
 companion install (wizard surface; explicit setup entry for non-interactive
 use). Must not trap headless or CI paths.
 
-**Dioptra.** Companion instrument in-tree at `instruments/dioptra/`. Optional
+**Iris.** Companion instrument in-tree at `instruments/iris/`. Optional
 detection/init pointer; absence is quiet.
 
 **Auto-update hard-off.** Compile-time policy in `xai-grok-update`
 (`FORK_AUTO_UPDATE_HARD_OFF`): auto-update is forced ineffective so the fork cannot
-self-update back to upstream. Newer builds come from Selene Build release
+self-update back to upstream. Newer builds come from Arcus Build release
 artifacts, not upstream installers.
 
 **Test-suite platform coverage (inherited).** The upstream suite is written
@@ -149,8 +149,8 @@ logic, and the bulk of `crates/`.
 2. Rebase or merge the **entire sync bundle**, then re-apply/re-verify the thin
    fork delta once.
 3. Refresh [`SOURCE_REV`](SOURCE_REV) when the upstream baseline moves.
-4. After every rebase, re-check at least: `.selene`/`.grok` precedence,
-   `~/.selene` default home, identity/binary naming, auto-update hard-off,
+4. After every rebase, re-check at least: `.arcus`/`.grok` precedence,
+   `~/.arcus` default home, identity/binary naming, auto-update hard-off,
    embed + `init` ownership tests, forbid-list on authored surfaces.
 5. Fast-follow security fixes; batch ordinary drift into the next sync rebase.
 
@@ -171,7 +171,7 @@ channel:
 
 - Re-enable auto-update toward upstream install endpoints.
 - Rename workspace crates to “match” the product name.
-- File Selene Build issues on the upstream GitHub repository.
+- File Arcus Build issues on the upstream GitHub repository.
 - Strip or relocate `LICENSE` / `THIRD-PARTY-NOTICES` without a
   license-compliant replacement.
 
@@ -185,4 +185,4 @@ channel:
 | [`SECURITY.md`](SECURITY.md) | Vulnerability reporting |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | Contribution / non-PR policy |
 | [`templates/house/`](templates/house/) | Embedded cooperation-harness pack |
-| [`instruments/dioptra/`](instruments/dioptra/) | Companion instrument sources |
+| [`instruments/iris/`](instruments/iris/) | Companion instrument sources |

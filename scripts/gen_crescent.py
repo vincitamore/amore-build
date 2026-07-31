@@ -1,4 +1,4 @@
-# Generates the Selene crescent-moon braille logo assets:
+# Generates the Arcus crescent-moon braille logo assets:
 #   assets/logo/logo07.txt  (full tier, 7 rows x 13 cols)
 #   assets/logo/logo05.txt  (small tier, 5 rows x 9 cols)
 #

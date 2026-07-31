@@ -156,7 +156,7 @@ async fn run_setup_command(json: bool) {
     if !managed_config::has_principal() {
         eprintln!("No deployment key or team sign-in found.");
         eprintln!();
-        eprintln!("To install managed configuration, sign in with a team using `selene login`,");
+        eprintln!("To install managed configuration, sign in with a team using `arcus login`,");
         eprintln!("or set a deployment key:");
         eprintln!();
         if cfg!(unix) {
@@ -164,9 +164,9 @@ async fn run_setup_command(json: bool) {
         } else {
             eprintln!("  $env:GROK_DEPLOYMENT_KEY=\"<your-key>\"");
         }
-        eprintln!("  selene setup");
+        eprintln!("  arcus setup");
         eprintln!();
-        eprintln!("Or add the key to ~/.selene/config.toml:");
+        eprintln!("Or add the key to ~/.arcus/config.toml:");
         eprintln!();
         eprintln!("  [endpoints]");
         eprintln!("  deployment_key = \"<your-key>\"");
@@ -204,7 +204,7 @@ async fn run_setup_command(json: bool) {
         }
         SetupOutcome::Skipped => {
             eprintln!(
-                "Managed configuration was not applied this run (another process held the apply lock, or the credential changed during the fetch). Run `selene setup` again."
+                "Managed configuration was not applied this run (another process held the apply lock, or the credential changed during the fetch). Run `arcus setup` again."
             );
         }
         SetupOutcome::Failed(e) => {
@@ -449,7 +449,7 @@ async fn run_workspace_mgmt(args: WorkspaceMgmtArgs) -> Result<()> {
         WorkspaceGate::Unknown => {
             anyhow::bail!(
                 "Could not load your settings for `grok workspace`. Check your \
-             network connection (run `selene login` if you are signed out), then \
+             network connection (run `arcus login` if you are signed out), then \
              try again."
             )
         }
@@ -546,14 +546,14 @@ async fn workspace_start(
     );
     if !use_leader {
         anyhow::bail!(
-            "`selene workspace` requires leader mode (the workspace is shared via the leader).\n\
-             Enable it with `[cli] use_leader = true` in ~/.selene/config.toml, or pass --leader."
+            "`arcus workspace` requires leader mode (the workspace is shared via the leader).\n\
+             Enable it with `[cli] use_leader = true` in ~/.arcus/config.toml, or pass --leader."
         );
     }
     ensure_authenticated(
         &agent_config.grok_com_config,
         false,
-        Some("No cached credentials found. Run `selene login` first."),
+        Some("No cached credentials found. Run `arcus login` first."),
     )
     .await?;
     let env_urls = LeaderEnvUrls::from(&agent_config.grok_com_config);
@@ -1067,7 +1067,7 @@ async fn run_agent_command(
     let is_leader = matches!(agent_args.mode, Some(AgentCmd::Leader(_)));
     if !is_stdio && !is_leader {
         eprintln!(
-            "Selene Build - v{}",
+            "Arcus Build - v{}",
             xai_grok_version::display_version_with_commit(
                 env!("VERSION_WITH_COMMIT"),
                 xai_grok_update::channel_label(),
@@ -1521,7 +1521,7 @@ fn flag_dashboard_at_startup_if_requested(args: &mut PagerArgs) -> Result<()> {
     if !xai_grok_pager::views::dashboard::dashboard_enabled() {
         anyhow::bail!(
             "the Agent Dashboard is disabled. Enable it by removing \
-             `[dashboard] enabled = false` from ~/.selene/config.toml and \
+             `[dashboard] enabled = false` from ~/.arcus/config.toml and \
              unsetting GROK_AGENT_DASHBOARD=0."
         );
     }
@@ -1749,7 +1749,7 @@ fn install_heap_profile_hooks() {
 }
 fn version_text(channel_label: &str) -> String {
     format!(
-        "selene {}\n",
+        "arcus {}\n",
         xai_grok_version::display_version_with_commit(env!("VERSION_WITH_COMMIT"), channel_label,)
     )
 }
@@ -1789,7 +1789,7 @@ fn dispatch_init_if_requested(args: &PagerArgs) -> bool {
     }
     true
 }
-/// Early-dispatch first-run wizard (`selene setup` without `--managed`/`--json`).
+/// Early-dispatch first-run wizard (`arcus setup` without `--managed`/`--json`).
 /// Managed config stays on the async command path.
 fn dispatch_setup_wizard_if_requested(args: &PagerArgs) -> bool {
     let Some(Command::Setup(setup_args)) = &args.command else {
@@ -2225,7 +2225,7 @@ async fn async_main(args: PagerArgs) -> Result<()> {
         }
         Ok(false) => {}
         Err(e) => {
-            eprintln!("selene: first-run setup skipped ({e:#})");
+            eprintln!("arcus: first-run setup skipped ({e:#})");
         }
     }
     enforce_version_policy_or_exit();
@@ -2590,7 +2590,7 @@ mod tests {
             let mut output = Vec::new();
             write_version(&mut output, label).unwrap();
             let output = String::from_utf8(output).unwrap();
-            assert!(output.starts_with("selene "));
+            assert!(output.starts_with("arcus "));
             assert!(output.contains(env!("VERSION_WITH_COMMIT")));
             assert!(output.ends_with(expected_suffix), "{output:?}");
         }

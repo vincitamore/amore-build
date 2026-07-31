@@ -508,14 +508,14 @@ fn auto_respond_to_permissions(
 /// "Not signed in" error message, tailored to the session type.
 fn auth_required_message(interactive: bool) -> String {
     if interactive {
-        "Not signed in. Run `selene login` to authenticate \
-         (or `selene login --device-auth` if no browser is available)."
+        "Not signed in. Run `arcus login` to authenticate \
+         (or `arcus login --device-auth` if no browser is available)."
             .to_string()
     } else {
         "Not signed in. To authenticate without a browser, run:\n  \
-         selene login --device-auth\n\n\
+         arcus login --device-auth\n\n\
          Alternatively, set the XAI_API_KEY environment variable \
-         or run `selene login` on a machine with a browser."
+         or run `arcus login` on a machine with a browser."
             .to_string()
     }
 }

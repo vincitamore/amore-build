@@ -1,0 +1,20 @@
+{
+  "name": "@arcus/cli",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Arcus house CLI \u2014 sole global bin `iris` (org verbs + sight + daemon; default :3853)",
+  "bin": {
+    "iris": "./src/iris.ts"
+  },
+  "scripts": {
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@arcus/regula": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "latest",
+    "bun-types": "latest"
+  }
+}

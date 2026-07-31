@@ -1,7 +1,7 @@
 //! Lightweight credential-presence checks for the first-run gate.
 //!
 //! "Credentials resolve" means any of:
-//! - non-empty `auth.json` session store under the selene/grok home
+//! - non-empty `auth.json` session store under the arcus/grok home
 //! - `XAI_API_KEY` (or legacy `GROK_CODE_XAI_API_KEY`) set in the process env
 //! - a `[model.*]` block whose `api_key` is non-empty or whose `env_key` resolves
 
@@ -179,7 +179,7 @@ system_prompt_label = "Kimi K3"
             r#"
 [model.k3]
 model = "moonshotai/kimi-k3"
-env_key = "SELENE_WIZARD_TEST_ENV_KEY_UNSET_ZZZ"
+env_key = "ARCUS_WIZARD_TEST_ENV_KEY_UNSET_ZZZ"
 system_prompt_label = "Kimi K3"
 "#,
         )

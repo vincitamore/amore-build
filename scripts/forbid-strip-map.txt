@@ -12,13 +12,13 @@
 # later find-strings (e.g. avoid {{NCU_…}} when a later rule matches NCU).
 
 # --- full personal paths BEFORE bare name fragments ---
-C:\Users\AlexMoyer\Documents\selene	{{HOUSE_ROOT}}
-C:/Users/AlexMoyer/Documents/selene	{{HOUSE_ROOT}}
+C:\Users\AlexMoyer\Documents\arcus	{{HOUSE_ROOT}}
+C:/Users/AlexMoyer/Documents/arcus	{{HOUSE_ROOT}}
 C:\Users\AlexMoyer	{{OPERATOR_HOME}}
 C:/Users/AlexMoyer	{{OPERATOR_HOME}}
-Documents\selene	{{HOUSE_ROOT_REL}}
-Documents/selene	{{HOUSE_ROOT_REL}}
-~/selene/bin	{{HOUSE_BIN}}
+Documents\arcus	{{HOUSE_ROOT_REL}}
+Documents/arcus	{{HOUSE_ROOT_REL}}
+~/arcus/bin	{{HOUSE_BIN}}
 
 # --- operator / house PII (AlexMoyer before amoyer — amoyer is a substring) ---
 AlexMoyer	{{OPERATOR_ID}}
@@ -34,13 +34,16 @@ Materia	{{HOUSE_NAME}}
 materia	{{house_name}}
 Aether	{{SIBLING_HOUSE}}
 aether	{{sibling_house}}
+Documents\selene	{{SIBLING_HOUSE_ROOT_REL}}
+Documents/selene	{{SIBLING_HOUSE_ROOT_REL}}
+~/selene/bin	{{SIBLING_HOUSE_BIN}}
 custos	{{house_role}}
 
 # --- private house ports / OMP / dispatch ---
 :8765	:{{HOUSE_PORT}}
 grok-dispatch	{{DISPATCH_CMD}}
-.omp/skills	.selene/skills
-.omp	.selene
+.omp/skills	.arcus/skills
+.omp	.arcus
 
 # --- private model / provider footing ---
 modal-k3	{{PRIVATE_MODEL_ID}}

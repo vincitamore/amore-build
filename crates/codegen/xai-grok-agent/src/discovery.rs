@@ -15,7 +15,7 @@ use crate::error::AgentBuildError;
 use crate::prompt::context::TemplateOverride;
 
 /// Project-level agent directories to scan (`.grok/agents/` + `.claude/agents/` compat).
-const PROJECT_AGENT_SUBDIRS: &[&str] = &[".selene/agents", ".grok/agents", ".claude/agents"];
+const PROJECT_AGENT_SUBDIRS: &[&str] = &[".arcus/agents", ".grok/agents", ".claude/agents"];
 
 /// Existing project-level agent dirs (`.grok/agents` / `.claude/agents`), walked
 /// from `cwd` up to the git worktree root (inclusive). Returns

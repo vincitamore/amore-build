@@ -2119,9 +2119,9 @@ mod tests {
         assert!(!args.no_alt_screen);
     }
     #[test]
-    fn cli_command_name_is_selene() {
+    fn cli_command_name_is_arcus() {
         use clap::CommandFactory;
-        assert_eq!(PagerArgs::command().get_name(), "selene");
+        assert_eq!(PagerArgs::command().get_name(), "arcus");
     }
     #[test]
     fn cli_help_output_header() {
@@ -2131,9 +2131,9 @@ mod tests {
         assert_eq!(
             first_5,
             vec![
-                "Selene Build TUI",
+                "Arcus Build TUI",
                 "",
-                "Usage: selene [OPTIONS] [PROMPT] [COMMAND]",
+                "Usage: arcus [OPTIONS] [PROMPT] [COMMAND]",
                 "",
                 "Arguments:",
             ]

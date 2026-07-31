@@ -284,7 +284,7 @@ async fn try_discover_managed_servers() -> (ConfigSourceStatus, Vec<DiscoveredSe
 
     let token = match auth_manager.get_valid_token().await {
         Ok(key) => key,
-        Err(_) => return managed_skipped("auth expired — run `selene login`"),
+        Err(_) => return managed_skipped("auth expired — run `arcus login`"),
     };
 
     let proxy_url = crate::agent::config::EndpointsConfig::from_effective_config().proxy_url();

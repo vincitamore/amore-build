@@ -13,7 +13,7 @@
 //!
 //! ## Product env identity ([`identity`])
 //!
-//! Selene Build reads `SELENE_*` as primary with `GROK_*` as silent legacy
+//! Arcus Build reads `ARCUS_*` as primary with `GROK_*` as silent legacy
 //! aliases. See [`identity`] for the mapping table and resolution helpers.
 
 pub mod identity;

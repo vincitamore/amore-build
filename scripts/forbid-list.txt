@@ -17,7 +17,7 @@
 # Zero occurrences of these strings are allowed in product files at public tag.
 #
 # Exception (operator ruling 2026-07-30, GA queue): the repo's own public URL
-# `github.com/vincitamore/selene-build` (and paths under it, e.g. /releases,
+# `github.com/vincitamore/arcus-build` (and paths under it, e.g. /releases,
 # /security/advisories) is allowed in product files even though `vincitamore`
 # is tier-1 — enforced as an URL-subtract allowlist inside forbid_check.py,
 # so the exception cannot smuggle adjacent forbidden text.
@@ -30,9 +30,9 @@ amoyer
 # --- absolute personal paths ---
 C:\Users\
 C:/Users/
-Documents\selene
-Documents/selene
-~/selene/bin
+Documents\arcus
+Documents/arcus
+~/arcus/bin
 
 # --- sibling / private house names ---
 # wb: avoids materialize / Materialized false positives
@@ -41,6 +41,15 @@ wb:Materia
 aether
 Aether
 custos
+# selene is the ONE sibling with a public product (github.com/vincitamore/
+# selene-build), so the bare word stays legal — UPSTREAM.md states the true
+# lineage grok-build -> selene-build -> arcus-build. Only the PRIVATE selene
+# house tree and its install/config paths are forbidden. Same split this list
+# already applies to arcus itself: the product is public, the tree is not.
+Documents\selene
+Documents/selene
+~/selene/bin
+.selene
 
 # --- private house ports / OMP / dispatch ---
 :8765
@@ -52,6 +61,9 @@ wb:OMP
 grok-dispatch
 
 # --- private model / provider footing (not public defaults) ---
+# selene-k3 is the SIBLING's private Modal model id. The 2026-07-31 identity
+# sweep renamed it to `arcus-k3`, which forbade a string that can never appear
+# while letting the real secret through — restored here.
 modal-k3
 selene-k3
 

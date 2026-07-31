@@ -6,7 +6,7 @@ created: 2026-07-30
 # forge/
 
 Agent working directory for pipeline-scale orchestration and directed multi-step
-products. Orchestration skills under `.selene/skills` (especially
+products. Orchestration skills under `.arcus/skills` (especially
 `forge-master` and `auriga`) reference this file — keep contracts stable.
 
 ## When to use the forge pattern

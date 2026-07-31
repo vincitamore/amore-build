@@ -6,9 +6,9 @@
 //! When a `PendingAction` is active (double-press confirmation),
 //! the bar replaces all hints with "press again to {label}".
 //!
-//! ## Dioptra companion (`dash`)
+//! ## Iris companion (`dash`)
 //!
-//! The optional Dioptra dash hint is **not** injected here. It is produced by
+//! The optional Iris dash hint is **not** injected here. It is produced by
 //! [`crate::actions::ActionRegistry::hint_items`] only when the companion
 //! resolves for the session (pointer file or PATH). When absent the action is
 //! unregistered, so this bar never renders a dead `dash` label.

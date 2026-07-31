@@ -545,7 +545,7 @@ impl EndpointsConfig {
 impl Default for EndpointsConfig {
     fn default() -> Self {
         Self {
-            cli_chat_proxy_base_url: xai_grok_env::var("SELENE_CLI_CHAT_PROXY_BASE_URL").ok(),
+            cli_chat_proxy_base_url: xai_grok_env::var("ARCUS_CLI_CHAT_PROXY_BASE_URL").ok(),
             xai_api_base_url: std::env::var("GROK_XAI_API_BASE_URL")
                 .unwrap_or_else(|_| XAI_API_BASE_URL_DEFAULT.to_owned()),
             alpha_test_key: None,
@@ -676,9 +676,9 @@ pub(crate) const FIRST_PARTY_CREDENTIAL_ENV_VARS: &[&str] = &[
 ];
 /// Read an env var as a trimmed string. Returns `None` if unset or empty/whitespace-only.
 ///
-/// Uses the Selene identity layer so mapped `SELENE_*` primaries win over
-/// `GROK_*` legacy aliases (e.g. `GROK_DEFAULT_MODEL` / `SELENE_DEFAULT_MODEL`,
-/// `GROK_CLI_*` / `SELENE_CLI_*`). Unmapped names are plain env reads.
+/// Uses the Arcus identity layer so mapped `ARCUS_*` primaries win over
+/// `GROK_*` legacy aliases (e.g. `GROK_DEFAULT_MODEL` / `ARCUS_DEFAULT_MODEL`,
+/// `GROK_CLI_*` / `ARCUS_CLI_*`). Unmapped names are plain env reads.
 pub(crate) fn env_string(name: &str) -> Option<String> {
     let value = xai_grok_env::var(name).ok()?;
     let trimmed = value.trim();
@@ -1743,7 +1743,7 @@ pub struct AgentSelectionConfig {
     pub system_prompt_label: Option<String>,
     /// When `false`, suppress the auto-guided first-run setup wizard.
     /// Absent / `true` allows auto-fire (subject to TTY/CI/credentials guards).
-    /// Written and advertised by `selene setup` / first-run onboarding.
+    /// Written and advertised by `arcus setup` / first-run onboarding.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub setup_on_first_run: Option<bool>,
 }

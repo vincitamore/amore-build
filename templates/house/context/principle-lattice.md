@@ -1,6 +1,6 @@
 <!--
-Default normative lens installed by `selene-build init` (default-on).
-Remove with `selene-build init --no-lattice` — deletes this file and the
+Default normative lens installed by `arcus-build init` (default-on).
+Remove with `arcus-build init --no-lattice` — deletes this file and the
 AGENTS.md lattice conditional blocks.
 
 This file is the house-local home of the lattice. Do NOT copy the body into

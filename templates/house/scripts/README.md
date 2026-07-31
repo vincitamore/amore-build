@@ -24,7 +24,7 @@ Tree-level rules:
 - **lattice-drift** — only when `LATTICE_CANONICAL` is set (path to an external
   canonical lattice); otherwise skipped with a note (local
   `context/principle-lattice.md` is the authority for single-house adopters).
-- **orientation-rules-drift** — when `.selene/` or `.grok/` exists, runs
+- **orientation-rules-drift** — when `.arcus/` or `.grok/` exists, runs
   `sync_orientation_rules.py --check` (adds `--grok-compat` if only `.grok/` is
   present).
 
@@ -54,7 +54,7 @@ Regenerates derived rules files from canonical sources under `context/`.
 
 | Flag | Effect |
 |------|--------|
-| *(default)* | Write to `.selene/rules/` (Selene Build lane) |
+| *(default)* | Write to `.arcus/rules/` (Arcus Build lane) |
 | `--grok-compat` | Write to `.grok/rules/` (upstream-grok lane) |
 | `--check` | Exit 0 if derived files match sources; exit 1 on missing/drift (no write) |
 

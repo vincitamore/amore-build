@@ -32,16 +32,16 @@ pub fn detect_windows_shell() -> &'static WindowsShell {
     static CACHED: OnceLock<WindowsShell> = OnceLock::new();
 
     CACHED.get_or_init(|| {
-        // Explicit override via SELENE_SHELL (primary) / GROK_SHELL (legacy).
-        if let Ok(val) = xai_grok_env::var("SELENE_SHELL") {
+        // Explicit override via ARCUS_SHELL (primary) / GROK_SHELL (legacy).
+        if let Ok(val) = xai_grok_env::var("ARCUS_SHELL") {
             match val.trim().to_ascii_lowercase().as_str() {
                 "pwsh" => {
-                    tracing::info!("Windows shell (SELENE_SHELL/GROK_SHELL override): pwsh");
+                    tracing::info!("Windows shell (ARCUS_SHELL/GROK_SHELL override): pwsh");
                     return WindowsShell::Pwsh;
                 }
                 "powershell" => {
                     tracing::info!(
-                        "Windows shell (SELENE_SHELL/GROK_SHELL override): powershell.exe"
+                        "Windows shell (ARCUS_SHELL/GROK_SHELL override): powershell.exe"
                     );
                     return WindowsShell::PowerShell;
                 }
@@ -49,21 +49,21 @@ pub fn detect_windows_shell() -> &'static WindowsShell {
                     if let Some(path) = find_git_bash() {
                         tracing::info!(
                             shell = path,
-                            "Windows shell (SELENE_SHELL/GROK_SHELL override): Git Bash"
+                            "Windows shell (ARCUS_SHELL/GROK_SHELL override): Git Bash"
                         );
                         return WindowsShell::GitBash(path);
                     }
                     tracing::warn!(
-                        "SELENE_SHELL/GROK_SHELL={val} but Git Bash not found; falling through to auto-detect"
+                        "ARCUS_SHELL/GROK_SHELL={val} but Git Bash not found; falling through to auto-detect"
                     );
                 }
                 "cmd" | "cmd.exe" => {
-                    tracing::info!("Windows shell (SELENE_SHELL/GROK_SHELL override): cmd.exe");
+                    tracing::info!("Windows shell (ARCUS_SHELL/GROK_SHELL override): cmd.exe");
                     return WindowsShell::Cmd;
                 }
                 other => {
                     tracing::warn!(
-                        "SELENE_SHELL/GROK_SHELL={other} is not recognized \
+                        "ARCUS_SHELL/GROK_SHELL={other} is not recognized \
                          (expected pwsh|powershell|bash|cmd); falling through to auto-detect"
                     );
                 }
@@ -428,8 +428,8 @@ fn resolve_unix_shell_path(kind: UnixShellKind) -> String {
     let name = kind.name();
     let matches_kind = |p: &std::path::Path| p.file_name().and_then(|n| n.to_str()) == Some(name);
 
-    // 1) Explicit override via $SELENE_SHELL / $GROK_SHELL.
-    if let Ok(s) = xai_grok_env::var("SELENE_SHELL") {
+    // 1) Explicit override via $ARCUS_SHELL / $GROK_SHELL.
+    if let Ok(s) = xai_grok_env::var("ARCUS_SHELL") {
         let p = std::path::PathBuf::from(&s);
         if matches_kind(&p) && is_executable(&p) {
             return s;

@@ -1,4 +1,4 @@
-//! `selene init` — install the embedded cooperation harness into a git repo.
+//! `arcus init` — install the embedded cooperation harness into a git repo.
 //!
 //! Offline extract of `templates/house/**` with an ownership/refresh policy:
 //! never silently overwrite user edits; `--refresh` only rewrites files whose
@@ -14,17 +14,17 @@ use serde::{Deserialize, Serialize};
 use crate::house_embed::{HouseEntry, embedded_house_entries};
 
 /// Relative path of the install manifest inside the target repo.
-pub const MANIFEST_REL: &str = ".selene/house-install.json";
+pub const MANIFEST_REL: &str = ".arcus/house-install.json";
 
-/// Dioptra companion pointer note (only when `--with-dioptra`).
-pub const DIOPTRA_NOTE_REL: &str = ".selene/dioptra-companion.note.md";
+/// Iris companion pointer note (only when `--with-iris`).
+pub const IRIS_NOTE_REL: &str = ".arcus/iris-companion.note.md";
 
 const MANIFEST_VERSION: u32 = 1;
 
-const DIOPTRA_NOTE: &str = "\
-# Dioptra companion (pointer)
+const IRIS_NOTE: &str = "\
+# Iris companion (pointer)
 
-Dioptra is an optional companion instrument for Selene Build — not installed by
+Iris is an optional companion instrument for Arcus Build — not installed by
 `init`. Install and run it separately when you want the dash/regula surfaces.
 
 See the product docs for the companion install story. This note is only a
@@ -42,24 +42,24 @@ pub struct InitArgs {
     /// Install bundled skills (default: on; explicit opt-in, no-op when already default).
     #[arg(long = "skills", conflicts_with = "no_skills")]
     pub skills: bool,
-    /// Skip bundled skills under `.selene/skills/`.
+    /// Skip bundled skills under `.arcus/skills/`.
     #[arg(long = "no-skills", conflicts_with = "skills")]
     pub no_skills: bool,
     /// Install project hooks (default: on; explicit opt-in, no-op when already default).
     #[arg(long = "hooks", conflicts_with = "no_hooks")]
     pub hooks: bool,
-    /// Skip `.selene/hooks/**` install and global hooks-paths registration.
+    /// Skip `.arcus/hooks/**` install and global hooks-paths registration.
     #[arg(long = "no-hooks", conflicts_with = "hooks")]
     pub no_hooks: bool,
     /// Skip `context/principle-lattice.md` (lattice is default-on).
     #[arg(long = "no-lattice")]
     pub no_lattice: bool,
-    /// Plant a dioptra companion pointer note (default: off).
-    #[arg(long = "with-dioptra", conflicts_with = "no_dioptra")]
-    pub with_dioptra: bool,
-    /// Explicitly skip the dioptra pointer note (default).
-    #[arg(long = "no-dioptra", conflicts_with = "with_dioptra")]
-    pub no_dioptra: bool,
+    /// Plant an iris companion pointer note (default: off).
+    #[arg(long = "with-iris", conflicts_with = "no_iris")]
+    pub with_iris: bool,
+    /// Explicitly skip the iris pointer note (default).
+    #[arg(long = "no-iris", conflicts_with = "with_iris")]
+    pub no_iris: bool,
     /// Print the plan; write nothing.
     #[arg(long)]
     pub dry_run: bool,
@@ -78,8 +78,8 @@ impl Default for InitArgs {
             hooks: false,
             no_hooks: false,
             no_lattice: false,
-            with_dioptra: false,
-            no_dioptra: false,
+            with_iris: false,
+            no_iris: false,
             dry_run: false,
             yes: false,
         }
@@ -102,9 +102,9 @@ impl InitArgs {
         !self.no_lattice
     }
 
-    /// Dioptra pointer note: default off; `--with-dioptra` on.
-    pub fn dioptra_enabled(&self) -> bool {
-        self.with_dioptra && !self.no_dioptra
+    /// Iris pointer note: default off; `--with-iris` on.
+    pub fn iris_enabled(&self) -> bool {
+        self.with_iris && !self.no_iris
     }
 }
 
@@ -224,7 +224,7 @@ impl HooksRegistryAction {
 #[derive(Debug, Clone)]
 pub struct InitContext {
     pub cwd: PathBuf,
-    /// Global config home (`~/.selene` / `$GROK_HOME`). Never touch the real one in tests.
+    /// Global config home (`~/.arcus` / `$GROK_HOME`). Never touch the real one in tests.
     pub grok_home: PathBuf,
     pub entries: Vec<HouseEntry>,
     pub stdin_is_terminal: bool,
@@ -379,7 +379,7 @@ pub fn run_with_context(
         false
     };
 
-    // Hooks registry: register <root>/.selene/hooks when hooks files were in the plan.
+    // Hooks registry: register <root>/.arcus/hooks when hooks files were in the plan.
     let hooks_registry = register_hooks_path(args, ctx, &root, &plans, writer)?;
 
     write_summary(writer, &root, &plans, wrote_manifest, &hooks_registry)?;
@@ -446,10 +446,10 @@ fn plan_files(
 
 fn is_hooks_rel(rel: &str) -> bool {
     let norm = rel.replace('\\', "/");
-    norm.starts_with(".selene/hooks/") || norm == ".selene/hooks"
+    norm.starts_with(".arcus/hooks/") || norm == ".arcus/hooks"
 }
 
-/// Filter embedded entries by CLI flags + inject dioptra note when requested.
+/// Filter embedded entries by CLI flags + inject iris note when requested.
 pub fn select_entries(entries: &[HouseEntry], args: &InitArgs) -> Vec<HouseEntry> {
     let mut out: Vec<HouseEntry> = entries
         .iter()
@@ -457,10 +457,10 @@ pub fn select_entries(entries: &[HouseEntry], args: &InitArgs) -> Vec<HouseEntry
         .cloned()
         .collect();
 
-    if args.dioptra_enabled() {
+    if args.iris_enabled() {
         out.push(HouseEntry {
-            rel_path: DIOPTRA_NOTE_REL.to_string(),
-            contents: DIOPTRA_NOTE.as_bytes().to_vec(),
+            rel_path: IRIS_NOTE_REL.to_string(),
+            contents: IRIS_NOTE.as_bytes().to_vec(),
         });
     }
 
@@ -471,7 +471,7 @@ pub fn select_entries(entries: &[HouseEntry], args: &InitArgs) -> Vec<HouseEntry
 fn keep_entry(rel: &str, args: &InitArgs) -> bool {
     let norm = rel.replace('\\', "/");
     if !args.skills_enabled()
-        && (norm.starts_with(".selene/skills/") || norm == ".selene/skills")
+        && (norm.starts_with(".arcus/skills/") || norm == ".arcus/skills")
     {
         return false;
     }
@@ -526,7 +526,7 @@ fn register_hooks_path(
     plans: &[FilePlan],
     writer: &mut impl Write,
 ) -> Result<HooksRegistryReport> {
-    let hooks_dir = root.join(".selene").join("hooks");
+    let hooks_dir = root.join(".arcus").join("hooks");
     let registry_path = ctx.grok_home.join("hooks-paths");
 
     // `--no-hooks` suppresses both file install and global registry write.
@@ -559,14 +559,14 @@ fn register_hooks_path(
         if hooks_dir.is_absolute() {
             hooks_dir.clone()
         } else {
-            root.join(".selene").join("hooks")
+            root.join(".arcus").join("hooks")
         }
     });
     // On dry-run the dir may not exist yet — still report the intended absolute path.
     let hooks_line = if hooks_abs.exists() {
         hooks_abs
     } else {
-        root.join(".selene").join("hooks")
+        root.join(".arcus").join("hooks")
     };
     let hooks_line = if hooks_line.is_absolute() {
         hooks_line
@@ -586,7 +586,7 @@ fn register_hooks_path(
         });
     }
 
-    // Ensure slots exist under the *overridden* grok home (not the real ~/.selene).
+    // Ensure slots exist under the *overridden* grok home (not the real ~/.arcus).
     std::fs::create_dir_all(&ctx.grok_home)
         .with_context(|| format!("create grok home {}", ctx.grok_home.display()))?;
     let hooks_slot = ctx.grok_home.join("hooks");
@@ -692,11 +692,11 @@ fn write_summary(
         )?;
         writeln!(
             writer,
-            "  2. Run selene in this directory (trust dialog if first time)"
+            "  2. Run arcus in this directory (trust dialog if first time)"
         )?;
         writeln!(
             writer,
-            "  3. Commit project-tier .selene/ and AGENTS.md for CI/cloud agents"
+            "  3. Commit project-tier .arcus/ and AGENTS.md for CI/cloud agents"
         )?;
     }
 
@@ -761,10 +761,10 @@ mod unit_tests {
     fn keep_entry_respects_no_skills_and_no_lattice() {
         let mut args = InitArgs::default();
         assert!(args.skills_enabled());
-        assert!(keep_entry(".selene/skills/foo/SKILL.md", &args));
+        assert!(keep_entry(".arcus/skills/foo/SKILL.md", &args));
         args.no_skills = true;
         assert!(!args.skills_enabled());
-        assert!(!keep_entry(".selene/skills/foo/SKILL.md", &args));
+        assert!(!keep_entry(".arcus/skills/foo/SKILL.md", &args));
         assert!(keep_entry("AGENTS.md", &args));
 
         args = InitArgs::default();
@@ -779,17 +779,17 @@ mod unit_tests {
         args.no_hooks = true;
         assert!(!args.hooks_enabled());
         assert!(
-            keep_entry(".selene/hooks/demo.json", &args),
+            keep_entry(".arcus/hooks/demo.json", &args),
             "hooks remain selectable so the plan can list them as skipped"
         );
     }
 
     #[test]
-    fn default_args_skills_hooks_lattice_on_dioptra_off() {
+    fn default_args_skills_hooks_lattice_on_iris_off() {
         let args = InitArgs::default();
         assert!(args.skills_enabled());
         assert!(args.hooks_enabled());
         assert!(args.lattice_enabled());
-        assert!(!args.dioptra_enabled());
+        assert!(!args.iris_enabled());
     }
 }

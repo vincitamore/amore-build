@@ -78,8 +78,8 @@ pub fn build_project_question(
 
     ProjectQuestion {
         question: Question {
-            question: "Run Selene Build in a project directory?\n\n\
-                 This gives Selene Build full context of your codebase for better results."
+            question: "Run Arcus Build in a project directory?\n\n\
+                 This gives Arcus Build full context of your codebase for better results."
                 .into(),
             id: None,
             options,

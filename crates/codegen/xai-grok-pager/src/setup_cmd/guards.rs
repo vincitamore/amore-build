@@ -4,7 +4,7 @@
 //! - NEVER fires headless (`-p`, piped stdin/stdout, non-TTY).
 //! - NEVER fires in CI (`CI`, `GITHUB_ACTIONS`, common CI markers).
 //! - Respects `[agent] setup_on_first_run = false`.
-//! - Respects wizard state (done/skipped) under `~/.selene`.
+//! - Respects wizard state (done/skipped) under `~/.arcus`.
 
 use super::state::WizardStatus;
 

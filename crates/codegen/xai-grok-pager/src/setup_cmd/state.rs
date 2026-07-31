@@ -1,14 +1,14 @@
-//! Wizard state persistence under `~/.selene` (or `$SELENE_HOME` / `$GROK_HOME`).
+//! Wizard state persistence under `~/.arcus` (or `$ARCUS_HOME` / `$GROK_HOME`).
 //!
 //! The state file ensures the auto-guided first-run screen fires once unless
-//! the operator resets it (`selene setup --reset`).
+//! the operator resets it (`arcus setup --reset`).
 
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-/// Relative file name inside the grok/selene home directory.
+/// Relative file name inside the grok/arcus home directory.
 pub const STATE_FILE_NAME: &str = "setup-wizard-state.json";
 
 const STATE_VERSION: u32 = 1;

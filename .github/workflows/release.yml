@@ -1,15 +1,15 @@
 name: release
 
-# Tag-triggered release: selene binary ×5 targets + dioptra companion assets,
+# Tag-triggered release: arcus binary ×5 targets + iris companion assets,
 # checksums, version inject, and the GitHub Release attach.
 #
 # Version: the tag drives the compiled version through GROK_VERSION
 # (xai-grok-version: option_env!("GROK_VERSION") → CARGO_PKG_VERSION). The tag
 # and the in-tree xai-grok-version crate version MUST agree (v0.1.0 ↔ 0.1.0).
 #
-# Dioptra: matrix mirrors dioptra-release-assets.yml (linux-x64, darwin-arm64,
+# Iris: matrix mirrors iris-release-assets.yml (linux-x64, darwin-arm64,
 # windows-x64). Expansion lanes (darwin-x64, linux-arm64, dash artifacts) are a
-# follow-on — see instruments/dioptra/PORTING.md.
+# follow-on — see instruments/iris/PORTING.md.
 
 on:
   push:
@@ -25,8 +25,8 @@ permissions:
   contents: write
 
 jobs:
-  selene:
-    name: selene — ${{ matrix.artifact }}
+  arcus:
+    name: arcus — ${{ matrix.artifact }}
     runs-on: ${{ matrix.os }}
     # Release lanes always build cold (no cache is shared into a tag run) and a
     # cold build of this workspace has been measured past 60 minutes on a
@@ -36,11 +36,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: ubuntu-latest,    artifact: selene-linux-x64,    bin: selene,     }
-          - { os: ubuntu-24.04-arm, artifact: selene-linux-arm64,  bin: selene,     }
-          - { os: windows-latest,   artifact: selene-windows-x64,  bin: selene.exe, }
-          - { os: macos-15,         artifact: selene-darwin-arm64, bin: selene,     }
-          - { os: macos-15-intel,   artifact: selene-darwin-x64,   bin: selene,     }
+          - { os: ubuntu-latest,    artifact: arcus-linux-x64,    bin: arcus,     }
+          - { os: ubuntu-24.04-arm, artifact: arcus-linux-arm64,  bin: arcus,     }
+          - { os: windows-latest,   artifact: arcus-windows-x64,  bin: arcus.exe, }
+          - { os: macos-15,         artifact: arcus-darwin-arm64, bin: arcus,     }
+          - { os: macos-15-intel,   artifact: arcus-darwin-x64,   bin: arcus,     }
     steps:
       - uses: actions/checkout@v4
 
@@ -128,20 +128,20 @@ jobs:
             ${{ matrix.artifact }}.tar.gz.sha256
           if-no-files-found: error
 
-  dioptra:
-    name: dioptra — ${{ matrix.name }}
+  iris:
+    name: iris — ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { os: ubuntu-latest,  name: dioptra-linux-x64,    suffix: linux-x64,    }
-          - { os: windows-latest, name: dioptra-windows-x64,  suffix: windows-x64,  }
-          - { os: macos-15,       name: dioptra-darwin-arm64, suffix: darwin-arm64, }
+          - { os: ubuntu-latest,  name: iris-linux-x64,    suffix: linux-x64,    }
+          - { os: windows-latest, name: iris-windows-x64,  suffix: windows-x64,  }
+          - { os: macos-15,       name: iris-darwin-arm64, suffix: darwin-arm64, }
     defaults:
       run:
-        working-directory: instruments/dioptra
+        working-directory: instruments/iris
     steps:
       - uses: actions/checkout@v4
 
@@ -153,8 +153,8 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.bun/install/cache
-          key: dioptra-bun-${{ runner.os }}-${{ hashFiles('instruments/dioptra/bun.lock') }}
-          restore-keys: dioptra-bun-${{ runner.os }}-
+          key: iris-bun-${{ runner.os }}-${{ hashFiles('instruments/iris/bun.lock') }}
+          restore-keys: iris-bun-${{ runner.os }}-
 
       - name: Install deps
         run: bun install --frozen-lockfile
@@ -178,12 +178,12 @@ jobs:
 
       - name: Package (unix — tar.gz with multi-tool + dash)
         if: matrix.os != 'windows-latest'
-        working-directory: instruments/dioptra
+        working-directory: instruments/iris
         shell: bash
         run: |
           set -e
           BIN="${{ matrix.name }}"
-          DASH="dioptra-dash-${{ matrix.suffix }}"
+          DASH="iris-dash-${{ matrix.suffix }}"
           test -f "dist/$BIN"
           test -f "dist/$DASH"   # dash is required on every lane (D3-deferred CI proof)
           chmod +x "dist/$BIN" "dist/$DASH"
@@ -194,10 +194,10 @@ jobs:
 
       - name: Package (windows — zip with multi-tool + dash)
         if: matrix.os == 'windows-latest'
-        working-directory: instruments/dioptra
+        working-directory: instruments/iris
         run: |
           $bin = "${{ matrix.name }}.exe"
-          $dash = "dioptra-dash-${{ matrix.suffix }}.exe"
+          $dash = "iris-dash-${{ matrix.suffix }}.exe"
           if (-not (Test-Path "dist/$bin")) { throw "missing dist/$bin" }
           if (-not (Test-Path "dist/$dash")) { throw "missing dist/$dash (dash build is required on all lanes)" }
           New-Item -ItemType Directory -Force -Path release | Out-Null
@@ -211,15 +211,15 @@ jobs:
         with:
           name: ${{ matrix.name }}
           path: |
-            instruments/dioptra/release/*.zip
-            instruments/dioptra/release/*.zip.sha256
-            instruments/dioptra/release/*.tar.gz
-            instruments/dioptra/release/*.tar.gz.sha256
+            instruments/iris/release/*.zip
+            instruments/iris/release/*.zip.sha256
+            instruments/iris/release/*.tar.gz
+            instruments/iris/release/*.tar.gz.sha256
           if-no-files-found: error
 
   release:
     name: GitHub Release
-    needs: [selene, dioptra]
+    needs: [arcus, iris]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     steps:
@@ -244,7 +244,7 @@ jobs:
           TAG="${GITHUB_REF_NAME}"
           NOTES="docs/release-notes/${TAG}.md"
           {
-            echo "# Selene Build ${TAG}"
+            echo "# Arcus Build ${TAG}"
             echo
             if [ -f "$NOTES" ]; then
               cat "$NOTES"
@@ -259,9 +259,9 @@ jobs:
             echo
             echo "| Asset | Notes |"
             echo "|---|---|"
-            echo "| \`selene-{platform}\` | TUI agent binary — verify with the adjacent \`.sha256\` |"
-            echo "| \`dioptra-{platform}\` | Companion org/knowledge multi-tool (regula verbs included) |"
-            echo "| \`dioptra-dash-{platform}\` | Optional standalone dash (TTY) — the multi-tool re-execs it when present |"
+            echo "| \`arcus-{platform}\` | TUI agent binary — verify with the adjacent \`.sha256\` |"
+            echo "| \`iris-{platform}\` | Companion org/knowledge multi-tool (regula verbs included) |"
+            echo "| \`iris-dash-{platform}\` | Optional standalone dash (TTY) — the multi-tool re-execs it when present |"
             echo
             echo "## Provenance"
             echo
@@ -277,7 +277,7 @@ jobs:
       - name: Create release + attach assets
         uses: softprops/action-gh-release@v2
         with:
-          name: Selene Build ${{ github.ref_name }}
+          name: Arcus Build ${{ github.ref_name }}
           body_path: notes.md
           files: assets/**
           fail_on_unmatched_files: true

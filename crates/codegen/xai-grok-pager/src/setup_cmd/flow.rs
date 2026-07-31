@@ -1,4 +1,4 @@
-//! Guided setup flow: K3 provider → Grok native rail → Dioptra (opt-out).
+//! Guided setup flow: K3 provider → Grok native rail → Iris (opt-out).
 //!
 //! Interactive path is an auto-guided TUI screen (clear + numbered menus).
 //! Headless path prints the same steps without reading stdin.
@@ -9,10 +9,10 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 
 use super::state::{WizardState, WizardStatus};
-use crate::dioptra_companion::detect_dioptra_on_path;
+use crate::iris_companion::detect_iris_on_path;
 
 use super::writer::{
-    ModelEntryPlan, dioptra_asset_shape, write_dioptra_pointer, write_model_entry,
+    ModelEntryPlan, iris_asset_shape, write_iris_pointer, write_model_entry,
 };
 
 /// Summary of what the wizard did (for the final screen + tests).
@@ -20,7 +20,7 @@ use super::writer::{
 pub struct SetupSummary {
     pub model: Option<ModelSummary>,
     pub grok_rail_note: Option<String>,
-    pub dioptra: Option<DioptraSummary>,
+    pub iris: Option<IrisSummary>,
     pub skipped_steps: Vec<&'static str>,
     pub state_status: Option<WizardStatus>,
     pub config_path: Option<PathBuf>,
@@ -36,7 +36,7 @@ pub struct ModelSummary {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DioptraSummary {
+pub struct IrisSummary {
     pub detected: bool,
     pub binary_path: Option<PathBuf>,
     pub pointer_path: Option<PathBuf>,
@@ -106,7 +106,7 @@ pub fn run_flow(
 }
 
 fn run_headless(ctx: &FlowContext, out: &mut impl Write, summary: &mut SetupSummary) -> Result<()> {
-    writeln!(out, "Selene Build — setup (headless)")?;
+    writeln!(out, "Arcus Build — setup (headless)")?;
     writeln!(out, "Home: {}", ctx.home.display())?;
     writeln!(out)?;
 
@@ -117,7 +117,7 @@ fn run_headless(ctx: &FlowContext, out: &mut impl Write, summary: &mut SetupSumm
     writeln!(out, "Step 1/3 — Kimi K3 provider (headline)")?;
     writeln!(
         out,
-        "  Choose one and either re-run `selene setup` interactively, or paste into {}:",
+        "  Choose one and either re-run `arcus setup` interactively, or paste into {}:",
         ctx.config_path().display()
     )?;
     writeln!(out)?;
@@ -146,25 +146,25 @@ fn run_headless(ctx: &FlowContext, out: &mut impl Write, summary: &mut SetupSumm
         out,
         "  One login covers the baked catalog + subagent freight (PKCE public client)."
     )?;
-    writeln!(out, "  Option A:  selene login")?;
+    writeln!(out, "  Option A:  arcus login")?;
     writeln!(out, "  Option B:  set XAI_API_KEY in your environment")?;
     writeln!(out)?;
     summary.grok_rail_note = Some(
-        "Run `selene login` (OAuth) or set XAI_API_KEY — one login covers catalog + subagent freight."
+        "Run `arcus login` (OAuth) or set XAI_API_KEY — one login covers catalog + subagent freight."
             .into(),
     );
     summary.skipped_steps.push("grok-rail (headless: printed only)");
 
-    // Step 3 — Dioptra
-    writeln!(out, "Step 3/3 — Dioptra companion (recommended, opt-out)")?;
-    let detected = detect_dioptra_on_path();
-    let asset = dioptra_asset_shape();
+    // Step 3 — Iris
+    writeln!(out, "Step 3/3 — Iris companion (recommended, opt-out)")?;
+    let detected = detect_iris_on_path();
+    let asset = iris_asset_shape();
     match &detected {
         Some(p) => {
             writeln!(out, "  Detected on PATH: {}", p.display())?;
             writeln!(
                 out,
-                "  Re-run interactively to plant ~/.selene/dioptra-companion.toml, or create it manually."
+                "  Re-run interactively to plant ~/.arcus/iris-companion.toml, or create it manually."
             )?;
         }
         None => {
@@ -180,14 +180,14 @@ fn run_headless(ctx: &FlowContext, out: &mut impl Write, summary: &mut SetupSumm
         }
     }
     writeln!(out)?;
-    summary.dioptra = Some(DioptraSummary {
+    summary.iris = Some(IrisSummary {
         detected: detected.is_some(),
         binary_path: detected,
         pointer_path: None,
         asset_shape: asset,
         planted: false,
     });
-    summary.skipped_steps.push("dioptra (headless: printed only)");
+    summary.skipped_steps.push("iris (headless: printed only)");
     summary.state_status = Some(WizardStatus::Skipped);
     Ok(())
 }
@@ -202,13 +202,13 @@ fn run_interactive(
     banner(out)?;
     writeln!(
         out,
-        "  First-run setup — configure a K3 path, optional Grok freight, and Dioptra."
+        "  First-run setup — configure a K3 path, optional Grok freight, and Iris."
     )?;
     writeln!(
         out,
         "  Escape hatch later: [agent] setup_on_first_run = false in config.toml"
     )?;
-    writeln!(out, "  Re-run anytime: selene setup   |  reset: selene setup --reset")?;
+    writeln!(out, "  Re-run anytime: arcus setup   |  reset: arcus setup --reset")?;
     writeln!(out)?;
 
     // ── Step 1: K3 provider ─────────────────────────────────────────────
@@ -228,7 +228,7 @@ fn run_interactive(
             writeln!(out, "  Setup cancelled.")?;
             summary.skipped_steps.push("k3-provider");
             summary.skipped_steps.push("grok-rail");
-            summary.skipped_steps.push("dioptra");
+            summary.skipped_steps.push("iris");
             summary.state_status = Some(WizardStatus::Skipped);
             return Ok(());
         }
@@ -263,7 +263,7 @@ fn run_interactive(
     )?;
     writeln!(out, "  (PKCE public client — no client secret).")?;
     writeln!(out)?;
-    writeln!(out, "  [1] I'll run `selene login` after this wizard")?;
+    writeln!(out, "  [1] I'll run `arcus login` after this wizard")?;
     writeln!(out, "  [2] I'll set XAI_API_KEY in my environment")?;
     writeln!(out, "  [s] Skip")?;
     writeln!(out)?;
@@ -273,10 +273,10 @@ fn run_interactive(
     match choice.as_str() {
         "1" | "login" => {
             summary.grok_rail_note = Some(
-                "Next: run `selene login` (OAuth). One login covers catalog + subagent freight."
+                "Next: run `arcus login` (OAuth). One login covers catalog + subagent freight."
                     .into(),
             );
-            writeln!(out, "  Noted — run `selene login` when ready.")?;
+            writeln!(out, "  Noted — run `arcus login` when ready.")?;
         }
         "2" | "key" | "api" => {
             summary.grok_rail_note = Some(
@@ -291,14 +291,14 @@ fn run_interactive(
     }
     writeln!(out)?;
 
-    // ── Step 3: Dioptra ─────────────────────────────────────────────────
-    step_header(out, 3, 3, "Dioptra companion (recommended, opt-out)")?;
-    let detected = detect_dioptra_on_path();
-    let asset = dioptra_asset_shape();
+    // ── Step 3: Iris ─────────────────────────────────────────────────
+    step_header(out, 3, 3, "Iris companion (recommended, opt-out)")?;
+    let detected = detect_iris_on_path();
+    let asset = iris_asset_shape();
     match &detected {
         Some(p) => {
             writeln!(out, "  Detected on PATH: {}", p.display())?;
-            writeln!(out, "  [1] Plant companion pointer config under selene home (recommended)")?;
+            writeln!(out, "  [1] Plant companion pointer config under arcus home (recommended)")?;
             writeln!(out, "  [s] Skip")?;
         }
         None => {
@@ -322,14 +322,14 @@ fn run_interactive(
     let choice = read_choice(input)?;
     let plant = matches!(choice.as_str(), "1" | "y" | "yes" | "plant");
     if plant {
-        let pointer = write_dioptra_pointer(&ctx.home, detected.as_deref(), ctx.dry_run)?;
+        let pointer = write_iris_pointer(&ctx.home, detected.as_deref(), ctx.dry_run)?;
         writeln!(
             out,
             "  {} companion pointer: {}",
             if ctx.dry_run { "Would write" } else { "Wrote" },
             pointer.display()
         )?;
-        summary.dioptra = Some(DioptraSummary {
+        summary.iris = Some(IrisSummary {
             detected: detected.is_some(),
             binary_path: detected,
             pointer_path: Some(pointer),
@@ -337,9 +337,9 @@ fn run_interactive(
             planted: true,
         });
     } else {
-        writeln!(out, "  Skipped Dioptra step.")?;
-        summary.skipped_steps.push("dioptra");
-        summary.dioptra = Some(DioptraSummary {
+        writeln!(out, "  Skipped Iris step.")?;
+        summary.skipped_steps.push("iris");
+        summary.iris = Some(IrisSummary {
             detected: detected.is_some(),
             binary_path: detected,
             pointer_path: None,
@@ -440,11 +440,11 @@ fn write_summary_screen(out: &mut impl Write, summary: &SetupSummary) -> Result<
         Some(n) => writeln!(out, "  Grok rail: {n}")?,
         None => writeln!(out, "  Grok rail: (skipped)")?,
     }
-    match &summary.dioptra {
+    match &summary.iris {
         Some(d) if d.planted => {
             writeln!(
                 out,
-                "  Dioptra:   pointer {}",
+                "  Iris:   pointer {}",
                 d.pointer_path
                     .as_ref()
                     .map(|p| p.display().to_string())
@@ -454,11 +454,11 @@ fn write_summary_screen(out: &mut impl Write, summary: &SetupSummary) -> Result<
         Some(d) => {
             writeln!(
                 out,
-                "  Dioptra:   not planted (asset shape: {})",
+                "  Iris:   not planted (asset shape: {})",
                 d.asset_shape
             )?;
         }
-        None => writeln!(out, "  Dioptra:   (n/a)")?,
+        None => writeln!(out, "  Iris:   (n/a)")?,
     }
     if !summary.skipped_steps.is_empty() {
         writeln!(out, "  Skipped:   {}", summary.skipped_steps.join(", "))?;
@@ -467,7 +467,7 @@ fn write_summary_screen(out: &mut impl Write, summary: &SetupSummary) -> Result<
         writeln!(out, "  State:     {}", p.display())?;
     }
     writeln!(out)?;
-    writeln!(out, "  Next: set any env keys above, then run `selene`.")?;
+    writeln!(out, "  Next: set any env keys above, then run `arcus`.")?;
     writeln!(
         out,
         "  Disable auto first-run: [agent] setup_on_first_run = false"
@@ -478,7 +478,7 @@ fn write_summary_screen(out: &mut impl Write, summary: &SetupSummary) -> Result<
 
 fn banner(out: &mut impl Write) -> Result<()> {
     writeln!(out, "════════════════════════════════════════")?;
-    writeln!(out, "  Selene Build — first-run setup")?;
+    writeln!(out, "  Arcus Build — first-run setup")?;
     writeln!(out, "════════════════════════════════════════")?;
     Ok(())
 }
@@ -507,11 +507,11 @@ fn read_choice(input: &mut impl BufRead) -> Result<String> {
     Ok(read_line(input)?.to_ascii_lowercase())
 }
 
-/// Plant only the dioptra pointer (helper for tests / future flags).
+/// Plant only the iris pointer (helper for tests / future flags).
 #[allow(dead_code)]
-pub fn plant_dioptra_only(home: &Path, dry_run: bool) -> Result<PathBuf> {
-    let detected = detect_dioptra_on_path();
-    write_dioptra_pointer(home, detected.as_deref(), dry_run)
+pub fn plant_iris_only(home: &Path, dry_run: bool) -> Result<PathBuf> {
+    let detected = detect_iris_on_path();
+    write_iris_pointer(home, detected.as_deref(), dry_run)
 }
 
 #[cfg(test)]
@@ -530,7 +530,7 @@ mod tests {
             stdin_is_terminal: true,
             stdout_is_terminal: false,
         };
-        // 1 = openrouter, s = skip grok, s = skip dioptra
+        // 1 = openrouter, s = skip grok, s = skip iris
         let mut input = Cursor::new("1\ns\ns\n");
         let mut out = Vec::new();
         let summary = run_flow(&ctx, &mut input, &mut out).unwrap();
@@ -559,8 +559,8 @@ mod tests {
         assert!(!dir.path().join("config.toml").exists());
         let text = String::from_utf8(out).unwrap();
         assert!(text.contains("OpenRouter"));
-        assert!(text.contains("selene login"));
-        assert!(text.contains("dioptra-"));
+        assert!(text.contains("arcus login"));
+        assert!(text.contains("iris-"));
     }
 
     #[test]

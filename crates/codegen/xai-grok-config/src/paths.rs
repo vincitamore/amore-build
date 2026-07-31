@@ -11,8 +11,8 @@ const CLAUDE_MANAGED_SETTINGS_PATH: &str =
 #[cfg(target_os = "linux")]
 const CLAUDE_MANAGED_SETTINGS_PATH: &str = "/etc/claude-code/managed-settings.json";
 
-/// The default user grok directory (`~/.selene` in the Selene Build fork,
-/// canonicalized) used when `SELENE_HOME` / `GROK_HOME` is unset. Exposed so callers (e.g. display helpers) can detect
+/// The default user grok directory (`~/.arcus` in the Arcus Build fork,
+/// canonicalized) used when `ARCUS_HOME` / `GROK_HOME` is unset. Exposed so callers (e.g. display helpers) can detect
 /// whether [`grok_home()`] is the default without duplicating the computation.
 ///
 /// Uses [`dunce::canonicalize`] instead of [`std::fs::canonicalize`]: on
@@ -28,18 +28,18 @@ const CLAUDE_MANAGED_SETTINGS_PATH: &str = "/etc/claude-code/managed-settings.js
 pub fn default_grok_home() -> PathBuf {
     #[allow(deprecated)]
     let home = std::env::home_dir().unwrap_or_else(|| PathBuf::from("."));
-    // Selene Build fork: the compiled-in home is `~/.selene` (kept apart from
-    // any upstream install at `~/.grok`); `$SELENE_HOME` primary / `$GROK_HOME`
+    // Arcus Build fork: the compiled-in home is `~/.arcus` (kept apart from
+    // any upstream install at `~/.grok`); `$ARCUS_HOME` primary / `$GROK_HOME`
     // legacy still override.
-    dunce::canonicalize(&home).unwrap_or(home).join(".selene")
+    dunce::canonicalize(&home).unwrap_or(home).join(".arcus")
 }
 
-/// Per-user config directory: `$SELENE_HOME` (primary) / `$GROK_HOME` (legacy)
-/// or `~/.selene`. Created if needed.
+/// Per-user config directory: `$ARCUS_HOME` (primary) / `$GROK_HOME` (legacy)
+/// or `~/.arcus`. Created if needed.
 pub fn grok_home() -> PathBuf {
     GROK_HOME
         .get_or_init(|| {
-            let grok_home = if let Ok(v) = xai_grok_env::var("SELENE_HOME") {
+            let grok_home = if let Ok(v) = xai_grok_env::var("ARCUS_HOME") {
                 PathBuf::from(v)
             } else {
                 default_grok_home()
@@ -51,13 +51,13 @@ pub fn grok_home() -> PathBuf {
 }
 
 /// The user-global grok home, but only when one genuinely resolves: `Some` when
-/// `$SELENE_HOME`/`$GROK_HOME` is set or a home directory is found, `None` otherwise. Unlike
+/// `$ARCUS_HOME`/`$GROK_HOME` is set or a home directory is found, `None` otherwise. Unlike
 /// [`grok_home()`], this never falls back to a cwd-relative `.grok`, so callers
 /// that *scan* user-global grok resources (hooks, marketplace sources, ...) don't
 /// mistake a project's `.grok` tree for the user-global one when no home resolves.
 pub fn user_grok_home() -> Option<PathBuf> {
     #[allow(deprecated)]
-    let resolvable = xai_grok_env::is_set("SELENE_HOME") || std::env::home_dir().is_some();
+    let resolvable = xai_grok_env::is_set("ARCUS_HOME") || std::env::home_dir().is_some();
     resolvable.then(grok_home)
 }
 
@@ -316,7 +316,7 @@ mod tests {
         // canonicalization must yield a plain path. No-op assertion on Unix.
         let home = default_grok_home();
         assert!(!home.to_string_lossy().starts_with(r"\\?\"));
-        assert!(home.ends_with(".selene"));
+        assert!(home.ends_with(".arcus"));
     }
 
     #[test]

@@ -19,7 +19,7 @@ impl SlashCommand for TutorialCommand {
     }
 
     fn description(&self) -> &str {
-        "Quick tips to get the most out of Selene Build"
+        "Quick tips to get the most out of Arcus Build"
     }
 
     fn usage(&self) -> &str {

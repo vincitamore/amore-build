@@ -352,7 +352,7 @@ fn human_wayland_error_includes_detail_once() {
     assert_eq!(
         human::format(&report),
         concat!(
-            "Selene Doctor\n",
+            "Arcus Doctor\n",
             "\n",
             "Environment\n",
             "  · terminal                     Ghostty\n",
@@ -460,7 +460,7 @@ fn human_healthy_fixture_is_exact() {
     assert_eq!(
         human::format(&healthy_report()),
         concat!(
-            "Selene Doctor\n",
+            "Arcus Doctor\n",
             "\n",
             "Environment\n",
             "  · terminal                     Ghostty\n",
@@ -487,7 +487,7 @@ fn human_mixed_fixture_is_exact() {
     assert_eq!(
         human::format(&mixed_report()),
         concat!(
-            "Selene Doctor\n",
+            "Arcus Doctor\n",
             "\n",
             "Environment\n",
             "  · terminal                     Ghostty\n",
@@ -647,7 +647,7 @@ fn human_incomplete_fixture_is_exact_without_duplicate_probe_rows() {
     assert_eq!(
         human::format(&report),
         concat!(
-            "Selene Doctor\n",
+            "Arcus Doctor\n",
             "\n",
             "Environment\n",
             "  · terminal                     Ghostty\n",
@@ -676,7 +676,7 @@ fn assert_path_collision_present(json: &serde_json::Value) {
     let pc = json
         .get("pathCollision")
         .expect("doctor JSON must include pathCollision check");
-    assert_eq!(pc["binary"], "selene");
+    assert_eq!(pc["binary"], "arcus");
     assert!(pc["status"].is_string());
     assert!(pc["shadowed"].is_boolean());
     assert!(pc["message"].is_string());

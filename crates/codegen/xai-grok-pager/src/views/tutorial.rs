@@ -307,7 +307,7 @@ fn handle_list_input(ev: &Event, st: &mut TutorialState) -> TutorialOutcome {
 /// Intro copy shown above the topic list. No time promises — just what it
 /// is and how to leave.
 const INTRO_LINES: [&str; 2] = [
-    "Quick tips to get the most out of Selene Build.",
+    "Quick tips to get the most out of Arcus Build.",
     "Pick a topic. Esc when you're done.",
 ];
 
@@ -420,7 +420,7 @@ fn render_list(buf: &mut Buffer, area: Rect, st: &mut TutorialState, compact: bo
         },
     ];
     let modal_config = ModalWindowConfig {
-        title: "Welcome to Selene Build",
+        title: "Welcome to Arcus Build",
         tabs: None,
         shortcuts: &shortcuts,
         sizing: ModalSizing {

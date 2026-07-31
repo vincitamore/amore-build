@@ -358,7 +358,7 @@ impl CompatConfig {
     }
 
     /// Config directories that may contain `skills/` subdirectories, in
-    /// priority order. Selene Build: `.selene` is the fork-native root and
+    /// priority order. Arcus Build: `.arcus` is the fork-native root and
     /// outranks everything; `.grok` stays as the legacy fallback (upstream
     /// format, still scanned). `.agents` is always included; `.claude`
     /// and `.cursor` are gated on their respective `skills` cell.
@@ -366,7 +366,7 @@ impl CompatConfig {
     /// Replaces the hard-coded `[".grok", ".agents", ".claude", ".cursor"]`
     /// in `collect_skill_config_dirs`.
     pub fn skill_config_dirs(&self) -> Vec<&'static str> {
-        let mut dirs = vec![".selene", ".grok", ".agents"];
+        let mut dirs = vec![".arcus", ".grok", ".agents"];
         if self.claude.skills {
             dirs.push(".claude");
         }
@@ -376,14 +376,14 @@ impl CompatConfig {
         dirs
     }
 
-    /// Subdirectories scanned for `*.md` rules files. Selene Build:
-    /// `.selene/rules` (fork-native) first, then `.grok/rules` (legacy
+    /// Subdirectories scanned for `*.md` rules files. Arcus Build:
+    /// `.arcus/rules` (fork-native) first, then `.grok/rules` (legacy
     /// fallback) — both always included; `.claude/rules` and `.cursor/rules`
     /// are gated on their respective `rules` cell.
     ///
     /// Replaces the hard-coded `RULES_DIRS` constant.
     pub fn rules_dirs(&self) -> Vec<&'static str> {
-        let mut dirs = vec![".selene/rules", ".grok/rules"];
+        let mut dirs = vec![".arcus/rules", ".grok/rules"];
         if self.claude.rules {
             dirs.push(".claude/rules");
         }
@@ -513,11 +513,11 @@ mod tests {
     #[test]
     fn skill_config_dirs_all_on_matches_legacy_constant() {
         // Pre-fork constant was `[".grok", ".agents", ".claude", ".cursor"]`;
-        // Selene Build prepends fork-native `.selene`, keeping `.grok` as the
+        // Arcus Build prepends fork-native `.arcus`, keeping `.grok` as the
         // legacy fallback.
         assert_eq!(
             CompatConfig::default().skill_config_dirs(),
-            vec![".selene", ".grok", ".agents", ".claude", ".cursor"]
+            vec![".arcus", ".grok", ".agents", ".claude", ".cursor"]
         );
     }
 
@@ -527,28 +527,28 @@ mod tests {
         c.cursor.skills = false;
         assert_eq!(
             c.skill_config_dirs(),
-            vec![".selene", ".grok", ".agents", ".claude"]
+            vec![".arcus", ".grok", ".agents", ".claude"]
         );
 
         c.claude.skills = false;
-        assert_eq!(c.skill_config_dirs(), vec![".selene", ".grok", ".agents"]);
+        assert_eq!(c.skill_config_dirs(), vec![".arcus", ".grok", ".agents"]);
 
         // Only the `cursor` cell on (`claude` off): `cursor` still appended last.
         let mut c2 = CompatConfig::default();
         c2.claude.skills = false;
         assert_eq!(
             c2.skill_config_dirs(),
-            vec![".selene", ".grok", ".agents", ".cursor"]
+            vec![".arcus", ".grok", ".agents", ".cursor"]
         );
     }
 
     #[test]
     fn rules_dirs_all_on_matches_legacy_constant() {
         // Historical `RULES_DIRS` was `[".grok/rules", ".claude/rules", ".cursor/rules"]`;
-        // Selene Build prepends `.selene/rules`, `.grok/rules` stays as legacy.
+        // Arcus Build prepends `.arcus/rules`, `.grok/rules` stays as legacy.
         assert_eq!(
             CompatConfig::default().rules_dirs(),
-            vec![".selene/rules", ".grok/rules", ".claude/rules", ".cursor/rules"]
+            vec![".arcus/rules", ".grok/rules", ".claude/rules", ".cursor/rules"]
         );
     }
 
@@ -558,10 +558,10 @@ mod tests {
         c.cursor.rules = false;
         assert_eq!(
             c.rules_dirs(),
-            vec![".selene/rules", ".grok/rules", ".claude/rules"]
+            vec![".arcus/rules", ".grok/rules", ".claude/rules"]
         );
         c.claude.rules = false;
-        assert_eq!(c.rules_dirs(), vec![".selene/rules", ".grok/rules"]);
+        assert_eq!(c.rules_dirs(), vec![".arcus/rules", ".grok/rules"]);
     }
 
     #[test]

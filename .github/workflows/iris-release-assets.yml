@@ -1,0 +1,145 @@
+# iris-release-assets.yml — per-OS release binary producer (Phase 1.5 D5)
+#
+# Standalone packaging lane, run on demand. `release.yml` builds and attaches
+# the iris assets itself as part of the tag run, so this workflow does NOT
+# trigger on tags — it would duplicate three lanes and produce assets nothing
+# consumes. Keep it dispatch-only: it is how iris packaging gets exercised
+# (and arch resolution re-proven) without cutting a release.
+#
+# No `contents: write` here by design — release attach is release.yml's job.
+#
+# Trigger: workflow_dispatch.
+# Matrix: ubuntu/windows/macos — ALL lanes strict (continue-on-error: false).
+# A dash-build failure on linux/darwin MUST fail the job — that failure IS the
+# D3-deferred CI proof. Windows-x64 is not special-cased either.
+#
+# Package layout (stable names for Phase-3 consume):
+#   iris-{os}-{arch}.tar.gz   (linux/darwin) — multi-tool + dash
+#   iris-{os}-{arch}.zip      (windows)      — multi-tool + dash
+# Artifact upload name: iris-{os}-{arch}
+
+name: iris-release-assets
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: instruments/iris
+
+jobs:
+  package:
+    name: package (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 50
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        timeout-minutes: 5
+
+      - name: Setup Bun 1.3.x
+        uses: oven-sh/setup-bun@v2
+        timeout-minutes: 5
+        with:
+          bun-version: "1.3.x"
+
+      - name: Cache bun install
+        uses: actions/cache@v4
+        timeout-minutes: 5
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-iris-bun-${{ hashFiles('instruments/iris/bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-iris-bun-
+
+      - name: bun install (frozen)
+        timeout-minutes: 10
+        run: bun install --frozen-lockfile
+
+      - name: build-compile --with-dash (strict — dash fail fails job)
+        timeout-minutes: 25
+        run: bun run scripts/build-compile.ts --with-dash
+
+      - name: Resolve asset shape + package (unix)
+        if: runner.os != 'Windows'
+        timeout-minutes: 5
+        shell: bash
+        id: pkg_unix
+        run: |
+          set -euo pipefail
+          case "$(uname -s)" in Darwin*) OS=darwin ;; *) OS=linux ;; esac
+          case "$(uname -m)" in arm64|aarch64) ARCH=arm64 ;; *) ARCH=x64 ;; esac
+          BIN="iris-${OS}-${ARCH}"
+          DASH="iris-dash-${OS}-${ARCH}"
+          test -f "dist/${BIN}" || { echo "FAIL: missing dist/${BIN}"; ls -la dist/; exit 1; }
+          test -f "dist/${DASH}" || { echo "FAIL: missing dist/${DASH} (dash build is required on all lanes)"; ls -la dist/; exit 1; }
+          chmod +x "dist/${BIN}" "dist/${DASH}"
+          mkdir -p release
+          tar -C dist -czf "release/${BIN}.tar.gz" "${BIN}" "${DASH}"
+          ls -la "release/${BIN}.tar.gz"
+          echo "asset_os=${OS}" >> "$GITHUB_OUTPUT"
+          echo "asset_arch=${ARCH}" >> "$GITHUB_OUTPUT"
+          echo "asset_name=${BIN}" >> "$GITHUB_OUTPUT"
+          echo "package_path=instruments/iris/release/${BIN}.tar.gz" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve asset shape + package (windows)
+        if: runner.os == 'Windows'
+        timeout-minutes: 5
+        shell: pwsh
+        id: pkg_win
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $arch = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'arm64' } else { 'x64' }
+          $os = 'windows'
+          $bin = "iris-${os}-${arch}.exe"
+          $dash = "iris-dash-${os}-${arch}.exe"
+          if (-not (Test-Path "dist/$bin")) { throw "missing dist/$bin" }
+          if (-not (Test-Path "dist/$dash")) { throw "missing dist/$dash (dash build is required on all lanes)" }
+          New-Item -ItemType Directory -Force -Path release | Out-Null
+          $zipName = "iris-${os}-${arch}.zip"
+          $zipPath = Join-Path "release" $zipName
+          if (Test-Path $zipPath) { Remove-Item -Force $zipPath }
+          Compress-Archive -Path "dist/$bin","dist/$dash" -DestinationPath $zipPath -Force
+          Get-Item $zipPath | Format-List Name, Length
+          "asset_os=$os" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "asset_arch=$arch" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "asset_name=iris-${os}-${arch}" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "package_path=instruments/iris/release/$zipName" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Upload release package (unix)
+        if: runner.os != 'Windows'
+        uses: actions/upload-artifact@v4
+        timeout-minutes: 10
+        with:
+          name: ${{ steps.pkg_unix.outputs.asset_name }}
+          path: ${{ steps.pkg_unix.outputs.package_path }}
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload release package (windows)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        timeout-minutes: 10
+        with:
+          name: ${{ steps.pkg_win.outputs.asset_name }}
+          path: ${{ steps.pkg_win.outputs.package_path }}
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload raw binaries (Phase-3 convenience)
+        uses: actions/upload-artifact@v4
+        timeout-minutes: 10
+        with:
+          name: iris-raw-${{ runner.os }}-${{ runner.arch }}
+          path: |
+            instruments/iris/dist/iris-*
+          if-no-files-found: error
+          retention-days: 14

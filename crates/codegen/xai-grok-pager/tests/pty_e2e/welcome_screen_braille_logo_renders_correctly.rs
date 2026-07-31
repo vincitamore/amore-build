@@ -35,7 +35,7 @@ async fn welcome_screen_braille_logo_renders_correctly() {
     // byte characters each (e.g. Cyrillic). Check for a few that only
     // appear in the logo — not in any ASCII menu label.
     //
-    // From logo07.txt (the selene crescent) line 5: ⢻⣿⣿⣿⣿⣿⣷⣤⣀
+    // From logo07.txt (the arcus crescent) line 5: ⢻⣿⣿⣿⣿⣿⣷⣤⣀
     assert!(
         screen.contains('⣷'),
         "Braille character ⣷ (U+28F7) not found in screen — \

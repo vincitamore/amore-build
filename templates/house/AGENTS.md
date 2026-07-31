@@ -1,7 +1,7 @@
 # {{HOUSE_NAME}}
 
 > Cooperation harness for long-running multi-session agent work on
-> **Selene Build** (fork of Grok Build). One continuous working tree —
+> **Arcus Build** (fork of Grok Build). One continuous working tree —
 > continuity lives in architecture, not in any single model's memory.
 
 ## Identity
@@ -14,15 +14,15 @@ utility, compress.
 
 ## Harness of record
 
-Project config lives at **`.selene/`** (highest-precedence skill and hook root;
+Project config lives at **`.arcus/`** (highest-precedence skill and hook root;
 `.grok` and peer tool dirs remain fallbacks). User-tier skills sit at
-`$GROK_HOME/skills` (default `~/.selene/skills`). Native multi-agent surfaces
+`$GROK_HOME/skills` (default `~/.arcus/skills`). Native multi-agent surfaces
 (`spawn_subagent`, monitors, workflows) are the freight path — harness docs
 own tool spellings.
 
 ### Hooks (installed by init — first-class)
 
-`selene-build init` plants project-tier hooks under `.selene/hooks/`:
+`arcus-build init` plants project-tier hooks under `.arcus/hooks/`:
 
 | Hook | Event | Role |
 |------|-------|------|
@@ -38,14 +38,14 @@ own tool spellings.
    `Maintenance not required` · `Gate released`
 2. **Capture-write soft-ack** — this turn already wrote under a capture path
    (`knowledge/`, `inbox/`, `tasks/`, `reminders/`, `context/`,
-   `forge/{handles,output,sessions}/`, `.selene/skills/`). Manufacturing a
+   `forge/{handles,output,sessions}/`, `.arcus/skills/`). Manufacturing a
    low-value capture to satisfy the gate is worse than releasing honestly.
 3. Trivial sessions, non-org workspaces, and non-`end_turn` fires never block.
 
 If in doubt whether real maintenance is owed, **release**.
 
-**Disable:** `selene-build init --no-hooks`, or remove/rename the registration
-under `.selene/hooks/`. Hooks are tool-owned — `init --refresh` may restore
+**Disable:** `arcus-build init --no-hooks`, or remove/rename the registration
+under `.arcus/hooks/`. Hooks are tool-owned — `init --refresh` may restore
 them; keep a local note if you intentionally disable.
 
 **What the gate asks you to consider:** insight → `knowledge/`; decisions /
@@ -98,12 +98,12 @@ into this house's `knowledge/` — regenerate, don't paraphrase.
 
 ## Skills
 
-House skills live at `.selene/skills/<name>/SKILL.md`. Metadata rides the
+House skills live at `.arcus/skills/<name>/SKILL.md`. Metadata rides the
 system prompt at session start; bodies load on demand (`read_file`,
 `skill://<name>`). Subagents inherit the discovered list. User-tier skills under
-`~/.selene/skills` apply across projects.
+`~/.arcus/skills` apply across projects.
 
-Bundled skills (tool-owned; refreshable by `selene-build init --refresh` —
+Bundled skills (tool-owned; refreshable by `arcus-build init --refresh` —
 fork to a new directory name to customize without losing edits):
 
 | Skill | Purpose |
@@ -157,7 +157,7 @@ Frontmatter is the single source of truth.
 ├── forge/                 # pipeline products (see forge/README.md)
 │   └── handles/ output/ sessions/
 ├── scripts/               # house utilities (lint, orientation sync, …)
-└── .selene/               # skills/, hooks/ (stop gate + session init)
+└── .arcus/               # skills/, hooks/ (stop gate + session init)
 ```
 
 Empty containers carry `.gitkeep`. Optional later: `instruments/` — not required.

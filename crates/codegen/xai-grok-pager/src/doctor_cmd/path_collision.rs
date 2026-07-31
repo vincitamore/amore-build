@@ -1,21 +1,21 @@
-//! PATH-collision detection for the public `selene` binary name.
+//! PATH-collision detection for the public `arcus` binary name.
 //!
-//! crates.io already publishes a Lua linter named `selene`. When that binary
-//! (or any other non-ours `selene`) sits earlier on PATH than Selene Build,
+//! crates.io already publishes a Lua linter named `arcus`. When that binary
+//! (or any other non-ours `arcus`) sits earlier on PATH than Arcus Build,
 //! users get the wrong tool. Doctor surfaces a recommendation with a PATH
 //! remedy — never a hard failure.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-/// Stable doctor finding id: `path.selene-collision`.
+/// Stable doctor finding id: `path.arcus-collision`.
 pub const PATH_COLLISION_ID: crate::diagnostics::DiagnosticId =
-    crate::diagnostics::DiagnosticId::new("path", "selene-collision");
+    crate::diagnostics::DiagnosticId::new("path", "arcus-collision");
 
-/// Result of resolving `selene` on PATH against this process's executable.
+/// Result of resolving `arcus` on PATH against this process's executable.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum PathCollisionResult {
-    /// `selene` not found on PATH.
+    /// `arcus` not found on PATH.
     NotOnPath,
     /// First PATH hit is this binary (or same file).
     Ours { path: PathBuf },
@@ -49,25 +49,25 @@ impl PathCollisionResult {
     pub fn message(&self) -> String {
         match self {
             Self::NotOnPath => {
-                "selene is not on PATH (install or add the binary directory to PATH).".to_owned()
+                "arcus is not on PATH (install or add the binary directory to PATH).".to_owned()
             }
             Self::Ours { path } => {
-                format!("selene on PATH resolves to this binary ({})", path.display())
+                format!("arcus on PATH resolves to this binary ({})", path.display())
             }
             Self::Shadowed { path } => format!(
-                "Another `selene` on PATH shadows Selene Build: {}. \
-                 (crates.io also publishes a Lua linter named selene.)",
+                "Another `arcus` on PATH shadows Arcus Build: {}. \
+                 (crates.io also publishes a Lua linter named arcus.)",
                 path.display()
             ),
             Self::CheckFailed { error } => {
-                format!("Could not resolve selene on PATH: {error}")
+                format!("Could not resolve arcus on PATH: {error}")
             }
         }
     }
 }
 
-/// Resolve the first `selene` on PATH and compare with `current_exe`.
-pub fn check_selene_path_collision() -> PathCollisionResult {
+/// Resolve the first `arcus` on PATH and compare with `current_exe`.
+pub fn check_arcus_path_collision() -> PathCollisionResult {
     let current = match std::env::current_exe() {
         Ok(p) => canonicalize_soft(&p),
         Err(e) => {
@@ -76,7 +76,7 @@ pub fn check_selene_path_collision() -> PathCollisionResult {
             };
         }
     };
-    let candidates = match resolve_selene_on_path() {
+    let candidates = match resolve_arcus_on_path() {
         Ok(v) => v,
         Err(e) => {
             return PathCollisionResult::CheckFailed {
@@ -100,7 +100,7 @@ pub fn check_selene_path_collision() -> PathCollisionResult {
 /// Always records a structured result on the report's findings when shadowed;
 /// callers that emit JSON also serialize the always-present check result.
 pub fn apply_path_collision_probe(report: &mut crate::diagnostics::DiagnosticReport) {
-    let result = check_selene_path_collision();
+    let result = check_arcus_path_collision();
     if let PathCollisionResult::Shadowed { ref path } = result {
         report.findings.push(crate::diagnostics::DiagnosticFinding {
             id: PATH_COLLISION_ID,
@@ -108,23 +108,23 @@ pub fn apply_path_collision_probe(report: &mut crate::diagnostics::DiagnosticRep
             message: result.message(),
             remediation: Some(crate::diagnostics::ManualRemediation {
                 fix: format!(
-                    "Ensure the Selene Build install directory appears before \
-                     \"{}\" on PATH (or rename/remove the other `selene`). \
-                     On Windows: `where.exe selene`. Elsewhere: `which -a selene`.",
+                    "Ensure the Arcus Build install directory appears before \
+                     \"{}\" on PATH (or rename/remove the other `arcus`). \
+                     On Windows: `where.exe arcus`. Elsewhere: `which -a arcus`.",
                     path.display()
                 ),
                 config_path: None,
             }),
             automatic_remediation: None,
             note: Some(
-                "The crates.io Lua-linter package is also named selene; PATH order picks the winner."
+                "The crates.io Lua-linter package is also named arcus; PATH order picks the winner."
                     .to_owned(),
             ),
         });
     }
 }
 
-fn resolve_selene_on_path() -> anyhow::Result<Vec<PathBuf>> {
+fn resolve_arcus_on_path() -> anyhow::Result<Vec<PathBuf>> {
     if cfg!(windows) {
         resolve_via_where()
     } else {
@@ -134,7 +134,7 @@ fn resolve_selene_on_path() -> anyhow::Result<Vec<PathBuf>> {
 
 fn resolve_via_where() -> anyhow::Result<Vec<PathBuf>> {
     // where.exe lists every match, one path per line. Exit 1 = not found.
-    let output = Command::new("where.exe").arg("selene").output()?;
+    let output = Command::new("where.exe").arg("arcus").output()?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         if output.stdout.is_empty() {
@@ -149,8 +149,8 @@ fn resolve_via_where() -> anyhow::Result<Vec<PathBuf>> {
 }
 
 fn resolve_via_which() -> anyhow::Result<Vec<PathBuf>> {
-    // `which -a selene` lists every match; exit 1 = not found.
-    let output = Command::new("which").args(["-a", "selene"]).output()?;
+    // `which -a arcus` lists every match; exit 1 = not found.
+    let output = Command::new("which").args(["-a", "arcus"]).output()?;
     if !output.status.success() && output.stdout.is_empty() {
         return Ok(Vec::new());
     }
@@ -194,21 +194,21 @@ mod tests {
         assert_eq!(PathCollisionResult::NotOnPath.status_label(), "not_on_path");
         assert_eq!(
             PathCollisionResult::Ours {
-                path: PathBuf::from("/x/selene")
+                path: PathBuf::from("/x/arcus")
             }
             .status_label(),
             "ours"
         );
         assert_eq!(
             PathCollisionResult::Shadowed {
-                path: PathBuf::from("/other/selene")
+                path: PathBuf::from("/other/arcus")
             }
             .status_label(),
             "shadowed"
         );
         assert!(
             PathCollisionResult::Shadowed {
-                path: PathBuf::from("/other/selene")
+                path: PathBuf::from("/other/arcus")
             }
             .is_shadowed()
         );
@@ -216,29 +216,29 @@ mod tests {
     }
 
     #[test]
-    fn collision_id_is_path_selene_collision() {
-        assert_eq!(PATH_COLLISION_ID.to_string(), "path.selene-collision");
+    fn collision_id_is_path_arcus_collision() {
+        assert_eq!(PATH_COLLISION_ID.to_string(), "path.arcus-collision");
     }
 
     #[test]
     fn check_runs_without_panic() {
         // Environment-dependent; just ensure the probe is callable.
-        let _ = check_selene_path_collision();
+        let _ = check_arcus_path_collision();
     }
 
     #[test]
     fn parse_path_lines_trims_and_skips_blank() {
-        // The probe reads `where selene` on Windows and `which -a selene` on
+        // The probe reads `where arcus` on Windows and `which -a arcus` on
         // Unix, so both the line shape and what counts as a trailing component
         // are platform-specific. `Path::ends_with` compares whole components,
         // not string suffixes — a Windows path on Unix is a single component,
         // so a Windows fixture cannot assert a leaf there.
         #[cfg(windows)]
         let (stdout, leaf): (&[u8], &str) =
-            (b"C:\\a\\selene.exe\r\n\r\nC:\\b\\selene.exe\n", "selene.exe");
+            (b"C:\\a\\arcus.exe\r\n\r\nC:\\b\\arcus.exe\n", "arcus.exe");
         #[cfg(not(windows))]
         let (stdout, leaf): (&[u8], &str) =
-            (b"/usr/local/bin/selene\n\n/usr/bin/selene\n", "selene");
+            (b"/usr/local/bin/arcus\n\n/usr/bin/arcus\n", "arcus");
 
         let paths = parse_path_lines(stdout);
         assert_eq!(paths.len(), 2);

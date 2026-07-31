@@ -2,12 +2,12 @@
 """
 Materialize the principle lattice into harness rules for session inject.
 
-Why: Selene Build (and upstream Grok Build) load project rules from a rules
+Why: Arcus Build (and upstream Grok Build) load project rules from a rules
 directory at session start. This script regenerates those derived files from
 the canonical sources under context/ so headless agents carrying the house
 cwd inherit the lattice without manual inlining.
 
-Default output target is `.selene/rules/` (Selene Build fork). Pass
+Default output target is `.arcus/rules/` (Arcus Build fork). Pass
 `--grok-compat` to materialize into `.grok/rules/` for the upstream-grok lane.
 
 Emits the lattice always, and praxis ONLY when `context/praxis.md` exists.
@@ -77,13 +77,13 @@ def find_org_root() -> Path:
 
 
 def rules_rel_for(grok_compat: bool) -> str:
-    return ".grok/rules" if grok_compat else ".selene/rules"
+    return ".grok/rules" if grok_compat else ".arcus/rules"
 
 
 def rules_dir_for(org_root: Path, grok_compat: bool) -> Path:
     if grok_compat:
         return org_root / ".grok" / "rules"
-    return org_root / ".selene" / "rules"
+    return org_root / ".arcus" / "rules"
 
 
 def flag_suffix(grok_compat: bool) -> str:
@@ -226,7 +226,7 @@ def main() -> None:
     parser.add_argument(
         "--grok-compat",
         action="store_true",
-        help="Materialize into .grok/rules/ (upstream-grok lane) instead of .selene/rules/",
+        help="Materialize into .grok/rules/ (upstream-grok lane) instead of .arcus/rules/",
     )
     args = parser.parse_args()
     org_root = find_org_root()

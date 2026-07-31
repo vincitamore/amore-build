@@ -292,9 +292,9 @@ impl Default for GrokComConfig {
             token_header: "xai-grok-cli".to_owned(),
             oidc,
             oauth2,
-            auth_provider_command: xai_grok_env::var("SELENE_AUTH_PROVIDER_COMMAND").ok(),
-            auth_provider_label: xai_grok_env::var("SELENE_AUTH_PROVIDER_LABEL").ok(),
-            auth_token_ttl: xai_grok_env::var("SELENE_AUTH_TOKEN_TTL")
+            auth_provider_command: xai_grok_env::var("ARCUS_AUTH_PROVIDER_COMMAND").ok(),
+            auth_provider_label: xai_grok_env::var("ARCUS_AUTH_PROVIDER_LABEL").ok(),
+            auth_token_ttl: xai_grok_env::var("ARCUS_AUTH_TOKEN_TTL")
                 .ok()
                 .and_then(|v| v.parse().ok()),
             disable_api_key_auth: std::env::var("GROK_DISABLE_API_KEY_AUTH")

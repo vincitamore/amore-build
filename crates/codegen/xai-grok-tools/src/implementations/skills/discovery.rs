@@ -849,10 +849,10 @@ pub fn discover_skills_for_paths(
     already_checked: &mut HashSet<PathBuf>,
     compat: CompatConfig,
 ) -> Vec<SkillInfo> {
-    // Selene Build: fork-native `.selene` first, legacy `.grok` fallback, then
+    // Arcus Build: fork-native `.arcus` first, legacy `.grok` fallback, then
     // `.agents`; `.claude` is gated on the claude-vendor skills cell.
     // (`.cursor` is excluded here by design — see fn docs.)
-    let mut config_dir_names: Vec<&str> = vec![".selene", ".grok", ".agents"];
+    let mut config_dir_names: Vec<&str> = vec![".arcus", ".grok", ".agents"];
     if compat.claude.skills {
         config_dir_names.push(".claude");
     }

@@ -26,9 +26,9 @@ pub enum UpdateRunMode {
 const PROMPT_UPDATE_NOW: &str = "Update now? [Y/n/d]";
 const MSG_AUTO_UPDATE_BACKGROUND: &str = "Auto-update running in background.";
 /// Manual-update nudge — fork installs do not self-update; point operators at
-/// the selene-build GitHub Releases page (URL inserted under the operator's
+/// the arcus-build GitHub Releases page (URL inserted under the operator's
 /// repo-self-URL carve, 2026-07-30).
-const MSG_RUN_UPDATE_MANUAL: &str = "This build does not auto-update. Download a newer release from the selene-build GitHub Releases page: https://github.com/vincitamore/selene-build/releases";
+const MSG_RUN_UPDATE_MANUAL: &str = "This build does not auto-update. Download a newer release from the arcus-build GitHub Releases page: https://github.com/vincitamore/arcus-build/releases";
 /// Fork policy: never self-update back to upstream, regardless of config.
 /// Config key `cli.auto_update` is still parsed for file compat, but every
 /// effective read is forced false (see [`effective_auto_update`]).
@@ -49,15 +49,15 @@ pub fn effective_auto_update(_config_value: Option<bool>) -> bool {
 /// User-facing notice for the fork's non-self-updating update surface.
 fn fork_update_notice(current_version: &str) -> String {
     format!(
-        "Selene Build - v{current_version}\n\
+        "Arcus Build - v{current_version}\n\
          Auto-update is disabled in this fork (it must not self-update back to upstream).\n\
-         Install newer builds from the selene-build GitHub Releases page."
+         Install newer builds from the arcus-build GitHub Releases page."
     )
 }
 
 /// Manual reinstall hint — fork-appropriate, no upstream xAI install URLs.
 fn reinstall_hint(_installer: &str) -> String {
-    "Please reinstall from the selene-build GitHub Releases page.".to_string()
+    "Please reinstall from the arcus-build GitHub Releases page.".to_string()
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -615,7 +615,7 @@ pub async fn run_update_if_available(
     let channel_label = format!(" [{}]", update_config.channel);
     if auto_update {
         eprintln!(
-            "A new version of Selene Build is available: {} -> {}{}",
+            "A new version of Arcus Build is available: {} -> {}{}",
             current_version, latest_version, channel_label
         );
         if interactive {
@@ -643,7 +643,7 @@ pub async fn run_update_if_available(
             return Ok(false);
         }
         eprintln!(
-            "A new version of Selene Build is available: {} -> {}{}",
+            "A new version of Arcus Build is available: {} -> {}{}",
             current_version, latest_version, channel_label
         );
         if interactive {
@@ -3584,7 +3584,7 @@ mod tests {
     fn test_reinstall_hint_npm_is_fork_neutral() {
         let hint = reinstall_hint("npm");
         assert!(
-            hint.contains("selene-build GitHub Releases"),
+            hint.contains("arcus-build GitHub Releases"),
             "fork reinstall must point at Releases: {hint}"
         );
         assert!(
@@ -3598,7 +3598,7 @@ mod tests {
     fn test_reinstall_hint_gh_release_is_fork_neutral() {
         let hint = reinstall_hint("gh-release");
         assert!(
-            hint.contains("selene-build GitHub Releases"),
+            hint.contains("arcus-build GitHub Releases"),
             "fork reinstall must point at Releases: {hint}"
         );
         assert!(
@@ -3612,7 +3612,7 @@ mod tests {
     fn test_reinstall_hint_internal_is_fork_neutral() {
         let hint = reinstall_hint("internal");
         assert!(
-            hint.contains("selene-build GitHub Releases"),
+            hint.contains("arcus-build GitHub Releases"),
             "fork reinstall must point at Releases: {hint}"
         );
         assert!(!hint.contains("x.ai/cli"), "must not name x.ai install URL: {hint}");
@@ -4343,7 +4343,7 @@ mod tests {
             "Auto-update running in background."
         );
         assert!(
-            MSG_RUN_UPDATE_MANUAL.contains("selene-build GitHub Releases"),
+            MSG_RUN_UPDATE_MANUAL.contains("arcus-build GitHub Releases"),
             "manual update message must point at fork Releases: {MSG_RUN_UPDATE_MANUAL}"
         );
         assert!(
@@ -4351,8 +4351,8 @@ mod tests {
             "manual update message must not mention x.ai: {MSG_RUN_UPDATE_MANUAL}"
         );
         let notice = fork_update_notice("0.1.0");
-        assert!(notice.contains("Selene Build"));
-        assert!(notice.contains("selene-build GitHub Releases"));
+        assert!(notice.contains("Arcus Build"));
+        assert!(notice.contains("arcus-build GitHub Releases"));
         assert!(!notice.contains("x.ai"));
         assert!(!notice.contains("@xai-official"));
     }

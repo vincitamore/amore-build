@@ -1,16 +1,16 @@
 # Kimi K3 quickstart (headline provider path)
 
-Selene Build is the **Kimi-K3 cooperation harness**, with native grok subagent
+Arcus Build is the **Kimi-K3 cooperation harness**, with native grok subagent
 freight as a second rail. This page is the public on-ramp for the default
 model path.
 
 | Product role | Model path |
 |--------------|------------|
 | **Headline (use this)** | Kimi K3 via OpenRouter, Moonshot direct, or an open-weight host |
-| **Native freight (second)** | xAI grok via `selene login` or `XAI_API_KEY` |
+| **Native freight (second)** | xAI grok via `arcus login` or `XAI_API_KEY` |
 | **Technical fallback only** | Baked catalog `grok-4.5` — never market this as the product default |
 
-Config lives at **`~/.selene/config.toml`** (override with `$SELENE_HOME`;
+Config lives at **`~/.arcus/config.toml`** (override with `$ARCUS_HOME`;
 legacy `$GROK_HOME` still works). Prefer **`env_key`** over a literal
 `api_key` so secrets stay out of the file.
 
@@ -30,7 +30,7 @@ legacy `$GROK_HOME` still works). Prefer **`env_key`** over a literal
 2. **Moonshot direct** — canonical K3 API, 1M context, native features  
 3. **Open-weight hosts** — Modal / Together / Fireworks when you already use them or need residency/dedicated capacity  
 
-All three are **OpenAI-compatible** Chat Completions paths. Selene Build's
+All three are **OpenAI-compatible** Chat Completions paths. Arcus Build's
 default `api_backend` is `chat_completions`; you do not need to set it for
 these providers.
 
@@ -48,7 +48,7 @@ these providers.
 | Keys | https://openrouter.ai/keys |
 | Model card | https://openrouter.ai/moonshotai/kimi-k3 |
 
-### `~/.selene/config.toml`
+### `~/.arcus/config.toml`
 
 ```toml
 [models]
@@ -63,7 +63,7 @@ system_prompt_label = "Kimi K3, a Moonshot AI model"
 context_window = 1048576
 max_completion_tokens = 16384
 # Optional ranking headers (OpenRouter docs):
-# extra_headers = { "HTTP-Referer" = "https://example.com", "X-Title" = "Selene Build" }
+# extra_headers = { "HTTP-Referer" = "https://example.com", "X-Title" = "Arcus Build" }
 ```
 
 | TOML field | Maps to | Evidence |
@@ -83,13 +83,13 @@ max_completion_tokens = 16384
 
 ```bash
 export OPENROUTER_API_KEY="sk-or-..."   # your key
-selene -m k3-openrouter -p "Reply with exactly: K3-OR-OK"
+arcus -m k3-openrouter -p "Reply with exactly: K3-OR-OK"
 ```
 
 Expect a short completion (K3 always reasons; output tokens dominate cost). Then:
 
 ```bash
-selene models
+arcus models
 ```
 
 You should see `k3-openrouter` listed. In the TUI, `/model k3-openrouter` switches mid-session.
@@ -117,7 +117,7 @@ China-region base `https://api.moonshot.cn/v1` is vendor-available but region-ga
 - Several sampling params are fixed by the vendor (`temperature=1.0`, `top_p=0.95`, …) — omit them in config rather than inventing values.
 - Automatic prefix caching when prior prompt ≥ 256 tokens (cost control).
 
-### `~/.selene/config.toml`
+### `~/.arcus/config.toml`
 
 ```toml
 [models]
@@ -144,7 +144,7 @@ max_completion_tokens = 16384
 
 ```bash
 export MOONSHOT_API_KEY="sk-..."
-selene -m k3-moonshot -p "Reply with exactly: K3-MS-OK"
+arcus -m k3-moonshot -p "Reply with exactly: K3-MS-OK"
 ```
 
 ---
@@ -178,7 +178,7 @@ max_completion_tokens = 16384
 ```
 
 **Verify:** `export TOGETHER_API_KEY=…` then  
-`selene -m k3-together -p "Reply with exactly: K3-TG-OK"`.
+`arcus -m k3-together -p "Reply with exactly: K3-TG-OK"`.
 
 ### 3b. Fireworks AI
 
@@ -204,7 +204,7 @@ max_completion_tokens = 16384
 ```
 
 **Verify:** `export FIREWORKS_API_KEY=…` then  
-`selene -m k3-fireworks -p "Reply with exactly: K3-FW-OK"`.
+`arcus -m k3-fireworks -p "Reply with exactly: K3-FW-OK"`.
 
 ### 3c. Modal (public Shared API or your Auto Endpoint)
 
@@ -235,7 +235,7 @@ your ops convention differs — the TOML value is only the **name** of the
 variable, not the secret.
 
 **Verify:** set `MODAL_TOKEN` and your real `base_url`, then  
-`selene -m k3-modal -p "Reply with exactly: K3-MD-OK"`.
+`arcus -m k3-modal -p "Reply with exactly: K3-MD-OK"`.
 
 > Modal is also an **OpenRouter upstream**. If you only need Modal’s fleet
 > without a Modal account, Path 1 (OpenRouter) already covers that.
@@ -280,7 +280,7 @@ technical fallback):
 
 | Mode | How |
 |------|-----|
-| Interactive | `selene login` (browser OAuth; credentials under `~/.selene/auth.json`) |
+| Interactive | `arcus login` (browser OAuth; credentials under `~/.arcus/auth.json`) |
 | Headless / CI | `export XAI_API_KEY="xai-..."` from https://console.x.ai |
 
 ```toml
@@ -289,7 +289,7 @@ technical fallback):
 model = "grok-4.5"
 name = "Grok 4.5 (xAI)"
 # No base_url: inherits first-party inference endpoints
-# No env_key: uses session from `selene login`, else XAI_API_KEY
+# No env_key: uses session from `arcus login`, else XAI_API_KEY
 system_prompt_label = "Grok 4.5"
 context_window = 500000
 ```
@@ -304,7 +304,7 @@ context_window = 500000
 **Verify:** after login or with `XAI_API_KEY` set:
 
 ```bash
-selene -m grok-4.5 -p "Reply with exactly: GROK-OK"
+arcus -m grok-4.5 -p "Reply with exactly: GROK-OK"
 ```
 
 K3 primary + grok freight = **two meters, two credentials**. Do not force a
@@ -314,13 +314,13 @@ single global base URL for both.
 
 ## Credential resolution (short)
 
-For each model, Selene resolves keys in this order
+For each model, Arcus resolves keys in this order
 (`resolve_credentials` in the shell agent config):
 
 1. Per-model `api_key` (literal — avoid in shared configs)
 2. Per-model `env_key` (first set, non-empty env among names)
 3. Named `auth_provider` helper token
-4. Session token from `selene login` — **only** when the model has no own
+4. Session token from `arcus login` — **only** when the model has no own
    credentials and the endpoint is first-party-safe
 5. `XAI_API_KEY` (then legacy `GROK_CODE_XAI_API_KEY`)
 
@@ -332,7 +332,7 @@ closed with no Authorization header.
 ## Appendix A — Anthropic workaround (workaround-tier)
 
 Anthropic’s **native** Messages API is **not** a drop-in OpenAI `base_url` swap.
-Selene supports it via `api_backend = "messages"` plus required headers.
+Arcus supports it via `api_backend = "messages"` plus required headers.
 
 **Gap:** `[model.*]` TOML cannot set `auth_scheme` today
 (`auth_scheme` exists on runtime `ModelInfo` / `SamplerConfig` but **not** on
@@ -360,7 +360,7 @@ env_http_headers = { "x-api-key" = "ANTHROPIC_API_KEY" }
 | *(gap)* `auth_scheme` | **not** on `ConfigModelOverride` — runtime `ModelInfo` only | do not invent in TOML |
 
 **Verify:** `export ANTHROPIC_API_KEY=…` then  
-`selene -m claude-workaround -p "Reply with exactly: CLAUDE-OK"`.
+`arcus -m claude-workaround -p "Reply with exactly: CLAUDE-OK"`.
 
 This path is documented for completeness. It is **not** a K3 headline path and
 is **workaround-tier** until first-class `auth_scheme` lands on the TOML
@@ -368,7 +368,7 @@ surface.
 
 Moonshot’s separate Anthropic-compatible base (`https://api.moonshot.ai/anthropic`)
 is a Claude Code–style integration, not Anthropic’s own API and not required
-for Selene’s OpenAI-compat K3 paths above.
+for Arcus’s OpenAI-compat K3 paths above.
 
 ---
 
@@ -385,7 +385,7 @@ for Selene’s OpenAI-compat K3 paths above.
 - Deep field reference: in-tree user guide
   `crates/codegen/xai-grok-pager/docs/user-guide/11-custom-models.md`
   (upstream brand paths may still say `~/.grok` / `grok`; the fork home is
-  `~/.selene` / binary `selene`).
+  `~/.arcus` / binary `arcus`).
 
 ---
 

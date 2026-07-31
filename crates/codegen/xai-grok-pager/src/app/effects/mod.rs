@@ -4574,7 +4574,7 @@ fn format_auth_lines(is_api_key_auth: bool, api_key_env_set: bool) -> String {
             "  Auth method: API key\n"
         };
         return format!(
-            "{method}  Manage account and credits: console.x.ai\n  Run `selene login` to use your SuperGrok subscription instead.\n"
+            "{method}  Manage account and credits: console.x.ai\n  Run `arcus login` to use your SuperGrok subscription instead.\n"
         );
     }
     String::from(

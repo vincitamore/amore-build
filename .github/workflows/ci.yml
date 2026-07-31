@@ -1,7 +1,7 @@
 name: ci
 
-# Build + test the selene binary surface on Linux and Windows.
-# Dioptra CI has its own lane (dioptra-ci.yml) scoped to instruments/dioptra/**.
+# Build + test the arcus binary surface on Linux and Windows.
+# Iris CI has its own lane (iris-ci.yml) scoped to instruments/iris/**.
 #
 # Build and test are SEPARATE jobs on purpose: one job that produced both a
 # release binary and a debug test tree ran the runner out of disk ("No space
@@ -12,10 +12,10 @@ on:
   push:
     branches: [main]
     paths-ignore:
-      - "instruments/dioptra/**"
+      - "instruments/iris/**"
   pull_request:
     paths-ignore:
-      - "instruments/dioptra/**"
+      - "instruments/iris/**"
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -55,7 +55,7 @@ jobs:
         with:
           shared-key: ci-build
 
-      - name: Build selene binary (unix)
+      - name: Build arcus binary (unix)
         if: matrix.os != 'windows-latest'
         run: cargo build --release -p xai-grok-pager-bin
 
@@ -64,34 +64,34 @@ jobs:
       # The flags go through RUSTFLAGS, NOT `cargo rustc -- -Clink-args=…`:
       # PowerShell splits `-Clink-args=/DEBUG:NONE` at the colon and rustc then
       # sees `NONE` as a second input filename.
-      - name: Build selene binary (windows)
+      - name: Build arcus binary (windows)
         if: matrix.os == 'windows-latest'
         env:
           RUSTFLAGS: "-Clink-arg=/DEBUG:NONE -Clink-arg=/STACK:8388608"
         run: cargo build --release -p xai-grok-pager-bin
 
-      - name: Smoke — selene --version stamps the build commit (Linux)
+      - name: Smoke — arcus --version stamps the build commit (Linux)
         if: matrix.os == 'ubuntu-latest'
         run: |
-          target/release/selene --version
-          target/release/selene doctor --json | head -c 400
+          target/release/arcus --version
+          target/release/arcus doctor --json | head -c 400
           echo
 
-      - name: Smoke — selene --version stamps the build commit (Windows)
+      - name: Smoke — arcus --version stamps the build commit (Windows)
         if: matrix.os == 'windows-latest'
         run: |
-          target\release\selene.exe --version
-          target\release\selene.exe doctor --json | Select-Object -First 1
+          target\release\arcus.exe --version
+          target\release\arcus.exe doctor --json | Select-Object -First 1
 
       # Keep the built binary reachable for local inspection (docs captures,
       # bisecting a report against a known commit) without a full local build.
       - name: Upload built binary
         uses: actions/upload-artifact@v4
         with:
-          name: selene-ci-${{ matrix.os }}
+          name: arcus-ci-${{ matrix.os }}
           path: |
-            target/release/selene
-            target/release/selene.exe
+            target/release/arcus
+            target/release/arcus.exe
           if-no-files-found: error
           retention-days: 7
 

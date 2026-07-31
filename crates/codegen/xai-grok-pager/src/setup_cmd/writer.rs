@@ -181,11 +181,11 @@ fn read_or_empty(path: &Path) -> Result<toml_edit::DocumentMut> {
         .with_context(|| format!("parse {}; refusing to overwrite invalid TOML", path.display()))
 }
 
-/// Dioptra companion pointer planted under the selene home (not a binary install).
-pub const DIOPTRA_POINTER_NAME: &str = "dioptra-companion.toml";
+/// Iris companion pointer planted under the arcus home (not a binary install).
+pub const IRIS_POINTER_NAME: &str = "iris-companion.toml";
 
 /// Expected public release-asset name shape (v1 documents only; no download).
-pub fn dioptra_asset_shape() -> String {
+pub fn iris_asset_shape() -> String {
     let os = if cfg!(target_os = "windows") {
         "windows"
     } else if cfg!(target_os = "macos") {
@@ -200,28 +200,28 @@ pub fn dioptra_asset_shape() -> String {
     } else {
         std::env::consts::ARCH
     };
-    format!("dioptra-{os}-{arch}")
+    format!("iris-{os}-{arch}")
 }
 
-// `detect_dioptra_on_path` re-homed to `crate::dioptra_companion` (TUI seam).
+// `detect_iris_on_path` re-homed to `crate::iris_companion` (TUI seam).
 
 /// Write the companion pointer config. Returns the path written (or that would be).
-pub fn write_dioptra_pointer(
+pub fn write_iris_pointer(
     home: &Path,
     detected: Option<&Path>,
     dry_run: bool,
 ) -> Result<std::path::PathBuf> {
-    let path = home.join(DIOPTRA_POINTER_NAME);
-    let asset = dioptra_asset_shape();
+    let path = home.join(IRIS_POINTER_NAME);
+    let asset = iris_asset_shape();
     let mut body = String::from(
-        "# Dioptra companion pointer — written by `selene setup` / first-run wizard.\n\
-         # Dioptra is optional; this file is not an install.\n\
+        "# Iris companion pointer — written by `arcus setup` / first-run wizard.\n\
+         # Iris is optional; this file is not an install.\n\
          # Expected release asset shape (fetch deferred; CI pipeline is a later unit):\n",
     );
     body.push_str(&format!("#   {asset}\n"));
     body.push_str(
         "# See product docs for the companion install story.\n\n\
-         [dioptra]\n",
+         [iris]\n",
     );
     match detected {
         Some(p) => {
@@ -323,17 +323,17 @@ mod tests {
     }
 
     #[test]
-    fn dioptra_pointer_write() {
+    fn iris_pointer_write() {
         let dir = tempdir().unwrap();
-        let p = write_dioptra_pointer(dir.path(), None, false).unwrap();
+        let p = write_iris_pointer(dir.path(), None, false).unwrap();
         let body = fs::read_to_string(&p).unwrap();
-        assert!(body.contains("dioptra-"));
+        assert!(body.contains("iris-"));
         assert!(body.contains("detected = false"));
     }
 
     #[test]
-    fn asset_shape_has_dioptra_prefix() {
-        let s = dioptra_asset_shape();
-        assert!(s.starts_with("dioptra-"), "{s}");
+    fn asset_shape_has_iris_prefix() {
+        let s = iris_asset_shape();
+        assert!(s.starts_with("iris-"), "{s}");
     }
 }

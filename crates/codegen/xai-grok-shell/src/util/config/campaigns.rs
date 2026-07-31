@@ -124,7 +124,7 @@ fn dismiss_campaign_ids_at(
 /// campaigns with exactly this", so a typo must not silently fall back to the
 /// real sources it was meant to replace.
 pub fn campaigns_override() -> Option<Vec<CampaignEntry>> {
-    let json = xai_grok_env::var("SELENE_CAMPAIGNS_OVERRIDE").ok()?;
+    let json = xai_grok_env::var("ARCUS_CAMPAIGNS_OVERRIDE").ok()?;
     match serde_json::from_str::<Vec<CampaignOverride>>(&json) {
         Ok(list) => Some(
             list.into_iter()

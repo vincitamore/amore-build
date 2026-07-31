@@ -9,7 +9,7 @@ const LIVE_TUI_PROBE_CTA: &str = "Some checks only run in Grok. Start Grok and r
 
 pub(super) fn format(report: &DiagnosticReport) -> String {
     let facts = &report.facts;
-    let mut out = String::from("Selene Doctor\n\nEnvironment\n");
+    let mut out = String::from("Arcus Doctor\n\nEnvironment\n");
 
     fact(&mut out, "terminal", &facts.terminal.to_string());
     match &facts.xtversion {

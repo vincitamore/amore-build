@@ -1052,7 +1052,7 @@ pub async fn resolve_api_key(explicit: Option<&str>, grok_home: &Path) -> Result
         return Ok(key);
     }
     Err(anyhow!(
-        "no API key: pass --api-key, set XAI_API_KEY, or run `selene login` to populate \
+        "no API key: pass --api-key, set XAI_API_KEY, or run `arcus login` to populate \
          <grok-home>/auth.json. An expired OIDC token is auto-refreshed when a refresh_token \
          is present; if not, re-login is required."
     ))
@@ -1096,7 +1096,7 @@ async fn non_interactive_auth_key(grok_home: &Path) -> Result<Option<String>> {
         }
         Err(AuthError::NotLoggedIn) => Ok(None),
         Err(e) => Err(anyhow!(
-            "auth.json refresh failed: {e}. Run `selene login` to re-authenticate, \
+            "auth.json refresh failed: {e}. Run `arcus login` to re-authenticate, \
              or pass --api-key / set $XAI_API_KEY to bypass auth.json."
         )),
     }
@@ -2362,7 +2362,7 @@ mod tests {
         assert!(
             msg.contains("--api-key")
                 && msg.contains("XAI_API_KEY")
-                && msg.contains("selene login")
+                && msg.contains("arcus login")
                 && msg.contains("auth.json"),
             "error names all three sources: {msg}",
         );

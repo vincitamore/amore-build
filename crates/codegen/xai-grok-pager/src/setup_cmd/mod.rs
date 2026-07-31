@@ -1,8 +1,8 @@
-//! First-run setup wizard + `selene setup` headless/explicit entry path (0.11).
+//! First-run setup wizard + `arcus setup` headless/explicit entry path (0.11).
 //!
 //! ## Auto-guided first launch
-//! On interactive TUI launch with **no** resolvable credentials, Selene shows
-//! a guided setup screen once (state under `~/.selene/setup-wizard-state.json`).
+//! On interactive TUI launch with **no** resolvable credentials, Arcus shows
+//! a guided setup screen once (state under `~/.arcus/setup-wizard-state.json`).
 //!
 //! ## Hard guards (never auto-fire)
 //! - Headless (`-p` / `--single` / prompt-json/file) or non-TTY / piped I/O
@@ -11,9 +11,9 @@
 //! - Wizard state already `done` or `skipped`
 //!
 //! ## Explicit path
-//! `selene setup` always runs the flow (interactive when TTY, else headless
+//! `arcus setup` always runs the flow (interactive when TTY, else headless
 //! step listing). Team managed config remains available as
-//! `selene setup --managed` (and legacy `selene setup --json`).
+//! `arcus setup --managed` (and legacy `arcus setup --json`).
 
 mod credentials;
 mod flow;
@@ -31,7 +31,7 @@ pub use guards::{
 };
 pub use state::{STATE_FILE_NAME, WizardState, WizardStatus};
 pub use writer::{
-    DIOPTRA_POINTER_NAME, ModelEntryPlan, dioptra_asset_shape, write_dioptra_pointer,
+    IRIS_POINTER_NAME, ModelEntryPlan, iris_asset_shape, write_iris_pointer,
     write_model_entry,
 };
 
@@ -40,7 +40,7 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 
-/// CLI arguments for `selene setup`.
+/// CLI arguments for `arcus setup`.
 #[derive(Clone, Debug, Eq, PartialEq, clap::Args)]
 pub struct SetupArgs {
     /// Team managed configuration (enterprise path; previous bare `setup` behavior).
@@ -48,7 +48,7 @@ pub struct SetupArgs {
     pub managed: bool,
     /// With `--managed`: print managed configuration as JSON without installing.
     /// Bare `--json` (without other wizard flags) also selects the managed path
-    /// for backward compatibility with `selene setup --json`.
+    /// for backward compatibility with `arcus setup --json`.
     #[arg(long)]
     pub json: bool,
     /// Force headless step listing (no prompts), even on a TTY.
@@ -87,7 +87,7 @@ impl SetupArgs {
     }
 }
 
-/// Production home for the wizard (`$SELENE_HOME` / `$GROK_HOME` / `~/.selene`).
+/// Production home for the wizard (`$ARCUS_HOME` / `$GROK_HOME` / `~/.arcus`).
 pub fn wizard_home() -> PathBuf {
     xai_grok_config::grok_home()
 }

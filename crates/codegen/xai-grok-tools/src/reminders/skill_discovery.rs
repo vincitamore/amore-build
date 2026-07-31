@@ -9,11 +9,11 @@
 
 use std::path::{Path, PathBuf};
 
-/// Directories that contain skill definitions (`.selene/skills/` [Selene Build
+/// Directories that contain skill definitions (`.arcus/skills/` [Arcus Build
 /// fork-native], `.grok/skills/` [legacy fallback], `.agents/skills/`,
 /// `.claude/skills/`, `.cursor/skills/`). Shared between startup skill discovery
 /// and runtime `SkillDiscoveryReminder`.
-pub const SKILL_CONFIG_DIRS: &[&str] = &[".selene", ".grok", ".agents", ".claude", ".cursor"];
+pub const SKILL_CONFIG_DIRS: &[&str] = &[".arcus", ".grok", ".agents", ".claude", ".cursor"];
 
 use crate::implementations::skills::discovery;
 use crate::implementations::skills::types::SkillScope;

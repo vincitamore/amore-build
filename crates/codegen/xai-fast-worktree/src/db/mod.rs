@@ -394,8 +394,8 @@ pub fn resolve_grok_home() -> Result<PathBuf> {
     // tree as trust/hooks even when it is symlinked. The dunce canonicalization
     // must stay in sync with xai_grok_config::default_grok_home();
     // home resolution deliberately differs ($HOME here vs std::env::home_dir()).
-    // Selene Build fork: `.selene` (see xai_grok_config::default_grok_home).
-    Ok(dunce::canonicalize(&home).unwrap_or(home).join(".selene"))
+    // Arcus Build fork: `.arcus` (see xai_grok_config::default_grok_home).
+    Ok(dunce::canonicalize(&home).unwrap_or(home).join(".arcus"))
 }
 
 /// Serializes tests that mutate the process-global `GROK_HOME` env var so they
