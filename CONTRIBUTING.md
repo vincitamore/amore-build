@@ -29,8 +29,9 @@ not an upstream contribution queue and not an xAI project. See
    `/release-notes` render from them, compiled in.
 5. **Templates stay generic.** Everything under `templates/house/` teaches the
    *adopter's* house — no references to this repository's own development
-   environment, maintainers, or private tooling. CI enforces a forbid list
-   (`scripts/forbid_check.py`).
+   environment, maintainers, or private tooling. Reviewers check this by
+   reading; a string blocklist cannot catch a section that describes the wrong
+   house.
 6. **No secrets, ever.** `~/.arcus/auth.json`, API keys, tokens — never in a
    commit, a log, or a test fixture.
 
@@ -44,17 +45,27 @@ cargo build --release -p xai-grok-pager-bin   # target/release/arcus
 cargo test --lib -p <crate-you-touched>       # per-crate gate; keep failures at zero
 ```
 
-Windows hosts: the release link may need
-`cargo rustc -p xai-grok-pager-bin --release -- -Clink-args=/DEBUG:NONE -Clink-args=/STACK:8388608`
-(MSVC PDB-writer limit + startup stack reserve), and pager-shell tests use
-`--skip standalone_color_uses` (an upstream brand-detection assumption).
-Drive built binaries from PowerShell/cmd — not git-bash.
+Windows hosts: the release link needs `/DEBUG:NONE` (MSVC PDB-writer limit) and
+`/STACK:8388608` (startup stack reserve). Pass them through the environment —
+**not as `-Clink-args` on the command line**, which no shell survives: git-bash's
+MSYS rewrites `/DEBUG:NONE` as a path, and PowerShell splits it at the colon.
+Both produce the same misleading error, `multiple input filenames provided (…
+and NONE)`, which reads like a source problem and is not one.
+
+```sh
+RUSTFLAGS="-Clink-arg=/DEBUG:NONE -Clink-arg=/STACK:8388608" \
+  cargo build --release -p xai-grok-pager-bin
+```
+
+Pager-shell tests use `--skip standalone_color_uses` (an upstream
+brand-detection assumption). Drive built binaries from PowerShell/cmd — not
+git-bash.
 
 ## CI
 
-`ci.yml` (Linux + Windows build/test) and the forbid-grep run on every PR.
-Both must be green; `docs`-only changes still run the forbid lane. Iris CI
- (`iris-ci.yml`) is scoped to `instruments/iris/**`.
+`ci.yml` runs build + smoke on Linux and Windows, and the test suites on both;
+it must be green. Iris CI (`iris-ci.yml`) is scoped to
+`instruments/iris/**`.
 
 ## Style
 

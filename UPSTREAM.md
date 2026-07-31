@@ -151,7 +151,7 @@ logic, and the bulk of `crates/`.
 3. Refresh [`SOURCE_REV`](SOURCE_REV) when the upstream baseline moves.
 4. After every rebase, re-check at least: `.arcus`/`.grok` precedence,
    `~/.arcus` default home, identity/binary naming, auto-update hard-off,
-   embed + `init` ownership tests, forbid-list on authored surfaces.
+   embed + `init` ownership tests.
 5. Fast-follow security fixes; batch ordinary drift into the next sync rebase.
 
 ### Contributors

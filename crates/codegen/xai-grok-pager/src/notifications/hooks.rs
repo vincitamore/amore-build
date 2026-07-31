@@ -89,6 +89,8 @@ pub fn run_hook(hook: &NotificationHook, event: &NotificationEvent) {
 mod tests {
     use super::*;
     use crate::notifications::config::NotificationEventKind;
+    // Only the POSIX-gated timing tests below use `Instant`.
+    #[cfg(unix)]
     use std::time::Instant;
 
     fn test_event() -> NotificationEvent {
@@ -100,6 +102,18 @@ mod tests {
         }
     }
 
+    // `execute_hook` spawns `sh -c` on every platform, so the tests below need a
+    // working POSIX shell to make their assertion: they call `printf`/`env`/
+    // `touch`/`sleep`, and several interpolate a filesystem path into the command
+    // string. On Windows `sh` resolves to git-bash, whose MSYS layer rewrites an
+    // absolute Windows path (`C:\…\env.txt`) into a single relative token — so the
+    // redirect lands in the crate directory instead of the temp dir, the assertion
+    // fails, and the run leaves a file behind containing a full environment dump.
+    //
+    // Gated to match the platform gating this module already uses (see `setsid` /
+    // `killpg` above) rather than by forking the logic. The three ungated tests
+    // assert only graceful non-panic handling and stay meaningful on Windows.
+    #[cfg(unix)]
     #[test]
     fn sets_environment_variables() {
         let dir = tempfile::tempdir().unwrap();
@@ -133,6 +147,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn omits_session_id_when_none() {
         let dir = tempfile::tempdir().unwrap();
@@ -154,6 +169,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn kills_on_timeout() {
         let start = Instant::now();
@@ -193,6 +209,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn successful_command_completes_without_error() {
         let dir = tempfile::tempdir().unwrap();
@@ -222,6 +239,7 @@ mod tests {
         std::thread::sleep(Duration::from_millis(200));
     }
 
+    #[cfg(unix)]
     #[test]
     fn timeout_clamped_to_minimum_one_second() {
         let dir = tempfile::tempdir().unwrap();
@@ -251,6 +269,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn run_hook_passes_correct_env_via_thread() {
         let dir = tempfile::tempdir().unwrap();
