@@ -25,3 +25,7 @@ Thumbs.db
 # Sweep / scratch
 /.sweep-scratch/
 sweep-*.log
+
+# Python bytecode from the asset generators
+__pycache__/
+*.pyc

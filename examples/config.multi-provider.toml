@@ -11,7 +11,7 @@
 # Prefer env_key over literal api_key. Each env_key comment names the process
 # environment variable that must be set before `arcus` runs.
 #
-# Pricing / availability notes in docs/setup-k3.md are as of 2026-07-30;
+# Pricing / availability notes in docs/setup-glm.md are as of 2026-07-30;
 # re-verify before relying on them.
 #
 # Schema: [model.<id>] → ConfigModelOverride

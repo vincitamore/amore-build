@@ -1,4 +1,4 @@
-//! Guided setup flow: K3 provider → Grok native rail → Iris (opt-out).
+//! Guided setup flow: model provider → Grok native rail → Iris (opt-out).
 //!
 //! Interactive path is an auto-guided TUI screen (clear + numbered menus).
 //! Headless path prints the same steps without reading stdin.
@@ -110,11 +110,11 @@ fn run_headless(ctx: &FlowContext, out: &mut impl Write, summary: &mut SetupSumm
     writeln!(out, "Home: {}", ctx.home.display())?;
     writeln!(out)?;
 
-    // Step 1 — print K3 config recipes (do not write unless -- with dry_run false
+    // Step 1 — print model config recipes (do not write unless -- with dry_run false
     // and user already has no way to pick). Headless default: print steps only,
     // do not mutate config unless dry_run is false AND we still write nothing
     // automatically (operator: "prints headless steps").
-    writeln!(out, "Step 1/3 — Kimi K3 provider (headline)")?;
+    writeln!(out, "Step 1/3 — model provider (headline)")?;
     writeln!(
         out,
         "  Choose one and either re-run `arcus setup` interactively, or paste into {}:",
@@ -123,22 +123,22 @@ fn run_headless(ctx: &FlowContext, out: &mut impl Write, summary: &mut SetupSumm
     writeln!(out)?;
     writeln!(out, "  [OpenRouter — recommended]")?;
     writeln!(out, "    env:  OPENROUTER_API_KEY")?;
-    writeln!(out, "    model id: k3-openrouter  wire: moonshotai/kimi-k3")?;
+    writeln!(out, "    model id: glm-openrouter  wire: z-ai/glm-5.2")?;
     writeln!(out, "    base: https://openrouter.ai/api/v1")?;
     writeln!(out)?;
-    writeln!(out, "  [Moonshot direct]")?;
-    writeln!(out, "    env:  MOONSHOT_API_KEY")?;
-    writeln!(out, "    model id: k3-moonshot  wire: kimi-k3")?;
-    writeln!(out, "    base: https://api.moonshot.ai/v1")?;
+    writeln!(out, "  [Z.ai direct]")?;
+    writeln!(out, "    env:  ZAI_API_KEY")?;
+    writeln!(out, "    model id: glm-zai  wire: glm-5.2")?;
+    writeln!(out, "    base: https://api.z.ai/api/paas/v4")?;
     writeln!(out)?;
     writeln!(out, "  [Open-weight host]")?;
     writeln!(
         out,
         "    Provide base_url + env_key + model; system_prompt_label is mandatory."
     )?;
-    writeln!(out, "    See docs/setup-k3.md for verified shapes.")?;
+    writeln!(out, "    See docs/setup-glm.md for verified shapes.")?;
     writeln!(out)?;
-    summary.skipped_steps.push("k3-provider (headless: printed only)");
+    summary.skipped_steps.push("model-provider (headless: printed only)");
 
     // Step 2 — Grok rail
     writeln!(out, "Step 2/3 — Grok native rail (second)")?;
@@ -202,7 +202,7 @@ fn run_interactive(
     banner(out)?;
     writeln!(
         out,
-        "  First-run setup — configure a K3 path, optional Grok freight, and Iris."
+        "  First-run setup — configure a model, optional Grok freight, and Iris."
     )?;
     writeln!(
         out,
@@ -211,10 +211,10 @@ fn run_interactive(
     writeln!(out, "  Re-run anytime: arcus setup   |  reset: arcus setup --reset")?;
     writeln!(out)?;
 
-    // ── Step 1: K3 provider ─────────────────────────────────────────────
-    step_header(out, 1, 3, "Kimi K3 provider (headline)")?;
-    writeln!(out, "  [1] OpenRouter   (recommended)  moonshotai/kimi-k3")?;
-    writeln!(out, "  [2] Moonshot direct             kimi-k3")?;
+    // ── Step 1: model provider ──────────────────────────────────────────
+    step_header(out, 1, 3, "model provider (headline)")?;
+    writeln!(out, "  [1] OpenRouter   (recommended)  z-ai/glm-5.2")?;
+    writeln!(out, "  [2] Z.ai direct                 glm-5.2")?;
     writeln!(out, "  [3] Open-weight host            base URL + env key")?;
     writeln!(out, "  [s] Skip this step")?;
     writeln!(out, "  [q] Quit setup")?;
@@ -226,22 +226,22 @@ fn run_interactive(
     match choice.as_str() {
         "q" | "quit" => {
             writeln!(out, "  Setup cancelled.")?;
-            summary.skipped_steps.push("k3-provider");
+            summary.skipped_steps.push("model-provider");
             summary.skipped_steps.push("grok-rail");
             summary.skipped_steps.push("iris");
             summary.state_status = Some(WizardStatus::Skipped);
             return Ok(());
         }
         "s" | "skip" => {
-            writeln!(out, "  Skipped K3 provider.")?;
-            summary.skipped_steps.push("k3-provider");
+            writeln!(out, "  Skipped model provider.")?;
+            summary.skipped_steps.push("model-provider");
         }
         "1" | "openrouter" | "or" => {
             let plan = ModelEntryPlan::openrouter();
             apply_model(ctx, out, summary, plan)?;
         }
-        "2" | "moonshot" | "ms" => {
-            let plan = ModelEntryPlan::moonshot();
+        "2" | "zai" | "z" => {
+            let plan = ModelEntryPlan::zai();
             apply_model(ctx, out, summary, plan)?;
         }
         "3" | "open" | "host" => {
@@ -249,8 +249,8 @@ fn run_interactive(
             apply_model(ctx, out, summary, plan)?;
         }
         other => {
-            writeln!(out, "  Unrecognized choice `{other}` — skipping K3 step.")?;
-            summary.skipped_steps.push("k3-provider");
+            writeln!(out, "  Unrecognized choice `{other}` — skipping model step.")?;
+            summary.skipped_steps.push("model-provider");
         }
     }
     writeln!(out)?;
@@ -402,12 +402,12 @@ fn prompt_open_weight(input: &mut impl BufRead, out: &mut impl Write) -> Result<
             v
         }
     };
-    write!(out, "  Wire model id [moonshotai/Kimi-K3]: ")?;
+    write!(out, "  Wire model id [z-ai/glm-5.2]: ")?;
     out.flush()?;
     let model = {
         let v = read_line(input)?;
         if v.trim().is_empty() {
-            "moonshotai/Kimi-K3".into()
+            "z-ai/glm-5.2".into()
         } else {
             v
         }
@@ -427,14 +427,14 @@ fn write_summary_screen(out: &mut impl Write, summary: &SetupSummary) -> Result<
     if let Some(ref m) = summary.model {
         writeln!(
             out,
-            "  K3 model:  [model.{}] in {}{}",
+            "  model:     [model.{}] in {}{}",
             m.id,
             m.config_path.display(),
             if m.dry_run { " (dry-run)" } else { "" }
         )?;
         writeln!(out, "  Env key:   {}", m.env_key)?;
     } else {
-        writeln!(out, "  K3 model:  (not written)")?;
+        writeln!(out, "  model:     (not written)")?;
     }
     match &summary.grok_rail_note {
         Some(n) => writeln!(out, "  Grok rail: {n}")?,
@@ -534,9 +534,9 @@ mod tests {
         let mut input = Cursor::new("1\ns\ns\n");
         let mut out = Vec::new();
         let summary = run_flow(&ctx, &mut input, &mut out).unwrap();
-        assert_eq!(summary.model.as_ref().unwrap().id, "k3-openrouter");
+        assert_eq!(summary.model.as_ref().unwrap().id, "glm-openrouter");
         let body = std::fs::read_to_string(dir.path().join("config.toml")).unwrap();
-        assert!(body.contains("moonshotai/kimi-k3"));
+        assert!(body.contains("z-ai/glm-5.2"));
         assert!(body.contains("system_prompt_label"));
         assert_eq!(summary.state_status, Some(WizardStatus::Done));
         assert!(WizardState::path_in(dir.path()).exists());

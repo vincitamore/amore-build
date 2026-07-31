@@ -125,7 +125,7 @@ max_completion_tokens = 16384
 ```
 
 Full recipes, pricing stamps, Modal/Together/Fireworks hosts, and verify
-commands: [`docs/setup-k3.md`](docs/setup-k3.md). Multi-provider sample:
+commands: [`docs/setup-glm.md`](docs/setup-glm.md). Multi-provider sample:
 [`examples/config.multi-provider.toml`](examples/config.multi-provider.toml).
 
 ```sh
@@ -187,7 +187,7 @@ UI. Pointer and install story: [`docs/iris.md`](docs/iris.md).
 
 | Doc | What |
 |-----|------|
-| [`docs/setup-k3.md`](docs/setup-k3.md) | Kimi K3 BYOK paths (OpenRouter / Moonshot / hosts) |
+| [`docs/setup-glm.md`](docs/setup-glm.md) | Kimi K3 BYOK paths (OpenRouter / Moonshot / hosts) |
 | [`docs/authentication.md`](docs/authentication.md) | OAuth + BYOK dual rail, `auth.json` anti-copy rule |
 | [`docs/onboarding.md`](docs/onboarding.md) | `arcus init` tree, ownership, refresh |
 | [`docs/iris.md`](docs/iris.md) | Iris companion |

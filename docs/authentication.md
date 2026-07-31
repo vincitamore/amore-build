@@ -9,7 +9,7 @@ they do not require each other.
 | **BYOK** (bring your own key) | Any `[model.*]` with its own key, including the Kimi K3 headline path | Env / TOML — **never** needs OAuth |
 
 For the marketed Kimi K3 setup (OpenRouter / Moonshot / hosts), see
-[setup-k3.md](setup-k3.md). For what `arcus init` installs into a repo, see
+[setup-glm.md](setup-glm.md). For what `arcus init` installs into a repo, see
 [onboarding.md](onboarding.md).
 
 ---
@@ -130,7 +130,7 @@ to `ARCUS_*`.
 ### Per-model BYOK in `~/.arcus/config.toml`
 
 Under `[model.<name>]`, prefer `env_key` over a literal `api_key` so secrets stay
-out of the file. Full K3 examples: [setup-k3.md](setup-k3.md).
+out of the file. Full K3 examples: [setup-glm.md](setup-glm.md).
 
 ```toml
 [model.k3-openrouter]
@@ -212,13 +212,13 @@ Credential precedence always prefers a model’s **own** key over the session
 | Auth / 401 loops after copying a home dir | **Do not recopy `auth.json`.** `arcus logout` then `arcus login` on that machine |
 | Headless host, no browser | `arcus login --device-auth` |
 | CI / automation | `XAI_API_KEY` or per-model `env_key` — skip OAuth |
-| “Model has env_key configured but none … are set” | Export the env named in TOML (see [setup-k3.md](setup-k3.md)) |
+| “Model has env_key configured but none … are set” | Export the env named in TOML (see [setup-glm.md](setup-glm.md)) |
 | Want a clean slate | `arcus logout` then login or set keys again |
 
 ---
 
 ## Related
 
-- [setup-k3.md](setup-k3.md) — K3 BYOK paths and multi-provider TOML
+- [setup-glm.md](setup-glm.md) — K3 BYOK paths and multi-provider TOML
 - [onboarding.md](onboarding.md) — `arcus init` house pack (not credentials)
 - Upstream user guide (vendor-shaped detail): `crates/codegen/xai-grok-pager/docs/user-guide/02-authentication.md`

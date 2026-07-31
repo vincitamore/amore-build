@@ -1,102 +1,17 @@
 [
   {
     "category": "features",
-    "description": "**v0.1.0 — first public release.** The Kimi-K3 cooperation harness, with native grok subagent freight: guided first-run setup, `arcus init` agent-house scaffold, `.arcus` config semantics, iris companion seam.",
-    "breaking_change": false
-  },
-  {
-    "category": "fixes",
-    "description": "**Repo-self references restored** — manual-update message names the GitHub Releases URL; SECURITY.md links the private-advisory form; README has the clone URL.",
-    "breaking_change": false
-  },
-  {
-    "category": "fixes",
-    "description": "**Identity sweep** — user-visible command spellings now say `arcus` (login/setup/wrap/…), home paths point to ~/.arcus/, trust warning + agent descriptions + billing copy re-voice to Arcus Build; xAI entitlement wording stays factual.",
+    "description": "**The fork begins.** Arcus Build, re-branded end to end from Selene Build: `ARCUS_*` environment primary, `.arcus` repo config, home `~/.arcus`, binary `arcus`. The upstream `GROK_*` alias chain is left intact.",
     "breaking_change": false
   },
   {
     "category": "features",
-    "description": "**Iris TUI companion seam** — session-cached detect (pointer file then PATH); shortcuts-bar `dash` hint only when present; Ctrl+Shift+D opens `iris dash` in a new OS terminal (never in-process); spawn failure surfaces as a toast.",
-    "breaking_change": false
-  },
-  {
-    "category": "fixes",
-    "description": "**Doctor header re-voice** — human doctor output header is `Arcus Doctor` (was `Grok Doctor`).",
-    "breaking_change": false
-  },
-  {
-    "category": "fixes",
-    "description": "**Setup wizard hardening** — atomic config.toml write (temp+rename); dry-run creates no dirs; --force re-runs past done state; [agent] setup_on_first_run typed (no unrecognized-key warn).",
+    "description": "**The identity is the house, not the model.** Model entries carry `system_prompt_label = \"Arcus Build\"` — a label naming the model would become false the moment the model is swapped.",
     "breaking_change": false
   },
   {
     "category": "features",
-    "description": "**First-run setup wizard + `arcus setup`** — auto-guided TUI when no credentials resolve (K3 provider, Grok rail, Iris pointer); hard guards for headless/CI/disable-config/state; `setup --managed` for team managed config; never auto-fires on `-p`/piped.",
-    "breaking_change": false
-  },
-  {
-    "category": "features",
-    "description": "**ARCUS_* env identity** — product env vars use ARCUS_* primary with GROK_* silent legacy aliases (HOME, DEFAULT_MODEL, SYSTEM_PROMPT_LABEL, AUTH_*, SHELL, CAMPAIGNS, CLI_*, managed-config); XAI_* provider keys unchanged; default home ~/.arcus.",
-    "breaking_change": false
-  },
-  {
-    "category": "features",
-    "description": "**SessionStart additionalContext** — SessionStart hooks emitting hookSpecificOutput.additionalContext inject into session context; .arcus/hooks discovery parity with .grok/hooks.",
-    "breaking_change": false
-  },
-  {
-    "category": "features",
-    "description": "**Binary rename to `arcus`** — public CLI is `arcus` (argv0 also accepts `arcus-build`, `grok`, `agent`); version output names arcus; doctor PATH-collision check for the crates.io Lua-linter name clash.",
-    "breaking_change": true
-  },
-  {
-    "category": "features",
-    "description": "**Default system-prompt label** is `Arcus Build` (overridable per-model / env).",
-    "breaking_change": false
-  },
-  {
-    "category": "fixes",
-    "description": "**Auto-update hard-off** — fork never self-updates to upstream; update surface points at the arcus-build GitHub Releases page; xAI reinstall hints purged.",
-    "breaking_change": false
-  },
-  {
-    "category": "features",
-    "description": "**`arcus init`** — offline install of the embedded cooperation harness into a git repo, with ownership-aware `--refresh`/`--force`, lattice default-on, hooks default-on (`--no-hooks` opt-out), and global hooks-paths registration.",
-    "breaking_change": false
-  },
-  {
-    "category": "features",
-    "description": "**.arcus semantics** — fork-native `.arcus` repo config dir (skills/commands, rules, hooks, workflows, agents, plugins) with `.grok` kept as legacy fallback at every surface.",
-    "breaking_change": false
-  },
-  {
-    "category": "features",
-    "description": "**Dual-rail auth** — BYOK (XAI_API_KEY or per-model env_key / base_url) works with no OAuth grant; not hard-walled behind interactive login.",
-    "breaking_change": false
-  },
-  {
-    "category": "fixes",
-    "description": "**Windows tests** — `parse_login_env_capture` tests cfg-gated to match their unix-only helper.",
-    "breaking_change": false
-  },
-  {
-    "category": "fixes",
-    "description": "**Honest identity** — the system prompt no longer hardcodes \"released by xAI\"; identity comes wholly from `system_prompt_label` (per-model overridable).",
-    "breaking_change": false
-  },
-  {
-    "category": "features",
-    "description": "**Arcus crescent** welcome logo — geometric braille moon and sparkle, both size tiers.",
-    "breaking_change": false
-  },
-  {
-    "category": "features",
-    "description": "Fork home lives at `~/.arcus`; multi-provider BYOK substrate retained (private model pins not shipped as compiled-in defaults).",
-    "breaking_change": false
-  },
-  {
-    "category": "fixes",
-    "description": "**Native Windows build** — protoc probe, `LNK1318` PDB link, stack reserve, harness fixes.",
+    "description": "**A rainbow where the logo goes** — a filled multi-band arc rasterized from geometry, with a per-cell hue map so the shine sweep moves light through the colors. GLM-5.2 is the headline model path; the bundled knowledge instrument is `iris` on :3853.",
     "breaking_change": false
   }
 ]

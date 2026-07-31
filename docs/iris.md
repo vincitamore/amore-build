@@ -207,7 +207,7 @@ expected_asset = "iris-linux-x64"
 ## See also
 
 - [onboarding.md](onboarding.md) — what `arcus init` installs; optional `--with-iris` note
-- [setup-k3.md](setup-k3.md) — headline K3 model path (setup wizard step 1)
+- [setup-glm.md](setup-glm.md) — headline model path (setup wizard step 1)
 - [authentication.md](authentication.md) — OAuth vs BYOK rails (setup wizard step 2)
 - [`instruments/iris/README.md`](../instruments/iris/README.md) — layout, env list, run recipes
 - [`UPSTREAM.md`](../UPSTREAM.md) — fork delta summary (iris called out as companion)

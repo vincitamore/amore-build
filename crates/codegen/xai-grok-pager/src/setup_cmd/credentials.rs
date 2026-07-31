@@ -159,10 +159,10 @@ mod tests {
         fs::write(
             &path,
             r#"
-[model.k3]
-model = "moonshotai/kimi-k3"
+[model.glm]
+model = "z-ai/glm-5.2"
 api_key = "sk-test"
-system_prompt_label = "Kimi K3"
+system_prompt_label = "Arcus Build"
 "#,
         )
         .unwrap();
@@ -177,10 +177,10 @@ system_prompt_label = "Kimi K3"
         fs::write(
             &path,
             r#"
-[model.k3]
-model = "moonshotai/kimi-k3"
+[model.glm]
+model = "z-ai/glm-5.2"
 env_key = "ARCUS_WIZARD_TEST_ENV_KEY_UNSET_ZZZ"
-system_prompt_label = "Kimi K3"
+system_prompt_label = "Arcus Build"
 "#,
         )
         .unwrap();

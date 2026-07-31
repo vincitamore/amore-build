@@ -12,20 +12,76 @@ use ratatui::widgets::{Paragraph, Widget};
 use crate::render::color::blend_color;
 use crate::theme::Theme;
 
-const LOGO: &str = include_str!("../../../assets/logo/logo07.txt");
-const LOGO_SMALL: &str = include_str!("../../../assets/logo/logo05.txt");
+/// Braille art paired with its per-cell hue map. Both are generated together
+/// by `scripts/gen_arcus.py` and must stay in lockstep: the hue file has one
+/// character per cell (`0`–`6` naming a band, `.` for an unlit cell) on lines
+/// padded to the same width as the art.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+struct Art {
+    cells: &'static str,
+    hues: &'static str,
+}
+
+const LOGO: Art = Art {
+    cells: include_str!("../../../assets/logo/logo07.txt"),
+    hues: include_str!("../../../assets/logo/logo07.hue.txt"),
+};
+const LOGO_SMALL: Art = Art {
+    cells: include_str!("../../../assets/logo/logo05.txt"),
+    hues: include_str!("../../../assets/logo/logo05.hue.txt"),
+};
+
+/// Primary-bow palette, outermost band first — red outside, violet inside, the
+/// way a real bow orders them. Indices match the digits in the hue map.
+const BOW: [(u8, u8, u8); 7] = [
+    (219, 78, 66),   // red
+    (226, 132, 51),  // orange
+    (222, 188, 62),  // yellow
+    (104, 184, 96),  // green
+    (72, 148, 219),  // blue
+    (88, 101, 196),  // indigo
+    (150, 94, 201),  // violet
+];
+
+/// Resting scale for a band color — the logo sits at this dimmed level between
+/// shine sweeps, so the art reads as colored rather than glaring.
+const REST: f32 = 0.58;
+/// How far the shine peak lifts a band toward white.
+const LIFT: f32 = 0.42;
+
+/// Quantize `c` to the 256-color palette when the theme has been quantized —
+/// an `Indexed` theme color is the signal that the terminal cannot take raw
+/// RGB. Blending fully toward `c` against an indexed base reuses
+/// `blend_color`'s own quantization rather than duplicating it.
+fn adapt(theme: &Theme, c: Color) -> Color {
+    match theme.gray {
+        Color::Indexed(_) => blend_color(Color::Indexed(0), c, 1.0).unwrap_or(c),
+        _ => c,
+    }
+}
+
+/// Resting and full-shine colors for hue digit `h`.
+fn band_colors(theme: &Theme, h: u8) -> (Color, Color) {
+    let (r, g, b) = BOW[(h as usize).min(BOW.len() - 1)];
+    let dim = |v: u8| (v as f32 * REST) as u8;
+    let lift = |v: u8| (v as f32 + (255.0 - v as f32) * LIFT) as u8;
+    (
+        adapt(theme, Color::Rgb(dim(r), dim(g), dim(b))),
+        adapt(theme, Color::Rgb(lift(r), lift(g), lift(b))),
+    )
+}
 
 /// Height at or above which the small logo is shown (below it, no logo).
 const SMALL_LOGO_MIN_HEIGHT: u16 = 22;
 /// Height at or above which the full logo is shown.
 const FULL_LOGO_MIN_HEIGHT: u16 = 26;
 
-fn pick_logo(window_height: u16) -> Option<&'static str> {
+fn pick_logo(window_height: u16) -> Option<Art> {
     pick_logo_for(window_height, logo_hidden())
 }
 
 /// Pure tier selection so tests can drive the legacy-console flag directly.
-fn pick_logo_for(window_height: u16, hidden: bool) -> Option<&'static str> {
+fn pick_logo_for(window_height: u16, hidden: bool) -> Option<Art> {
     if hidden || window_height < SMALL_LOGO_MIN_HEIGHT {
         None
     } else if window_height < FULL_LOGO_MIN_HEIGHT {
@@ -107,8 +163,15 @@ fn shine_opacity(diag: f32, secs: f32) -> f32 {
     (pulse + SHINE * shine).clamp(0.0, 1.0)
 }
 
-fn render_into(area: Rect, buf: &mut Buffer, theme: &Theme, logo: &str) {
-    let lines: Vec<&str> = non_empty_lines(logo).collect();
+fn render_into(area: Rect, buf: &mut Buffer, theme: &Theme, logo: Art) {
+    let lines: Vec<&str> = non_empty_lines(logo.cells).collect();
+    let hue_rows: Vec<Vec<u8>> = non_empty_lines(logo.hues)
+        .map(|l| {
+            l.chars()
+                .map(|c| c.to_digit(10).map_or(u8::MAX, |d| d as u8))
+                .collect()
+        })
+        .collect();
     let rows = lines.len().max(1) as f32;
     let cols = lines
         .iter()
@@ -118,12 +181,11 @@ fn render_into(area: Rect, buf: &mut Buffer, theme: &Theme, logo: &str) {
         .max(1) as f32;
     let secs = anim_phase_secs();
 
-    // Blend each glyph from the resting gray toward the bright text color by its
-    // shine opacity, so a sheen sweeps across the braille art. Adjacent glyphs
-    // that land on the same blended color share one Span to hold down the
-    // per-frame allocation.
-    let base = theme.gray;
-    let hilite = theme.text_primary;
+    // Each glyph belongs to a band of the bow and blends from that band's
+    // resting color toward its lit color by the shine opacity, so the sweep
+    // reads as light moving through the colors rather than a gray sheen.
+    // Adjacent glyphs that land on the same blended color share one Span to
+    // hold down the per-frame allocation.
     let logo_lines: Vec<Line> = lines
         .iter()
         .enumerate()
@@ -135,7 +197,17 @@ fn render_into(area: Rect, buf: &mut Buffer, theme: &Theme, logo: &str) {
                 // Sweep along the bottom-left → top-right diagonal: the
                 // coordinate grows as col increases and row decreases.
                 let diag = (col as f32 + (rows - 1.0 - row as f32)) / (cols + rows);
-                let color = blend_color(base, hilite, shine_opacity(diag, secs)).unwrap_or(base);
+                // An unlit cell (`.` in the hue map, or a hue map shorter than
+                // the art) keeps the theme gray; the glyph there is blank
+                // anyway, so the color is never actually seen.
+                let hue = hue_rows.get(row).and_then(|r| r.get(col)).copied();
+                let color = match hue {
+                    Some(h) if h < BOW.len() as u8 => {
+                        let (rest, lit) = band_colors(theme, h);
+                        blend_color(rest, lit, shine_opacity(diag, secs)).unwrap_or(rest)
+                    }
+                    _ => theme.gray,
+                };
                 if run_color != Some(color) {
                     if let Some(prev) = run_color {
                         spans.push(Span::styled(
@@ -157,11 +229,11 @@ fn render_into(area: Rect, buf: &mut Buffer, theme: &Theme, logo: &str) {
 }
 
 pub fn logo_line_count(window_height: u16) -> u16 {
-    pick_logo(window_height).map_or(0, count_lines)
+    pick_logo(window_height).map_or(0, |a| count_lines(a.cells))
 }
 
 pub fn logo_visual_width(window_height: u16) -> u16 {
-    pick_logo(window_height).map_or(24, visual_width)
+    pick_logo(window_height).map_or(24, |a| visual_width(a.cells))
 }
 
 pub fn render_logo(area: Rect, buf: &mut Buffer, theme: &Theme, window_height: u16) {
@@ -179,7 +251,7 @@ pub fn full_logo_line_count() -> u16 {
 }
 
 fn full_logo_line_count_for(hidden: bool) -> u16 {
-    if hidden { 0 } else { count_lines(LOGO) }
+    if hidden { 0 } else { count_lines(LOGO.cells) }
 }
 
 pub fn full_logo_visual_width() -> u16 {
@@ -187,7 +259,7 @@ pub fn full_logo_visual_width() -> u16 {
 }
 
 fn full_logo_visual_width_for(hidden: bool) -> u16 {
-    if hidden { 0 } else { visual_width(LOGO) }
+    if hidden { 0 } else { visual_width(LOGO.cells) }
 }
 
 pub fn render_full_logo(area: Rect, buf: &mut Buffer, theme: &Theme) {
@@ -202,7 +274,7 @@ pub fn compact_logo_line_count() -> u16 {
     if logo_hidden() {
         0
     } else {
-        count_lines(LOGO_SMALL)
+        count_lines(LOGO_SMALL.cells)
     }
 }
 
@@ -245,10 +317,10 @@ mod tests {
     fn hero_box_always_uses_full_logo() {
         // The box renders the full logo regardless of height (it's laid out
         // beside the menu), and it's the large variant — never the small one.
-        assert_eq!(full_logo_line_count_for(false), count_lines(LOGO));
-        assert_eq!(full_logo_visual_width_for(false), visual_width(LOGO));
-        assert!(full_logo_line_count_for(false) > count_lines(LOGO_SMALL));
-        assert!(full_logo_visual_width_for(false) > visual_width(LOGO_SMALL));
+        assert_eq!(full_logo_line_count_for(false), count_lines(LOGO.cells));
+        assert_eq!(full_logo_visual_width_for(false), visual_width(LOGO.cells));
+        assert!(full_logo_line_count_for(false) > count_lines(LOGO_SMALL.cells));
+        assert!(full_logo_visual_width_for(false) > visual_width(LOGO_SMALL.cells));
     }
 
     #[test]
@@ -263,11 +335,61 @@ mod tests {
         // the logo isn't hidden, the count equals the small art's line count and
         // is strictly shorter than the full logo.
         if !logo_hidden() {
-            assert_eq!(compact_logo_line_count(), count_lines(LOGO_SMALL));
-            assert!(compact_logo_line_count() < count_lines(LOGO));
+            assert_eq!(compact_logo_line_count(), count_lines(LOGO_SMALL.cells));
+            assert!(compact_logo_line_count() < count_lines(LOGO.cells));
             assert!(compact_logo_line_count() > 0);
         } else {
             assert_eq!(compact_logo_line_count(), 0);
+        }
+    }
+
+    // The art and its hue map are two files generated from one shape. Nothing
+    // in the type system holds them together, so regenerating one without the
+    // other would silently mis-color the bow — or drop it to gray — with every
+    // other test still green. This is the pin.
+    #[test]
+    fn hue_map_matches_art_cell_for_cell() {
+        for (name, art) in [("logo07", LOGO), ("logo05", LOGO_SMALL)] {
+            let cells: Vec<&str> = non_empty_lines(art.cells).collect();
+            let hues: Vec<&str> = non_empty_lines(art.hues).collect();
+            assert_eq!(
+                cells.len(),
+                hues.len(),
+                "{name}: art has {} rows, hue map has {}",
+                cells.len(),
+                hues.len()
+            );
+            for (row, (c, h)) in cells.iter().zip(&hues).enumerate() {
+                let (cw, hw) = (c.chars().count(), h.chars().count());
+                assert_eq!(cw, hw, "{name} row {row}: {cw} cells vs {hw} hues");
+                for (col, (glyph, hue)) in c.chars().zip(h.chars()).enumerate() {
+                    // U+2800 is the blank braille cell used for padding.
+                    let lit = glyph != '\u{2800}';
+                    let hued = hue != '.';
+                    assert_eq!(
+                        lit, hued,
+                        "{name} row {row} col {col}: glyph {glyph:?} lit={lit} \
+                         but hue {hue:?} hued={hued}"
+                    );
+                    if hued {
+                        let d = hue.to_digit(10).unwrap_or(99) as usize;
+                        assert!(d < BOW.len(), "{name} row {row} col {col}: band {d}");
+                    }
+                }
+            }
+        }
+    }
+
+    // The pty e2e probe asserts these two glyphs survive the terminal writer.
+    // Regenerating the art with different geometry could drop them and turn
+    // that test into a false negative about code-page handling.
+    #[test]
+    fn art_contains_the_pty_probe_glyphs() {
+        for ch in ['⣷', '⣿'] {
+            assert!(
+                LOGO.cells.contains(ch),
+                "logo07 lost the pty probe glyph {ch:?}"
+            );
         }
     }
 

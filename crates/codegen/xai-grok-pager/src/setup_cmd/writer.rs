@@ -1,6 +1,6 @@
 //! Config.toml writer for first-run wizard model entries.
 //!
-//! Field set matches `ConfigModelOverride` + `docs/setup-k3.md` (wave-3
+//! Field set matches `ConfigModelOverride` + `docs/setup-glm.md` (wave-3
 //! schema-verified shapes). `system_prompt_label` is mandatory on every write.
 
 use std::path::Path;
@@ -10,7 +10,7 @@ use anyhow::{Context, Result, bail};
 /// A planned `[model.<id>]` block.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModelEntryPlan {
-    /// Catalog / config id (table key), e.g. `k3-openrouter`.
+    /// Catalog / config id (table key), e.g. `glm-openrouter`.
     pub id: String,
     pub model: String,
     pub base_url: String,
@@ -23,31 +23,40 @@ pub struct ModelEntryPlan {
     pub set_as_default: bool,
 }
 
+/// The identity written into every model entry this wizard creates.
+///
+/// Deliberately names the harness and nothing else. Upstream resolves
+/// `You are <label>` from this field, and the tempting thing to write is the
+/// model — but a label naming the model is a lie the moment the model is
+/// swapped, and the config it lives in is per-model already. Naming the house
+/// keeps the sentence true under every resident.
+const HOUSE_LABEL: &str = "Arcus Build";
+
 impl ModelEntryPlan {
-    /// OpenRouter path — recommended public on-ramp (`docs/setup-k3.md` §1).
+    /// OpenRouter path — recommended public on-ramp (`docs/setup-glm.md` §1).
     pub fn openrouter() -> Self {
         Self {
-            id: "k3-openrouter".into(),
-            model: "moonshotai/kimi-k3".into(),
+            id: "glm-openrouter".into(),
+            model: "z-ai/glm-5.2".into(),
             base_url: "https://openrouter.ai/api/v1".into(),
-            name: "Kimi K3 (OpenRouter)".into(),
+            name: "GLM-5.2 (OpenRouter)".into(),
             env_key: "OPENROUTER_API_KEY".into(),
-            system_prompt_label: "Kimi K3 (via OpenRouter)".into(),
+            system_prompt_label: HOUSE_LABEL.into(),
             context_window: 1_048_576,
             max_completion_tokens: 16_384,
             set_as_default: true,
         }
     }
 
-    /// Moonshot direct (`docs/setup-k3.md` §2).
-    pub fn moonshot() -> Self {
+    /// Z.ai direct (`docs/setup-glm.md` §2).
+    pub fn zai() -> Self {
         Self {
-            id: "k3-moonshot".into(),
-            model: "kimi-k3".into(),
-            base_url: "https://api.moonshot.ai/v1".into(),
-            name: "Kimi K3 (Moonshot)".into(),
-            env_key: "MOONSHOT_API_KEY".into(),
-            system_prompt_label: "Kimi K3 (via Moonshot)".into(),
+            id: "glm-zai".into(),
+            model: "glm-5.2".into(),
+            base_url: "https://api.z.ai/api/paas/v4".into(),
+            name: "GLM-5.2 (Z.ai)".into(),
+            env_key: "ZAI_API_KEY".into(),
+            system_prompt_label: HOUSE_LABEL.into(),
             context_window: 1_048_576,
             max_completion_tokens: 16_384,
             set_as_default: true,
@@ -57,12 +66,12 @@ impl ModelEntryPlan {
     /// Open-weight host — user supplies base URL + env key + wire model id.
     pub fn open_weight(base_url: String, env_key: String, model: String) -> Self {
         Self {
-            id: "k3-openweight".into(),
+            id: "openweight".into(),
             model,
             base_url,
-            name: "Kimi K3 (open-weight host)".into(),
+            name: "Open-weight host".into(),
             env_key,
-            system_prompt_label: "Kimi K3 (via open-weight host)".into(),
+            system_prompt_label: HOUSE_LABEL.into(),
             context_window: 1_048_576,
             max_completion_tokens: 16_384,
             set_as_default: true,
@@ -260,13 +269,13 @@ mod tests {
         fs::write(&path, "[ui]\ntheme = \"dark\"\n").unwrap();
         let plan = ModelEntryPlan::openrouter();
         let report = write_model_entry(&path, &plan, false).unwrap();
-        assert_eq!(report.model_id, "k3-openrouter");
+        assert_eq!(report.model_id, "glm-openrouter");
         let body = fs::read_to_string(&path).unwrap();
         assert!(body.contains("theme"), "must preserve siblings: {body}");
-        assert!(body.contains("moonshotai/kimi-k3"), "{body}");
+        assert!(body.contains("z-ai/glm-5.2"), "{body}");
         assert!(body.contains("OPENROUTER_API_KEY"), "{body}");
         assert!(body.contains("system_prompt_label"), "{body}");
-        assert!(body.contains("Kimi K3 (via OpenRouter)"), "{body}");
+        assert!(body.contains("Arcus Build"), "{body}");
         assert!(body.contains("default"), "{body}");
         assert!(body.contains("1048576") || body.contains("1_048_576"), "{body}");
     }
@@ -275,7 +284,7 @@ mod tests {
     fn dry_run_writes_nothing() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("config.toml");
-        write_model_entry(&path, &ModelEntryPlan::moonshot(), true).unwrap();
+        write_model_entry(&path, &ModelEntryPlan::zai(), true).unwrap();
         assert!(!path.exists());
     }
 
@@ -298,7 +307,7 @@ mod tests {
         fs::write(&path, "[ui]\ntheme = \"dark\"\n").unwrap();
         write_model_entry(&path, &ModelEntryPlan::openrouter(), false).unwrap();
         let body = fs::read_to_string(&path).unwrap();
-        assert!(body.contains("k3-openrouter"), "{body}");
+        assert!(body.contains("glm-openrouter"), "{body}");
         assert!(body.contains("theme"), "sibling preserved: {body}");
         // No leftover temp files from atomic write.
         let leftovers: Vec<_> = fs::read_dir(dir.path())
