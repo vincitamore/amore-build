@@ -1,8 +1,10 @@
-//! Arcus theme — deep indigo-charcoal base, silver-moonlight accent.
+//! Arcus theme — rain-dark ground, light resolved against it.
 //!
-//! A dark only theme in the house of night themes: cool tinted backgrounds
-//! like TokyoNight/Oscura, but the accent hue moves off magenta/blue onto a
-//! pale silver "moonbeam", with a muted gold user accent (borrowed sunlight).
+//! A dark-only theme in the house of night themes: cool tinted backgrounds
+//! like TokyoNight/Oscura. The ground is the storm side of the sky, which is
+//! what a bow is always seen against; the accents are drawn off the bow
+//! itself, blue where refraction bends hardest and gold for the incident
+//! light that has not been divided yet.
 
 use ratatui::style::{Color, Modifier};
 
@@ -13,7 +15,7 @@ const fn rgb(r: u8, g: u8, b: u8) -> Color {
     Color::Rgb(r, g, b)
 }
 
-// Arcus palette — night-sky blues with a silver lunar accent.
+// Arcus palette — rain-dark blues, accents taken from the bow.
 #[allow(dead_code)]
 mod palette {
     use super::*;
@@ -28,7 +30,7 @@ mod palette {
     pub const BG_VISUAL: Color = rgb(44, 52, 74); // #2c344a
 
     // ── Text / grays ────────────────────────────────────────────────────
-    pub const FG: Color = rgb(211, 218, 240); // #d3daf0 — moon-silver, primary text
+    pub const FG: Color = rgb(211, 218, 240); // #d3daf0 — rain-light, primary text
     pub const FG_DARK: Color = rgb(173, 182, 212); // #adb6d4 — secondary text
     pub const FG_GUTTER: Color = rgb(63, 69, 94); // #3f455e — dim
     pub const COMMENT: Color = rgb(97, 106, 138); // #616a8a — muted slate-blue
@@ -36,8 +38,9 @@ mod palette {
     pub const DARK5: Color = rgb(124, 134, 166); // #7c86a6 — bright gray
 
     // ── Accents ─────────────────────────────────────────────────────────
-    pub const GOLD: Color = rgb(217, 198, 155); // #d9c69b — user; borrowed sunlight
-    pub const MOONBEAM: Color = rgb(159, 184, 242); // #9fb8f2 — assistant/thinking
+    pub const GOLD: Color = rgb(217, 198, 155); // #d9c69b — user; the incident light
+    // Blue refracts hardest, which is why it rides the inner edge of a primary bow.
+    pub const REFRACT: Color = rgb(159, 184, 242); // #9fb8f2 — assistant/thinking
     pub const STEEL: Color = rgb(114, 134, 168); // #7286a8 — system blue-gray
     pub const SKILL_BLUE: Color = rgb(143, 184, 216); // #8fb8d8 — skill accents
     pub const SOFT_RED: Color = rgb(229, 123, 140); // #e57b8c
@@ -58,7 +61,7 @@ mod palette {
 use palette::*;
 
 impl Theme {
-    /// Arcus theme — moonlit dark; silver-lunar accents, gold user accent.
+    /// Arcus theme — rain-dark ground; bow-blue accents, gold user accent.
     ///
     /// Colors are defined in RGB. Call [`Theme::quantized`] to downgrade
     /// them to the terminal's supported color level before rendering.
@@ -72,13 +75,13 @@ impl Theme {
             bg_terminal: BG,
 
             accent_user: GOLD,
-            accent_assistant: MOONBEAM,
-            accent_thinking: MOONBEAM,
+            accent_assistant: REFRACT,
+            accent_thinking: REFRACT,
             accent_tool: DARK5,
             accent_system: STEEL,
             accent_error: SOFT_RED,
             accent_success: SOFT_GREEN,
-            accent_running: MOONBEAM,
+            accent_running: REFRACT,
             accent_skill: SKILL_BLUE,
 
             text_primary: FG,
@@ -93,7 +96,7 @@ impl Theme {
             running: RUNNING_CYAN,
             warning: COMMAND_GOLD,
 
-            fuzzy_accent: MOONBEAM,
+            fuzzy_accent: REFRACT,
 
             accent_plan: PLAN_GOLD,
 
@@ -126,7 +129,7 @@ impl Theme {
             paste_fg: FG_DARK,
             paste_dim: FG_GUTTER,
 
-            md_heading_h1: MOONBEAM,
+            md_heading_h1: REFRACT,
             md_heading_h1_mod: Modifier::BOLD,
             md_heading_h2: SKILL_BLUE,
             md_heading_h2_mod: Modifier::BOLD,

@@ -56,7 +56,7 @@ pub enum Command {
     Models,
     /// List, search, or restore sessions
     Sessions(crate::sessions_cmd::SessionsArgs),
-    /// First-run credentials setup (K3 provider + Grok rail + Iris).
+    /// First-run credentials setup (model provider + Grok rail + Iris).
     ///
     /// Team managed configuration: `arcus setup --managed` (or legacy
     /// `arcus setup --json`).

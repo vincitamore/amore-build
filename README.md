@@ -1,16 +1,16 @@
 # Arcus Build
 
 <pre>
-⠀⠀⢀⣠⣴⠆⠀⠀⠀⠀⡀⠀⠀
-⠀⣴⣿⣿⣿⠀⠀⠀⠠⢴⣷⠤⠀
-⣼⣿⣿⣿⣿⠀⠀⠀⠀⠀⠃⠀⠀
-⣿⣿⣿⣿⣿⣧⠀⠀⠀⠀⠀⠀⠀
-⢻⣿⣿⣿⣿⣿⣷⣤⣀⠀⠀⠀⠀
-⠀⠻⣿⣿⣿⣿⣿⣿⣿⣿⣿⠟⠀
-⠀⠀⠈⠙⠻⠿⠿⠿⠟⠋⠁⠀⠀
+⠀⠀⠀⠀⢀⣀⣤⣤⣶⣶⣶⣶⣶⣤⣤⣀⡀⠀⠀⠀⠀
+⠀⢀⣴⣾⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣿⣷⣦⡀⠀
+⣶⣿⣿⣿⣿⣿⣿⣿⡿⠿⠿⠿⢿⣿⣿⣿⣿⣿⣿⣿⣶
+⣿⣿⣿⣿⡿⠛⠉⠀⠀⠀⠀⠀⠀⠀⠉⠛⢿⣿⣿⣿⣿
+⣿⣿⡿⠋⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠙⢿⣿⣿
+⣿⡿⠁⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠈⢿⣿
+⣿⠃⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠘⣿
 </pre>
 
-**the Kimi-K3 cooperation harness, with native grok subagent freight**
+**a terminal coding agent that is not a wrapper around one model**
 
 Arcus Build (`arcus`) is a terminal AI coding agent: a full-screen TUI that
 understands your codebase, edits files, runs shell commands, searches the web,
@@ -19,10 +19,11 @@ scripting/CI, or embedded in editors via ACP.
 
 It is a **permanent engineered fork** of xAI's open-source
 [`grok-build`](https://github.com/xai-org/grok-build) (Apache-2.0). **Not an
-xAI product. Not a Moonshot product.** Upstream provenance and sync cadence:
+xAI product, and not affiliated with any model vendor.** Upstream provenance
+and sync cadence:
 [`UPSTREAM.md`](UPSTREAM.md).
 
-![Arcus Build — the welcome screen, with a Kimi K3 model configured](docs/assets/welcome.png)
+![Arcus Build — the welcome screen](docs/assets/welcome.png)
 
 ---
 
@@ -72,11 +73,12 @@ is kept as a legacy fallback; `.arcus` wins when both exist).
 
 ---
 
-## Quickstart — Kimi K3 first
+## Quickstart
 
-The default model path is **Kimi K3** (OpenRouter, Moonshot direct,
-or an open-weight/Modal-style host). Native xAI grok is the **second rail**
-(subagent freight + first-party catalog).
+The shipped default is **GLM-5.2** over OpenRouter, but nothing here is bound
+to it: any OpenAI-compatible endpoint works, and the identity the model is
+given does not name a model at all (see below). Native xAI grok is the
+**second rail** (subagent freight + first-party catalog).
 
 ### Guided path (recommended)
 
@@ -98,39 +100,45 @@ done/skipped under `~/.arcus`. Team managed config is a separate path:
 ### Manual paths (condensed)
 
 Config: `~/.arcus/config.toml`. Prefer `env_key` over a literal `api_key`.
-**Every** custom `[model.*]` block for K3 **must** set `system_prompt_label`
-(unlabeled models resolve to the product default identity and play the wrong
-persona).
+**Every** custom `[model.*]` block **must** set `system_prompt_label` —
+an unlabeled model falls through the resolver chain to a default and will
+confidently answer to the wrong name.
+
+Give that label the **harness and the role, not the model**. Upstream renders
+it as `You are <label>`, so a label naming the model becomes false the moment
+you point the entry at a different one — and the block it lives in is
+per-model already, so the model name is never the thing missing.
 
 | Path | Model id (wire) | Base URL | Env |
 |------|-----------------|----------|-----|
-| **OpenRouter** (lowest friction) | `moonshotai/kimi-k3` | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` |
-| **Moonshot direct** | `kimi-k3` | `https://api.moonshot.ai/v1` | `MOONSHOT_API_KEY` |
-| **Open-weight / Modal-style** | host-specific | your OpenAI-compatible `/v1` base | host token env |
+| **OpenRouter** (lowest friction) | `z-ai/glm-5.2` | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` |
+| **Z.ai direct** | `glm-5.2` | `https://api.z.ai/api/paas/v4` | `ZAI_API_KEY` |
+| **Any OpenAI-compatible host** | host-specific | your `/v1` base | host token env |
 
 Minimal OpenRouter sketch:
 
 ```toml
 [models]
-default = "k3-openrouter"
+default = "glm-openrouter"
 
-[model.k3-openrouter]
-model = "moonshotai/kimi-k3"
+[model.glm-openrouter]
+model = "z-ai/glm-5.2"
 base_url = "https://openrouter.ai/api/v1"
-name = "Kimi K3 (OpenRouter)"
+name = "GLM-5.2 (OpenRouter)"
 env_key = "OPENROUTER_API_KEY"
-system_prompt_label = "Kimi K3, a Moonshot AI model"
+system_prompt_label = "Arcus Build"
 context_window = 1048576
-max_completion_tokens = 16384
+# Reasoning tokens count against this. Too tight truncates mid-thought.
+max_completion_tokens = 32768
 ```
 
-Full recipes, pricing stamps, Modal/Together/Fireworks hosts, and verify
-commands: [`docs/setup-glm.md`](docs/setup-glm.md). Multi-provider sample:
+Full recipes, pricing stamps, alternate hosts, and verify commands:
+[`docs/setup-glm.md`](docs/setup-glm.md). Multi-provider sample:
 [`examples/config.multi-provider.toml`](examples/config.multi-provider.toml).
 
 ```sh
 export OPENROUTER_API_KEY="sk-or-..."   # your key
-arcus -m k3-openrouter -p "Reply with exactly: K3-OR-OK"
+arcus -m glm-openrouter -p "Reply with exactly: ARCUS-OR-OK"
 ```
 
 ---
@@ -138,7 +146,7 @@ arcus -m k3-openrouter -p "Reply with exactly: K3-OR-OK"
 ## Grok native (second rail)
 
 Native grok subagent freight and first-party xAI models ride a **separate**
-credential rail from K3 BYOK:
+credential rail from your BYOK model:
 
 ```sh
 arcus login                 # browser OAuth (PKCE) against xAI
@@ -147,7 +155,7 @@ arcus login --device-auth   # device-code for headless / remote
 export XAI_API_KEY="xai-..." # console key; no OAuth required
 ```
 
-K3 primary + grok freight = **two meters, two credentials**. BYOK models
+BYOK primary + grok freight = **two meters, two credentials**. BYOK models
 never require OAuth; session JWT is never sent to foreign hosts. Details:
 [`docs/authentication.md`](docs/authentication.md).
 
@@ -187,7 +195,7 @@ UI. Pointer and install story: [`docs/iris.md`](docs/iris.md).
 
 | Doc | What |
 |-----|------|
-| [`docs/setup-glm.md`](docs/setup-glm.md) | Kimi K3 BYOK paths (OpenRouter / Moonshot / hosts) |
+| [`docs/setup-glm.md`](docs/setup-glm.md) | BYOK model paths (OpenRouter / Z.ai / any OpenAI-compatible host) |
 | [`docs/authentication.md`](docs/authentication.md) | OAuth + BYOK dual rail, `auth.json` anti-copy rule |
 | [`docs/onboarding.md`](docs/onboarding.md) | `arcus init` tree, ownership, refresh |
 | [`docs/iris.md`](docs/iris.md) | Iris companion |

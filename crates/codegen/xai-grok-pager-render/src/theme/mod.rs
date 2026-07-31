@@ -117,7 +117,7 @@ impl ThemeKind {
                 Some(Self::RosePineMoon)
             }
             "oscura" | "oscura-midnight" => Some(Self::OscuraMidnight),
-            "arcus" | "arcus-night" | "moon" => Some(Self::Arcus),
+            "arcus" | "arcus-night" | "bow" => Some(Self::Arcus),
             _ => None,
         }
     }

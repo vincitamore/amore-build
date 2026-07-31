@@ -5,7 +5,7 @@ created: 2026-07-30
 
 # House scaffold
 
-Root index for a **Arcus Build** house — a continuous working tree for
+Root index for an **Arcus Build** house — a continuous working tree for
 long-running multi-session agent work. Continuity lives in architecture, not
 in any single model's memory.
 

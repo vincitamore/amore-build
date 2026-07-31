@@ -249,10 +249,10 @@ jobs:
             if [ -f "$NOTES" ]; then
               cat "$NOTES"
             else
-              echo "The Kimi-K3 cooperation harness, with native grok subagent freight."
+              echo "A terminal coding agent that is not a wrapper around one model."
               echo
               echo "A permanent engineered fork of xAI's open-source grok-build"
-              echo "(Apache-2.0). Not an xAI product. Not a Moonshot product."
+              echo "(Apache-2.0). Not an xAI product, and not affiliated with any model vendor."
             fi
             echo
             echo "## Asset map"

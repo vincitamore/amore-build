@@ -6,9 +6,9 @@ they do not require each other.
 | Rail | What it covers | How you enroll |
 |------|----------------|----------------|
 | **OAuth session** (`arcus login`) | First-party model catalog + native grok subagent freight | Interactive browser (PKCE) or device-code |
-| **BYOK** (bring your own key) | Any `[model.*]` with its own key, including the Kimi K3 headline path | Env / TOML — **never** needs OAuth |
+| **BYOK** (bring your own key) | Any `[model.*]` with its own key, including the headline GLM-5.2 path | Env / TOML — **never** needs OAuth |
 
-For the marketed Kimi K3 setup (OpenRouter / Moonshot / hosts), see
+For the headline model setup (OpenRouter / Z.ai / any OpenAI-compatible host), see
 [setup-glm.md](setup-glm.md). For what `arcus init` installs into a repo, see
 [onboarding.md](onboarding.md).
 
@@ -130,14 +130,15 @@ to `ARCUS_*`.
 ### Per-model BYOK in `~/.arcus/config.toml`
 
 Under `[model.<name>]`, prefer `env_key` over a literal `api_key` so secrets stay
-out of the file. Full K3 examples: [setup-glm.md](setup-glm.md).
+out of the file. Full examples: [setup-glm.md](setup-glm.md).
 
 ```toml
-[model.k3-openrouter]
-model = "moonshotai/kimi-k3"
+[model.glm-openrouter]
+model = "z-ai/glm-5.2"
 base_url = "https://openrouter.ai/api/v1"
 env_key = "OPENROUTER_API_KEY"
-system_prompt_label = "Kimi K3, a Moonshot AI model"
+# The harness and the role — never the model. See setup-glm.md.
+system_prompt_label = "Arcus Build"
 ```
 
 | Field | Role | Source |

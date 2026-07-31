@@ -1,17 +1,22 @@
 # Arcus Build — multi-provider example config
 # Copy fields you need into ~/.arcus/config.toml (or $GROK_HOME/config.toml).
 #
-# Product posture: K3 is the headline path; native grok is
-# the second rail (login / XAI_API_KEY). Baked catalog grok-4.5 is technical
-# fallback only — not the default.
+# Product posture: the shipped default is GLM-5.2 over OpenRouter, but the
+# harness is not a wrapper around any one model. Native grok is the second
+# rail (login / XAI_API_KEY). Baked catalog grok-4.5 is technical fallback
+# only — not the default.
 #
-# EVERY custom [model.*] MUST set system_prompt_label. Unlabeled models resolve
-# to the product default identity and play the wrong persona.
+# EVERY custom [model.*] MUST set system_prompt_label. Unlabeled models
+# resolve to the product default identity and play the wrong persona in tool
+# loops. The label names the harness and the role, never the model or its
+# lab — see docs/setup-glm.md for the full identity-rule doctrine and why
+# every block below uses "Arcus Build" regardless of which model it points
+# at.
 #
 # Prefer env_key over literal api_key. Each env_key comment names the process
 # environment variable that must be set before `arcus` runs.
 #
-# Pricing / availability notes in docs/setup-glm.md are as of 2026-07-30;
+# Pricing / availability notes in docs/setup-glm.md are as of 2026-07-31;
 # re-verify before relying on them.
 #
 # Schema: [model.<id>] → ConfigModelOverride
@@ -20,14 +25,12 @@
 #   crates/codegen/xai-grok-shell/src/agent/model_providers.rs
 
 # ---------------------------------------------------------------------------
-# Default: pick ONE headline K3 path after you set the matching env var.
+# Default: pick ONE headline path after you set the matching env var.
 # ---------------------------------------------------------------------------
 [models]
-default = "k3-openrouter"
-# default = "k3-moonshot"
-# default = "k3-together"
-# default = "k3-fireworks"
-# default = "k3-modal"
+default = "glm-openrouter"
+# default = "glm-zai"
+# default = "openweight"
 # default = "grok-4.5"   # technical fallback / freight only — not marketed default
 
 # ---------------------------------------------------------------------------
@@ -41,85 +44,52 @@ env_key = "OPENROUTER_API_KEY"
 # extra_headers = { "HTTP-Referer" = "https://example.com", "X-Title" = "Arcus Build" }
 
 # ---------------------------------------------------------------------------
-# (1) K3 via OpenRouter — preferred on-ramp
-# Wire model id: moonshotai/kimi-k3
+# (1) GLM-5.2 via OpenRouter — preferred on-ramp
+# Wire model id: z-ai/glm-5.2
 # env: OPENROUTER_API_KEY  (https://openrouter.ai/keys)
-# Probe: arcus -m k3-openrouter -p "Reply with exactly: K3-OR-OK"
+# Probe: arcus -m glm-openrouter -p "Reply with exactly: ARCUS-OR-OK"
 # ---------------------------------------------------------------------------
-[model.k3-openrouter]
-model = "moonshotai/kimi-k3"
+[model.glm-openrouter]
+model = "z-ai/glm-5.2"
 model_provider = "openrouter"
-name = "Kimi K3 (OpenRouter)"
-system_prompt_label = "Kimi K3, a Moonshot AI model"
+name = "GLM-5.2 (OpenRouter)"
+system_prompt_label = "Arcus Build"
 context_window = 1048576
-max_completion_tokens = 16384
+# Reasoning tokens count against this cap. OpenRouter reports a provider
+# ceiling of 128000; 32768 leaves headroom without truncating mid-thought.
+max_completion_tokens = 32768
 # api_backend defaults to "chat_completions" — correct for OpenRouter
 
 # ---------------------------------------------------------------------------
-# (2) K3 via Moonshot direct — canonical 1M-context API
-# Wire model id: kimi-k3
-# env: MOONSHOT_API_KEY  (https://platform.kimi.ai — top-up may be required)
-# Probe: arcus -m k3-moonshot -p "Reply with exactly: K3-MS-OK"
+# (2) GLM-5.2 via Z.ai direct — the model's own API surface
+# Wire model id: glm-5.2
+# env: ZAI_API_KEY  (https://z.ai/manage-apikey/apikey-list)
+# Probe: arcus -m glm-zai -p "Reply with exactly: ARCUS-ZAI-OK"
 # ---------------------------------------------------------------------------
-[model.k3-moonshot]
-model = "kimi-k3"
-base_url = "https://api.moonshot.ai/v1"
-name = "Kimi K3 (Moonshot)"
-env_key = "MOONSHOT_API_KEY"
-system_prompt_label = "Kimi K3, a Moonshot AI model"
+[model.glm-zai]
+model = "glm-5.2"
+base_url = "https://api.z.ai/api/paas/v4"
+name = "GLM-5.2 (Z.ai)"
+env_key = "ZAI_API_KEY"
+system_prompt_label = "Arcus Build"
 context_window = 1048576
-max_completion_tokens = 16384
-# Optional cost control (vendor: low | high | max; default max):
-# reasoning_effort = "high"
+max_completion_tokens = 32768
 
 # ---------------------------------------------------------------------------
-# (3a) K3 via Together AI — open-weight host tier
-# Wire model id: moonshotai/Kimi-K3
-# env: TOGETHER_API_KEY
-# Probe: arcus -m k3-together -p "Reply with exactly: K3-TG-OK"
+# (3) Any other OpenAI-compatible host
+# Not OpenRouter, not Z.ai: a hyperscaler endpoint, a dedicated deployment,
+# or a different model entirely. "openweight" is a placeholder key name, not
+# a reserved identifier — fill in your own wire model id, base URL, and env.
+# Probe: arcus -m openweight -p "Reply with exactly: ARCUS-OW-OK"
 # ---------------------------------------------------------------------------
-[model.k3-together]
-model = "moonshotai/Kimi-K3"
-base_url = "https://api.together.xyz/v1"
-name = "Kimi K3 (Together)"
-env_key = "TOGETHER_API_KEY"
-system_prompt_label = "Kimi K3, a Moonshot AI model"
+[model.openweight]
+model = "REPLACE-WITH-THE-HOST-WIRE-MODEL-ID"
+base_url = "https://YOUR-HOST/v1"
+name = "Open host"
+env_key = "YOUR_HOST_API_KEY"
+system_prompt_label = "Arcus Build"
 context_window = 1048576
-max_completion_tokens = 16384
-
-# ---------------------------------------------------------------------------
-# (3b) K3 via Fireworks AI — open-weight host tier
-# Wire model id: accounts/fireworks/models/kimi-k3
-# env: FIREWORKS_API_KEY
-# Probe: arcus -m k3-fireworks -p "Reply with exactly: K3-FW-OK"
-# ---------------------------------------------------------------------------
-[model.k3-fireworks]
-model = "accounts/fireworks/models/kimi-k3"
-base_url = "https://api.fireworks.ai/inference/v1"
-name = "Kimi K3 (Fireworks)"
-env_key = "FIREWORKS_API_KEY"
-system_prompt_label = "Kimi K3, a Moonshot AI model"
-context_window = 1048576
-max_completion_tokens = 16384
-
-# ---------------------------------------------------------------------------
-# (3c) K3 via Modal — YOUR Shared API or Auto Endpoint base URL
-# Wire model id: moonshotai/Kimi-K3
-# env: MODAL_TOKEN  (Shared API auth or Auto Endpoint proxy token Bearer wk-….ws-…)
-# base_url: replace placeholder — no global public hostname is hardcoded here
-#   Shared API: product/dashboard OpenAI-compat URL for moonshotai/Kimi-K3
-#   Auto Endpoint: modal endpoint create --model moonshotai/Kimi-K3
-#                 then modal endpoint list / dashboard for https://…/v1
-# Probe: arcus -m k3-modal -p "Reply with exactly: K3-MD-OK"
-# ---------------------------------------------------------------------------
-[model.k3-modal]
-model = "moonshotai/Kimi-K3"
-base_url = "https://YOUR-ENDPOINT.modal.direct/v1"
-name = "Kimi K3 (Modal)"
-env_key = "MODAL_TOKEN"
-system_prompt_label = "Kimi K3, a Moonshot AI model"
-context_window = 1048576
-max_completion_tokens = 16384
+max_completion_tokens = 32768
 
 # ---------------------------------------------------------------------------
 # Native grok rail — second path (login-covered or XAI_API_KEY)
@@ -132,12 +102,15 @@ max_completion_tokens = 16384
 # ---------------------------------------------------------------------------
 [model.grok-4.5]
 # Override only the label when you want an explicit pin in the picker;
-# omit this whole table if the baked catalog entry is enough.
-system_prompt_label = "Grok 4.5"
+# omit this whole table if the baked catalog entry is enough. Note the
+# label is still "Arcus Build", not "Grok 4.5" — the model name already
+# lives in `model` / `name`, and the identity rule carves out no exception
+# for the native rail.
+system_prompt_label = "Arcus Build"
 name = "Grok 4.5 (xAI)"
 
 # ---------------------------------------------------------------------------
-# Anthropic Messages — WORKAROUND-TIER only (not a K3 path)
+# Anthropic Messages — WORKAROUND-TIER only (BYOK, not the shipped default)
 # ConfigModelOverride has no auth_scheme field; use messages + headers.
 # env: ANTHROPIC_API_KEY  (via env_http_headers → x-api-key)
 # Probe: arcus -m claude-workaround -p "Reply with exactly: CLAUDE-OK"
@@ -147,7 +120,7 @@ name = "Grok 4.5 (xAI)"
 # base_url = "https://api.anthropic.com/v1"
 # name = "Claude (Messages workaround)"
 # api_backend = "messages"
-# system_prompt_label = "Claude"
+# system_prompt_label = "Arcus Build"
 # context_window = 200000
 # extra_headers = { "anthropic-version" = "2023-06-01" }
 # env_http_headers = { "x-api-key" = "ANTHROPIC_API_KEY" }

@@ -7,7 +7,7 @@ start — they keep the fork healthy and reviews fast.
 
 Arcus Build is a **permanent, engineered fork** of xAI's open-source
 `grok-build` (Apache-2.0). It is its own product with its own roadmap; it is
-not an upstream contribution queue and not an xAI/Moonshot project. See
+not an upstream contribution queue and not an xAI project. See
 `UPSTREAM.md` for the provenance and sync relationship.
 
 ## Tenets reviews enforce
