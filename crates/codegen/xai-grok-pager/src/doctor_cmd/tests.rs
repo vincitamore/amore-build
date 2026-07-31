@@ -240,7 +240,19 @@ fn fake_standalone_facts_compose_through_shared_view() {
     );
     let report = collect_report_with(snapshot);
 
-    assert_eq!(report.issue_count(), 1);
+    // `collect_report_with` runs the voice probe, which asks the REAL host for
+    // an audio input device: any machine without a microphone (CI runners,
+    // most workstations) adds a `voice.no-input-device` issue that has nothing
+    // to do with the synthetic snapshot under test. Assert the issue this test
+    // is about instead of a host-dependent total.
+    let issues: Vec<String> = report
+        .findings
+        .iter()
+        .filter(|finding| finding.disposition == FindingDisposition::Issue)
+        .map(|finding| finding.id.to_string())
+        .filter(|id| !id.starts_with("voice."))
+        .collect();
+    assert_eq!(issues, vec!["terminal.tmux-clipboard".to_string()]);
     assert!(
         report
             .findings
@@ -484,7 +496,7 @@ fn human_mixed_fixture_is_exact() {
             "  · byobu                        tmux\n",
             "  · ssh                          yes\n",
             "  · color                        256\n",
-            "  · themes                       2/5: groknight, grokday\n",
+            "  · themes                       2/6: groknight, grokday\n",
             "  · keyboard                     cmd=dropped, opt=native (OS rescue active)\n",
             "  · newline                      Alt+Enter (Cursor: xterm.js cannot distinguish Shift+Enter)\n",
             "\n",
@@ -702,7 +714,7 @@ fn json_empty_fixture_pins_null_policy() {
                 "color": {
                     "level": {"status": "unavailable", "value": null},
                     "availableThemes": [],
-                    "totalThemes": 5
+                    "totalThemes": 6
                 },
                 "keyboard": null,
                 "newline": null,
@@ -764,7 +776,7 @@ fn json_contract_is_structural_stable_ordered_and_ansi_free() {
                 "color": {
                     "level": {"status": "available", "value": "256"},
                     "availableThemes": ["groknight", "grokday"],
-                    "totalThemes": 5
+                    "totalThemes": 6
                 },
                 "keyboard": {"cmd": "dropped", "opt": "native", "os": "macos"},
                 "newline": {"kind": "xterm_js", "terminalName": "cursor"},

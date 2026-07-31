@@ -60,8 +60,16 @@ jobs:
           echo "GROK_VERSION=${REF#v}" >> "$GITHUB_ENV"
           echo "Version inject: ${REF#v}"
 
-      - name: Build
+      - name: Build (unix)
+        if: matrix.os != 'windows-latest'
         run: cargo build --release -p xai-grok-pager-bin
+
+      # MSVC hits `LNK4319: A PDB limit was hit while adding public symbols` on
+      # an artifact this size; /DEBUG:NONE skips PDB emission. Same link args
+      # as the local Windows build recipe and the ci.yml lane.
+      - name: Build (windows)
+        if: matrix.os == 'windows-latest'
+        run: cargo rustc -p xai-grok-pager-bin --release -- -Clink-args=/DEBUG:NONE -Clink-args=/STACK:8388608
 
       - name: Smoke — --version + doctor --json (unix)
         if: matrix.os != 'windows-latest'

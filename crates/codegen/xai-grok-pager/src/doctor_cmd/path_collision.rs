@@ -228,8 +228,20 @@ mod tests {
 
     #[test]
     fn parse_path_lines_trims_and_skips_blank() {
-        let paths = parse_path_lines(b"C:\\a\\selene.exe\r\n\r\nC:\\b\\selene.exe\n");
+        // The probe reads `where selene` on Windows and `which -a selene` on
+        // Unix, so both the line shape and what counts as a trailing component
+        // are platform-specific. `Path::ends_with` compares whole components,
+        // not string suffixes — a Windows path on Unix is a single component,
+        // so a Windows fixture cannot assert a leaf there.
+        #[cfg(windows)]
+        let (stdout, leaf): (&[u8], &str) =
+            (b"C:\\a\\selene.exe\r\n\r\nC:\\b\\selene.exe\n", "selene.exe");
+        #[cfg(not(windows))]
+        let (stdout, leaf): (&[u8], &str) =
+            (b"/usr/local/bin/selene\n\n/usr/bin/selene\n", "selene");
+
+        let paths = parse_path_lines(stdout);
         assert_eq!(paths.len(), 2);
-        assert!(paths[0].ends_with("selene.exe"));
+        assert!(paths[0].ends_with(leaf));
     }
 }
