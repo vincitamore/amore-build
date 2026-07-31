@@ -9,9 +9,8 @@ Local-first: the daemon and CLI operate on directories on your machine. There
 is no product telemetry surface in iris.
 
 In-tree sources live at [`instruments/iris/`](../instruments/iris/).
-Package-level detail: [`instruments/iris/README.md`](../instruments/iris/README.md)
-and the public-port notes in
-[`instruments/iris/PORTING.md`](../instruments/iris/PORTING.md).
+Package-level detail: [`instruments/iris/README.md`](../instruments/iris/README.md);
+building from source: [`instruments/iris/BUILD.md`](../instruments/iris/BUILD.md).
 
 ---
 
@@ -25,9 +24,7 @@ Three surfaces share one product name:
 | **CLI** (`iris`) | Org verbs powered by `@arcus/regula` (`task`, `inbox`, `reminder`, `knowledge`, plus `status`, `search`, `daemon`, …) and daemon-backed reads |
 | **Dash** (TUI) | OpenTUI interactive dashboard — Dashboard / Tasks / Inbox / Reminders / Knowledge / Files / Graph / Forge |
 
-The public package ships the **full** regula org-verb surface (no gated subset).
-Semantic-search backends and other dropped lineage surfaces are not in this
-tree; see `PORTING.md` if you are comparing to an older private build.
+Iris ships the **full** regula org-verb surface — there is no gated subset.
 
 ### Common commands
 

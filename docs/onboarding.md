@@ -68,7 +68,6 @@ lists every path under **would-write** (currently **133** files).
       prokope/
       sortes/                     # lenses + bin
       isda/
-      sentinel/
 ```
 
 **Also (not a repo file):** init appends the absolute path of
@@ -145,8 +144,7 @@ Columns: **path** · **what** · **owner** · **refresh** · **customize safely*
 | `.arcus/skills/isda/theory.md` | isda skill support material | Tool-managed pack; yours after you edit | Untouched (disk sha256 == manifest) -> rewrite; your edits always preserved unless --force | Edit SKILL.md and support files; skill-local changes preserved on --refresh. |
 | `.arcus/skills/oeconomia/SKILL.md` | Skill definition | Tool-managed pack; yours after you edit | Untouched (disk sha256 == manifest) -> rewrite; your edits always preserved unless --force | Edit SKILL.md and support files; skill-local changes preserved on --refresh. |
 | `.arcus/skills/prokope/SKILL.md` | Skill definition | Tool-managed pack; yours after you edit | Untouched (disk sha256 == manifest) -> rewrite; your edits always preserved unless --force | Edit SKILL.md and support files; skill-local changes preserved on --refresh. |
-| `.arcus/skills/README.md` | Skills pack index (7-skill set) | Tool-managed pack; yours after you edit | Untouched (disk sha256 == manifest) -> rewrite; your edits always preserved unless --force | Edit SKILL.md and support files; skill-local changes preserved on --refresh. |
-| `.arcus/skills/sentinel/SKILL.md` | Skill definition | Tool-managed pack; yours after you edit | Untouched (disk sha256 == manifest) -> rewrite; your edits always preserved unless --force | Edit SKILL.md and support files; skill-local changes preserved on --refresh. |
+| `.arcus/skills/README.md` | Skills pack index (6-skill set) | Tool-managed pack; yours after you edit | Untouched (disk sha256 == manifest) -> rewrite; your edits always preserved unless --force | Edit SKILL.md and support files; skill-local changes preserved on --refresh. |
 | `.arcus/skills/sortes/bin/pick.ts` | sortes skill support (lenses / bin) | Tool-managed pack; yours after you edit | Untouched (disk sha256 == manifest) -> rewrite; your edits always preserved unless --force | Edit SKILL.md and support files; skill-local changes preserved on --refresh. |
 | `.arcus/skills/sortes/lenses-ideation/absurd-falsifiable.md` | sortes skill support (lenses / bin) | Tool-managed pack; yours after you edit | Untouched (disk sha256 == manifest) -> rewrite; your edits always preserved unless --force | Edit SKILL.md and support files; skill-local changes preserved on --refresh. |
 | `.arcus/skills/sortes/lenses-ideation/average-first.md` | sortes skill support (lenses / bin) | Tool-managed pack; yours after you edit | Untouched (disk sha256 == manifest) -> rewrite; your edits always preserved unless --force | Edit SKILL.md and support files; skill-local changes preserved on --refresh. |

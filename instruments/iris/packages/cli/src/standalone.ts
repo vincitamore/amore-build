@@ -6,7 +6,7 @@
  * (`@arcus/regula` write surface + daemon HTTP reads) and the Bun index daemon.
  * Routing is in-process: no sibling `.ts` spawns (those only exist in a source tree).
  *
- * OpenTUI dash is intentionally NOT embedded — see PORTING.md §Compile / OpenTUI.
+ * OpenTUI dash is intentionally NOT embedded — see BUILD.md.
  * Bare `iris` / `iris dash` from this binary print the source-build recipe.
  *
  * Source-tree bin remains `iris.ts` (spawns glass / daemon / index via Bun).
@@ -62,7 +62,7 @@ const DASH_SOURCE_NOTE = [
   'windows-x64). Extra grammars (tree-sitter-wasms) resolve from node_modules',
   'in source builds; compiled dash ships OpenTUI defaults only.',
   '',
-  'See instruments/iris/PORTING.md §Compile.',
+  'See instruments/iris/BUILD.md.',
 ].join('\n');
 
 function help(): void {
@@ -76,7 +76,7 @@ function help(): void {
       '  iris commands [--json]             capability manifest',
       '  iris --help',
       '',
-      'Dash (OpenTUI) is source-build only from this artifact — see PORTING.md.',
+      'Dash (OpenTUI) is source-build only from this artifact — see BUILD.md.',
       `Daemon default port ${DEFAULT_PORT}. Org root: $IRIS_ORG_ROOT or walk-up markers.`,
       '',
     ].join('\n'),

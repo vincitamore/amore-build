@@ -9,7 +9,7 @@
  *
  * Embeds: CLI verbs + Bun index daemon (+ @arcus/regula).
  * Optional: `--with-dash` also builds dist/iris-dash-{os}-{arch}[.exe]
- * (OpenTUI native surface — proven on windows-x64; see PORTING.md §Compile).
+ * (OpenTUI native surface — proven on windows-x64; see BUILD.md).
  *
  * Usage (from instruments/iris):
  *   bun run scripts/build-compile.ts

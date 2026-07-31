@@ -114,7 +114,6 @@ fork to a new directory name to customize without losing edits):
 | `prokope` | Goal-loop engineering for long-horizon, multi-session campaigns |
 | `sortes` | External decorrelation draws for review/ideation fan-outs |
 | `isda` | Irreducible Semantic Density Analysis — text compressibility |
-| `sentinel` | Base discipline for session-hosted bounded watches |
 
 **Authoring:** frontmatter `name` + `description` only; description = TRIGGER +
 SKIP + disambiguation; progressive disclosure; assets under the skill dir via

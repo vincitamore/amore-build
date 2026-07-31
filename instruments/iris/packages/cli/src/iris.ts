@@ -85,7 +85,7 @@ if (argv[0] === "daemon") {
   if (!existsSync(DAEMON_ENTRY)) {
     process.stderr.write(
       `iris daemon: missing ${DAEMON_ENTRY}\n` +
-        `(use the compiled binary: iris-{os}-{arch} daemon … — see PORTING.md §Compile)\n`,
+        `(use the compiled binary: iris-{os}-{arch} daemon … — see BUILD.md)\n`,
     );
     process.exit(64);
   }

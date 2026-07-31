@@ -20,11 +20,9 @@ Public home of the instrument inside the `arcus-build` repo
 | `packages/cli` | Sole global bin **`iris`** — org verbs + span + daemon control |
 | `packages/tui` | The OpenTUI dashboard (bare `iris` / `iris dash` opens it) — Dashboard / Tasks / Inbox / Reminders / Knowledge / Files / Graph / Forge |
 | `packages/parity` | Golden-master parity harness (`parity record` / `parity replay`) used to verify the Bun daemon against a historical legacy daemon; still useful for self-replay |
-| `patches/` | pnpm patched dependencies (`@opentui/core` UAF mitigation) + the opentui.dll native fix |
 
-See **PORTING.md** for what the public port dropped (lineage residual surfaces)
-and known follow-on debts (OpenTUI native, install story). Foreign-root trust is
-tiered: daemon reads work on any root; mutations need house markers or
+Building from source and packaging: **[BUILD.md](BUILD.md)**. Foreign-root
+trust is tiered: daemon reads work on any root; mutations need house markers or
 `--allow-foreign-root` / `IRIS_ALLOW_FOREIGN_ROOT=1` / `~/.iris/allowed-roots.json`.
 
 ## Run

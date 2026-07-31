@@ -9,7 +9,7 @@ name: release
 #
 # Iris: matrix mirrors iris-release-assets.yml (linux-x64, darwin-arm64,
 # windows-x64). Expansion lanes (darwin-x64, linux-arm64, dash artifacts) are a
-# follow-on — see instruments/iris/PORTING.md.
+# not built here.
 
 on:
   push:
