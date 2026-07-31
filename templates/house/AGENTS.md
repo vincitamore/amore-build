@@ -6,8 +6,9 @@
 
 ## Identity
 
-This house is **{{HOUSE_NAME}}**. Customize after init: house name, project
-facts, stack notes the next session must know. **Self-updating for structure,
+This house is **{{HOUSE_NAME}}** — `init` filled that in from the directory
+name. Everything else here is yours to shape: the project facts and stack notes
+the next session must know, and any convention you want held to. **Self-updating for structure,
 never for state** — new folder/schema/discipline → edit here; task/inbox/
 knowledge state → [[context/current-state]]. When this file accretes past
 utility, compress.
@@ -155,11 +156,17 @@ Frontmatter is the single source of truth.
 ├── reminders/             # time-based obligations (see reminders/README.md)
 ├── forge/                 # pipeline products (see forge/README.md)
 │   └── handles/ output/ sessions/
+├── projects/              # the work itself (see projects/README.md)
+├── instruments/           # tools that act on this house (iris lands here)
 ├── scripts/               # house utilities (lint, orientation sync, …)
 └── .arcus/               # skills/, hooks/ (stop gate + session init)
 ```
 
-Empty containers carry `.gitkeep`. Optional later: `instruments/` — not required.
+Empty containers carry `.gitkeep` so they survive a clone.
+
+`projects/` holds the work; `instruments/` holds tools whose subject is this
+house. The split is by what a thing points at, not by size — see each folder's
+README.
 
 ### Tasks (`tasks/**/*.md`)
 

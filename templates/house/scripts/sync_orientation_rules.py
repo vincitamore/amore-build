@@ -106,8 +106,18 @@ def content_hash(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
 
 
+def lattice_source(org_root: Path) -> Path:
+    return org_root / "context" / "principle-lattice.md"
+
+
 def build_lattice_rules(org_root: Path, grok_compat: bool) -> tuple[str, dict]:
-    src = org_root / "context" / "principle-lattice.md"
+    """Build the derived lattice rules file.
+
+    Callers must check :func:`lattice_source` first — the lattice is optional
+    (``arcus init --no-lattice``), and a house without one is correctly
+    configured, not broken.
+    """
+    src = lattice_source(org_root)
     if not src.exists():
         raise FileNotFoundError(f"missing {src}")
     raw = src.read_text(encoding="utf-8", errors="replace")
@@ -162,19 +172,22 @@ def write_if_changed(path: Path, content: str) -> bool:
 
 def sync(org_root: Path, grok_compat: bool) -> dict:
     rules_dir = rules_dir_for(org_root, grok_compat)
-    lattice_text, lattice_meta = build_lattice_rules(org_root, grok_compat)
+    has_lattice = lattice_source(org_root).exists()
     has_praxis = (org_root / "context" / "praxis.md").exists()
     lattice_path = rules_dir / "principle-lattice.md"
     praxis_path = rules_dir / "praxis.md"
-    changed = write_if_changed(lattice_path, lattice_text)
-    result: dict = {
-        "rules_dir": str(rules_dir),
-        "lattice": {
+    result: dict = {"rules_dir": str(rules_dir)}
+    if has_lattice:
+        lattice_text, lattice_meta = build_lattice_rules(org_root, grok_compat)
+        result["lattice"] = {
             **lattice_meta,
             "path": str(lattice_path.relative_to(org_root)).replace("\\", "/"),
-            "changed": changed,
-        },
-    }
+            "changed": write_if_changed(lattice_path, lattice_text),
+        }
+    else:
+        result["lattice"] = None
+        if lattice_path.exists():  # source retired locally: drop the derived file
+            lattice_path.unlink()
     if has_praxis:
         praxis_text, praxis_meta = build_praxis_rules(org_root, grok_compat)
         result["praxis"] = {
@@ -192,13 +205,20 @@ def sync(org_root: Path, grok_compat: bool) -> dict:
 def check(org_root: Path, grok_compat: bool) -> int:
     """Return 0 if rules match sources, 1 if drift or missing."""
     rules_dir = rules_dir_for(org_root, grok_compat)
-    lattice_text, _ = build_lattice_rules(org_root, grok_compat)
+    has_lattice = lattice_source(org_root).exists()
     has_praxis = (org_root / "context" / "praxis.md").exists()
+    lattice_text = (
+        build_lattice_rules(org_root, grok_compat)[0] if has_lattice else None
+    )
     praxis_text = (
         build_praxis_rules(org_root, grok_compat)[0] if has_praxis else None
     )
     ok = True
-    pairs = [("principle-lattice.md", lattice_text)]
+    pairs = []
+    if lattice_text is not None:
+        pairs.append(("principle-lattice.md", lattice_text))
+    else:
+        print("SKIP principle-lattice.md (no context/principle-lattice.md)")
     if praxis_text is not None:
         pairs.append(("praxis.md", praxis_text))
     for name, expected in pairs:

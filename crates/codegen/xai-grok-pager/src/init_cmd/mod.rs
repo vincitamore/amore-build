@@ -21,6 +21,15 @@ pub const IRIS_NOTE_REL: &str = ".arcus/iris-companion.note.md";
 
 const MANIFEST_VERSION: u32 = 1;
 
+/// Default directory name for a new house.
+///
+/// `init` **creates** the house; it does not overlay an existing repository.
+/// The house is the directory you launch from every session — it holds your
+/// tasks, conventions and running context, and the work itself lives in
+/// `projects/` inside it. That is why it owns its own git history rather than
+/// borrowing a host repo's.
+pub const DEFAULT_HOUSE_DIR: &str = "arcus";
+
 const IRIS_NOTE: &str = "\
 # Iris companion (pointer)
 
@@ -33,6 +42,9 @@ pointer so the house tree records the opt-in.
 
 #[derive(Clone, Debug, Eq, PartialEq, clap::Args)]
 pub struct InitArgs {
+    /// Directory to create the house in, relative to the current directory.
+    #[arg(value_name = "DIR", default_value = DEFAULT_HOUSE_DIR)]
+    pub dir: String,
     /// Overwrite user-modified files (requires confirmation unless `--yes`).
     #[arg(long)]
     pub force: bool,
@@ -71,6 +83,7 @@ pub struct InitArgs {
 impl Default for InitArgs {
     fn default() -> Self {
         Self {
+            dir: DEFAULT_HOUSE_DIR.to_string(),
             force: false,
             refresh: false,
             skills: false,
@@ -257,12 +270,7 @@ pub fn run_with_context(
     ctx: &InitContext,
     writer: &mut impl Write,
 ) -> Result<InitReport> {
-    let root = find_git_root(&ctx.cwd).ok_or_else(|| {
-        anyhow::anyhow!(
-            "init requires a git repository (no .git found from {}). Run inside a repo.",
-            ctx.cwd.display()
-        )
-    })?;
+    let root = resolve_house_root(args, ctx, writer)?;
 
     let selected = select_entries(&ctx.entries, args);
     let manifest_path = root.join(MANIFEST_REL);
@@ -449,12 +457,48 @@ fn is_hooks_rel(rel: &str) -> bool {
     norm.starts_with(".arcus/hooks/") || norm == ".arcus/hooks"
 }
 
+/// The house's own name, taken from the directory being created.
+///
+/// `arcus init` → `arcus`; `arcus init ../work/atelier` → `atelier`. Falls
+/// back to the default rather than producing an empty name for an odd path.
+fn house_name_from(dir: &str) -> String {
+    Path::new(dir)
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .filter(|n| !n.is_empty())
+        .unwrap_or_else(|| DEFAULT_HOUSE_DIR.to_string())
+}
+
+/// Substitute `{{PLACEHOLDER}}` tokens in template text.
+///
+/// `init` knows the house name — it is the directory being created — so there is
+/// no reason to hand a new user a file full of `{{HOUSE_NAME}}` and ask them to
+/// find and replace it. Substitution happens before the content hash is taken,
+/// so `--refresh` compares like with like and a user's later edits are still
+/// detected as theirs.
+fn expand_placeholders(contents: &[u8], house_name: &str) -> Vec<u8> {
+    // Binary assets (and anything non-UTF-8) pass through untouched.
+    let Ok(text) = std::str::from_utf8(contents) else {
+        return contents.to_vec();
+    };
+    if !text.contains("{{") {
+        return contents.to_vec();
+    }
+    text.replace("{{HOUSE_NAME}}", house_name)
+        .replace("{{HOUSE_ROOT_LABEL}}", house_name)
+        .into_bytes()
+}
+
 /// Filter embedded entries by CLI flags + inject iris note when requested.
 pub fn select_entries(entries: &[HouseEntry], args: &InitArgs) -> Vec<HouseEntry> {
+    let house_name = house_name_from(&args.dir);
     let mut out: Vec<HouseEntry> = entries
         .iter()
         .filter(|e| keep_entry(&e.rel_path, args))
-        .cloned()
+        .map(|e| HouseEntry {
+            rel_path: e.rel_path.clone(),
+            contents: expand_placeholders(&e.contents, &house_name),
+        })
         .collect();
 
     if args.iris_enabled() {
@@ -470,6 +514,18 @@ pub fn select_entries(entries: &[HouseEntry], args: &InitArgs) -> Vec<HouseEntry
 
 fn keep_entry(rel: &str, args: &InitArgs) -> bool {
     let norm = rel.replace('\\', "/");
+
+    // The bundled lint's own test suite never ships. It exists to exercise
+    // `house_lint.ts` inside this repository; planted into a house it delivers
+    // three synthetic `AGENTS.md` files, a deliberately-invalid task and two
+    // stub principle lattices sitting beside the real one. A fresh house should
+    // contain nothing that looks like a fixture — the adopter cannot tell which
+    // files are theirs, and the fake constitutions are indistinguishable from
+    // the one they are supposed to edit.
+    if norm.starts_with("scripts/tests/") || norm == "scripts/house_lint.test.ts" {
+        return false;
+    }
+
     if !args.skills_enabled()
         && (norm.starts_with(".arcus/skills/") || norm == ".arcus/skills")
     {
@@ -483,16 +539,69 @@ fn keep_entry(rel: &str, args: &InitArgs) -> bool {
     true
 }
 
-fn find_git_root(start: &Path) -> Option<PathBuf> {
-    let mut cur = start.to_path_buf();
-    loop {
-        if cur.join(".git").exists() {
-            return Some(cur);
+/// Resolve — and, unless this is a dry run, create — the house directory.
+///
+/// `init` creates a house rather than overlaying an existing repository. It is
+/// safe to re-run: a directory that already carries an install manifest is
+/// treated as this house and refreshed in place. A directory that holds
+/// something else is refused rather than merged into, because silently
+/// scattering a house across someone's unrelated project is not recoverable by
+/// reading the summary afterwards.
+fn resolve_house_root(
+    args: &InitArgs,
+    ctx: &InitContext,
+    writer: &mut impl Write,
+) -> Result<PathBuf> {
+    let root = ctx.cwd.join(&args.dir);
+
+    if root.exists() {
+        if !root.is_dir() {
+            bail!("{} exists and is not a directory", root.display());
         }
-        if !cur.pop() {
-            return None;
+        let already_a_house = root.join(MANIFEST_REL).exists();
+        let is_empty = std::fs::read_dir(&root)
+            .with_context(|| format!("read {}", root.display()))?
+            .next()
+            .is_none();
+        if !already_a_house && !is_empty {
+            bail!(
+                "{} already exists and is not a house.\n\
+                 Choose another name (`arcus init <dir>`), or remove it first.",
+                root.display()
+            );
+        }
+    } else if !args.dry_run {
+        std::fs::create_dir_all(&root)
+            .with_context(|| format!("create {}", root.display()))?;
+    }
+
+    // The house owns its history: continuity lives in what is committed, not in
+    // what the last session happened to remember. Not fatal if git is missing —
+    // every other part of the house still works.
+    if !args.dry_run && !root.join(".git").exists() {
+        if let Err(err) = git_init(&root) {
+            writeln!(
+                writer,
+                "  note: skipped `git init` ({err}). The house works without it, \
+                 but commit history is how it survives across sessions."
+            )?;
         }
     }
+
+    Ok(root)
+}
+
+fn git_init(root: &Path) -> Result<()> {
+    let out = std::process::Command::new("git")
+        .arg("init")
+        .arg("--quiet")
+        .current_dir(root)
+        .output()
+        .context("run git init")?;
+    if !out.status.success() {
+        bail!("{}", String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
+    Ok(())
 }
 
 fn disk_sha(path: &Path) -> Result<String> {
@@ -685,18 +794,27 @@ fn write_summary(
     )?;
 
     if would.is_empty() && !written.is_empty() {
+        let house = root
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| root.display().to_string());
         writeln!(writer, "Next:")?;
+        writeln!(writer, "  1. cd {house}")?;
         writeln!(
             writer,
-            "  1. Edit AGENTS.md — replace {{{{HOUSE_NAME}}}} / identity placeholders"
+            "  2. Run arcus from there (trust dialog if first time)"
         )?;
         writeln!(
             writer,
-            "  2. Run arcus in this directory (trust dialog if first time)"
+            "  3. Put your work in projects/ — the house is where you launch from,"
         )?;
         writeln!(
             writer,
-            "  3. Commit project-tier .arcus/ and AGENTS.md for CI/cloud agents"
+            "     and projects/ is git-ignored so each one keeps its own history"
+        )?;
+        writeln!(
+            writer,
+            "  AGENTS.md is yours to edit — it is the house's constitution."
         )?;
     }
 
@@ -756,6 +874,64 @@ fn walk_collect(root: &Path, dir: &Path, out: &mut Vec<HouseEntry>) -> Result<()
 #[cfg(test)]
 mod unit_tests {
     use super::*;
+
+    #[test]
+    fn keep_entry_never_plants_the_lints_own_fixtures() {
+        // These shipped once: an adopter's house arrived carrying three
+        // synthetic `AGENTS.md` files and two stub lattices beside the real
+        // ones, with no way to tell which were theirs.
+        let args = InitArgs::default();
+        assert!(!keep_entry("scripts/tests/fixtures/clean-house/AGENTS.md", &args));
+        assert!(!keep_entry("scripts/tests/fixtures/dirty-house/tasks/wrong-status.md", &args));
+        assert!(!keep_entry(
+            "scripts/tests/fixtures/sync-tree/context/principle-lattice.md",
+            &args
+        ));
+        assert!(!keep_entry("scripts/house_lint.test.ts", &args));
+        // Backslash-separated paths normalize the same way.
+        assert!(!keep_entry("scripts\\tests\\fixtures\\clean-house\\AGENTS.md", &args));
+
+        // The lint itself still ships — it is the adopter's to run and edit.
+        assert!(keep_entry("scripts/house_lint.ts", &args));
+        assert!(keep_entry("scripts/sync_orientation_rules.py", &args));
+        // As do the hooks fixtures: canned envelopes for a script they own,
+        // documented by the hooks README, and not mistakable for house content.
+        assert!(keep_entry(
+            ".arcus/hooks/fixtures/stop-gate/01-first-fire-block.json",
+            &args
+        ));
+    }
+
+    #[test]
+    fn placeholders_are_filled_in_at_install_time() {
+        // The user should never receive a file telling them to find-and-replace
+        // a token the tool already knows the value of.
+        let out = expand_placeholders(b"# {{HOUSE_NAME}}\n{{HOUSE_ROOT_LABEL}}/", "atelier");
+        assert_eq!(String::from_utf8(out).unwrap(), "# atelier\natelier/");
+
+        // Non-UTF-8 assets pass through byte-identical.
+        let png = [0x89u8, 0x50, 0x4E, 0x47, 0xFF, 0xFE];
+        assert_eq!(expand_placeholders(&png, "atelier"), png.to_vec());
+
+        // Text without placeholders is untouched.
+        let plain = b"nothing to expand";
+        assert_eq!(expand_placeholders(plain, "atelier"), plain.to_vec());
+    }
+
+    #[test]
+    fn house_name_comes_from_the_directory() {
+        assert_eq!(house_name_from("arcus"), "arcus");
+        assert_eq!(house_name_from("my-house"), "my-house");
+        assert_eq!(house_name_from("../work/atelier"), "atelier");
+        // Degenerate input falls back rather than yielding an empty name.
+        assert_eq!(house_name_from(""), DEFAULT_HOUSE_DIR);
+    }
+
+    #[test]
+    fn default_house_dir_is_arcus() {
+        assert_eq!(InitArgs::default().dir, DEFAULT_HOUSE_DIR);
+        assert_eq!(DEFAULT_HOUSE_DIR, "arcus");
+    }
 
     #[test]
     fn keep_entry_respects_no_skills_and_no_lattice() {

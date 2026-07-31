@@ -1,6 +1,10 @@
-//! Golden ownership/refresh tests for `arcus init` (task 0.8).
+//! Golden ownership/refresh tests for `arcus init`.
 //!
-//! Fixture pack: `tests/fixtures/house-golden/**` (not the live templates stubs).
+//! `init` CREATES a house directory under the cwd — it does not overlay the
+//! current repository — so every assertion below targets `<cwd>/arcus`, not
+//! the cwd itself.
+//!
+//! Fixture pack: `tests/fixtures/house-golden/**` (not the live templates).
 //! Global hooks registry is isolated via a temp `grok_home` (never `~/.arcus`).
 
 use std::collections::BTreeMap;
@@ -33,8 +37,6 @@ impl Harness {
         let grok_home = tmp.path().join("fake-arcus-home");
         std::fs::create_dir_all(&repo).unwrap();
         std::fs::create_dir_all(&grok_home).unwrap();
-        // Minimal git repo so init accepts the root.
-        std::fs::create_dir_all(repo.join(".git")).unwrap();
         let entries = load_golden_entries();
         assert!(
             !entries.is_empty(),
@@ -69,16 +71,21 @@ impl Harness {
         format!("{err:#}")
     }
 
+    /// Where `init` plants the house. `repo` is the cwd it is invoked from.
+    fn house(&self) -> PathBuf {
+        self.repo.join(init_cmd::DEFAULT_HOUSE_DIR)
+    }
+
     fn read(&self, rel: &str) -> String {
-        std::fs::read_to_string(self.repo.join(rel)).unwrap_or_default()
+        std::fs::read_to_string(self.house().join(rel)).unwrap_or_default()
     }
 
     fn exists(&self, rel: &str) -> bool {
-        self.repo.join(rel).exists()
+        self.house().join(rel).exists()
     }
 
     fn write_user(&self, rel: &str, body: &str) {
-        let path = self.repo.join(rel);
+        let path = self.house().join(rel);
         if let Some(p) = path.parent() {
             std::fs::create_dir_all(p).unwrap();
         }
@@ -87,7 +94,12 @@ impl Harness {
 
     fn list_files(&self) -> BTreeMap<String, Vec<u8>> {
         let mut map = BTreeMap::new();
-        collect_files(&self.repo, &self.repo, &mut map);
+        let house = self.house();
+        // A dry run creates nothing at all, not even the house directory, so an
+        // absent house is "no files" rather than an error.
+        if house.is_dir() {
+            collect_files(&house, &house, &mut map);
+        }
         // Ignore .git
         map.retain(|k, _| !k.starts_with(".git/") && k != ".git");
         map
@@ -136,9 +148,12 @@ fn fresh_install_writes_tree_and_manifest() {
     assert!(h.exists(".arcus/skills/demo-skill/SKILL.md"));
     assert!(!h.exists(init_cmd::IRIS_NOTE_REL)); // iris default-off
 
-    // Every golden source file present with identical bytes.
-    for entry in &h.entries {
-        let on_disk = std::fs::read(h.repo.join(&entry.rel_path)).unwrap();
+    // Every selected file present with identical bytes. Compare against
+    // `select_entries`, not the raw fixtures: init expands `{{HOUSE_NAME}}` at
+    // install time, so the bytes on disk are the expanded ones by design.
+    let selected = init_cmd::select_entries(&h.entries, &default_args());
+    for entry in &selected {
+        let on_disk = std::fs::read(h.house().join(&entry.rel_path)).unwrap();
         assert_eq!(
             on_disk, entry.contents,
             "mismatch for {}",
@@ -146,12 +161,23 @@ fn fresh_install_writes_tree_and_manifest() {
         );
     }
 
+    // The user never receives a placeholder to hand-edit.
+    let agents = h.read("AGENTS.md");
+    assert!(
+        !agents.contains("{{"),
+        "placeholders must be expanded at install time, got: {agents}"
+    );
+    assert!(
+        agents.contains(init_cmd::DEFAULT_HOUSE_DIR),
+        "house name must be substituted in, got: {agents}"
+    );
+
     // Manifest covers every written file with matching sha256.
-    let manifest = init_cmd::InstallManifest::load(&h.repo.join(MANIFEST_REL))
+    let manifest = init_cmd::InstallManifest::load(&h.house().join(MANIFEST_REL))
         .unwrap()
         .expect("manifest present");
     assert_eq!(manifest.version, 1);
-    for entry in &h.entries {
+    for entry in &selected {
         let expected = xai_file_utils::sha256_hex(&entry.contents);
         assert_eq!(
             manifest.files.get(&entry.rel_path).map(String::as_str),
@@ -446,24 +472,31 @@ fn with_iris_plants_pointer_note() {
 }
 
 #[test]
-fn refuses_outside_git_repo() {
-    let tmp = tempfile::tempdir().unwrap();
-    let not_repo = tmp.path().join("plain");
-    let grok_home = tmp.path().join("home");
-    std::fs::create_dir_all(&not_repo).unwrap();
-    std::fs::create_dir_all(&grok_home).unwrap();
-    let ctx = InitContext {
-        cwd: not_repo,
-        grok_home,
-        entries: load_golden_entries(),
-        stdin_is_terminal: false,
-    };
-    let mut out = Vec::new();
-    let err = init_cmd::run_with_context(&default_args(), &ctx, &mut out).unwrap_err();
+fn creates_the_house_directory_in_a_plain_folder() {
+    // The retired contract required a surrounding git repo and planted into it.
+    // A plain empty directory is now the normal case: init creates the house.
+    let h = Harness::new();
+    assert!(!h.house().exists(), "house must not exist before init");
+    h.run(default_args());
+    assert!(h.house().is_dir(), "init must create the house directory");
+    assert!(h.exists("AGENTS.md"));
+    assert!(h.exists(MANIFEST_REL));
+}
+
+#[test]
+fn refuses_a_non_empty_directory_that_is_not_a_house() {
+    // Merging a house into someone's unrelated project is not recoverable by
+    // reading the summary afterwards, so refuse rather than scatter.
+    let h = Harness::new();
+    std::fs::create_dir_all(h.house()).unwrap();
+    std::fs::write(h.house().join("their-work.txt"), b"not ours").unwrap();
+    let err = h.run_expect_err(default_args());
     assert!(
-        err.to_string().contains("git repository"),
-        "unexpected error: {err:#}"
+        err.contains("not a house"),
+        "unexpected error: {err}"
     );
+    // And it left their file alone.
+    assert!(h.house().join("their-work.txt").exists());
 }
 
 #[test]

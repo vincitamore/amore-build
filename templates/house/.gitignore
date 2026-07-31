@@ -1,0 +1,35 @@
+# The house tracks the house. Projects keep their own history.
+#
+# Anything you put in projects/ is ignored here — clone a repository in, and it
+# stays its own repository with its own remote and its own log, instead of being
+# swallowed as an embedded checkout. The house commits what surrounds the work:
+# tasks, decisions, knowledge, conventions, running context.
+#
+# To track a small project inside the house instead, un-ignore it explicitly:
+#     !projects/scratchpad/
+projects/*
+!projects/README.md
+
+# Installed instruments are artifacts, not authored source — iris is fetched
+# by `arcus init`, not written by you. Instruments you write yourself are
+# tracked normally.
+instruments/iris/
+
+# Secrets never enter the tree, whatever a session may see.
+.env
+.env.*
+*.key
+*.pem
+auth.json
+
+# OS and editor noise
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.swp
+*~
+
+# Scratch and transient
+tmp-*
+*.tmp
+*.log
