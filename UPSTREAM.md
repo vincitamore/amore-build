@@ -127,6 +127,16 @@ detection/init pointer; absence is quiet.
 self-update back to upstream. Newer builds come from Selene Build release
 artifacts, not upstream installers.
 
+**Test-suite platform coverage (inherited).** The upstream suite is written
+against unix hosts: a substantial set of tests assert unix path shapes, unix
+process/env behaviour, or terminal-brand detection, and fail on Windows in
+stock upstream as much as here. The fork does not "fix" those by forking test
+logic — where a test is unix-only, it is `cfg`-gated to match upstream's own
+gating, and nothing more. Consequence for CI: **the pager suite is gated on
+Linux; Windows is gated on building the binary, smoking it (`--version`,
+`doctor --json`), and the crate suites that are clean there.** Windows is a
+supported build and runtime target; it is not yet a green-suite target.
+
 Everything else is largely upstream: agent runtime, tools, TUI, ACP, workspace
 logic, and the bulk of `crates/`.
 
