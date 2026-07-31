@@ -1,13 +1,14 @@
 # dioptra-release-assets.yml — per-OS release binary producer (Phase 1.5 D5)
 #
-# Phase-3 integration seam: `.github/workflows/release.yml` (Phase 3) will
-# download these artifacts via `actions/download-artifact` and attach them to
-# the GitHub Release (`gh release upload` / softprops/action-gh-release).
-# This workflow is intentionally self-sufficient WITHOUT `contents: write` —
-# release attach is NOT this job's responsibility. Do not add contents:write
-# here; keep the packaging lane separate from the release-publish lane.
+# Standalone packaging lane, run on demand. `release.yml` builds and attaches
+# the dioptra assets itself as part of the tag run, so this workflow does NOT
+# trigger on tags — it would duplicate three lanes and produce assets nothing
+# consumes. Keep it dispatch-only: it is how dioptra packaging gets exercised
+# (and arch resolution re-proven) without cutting a release.
 #
-# Triggers: tag `v*` push + workflow_dispatch.
+# No `contents: write` here by design — release attach is release.yml's job.
+#
+# Trigger: workflow_dispatch.
 # Matrix: ubuntu/windows/macos — ALL lanes strict (continue-on-error: false).
 # A dash-build failure on linux/darwin MUST fail the job — that failure IS the
 # D3-deferred CI proof. Windows-x64 is not special-cased either.
@@ -20,9 +21,6 @@
 name: dioptra-release-assets
 
 on:
-  push:
-    tags:
-      - "v*"
   workflow_dispatch:
 
 permissions:

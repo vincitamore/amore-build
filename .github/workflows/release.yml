@@ -217,26 +217,47 @@ jobs:
           merge-multiple: true
           path: assets
 
+      # Body: docs/release-notes/<tag>.md when it exists (authored per tag),
+      # else a generic stanza. The provenance table is always appended — the
+      # two pins a consumer needs are the fork tip and the upstream baseline,
+      # and SOURCE_REV means the UPSTREAM revision (UPSTREAM.md §3), never
+      # this repo's commit.
       - name: Compose release notes
         shell: bash
         run: |
-          cat > notes.md <<EOF
-          # Selene Build ${GITHUB_REF_NAME}
-
-          The Kimi-K3 cooperation harness, with native grok subagent freight.
-
-          **Source revision (SOURCE_REV):** \`${GITHUB_SHA}\`
-
-          | Asset | Notes |
-          |---|---|
-          | \`selene-{platform}\` | TUI agent binary — verify with the adjacent \`.sha256\` |
-          | \`dioptra-{platform}\` | Companion org/knowledge multi-tool (regula verbs included) |
-          | \`dioptra-dash-{platform}\` | Optional standalone dash (TTY) — multi-tool re-execs it when present |
-
-          Quickstart: see README (K3 paths first, Grok native second). Upstream
-          provenance + sync cadence: UPSTREAM.md. User-visible changes:
-          \`crates/codegen/xai-grok-shell-base/assets/selene-changelog.md\`.
-          EOF
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          NOTES="docs/release-notes/${TAG}.md"
+          {
+            echo "# Selene Build ${TAG}"
+            echo
+            if [ -f "$NOTES" ]; then
+              cat "$NOTES"
+            else
+              echo "The Kimi-K3 cooperation harness, with native grok subagent freight."
+              echo
+              echo "A permanent engineered fork of xAI's open-source grok-build"
+              echo "(Apache-2.0). Not an xAI product. Not a Moonshot product."
+            fi
+            echo
+            echo "## Asset map"
+            echo
+            echo "| Asset | Notes |"
+            echo "|---|---|"
+            echo "| \`selene-{platform}\` | TUI agent binary — verify with the adjacent \`.sha256\` |"
+            echo "| \`dioptra-{platform}\` | Companion org/knowledge multi-tool (regula verbs included) |"
+            echo "| \`dioptra-dash-{platform}\` | Optional standalone dash (TTY) — the multi-tool re-execs it when present |"
+            echo
+            echo "## Provenance"
+            echo
+            echo "| Pin | Value |"
+            echo "|---|---|"
+            echo "| Fork commit (this release) | \`${GITHUB_SHA}\` |"
+            echo "| Upstream baseline (\`SOURCE_REV\`) | \`$(tr -d '[:space:]' < SOURCE_REV)\` |"
+            echo
+            echo "Pin both — the upstream baseline this tree is rebased on, and this fork tip."
+          } > notes.md
+          cat notes.md
 
       - name: Create release + attach assets
         uses: softprops/action-gh-release@v2

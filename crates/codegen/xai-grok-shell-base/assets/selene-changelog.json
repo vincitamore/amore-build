@@ -1,5 +1,10 @@
 [
   {
+    "category": "features",
+    "description": "**v0.1.0 — first public release.** The Kimi-K3 cooperation harness, with native grok subagent freight: guided first-run setup, `selene init` agent-house scaffold, `.selene` config semantics, dioptra companion seam.",
+    "breaking_change": false
+  },
+  {
     "category": "fixes",
     "description": "**Repo-self references restored** — manual-update message names the GitHub Releases URL; SECURITY.md links the private-advisory form; README has the clone URL.",
     "breaking_change": false

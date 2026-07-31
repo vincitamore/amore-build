@@ -6,8 +6,16 @@ everything below is the fork's own delta, newest first. This document is
 compiled into the binary — update it in the same change as the work it
 describes.
 
-## 2026-07-30
+## 2026-07-30 — v0.1.0
 
+- **First public release.** The Kimi-K3 cooperation harness, with native grok
+  subagent freight. Guided first-run setup (K3 provider paths first, grok
+  native second, dioptra companion offered), `selene init` planting a complete
+  agent house (AGENTS.md, context/tasks/inbox/knowledge scaffold, seven
+  orchestration skills, hooks pack, principle lattice default-on), `.selene`
+  config semantics with `.grok` legacy fallback, `SELENE_*` environment
+  primary, and the `Ctrl+Shift+D` dioptra companion seam. Auto-update is hard
+  off; telemetry and feedback default off.
 - **Repo-self references restored** — the compiled manual-update message now
   names the GitHub Releases URL; README links the clone URL and Releases
   page; SECURITY.md links the private-advisory form (repo-self-URL exception

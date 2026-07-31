@@ -22,7 +22,7 @@ It is a **permanent engineered fork** of xAI's open-source
 xAI product. Not a Moonshot product.** Upstream provenance and sync cadence:
 [`UPSTREAM.md`](UPSTREAM.md).
 
-![Selene Build — first-run welcome screen](docs/assets/welcome.png)
+![Selene Build — the welcome screen, with a Kimi K3 model configured](docs/assets/welcome.png)
 
 ---
 
