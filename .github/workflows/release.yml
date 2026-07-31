@@ -65,11 +65,15 @@ jobs:
         run: cargo build --release -p xai-grok-pager-bin
 
       # MSVC hits `LNK4319: A PDB limit was hit while adding public symbols` on
-      # an artifact this size; /DEBUG:NONE skips PDB emission. Same link args
-      # as the local Windows build recipe and the ci.yml lane.
+      # an artifact this size; /DEBUG:NONE skips PDB emission.
+      # The flags go through RUSTFLAGS, NOT `cargo rustc -- -Clink-args=…`:
+      # PowerShell splits `-Clink-args=/DEBUG:NONE` at the colon and rustc then
+      # sees `NONE` as a second input filename.
       - name: Build (windows)
         if: matrix.os == 'windows-latest'
-        run: cargo rustc -p xai-grok-pager-bin --release -- -Clink-args=/DEBUG:NONE -Clink-args=/STACK:8388608
+        env:
+          RUSTFLAGS: "-Clink-arg=/DEBUG:NONE -Clink-arg=/STACK:8388608"
+        run: cargo build --release -p xai-grok-pager-bin
 
       - name: Smoke — --version + doctor --json (unix)
         if: matrix.os != 'windows-latest'

@@ -2,6 +2,11 @@ name: ci
 
 # Build + test the selene binary surface on Linux and Windows.
 # Dioptra CI has its own lane (dioptra-ci.yml) scoped to instruments/dioptra/**.
+#
+# Build and test are SEPARATE jobs on purpose: one job that produced both a
+# release binary and a debug test tree ran the runner out of disk ("No space
+# left on device" building rlibs). Split, each profile gets a whole runner —
+# and the two run in parallel.
 
 on:
   push:
@@ -17,8 +22,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-test:
-    name: ${{ matrix.os }} — build + test
+  build:
+    name: ${{ matrix.os }} — build + smoke
     runs-on: ${{ matrix.os }}
     # A cold release build of this workspace exceeds 60 minutes on a 2-core
     # runner, and a job that times out never saves its cache — so a too-short
@@ -44,43 +49,26 @@ jobs:
           toolchain: "1.92.0"
 
       # shared-key must be STABLE across runs — keying it on run_id gave every
-      # run a fresh miss (every CI build was cold).
+      # run a fresh miss (every CI build was cold). Separate key per profile.
       - name: Cargo cache
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: ci
+          shared-key: ci-build
 
       - name: Build selene binary (unix)
         if: matrix.os != 'windows-latest'
         run: cargo build --release -p xai-grok-pager-bin
 
       # MSVC hits `LNK4319: A PDB limit was hit while adding public symbols` on
-      # an artifact this size. /DEBUG:NONE skips PDB emission — the same link
-      # args the local Windows build recipe uses.
+      # an artifact this size; /DEBUG:NONE skips PDB emission.
+      # The flags go through RUSTFLAGS, NOT `cargo rustc -- -Clink-args=…`:
+      # PowerShell splits `-Clink-args=/DEBUG:NONE` at the colon and rustc then
+      # sees `NONE` as a second input filename.
       - name: Build selene binary (windows)
         if: matrix.os == 'windows-latest'
-        run: cargo rustc -p xai-grok-pager-bin --release -- -Clink-args=/DEBUG:NONE -Clink-args=/STACK:8388608
-
-      # Tests run in DEBUG. `--release` compiles out `debug_assert!`, which
-      # silently breaks every `#[should_panic]` test that rides one (they fail
-      # with "test did not panic as expected"), and it costs a second full
-      # optimized build of the whole tree.
-      # Windows: upstream brand-detection test assumes a unix host; skip it
-      # (documented fork test discipline — see CONTRIBUTING.md).
-      - name: Test pager crate (unit + integration)
-        run: cargo test -p xai-grok-pager -- --skip standalone_color_uses
-        if: matrix.os == 'windows-latest'
-
-      - name: Test pager crate (unit + integration)
-        run: cargo test -p xai-grok-pager
-        if: matrix.os == 'ubuntu-latest'
-
-      - name: Test config/env/hooks/agent/version crates
-        run: >-
-          cargo test
-          -p xai-grok-config -p xai-grok-env -p xai-grok-hooks
-          -p xai-grok-agent -p xai-grok-version -p xai-grok-update
-          -- --skip standalone_color_uses
+        env:
+          RUSTFLAGS: "-Clink-arg=/DEBUG:NONE -Clink-arg=/STACK:8388608"
+        run: cargo build --release -p xai-grok-pager-bin
 
       - name: Smoke — selene --version stamps the build commit (Linux)
         if: matrix.os == 'ubuntu-latest'
@@ -106,3 +94,51 @@ jobs:
             target/release/selene.exe
           if-no-files-found: error
           retention-days: 7
+
+  test:
+    name: ${{ matrix.os }} — tests
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    env:
+      CARGO_TERM_COLOR: always
+      CARGO_INCREMENTAL: "0"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+
+      - name: Install Rust toolchain (rust-toolchain.toml)
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.92.0"
+
+      - name: Cargo cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ci-test
+
+      # Suites run in DEBUG. `--release` compiles out `debug_assert!`, which
+      # silently breaks every `#[should_panic]` test that rides one (they fail
+      # with "test did not panic as expected"), and it costs a second full
+      # optimized build of the tree.
+      # Windows: upstream brand-detection test assumes a unix host; skip it
+      # (documented fork test discipline — see CONTRIBUTING.md).
+      - name: Test pager crate (unit + integration)
+        run: cargo test -p xai-grok-pager -- --skip standalone_color_uses
+        if: matrix.os == 'windows-latest'
+
+      - name: Test pager crate (unit + integration)
+        run: cargo test -p xai-grok-pager
+        if: matrix.os == 'ubuntu-latest'
+
+      - name: Test config/env/hooks/agent/version crates
+        run: >-
+          cargo test
+          -p xai-grok-config -p xai-grok-env -p xai-grok-hooks
+          -p xai-grok-agent -p xai-grok-version -p xai-grok-update
+          -- --skip standalone_color_uses
