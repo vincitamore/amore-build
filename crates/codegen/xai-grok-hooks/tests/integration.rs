@@ -254,6 +254,11 @@ async fn first_deny_stops_chain() {
     }
 }
 
+// Spawns a real hook command, which the runner routes through `sh -c`.
+// On Windows `sh` is git-bash if it exists at all, so this asserts the host's
+// shell rather than the dispatcher. Gated to match the gating this crate
+// already uses; no logic forked.
+#[cfg(unix)]
 #[tokio::test]
 async fn hook_receives_stdin_envelope() {
     let dir = tempfile::tempdir().unwrap();
@@ -321,6 +326,11 @@ fn make_envelope(event: HookEventName, payload: HookPayload) -> HookEventEnvelop
 
 /// Each new event type: write hook file → load → dispatch → verify the
 /// command fires and receives the correct JSON envelope on stdin.
+// Spawns a real hook command, which the runner routes through `sh -c`.
+// On Windows `sh` is git-bash if it exists at all, so this asserts the host's
+// shell rather than the dispatcher. Gated to match the gating this crate
+// already uses; no logic forked.
+#[cfg(unix)]
 #[tokio::test]
 async fn new_event_types_fire_and_receive_correct_envelope() {
     struct Case {
@@ -473,6 +483,11 @@ async fn new_event_types_fire_and_receive_correct_envelope() {
 /// constructs the spoof JSON, dispatches a hook that writes `printenv`
 /// for each key, and asserts the captured values are the runner's
 /// authentic ones.
+// Spawns a real hook command, which the runner routes through `sh -c`.
+// On Windows `sh` is git-bash if it exists at all, so this asserts the host's
+// shell rather than the dispatcher. Gated to match the gating this crate
+// already uses; no logic forked.
+#[cfg(unix)]
 #[tokio::test]
 async fn runner_injected_vars_override_extra_env_at_spawn() {
     let dir = tempfile::tempdir().unwrap();

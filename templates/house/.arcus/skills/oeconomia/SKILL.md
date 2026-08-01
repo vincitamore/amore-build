@@ -6,8 +6,8 @@ description: >-
   work to subagents on KNOWN model resolutions. REFLEX (holds even before the
   body loads): (1) EVERY dispatch fires with its model resolution KNOWN —
   without an explicit pin a subagent inherits the parent/session model via
-  resolution order (spawn-time model override → role/persona default →
-  [subagents.models.<type>] → parent session model). A blind spawn silently
+  resolution order (spawn-time/runtime override → [subagents.models.<name>] →
+  the agent definition's own model → parent session model). A blind spawn silently
   inherits the orchestrator. Prefer type pins in config and spawn-time overrides
   when the dispatch must not share the session meter; (2) delegate bulk + early
   — multi-file comprehension reads, protocol-driven review/judging sweeps,
@@ -35,7 +35,7 @@ description: >-
 
 > **SELF-UPDATING.** A stale contract mis-allocates every future session's budget — worse than no contract. Update this file **in the same change that creates the fact**, per §8's triggers; the act of noticing is the trigger. Operational doctrine only — history lives in git and the task record, never accreted here.
 
-> Ported from a companion house's operations library. Regenerated for **Arcus Build**: native task-tool dispatch, model resolution via `[subagents.models]`, role/persona defaults, and spawn-time model override (user-guide §16).
+> Written for **Arcus Build**: native task-tool dispatch, model resolution via `[subagents.models]`, role/persona defaults, and spawn-time model override.
 
 The operational contract. Deeper doctrine and formation notes may live beside this skill as a companion file if the house authors one; this file is what you follow.
 
@@ -86,7 +86,7 @@ Classify every action by the **judgment-density of its output given the extendab
 1. **Versioned protocol file** for recurring criteria — never re-inline per dispatch. It is also where residual-Original leaks get folded back in, so it improves under use.
 2. **File-based briefs in / file outputs back** — payloads stay off the wire and out of the window. The dispatch is a pointer (~a hundred tokens); the reply is one line; the substance is on disk. Dual-write handle-first (`forge/handles/` then `forge/output/`, per `forge/README.md`) so a checkpoint survives the agent's death.
 3. **Mechanical gate at ingest** — the highest-leverage move: **constrain the output shape until the gate is mechanical** (schema validation, quote-must-be-found exhibit anchors, tests). "Delegate + verify mechanically" is the pattern; "delegate + trust" is the failure mode.
-4. **Model resolution is checked, not assumed** — know the resolution order before the wave (user-guide §16): **spawn-time model override → role/persona model → `[subagents.models.<type>]` → parent session model**. A dispatch whose resolution you haven't reasoned about inherits the orchestrator's model and meter silently. Before any wave that depends on a pin, verify one spawn's actual resolution (status badge, transcript header, or harness equivalent).
+4. **Model resolution is checked, not assumed** — know the resolution order before the wave: **spawn-time/runtime override → `[subagents.models.<name>]` in config → the agent definition's own `model:` → parent session model**. Note the middle pair: a **config pin outranks the agent definition**, so a `model:` written into a definition loses to a `[subagents.models]` entry you may have forgotten — the surprising direction, and the one worth checking. A dispatch whose resolution you haven't reasoned about inherits the orchestrator's model and meter silently. Before any wave that depends on a pin, verify one spawn's actual resolution (status badge, transcript header, or harness equivalent).
 
 ## 5. Dispatch mechanics — hard rules and measured hazards
 

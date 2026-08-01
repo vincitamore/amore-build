@@ -1071,6 +1071,12 @@ mod tests {
     /// Now the env-var pre-spawn check refuses with a clear reason when
     /// the var is unset (and the dispatcher fail-opens, so the tool call
     /// itself is not blocked).
+    // Unix-shaped by construction: writes a `#!/bin/sh` script (chmod already
+    // `cfg(unix)` inside) and relies on the runner's `sh -c` path. On Windows
+    // `sh` is git-bash if present at all, so this asserts the host's shell
+    // rather than the hook runner. Gated to match upstream's own gating in
+    // this file; the logic is untouched.
+    #[cfg(unix)]
     #[tokio::test]
     async fn test_env_var_interpolation_runs_via_shell() {
         let tmp = tempfile::tempdir().unwrap();
@@ -1130,6 +1136,12 @@ mod tests {
     /// it on the spawned child so shell expansion via the `sh -c` branch
     /// resolves correctly; otherwise such hooks fail to find the
     /// command.
+    // Unix-shaped by construction: writes a `#!/bin/sh` script (chmod already
+    // `cfg(unix)` inside) and relies on the runner's `sh -c` path. On Windows
+    // `sh` is git-bash if present at all, so this asserts the host's shell
+    // rather than the hook runner. Gated to match upstream's own gating in
+    // this file; the logic is untouched.
+    #[cfg(unix)]
     #[tokio::test]
     async fn test_claude_project_dir_is_exported() {
         let tmp = tempfile::tempdir().unwrap();

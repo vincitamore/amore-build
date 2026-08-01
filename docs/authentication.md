@@ -149,7 +149,7 @@ system_prompt_label = "Arcus Build"
 
 ### `ARCUS_*` primary, `GROK_*` legacy
 
-Wave-3 env identity: for mapped suffixes, **`ARCUS_*` wins** when both are set;
+For mapped suffixes, **`ARCUS_*` wins** when both are set;
 legacy `GROK_*` is read silently when primary is absent. Auth-related mappings
 include exact `AUTH` and the `AUTH_*` / `CLI_*` wildcards.
 
@@ -173,10 +173,12 @@ Unmapped names (including `XAI_API_KEY`) resolve as plain environment variables.
 
 Whether a **free** xAI account is enough for OAuth catalog + cli-chat-proxy use,
 or whether a **paid** plan is required, is **not encoded** in this repository in
-a way that can be asserted as fact. The protocol, scopes, and public-client
-shape are verified in-tree; **plan gating is a server-side policy** and was
-recorded as **UNVERIFIED** in the public-release shape work (Q1 — empirical test
-scheduled before GA).
+a way this project can assert as fact. The protocol, scopes, and public-client
+shape are verified in-tree; **which plans may use them is xAI's server-side
+policy**, not something encoded here, and it can change without any change to
+this repo.
+
+What that means in practice:
 
 Until that test lands and this page is updated:
 

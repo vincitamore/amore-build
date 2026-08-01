@@ -142,16 +142,45 @@ logic, and the bulk of `crates/`.
 
 ## 6. How to consume upstream fixes
 
+The mechanics below are automated by [`scripts/sync_upstream.py`](scripts/sync_upstream.py)
+(stdlib Python; `py scripts/sync_upstream.py --help` on Windows, `python3`
+elsewhere). Upstream publishes **sync-bundle commits** — bot-authored commits
+titled "Synced from monorepo" with a `Source-Revision:` trailer naming the
+internal monorepo SHA. Those bundles are the intake unit (§4); never
+cherry-pick unrelated upstream commits.
+
+### One-line intake flow
+
+```bash
+python scripts/sync_upstream.py --check      # how far behind, what's in the newest bundle
+python scripts/sync_upstream.py --apply      # fetch + merge upstream/main on a sync/<sha> branch
+python scripts/sync_upstream.py --verify     # run the fork-surface checklist against the tree
+# resolve conflicts if any, re-apply the thin fork delta once, then:
+git commit -m "sync: merge upstream <sha>"
+python scripts/sync_upstream.py --update-pin # SOURCE_REV -> upstream/main
+```
+
+`--apply` refuses a dirty working tree and never commits — the merge is left
+for human review. `--verify` checks the five fork surfaces mechanically:
+`.arcus`/`.grok` precedence, `~/.arcus` default home, identity/binary naming
+(argv0 aliases), auto-update hard-off (`FORK_AUTO_UPDATE_HARD_OFF`), and the
+embed + `init` ownership tests — then builds and smokes `arcus` on the host.
+The Linux pager suite and full crate suite remain CI's job (see §5); `--verify`
+says what it can and cannot run rather than faking a green.
+
 ### Operators / release maintainers
 
 1. Track monorepo **sync** commits on `xai-org/grok-build` (bundle-shaped; do
-   not invent a cherry-pick stream).
-2. Rebase or merge the **entire sync bundle**, then re-apply/re-verify the thin
-   fork delta once.
-3. Refresh [`SOURCE_REV`](SOURCE_REV) when the upstream baseline moves.
-4. After every rebase, re-check at least: `.arcus`/`.grok` precedence,
-   `~/.arcus` default home, identity/binary naming, auto-update hard-off,
-   embed + `init` ownership tests.
+   not invent a cherry-pick stream). `--check` reports the delta and the
+   newest bundle's change list.
+2. Rebase or merge the **entire sync bundle** (`--apply`), then re-apply/re-
+   verify the thin fork delta once.
+3. Refresh [`SOURCE_REV`](SOURCE_REV) when the upstream baseline moves
+   (`--update-pin`). **The pin stores the public sync-bundle SHA** — the last
+   one merged — not upstream's internal monorepo SHA (`Source-Revision:`),
+   which is not a fetchable git object.
+4. After every rebase, re-check at least the five surfaces — `--verify` does
+   this; keep the checklist in sync with the script when it grows.
 5. Fast-follow security fixes; batch ordinary drift into the next sync rebase.
 
 ### Contributors
@@ -162,6 +191,12 @@ channel:
 - **Thin-diff:** smallest change that works; new files beat upstream churn.
 - **Rebase-rarely:** no micro-rebase stream from upstream; intake is
   bundle-shaped (§4).
+- The fork-surface grok boundary is enforced by
+  [`scripts/check_grok_boundary.py`](scripts/check_grok_boundary.py) —
+  `--scan` to survey, `--check` to gate. It encodes which `grok` mentions are
+  ours to change (fork-owned surface) versus upstream substrate (crate ids,
+  paths, env, model name, provenance) that must stay untouched for merge
+  economics. Add reviewed exceptions there, not by editing around the check.
 - A longer **rebase checklist** (every `.grok` load site, test matrix, Windows
   notes) is intended for contributor AGENTS / maintainer docs when published.
   Until then, §4–§5 plus thin-diff / rebase-rarely are the binding written

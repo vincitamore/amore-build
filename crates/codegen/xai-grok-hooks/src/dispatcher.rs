@@ -911,6 +911,12 @@ mod tests {
         assert_eq!(result.blocks.len(), 1);
     }
 
+    // Unix-shaped by construction: writes a `#!/bin/sh` script (chmod already
+    // `cfg(unix)` inside) and relies on the runner's `sh -c` path. On Windows
+    // `sh` is git-bash if present at all, so this asserts the host's shell
+    // rather than the hook runner. Gated to match upstream's own gating in
+    // this file; the logic is untouched.
+    #[cfg(unix)]
     #[tokio::test]
     async fn stop_exit2_fail_open_and_context() {
         let registry = registry_from_specs(vec![

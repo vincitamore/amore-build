@@ -128,6 +128,17 @@ impl ParentPlan {
 pub(super) struct ParentAnchor {
     path: PathBuf,
     identity: FileIdentity,
+    /// Directory handle, kept solely so [`ParentAnchor::sync`] can `fsync` the
+    /// parent after publication.
+    ///
+    /// Unix-only by necessity, not by preference: opening a *directory* as a
+    /// file succeeds on unix and is the normal way to obtain a dirfd, but on
+    /// Windows it fails with `ERROR_ACCESS_DENIED` unless the handle is opened
+    /// with `FILE_FLAG_BACKUP_SEMANTICS`. Since `sync()` is itself `cfg(unix)`
+    /// — there is no directory fsync to perform on Windows — the handle was
+    /// pure cost there: every `ManagedConfig::apply` failed at capture time
+    /// having opened something it would never use.
+    #[cfg(unix)]
     directory: fs::File,
 }
 
@@ -140,6 +151,7 @@ impl ParentAnchor {
         if metadata.file_type().is_symlink() || !metadata.is_dir() {
             return Err(ManagedConfigError::ParentChanged(path.to_path_buf()));
         }
+        #[cfg(unix)]
         let directory = fs::File::open(path).map_err(|source| ManagedConfigError::Read {
             path: path.to_path_buf(),
             source,
@@ -147,6 +159,7 @@ impl ParentAnchor {
         Ok(Self {
             path: path.to_path_buf(),
             identity: FileIdentity::from_metadata(&metadata),
+            #[cfg(unix)]
             directory,
         })
     }

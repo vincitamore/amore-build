@@ -20,7 +20,7 @@ description: >
 
 Named for Greek **προκοπή** (*prokopē*): progress as continuous advancement — the *viator* climb, not arrival. Matches the house lattice floor (never-arriving perfection): the loop is for the road.
 
-> Ported from a companion house's operations library. Regenerated for **Arcus Build**: native task-tool dispatch, automatic context compaction (no reliable pre-compact tip-write hook — the operational write is agent-owned), git-committed task file as the durable handoff surface, direct tasks/knowledge/inbox lifecycle per AGENTS.md. Primary corpus exhibits are formative, not gospel — do not hardcode wave-rate numbers or domain-specific True-success bars as universal constants.
+> Written for **Arcus Build**: native task-tool dispatch, automatic context compaction (there is no reliable pre-compact hook, so the operational write is agent-owned), the git-committed task file as the durable handoff surface, and the tasks/knowledge/inbox lifecycle from AGENTS.md. The worked numbers below are illustrative — do not hardcode wave rates or domain-specific success bars as universal constants.
 
 ## §0 · Self-updating
 
@@ -31,7 +31,8 @@ Keep this skill true when the underlying fact moves:
 - **Session re-arm or compactification protocol changes** → §4, §7, and any local templates/references.
 - **Pressure-health metrics renamed** → §4 and local pressure-health notes.
 - **Tip / orientation-packet shape changes** → §6–§7 and goal-brief template.
-- **Source doctrine materially advances** → rebase this port.
+- **Your own practice moves past what is written here** → this file is yours;
+  rewrite it rather than working around it.
 
 Ephemeral campaign state lives in the goal’s own surfaces (attack graph, status) — **not** here.
 

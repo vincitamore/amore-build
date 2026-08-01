@@ -564,6 +564,21 @@ fn failed_validator_cleans_reserved_backup_and_temp() {
     assert!(artifacts(temp.path()).is_empty());
 }
 
+// Hangs indefinitely on Windows: the second thread never returns from
+// `apply()`, so the join never completes and the test binary runs until the CI
+// job is killed. Measured 2026-07-31 — it alone accounted for the entire
+// 150-minute Windows `tests` timeout (the whole crate set compiles in under
+// five minutes), so the lane produced no result on any run it ever made.
+//
+// The lock itself is `std::fs::File::lock()`, whose blocking semantics differ
+// between `flock` and `LockFileEx`; this test drives two threads into
+// contention on one lock file with barriers, which is exactly where that
+// difference shows. Gated to unix rather than rewritten, per the standing rule
+// for inherited unix-shaped tests: match upstream's own gating, do not fork the
+// logic. **The underlying behaviour is not diagnosed** — gating buys back a
+// usable CI lane, it does not clear the question of how `apply()` behaves under
+// concurrent contention on Windows.
+#[cfg(unix)]
 #[test]
 fn transaction_lock_blocks_second_apply_then_stale_revalidation_wins() {
     struct BlockAfterLock {

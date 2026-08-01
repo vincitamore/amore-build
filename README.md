@@ -35,10 +35,12 @@ Requirements:
 
 - **Rust** — pinned by [`rust-toolchain.toml`](rust-toolchain.toml); `rustup`
   installs it on first build.
-- **[DotSlash](https://dotslash-cli.com)** — so hermetic tools under
-  [`bin/`](bin/) (notably [`bin/protoc`](bin/protoc)) can download and run.
-  Put `dotslash` on your `PATH` **before** building.
-- **protoc** — resolved via DotSlash, or a `protoc` on `PATH` / `$PROTOC`.
+- **protoc** — on your `PATH`, or pointed at by `$PROTOC`. Any recent release
+  works; this is what CI uses on every platform.
+
+Optionally, [DotSlash](https://dotslash-cli.com) can run the pinned tool under
+[`bin/`](bin/) instead. It is not required, and not available on Windows — the
+build falls back to `protoc` on `PATH` by design.
 
 ```sh
 git clone https://github.com/vincitamore/arcus-build.git

@@ -224,8 +224,8 @@ pub fn write_iris_pointer(
     let asset = iris_asset_shape();
     let mut body = String::from(
         "# Iris companion pointer — written by `arcus setup` / first-run wizard.\n\
-         # Iris is optional; this file is not an install.\n\
-         # Expected release asset shape (fetch deferred; CI pipeline is a later unit):\n",
+         # `arcus init` installs iris; this file only records the asset it expects.\n\
+         # Release asset for this platform:\n",
     );
     body.push_str(&format!("#   {asset}\n"));
     body.push_str(

@@ -5,7 +5,7 @@ description: "Dynamic multi-agent pipeline orchestration. The main session becom
 
 # Forge Master — Dynamic Pipeline Mode
 
-> Ported from a companion house's operations library. Regenerated for **Arcus Build**: native task-tool / orchestrator subagent dispatch, house `forge/` contracts, AGENTS.md orientation. No private harness lanes.
+> Written for **Arcus Build**: native task-tool / orchestrator subagent dispatch, `forge/` contracts, AGENTS.md orientation.
 
 ## §0 SELF-UPDATING
 
