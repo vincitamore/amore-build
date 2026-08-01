@@ -200,7 +200,7 @@ export function Shell({ onQuit }: { onQuit?: () => void }) {
   const [world, setWorld] = useState<WorldNode[] | null>(null);
   const [neutralCluster, setNeutralCluster] = useState(-1); // community mode's misc-bucket index (→ gray)
   const [layingOut, setLayingOut] = useState(false); // a relayout in flight (the PRIOR world stays rendered)
-  const [loadingLabel, setLoadingLabel] = useState('Connecting to Vitrum daemon');
+  const [loadingLabel, setLoadingLabel] = useState('Connecting to Iris daemon');
   const graphRef = useRef<GraphData | null>(null);
   graphRef.current = graph;
 
@@ -214,7 +214,7 @@ export function Shell({ onQuit }: { onQuit?: () => void }) {
     void (async () => {
       let url = daemonUrl();
       let daemonOk = false;
-      if (!(await isDaemonUp(url)) && alive) setLoadingLabel('Starting Vitrum daemon (building index)');
+      if (!(await isDaemonUp(url)) && alive) setLoadingLabel('Starting Iris daemon (building index)');
       try {
         const r = await ensureDaemon({ autoSpawn: true });
         url = r.url;
@@ -242,7 +242,7 @@ export function Shell({ onQuit }: { onQuit?: () => void }) {
         setDemoNotice(
           daemonOk
             ? 'Graph index empty — showing demo data'
-            : 'Vitrum daemon unavailable — showing demo data (graph, search & enrichment offline)',
+            : 'Iris daemon unavailable — showing demo data (graph, search & enrichment offline)',
         );
       }
     })();

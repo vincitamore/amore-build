@@ -97,6 +97,12 @@ xai-grok-update = { path = "../xai-grok-update" }
 agent-client-protocol = { workspace = true }
 xai-acp-lib = { workspace = true }
 xai-file-utils = { path = "../xai-file-utils" }
+
+# `arcus init` fetches the iris companion from the matching GitHub release.
+# Blocking client: init is dispatched from `fn main` before any async runtime
+# starts, so there is no reactor to conflict with.
+reqwest = { workspace = true, features = ["blocking"] }
+zip = "3"   # tar + flate2 are already dependencies below
 xai-grok-config = { workspace = true }
 # Voice dictation. `audio` (mic capture) is enabled on every target. On
 # macOS/Windows it links cpal; on Linux it compiles a subprocess-recorder

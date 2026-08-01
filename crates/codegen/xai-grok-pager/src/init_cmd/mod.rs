@@ -1,8 +1,17 @@
-//! `arcus init` — install the embedded cooperation harness into a git repo.
+//! `arcus init` — create a house and install the cooperation harness into it.
 //!
-//! Offline extract of `templates/house/**` with an ownership/refresh policy:
-//! never silently overwrite user edits; `--refresh` only rewrites files whose
-//! on-disk sha256 still matches the install manifest; `--force` overwrites.
+//! The house tree itself is extracted from `templates/house/**`, compiled into
+//! this binary, with an ownership/refresh policy: never silently overwrite user
+//! edits; `--refresh` only rewrites files whose on-disk sha256 still matches the
+//! install manifest; `--force` overwrites.
+//!
+//! `init` then installs the **iris** companion into `instruments/iris/`,
+//! which fetches it from the matching release — so `init` is not a network-free
+//! operation unless you pass `--no-iris`. Iris is part of the house, and the
+//! honest install story is better than a "no network required" claim kept
+//! true by shipping a house without its instrument. A fetch that fails never
+//! fails the house: the tree is already complete, and the failure is reported
+//! with the command to finish later.
 
 use std::collections::BTreeMap;
 use std::io::{IsTerminal as _, Write};
@@ -19,6 +28,8 @@ pub const MANIFEST_REL: &str = ".arcus/house-install.json";
 /// Iris companion pointer note (only when `--with-iris`).
 pub const IRIS_NOTE_REL: &str = ".arcus/iris-companion.note.md";
 
+pub mod iris_fetch;
+
 const MANIFEST_VERSION: u32 = 1;
 
 /// Default directory name for a new house.
@@ -29,16 +40,6 @@ const MANIFEST_VERSION: u32 = 1;
 /// `projects/` inside it. That is why it owns its own git history rather than
 /// borrowing a host repo's.
 pub const DEFAULT_HOUSE_DIR: &str = "arcus";
-
-const IRIS_NOTE: &str = "\
-# Iris companion (pointer)
-
-Iris is an optional companion instrument for Arcus Build — not installed by
-`init`. Install and run it separately when you want the dash/regula surfaces.
-
-See the product docs for the companion install story. This note is only a
-pointer so the house tree records the opt-in.
-";
 
 #[derive(Clone, Debug, Eq, PartialEq, clap::Args)]
 pub struct InitArgs {
@@ -66,10 +67,10 @@ pub struct InitArgs {
     /// Skip `context/principle-lattice.md` (lattice is default-on).
     #[arg(long = "no-lattice")]
     pub no_lattice: bool,
-    /// Plant an iris companion pointer note (default: off).
+    /// Install the iris companion (default: on; explicit opt-in, no-op when already default).
     #[arg(long = "with-iris", conflicts_with = "no_iris")]
     pub with_iris: bool,
-    /// Explicitly skip the iris pointer note (default).
+    /// Skip installing iris. `init` then makes no network request at all.
     #[arg(long = "no-iris", conflicts_with = "with_iris")]
     pub no_iris: bool,
     /// Print the plan; write nothing.
@@ -115,9 +116,14 @@ impl InitArgs {
         !self.no_lattice
     }
 
-    /// Iris pointer note: default off; `--with-iris` on.
+    /// Iris install: default ON; `--no-iris` off.
+    ///
+    /// Iris is part of the house rather than an optional extra, so it is
+    /// installed unless refused — the same shape as skills, hooks and the
+    /// lattice. `--no-iris` is also the offline switch: it is the only thing
+    /// in `init` that touches the network.
     pub fn iris_enabled(&self) -> bool {
-        self.with_iris && !self.no_iris
+        !self.no_iris
     }
 }
 
@@ -390,7 +396,15 @@ pub fn run_with_context(
     // Hooks registry: register <root>/.arcus/hooks when hooks files were in the plan.
     let hooks_registry = register_hooks_path(args, ctx, &root, &plans, writer)?;
 
-    write_summary(writer, &root, &plans, wrote_manifest, &hooks_registry)?;
+    // Companion install runs LAST: the house is already complete on disk, so a
+    // network failure here degrades to a note instead of taking the tree down.
+    let iris = if args.iris_enabled() {
+        iris_fetch::install(&root, xai_grok_version::VERSION, args.dry_run)
+    } else {
+        iris_fetch::IrisOutcome::OptedOut
+    };
+
+    write_summary(writer, &root, &plans, wrote_manifest, &hooks_registry, &iris)?;
 
     Ok(InitReport {
         root,
@@ -500,13 +514,6 @@ pub fn select_entries(entries: &[HouseEntry], args: &InitArgs) -> Vec<HouseEntry
             contents: expand_placeholders(&e.contents, &house_name),
         })
         .collect();
-
-    if args.iris_enabled() {
-        out.push(HouseEntry {
-            rel_path: IRIS_NOTE_REL.to_string(),
-            contents: IRIS_NOTE.as_bytes().to_vec(),
-        });
-    }
 
     out.sort_by(|a, b| a.rel_path.cmp(&b.rel_path));
     out
@@ -746,6 +753,7 @@ fn write_summary(
     plans: &[FilePlan],
     wrote_manifest: bool,
     hooks: &HooksRegistryReport,
+    iris: &iris_fetch::IrisOutcome,
 ) -> Result<()> {
     let mut written = Vec::new();
     let mut skipped = Vec::new();
@@ -792,6 +800,10 @@ fn write_summary(
         hooks.hooks_dir.display(),
         hooks.registry_path.display()
     )?;
+
+    if let Some(line) = iris.summary_line() {
+        writeln!(writer, "{line}")?;
+    }
 
     if would.is_empty() && !written.is_empty() {
         let house = root
@@ -961,11 +973,29 @@ mod unit_tests {
     }
 
     #[test]
-    fn default_args_skills_hooks_lattice_on_iris_off() {
+    fn everything_the_house_needs_is_on_by_default() {
+        // Iris joined this list when it stopped being an optional extra: a
+        // plain `arcus init` gives you the whole house, and each piece has an
+        // explicit opt-out rather than an opt-in nobody discovers.
         let args = InitArgs::default();
         assert!(args.skills_enabled());
         assert!(args.hooks_enabled());
         assert!(args.lattice_enabled());
-        assert!(!args.iris_enabled());
+        assert!(args.iris_enabled());
+    }
+
+    #[test]
+    fn each_piece_has_a_working_opt_out() {
+        let off = |f: fn(&mut InitArgs)| {
+            let mut a = InitArgs::default();
+            f(&mut a);
+            a
+        };
+        assert!(!off(|a| a.no_skills = true).skills_enabled());
+        assert!(!off(|a| a.no_hooks = true).hooks_enabled());
+        assert!(!off(|a| a.no_lattice = true).lattice_enabled());
+        // --no-iris is also the offline switch: it must actually disable the
+        // one code path in `init` that makes a network request.
+        assert!(!off(|a| a.no_iris = true).iris_enabled());
     }
 }

@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "The Vitrum OpenTUI dashboard — the operator's terminal surface. Reads the daemon, mutates via @arcus/regula, renders the knowledge graph with a braille canvas.",
+  "description": "The Iris OpenTUI dashboard — the operator's terminal surface. Reads the daemon, mutates via @arcus/regula, renders the knowledge graph with a braille canvas.",
   "scripts": {
     "test": "bun test",
     "dash": "bun src/index.tsx",

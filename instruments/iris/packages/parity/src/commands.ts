@@ -39,10 +39,10 @@ export const COMMANDS: CommandSpec[] = [
   {
     name: 'record',
     summary: 'Record every core case against a base daemon into golden/ (the spec snapshot)',
-    usage: 'parity record [--base http://127.0.0.1:3847] [--out golden/] [--json]',
+    usage: 'parity record [--base http://127.0.0.1:3853] [--out golden/] [--json]',
     write: true, // writes goldens to disk (not the daemon — read-only against it)
     flags: {
-      base: 'daemon base URL to record from (default http://127.0.0.1:3847)',
+      base: 'daemon base URL to record from (default http://127.0.0.1:3853)',
       out: 'golden output directory (default golden/ under cwd)',
     },
     booleanFlags: {},
@@ -79,7 +79,7 @@ export function manifest(): { commands: Array<Record<string, unknown>> } {
 }
 
 export function helpText(): string {
-  const lines = ['parity — golden-master parity harness for the Vitrum daemon rework', ''];
+  const lines = ['parity — golden-master parity harness for the daemon rework', ''];
   for (const c of COMMANDS) {
     lines.push(`  ${c.usage}`);
     lines.push(`      ${c.summary}`);

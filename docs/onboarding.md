@@ -1,15 +1,14 @@
 # Onboarding: what `arcus init` installs
 
-After `arcus init` in a git repository, you have a **cooperation harness** —
-orientation surfaces, folder schemas, hooks, skills, and an install manifest
-that records ownership. This page answers: **what got installed, what Arcus
-owns vs what you own, and what happens on `--refresh`.**
+After `arcus init`, you have a **cooperation harness** — orientation surfaces,
+folder schemas, hooks, skills, and an install manifest that records ownership.
+This page answers: **what got installed, what Arcus owns vs what you own, and
+what happens on `--refresh`.**
 
-Binary spelling: **`arcus`** (argv0 also tolerates `arcus-build`). Run from
-the target repo root (or any subdirectory — init walks up to the `.git` root).
+Binary spelling: **`arcus`** (argv0 also tolerates `arcus-build`).
 
 ```sh
-arcus init              # default: lattice + skills + hooks on; iris off
+arcus init              # default: lattice + skills + hooks + iris on
 arcus init --dry-run    # plan only
 arcus init --refresh    # upgrade untouched files only
 ```
@@ -258,7 +257,7 @@ Optional opt-in (not in default 133):
 
 | Path | Flag | What |
 |------|------|------|
-| `.arcus/iris-companion.note.md` | `--with-iris` | Pointer note only — Iris is **not** installed by init |
+| `instruments/iris/` | default on | The iris companion, fetched from the matching release. `--no-iris` skips it (and makes `init` network-free). |
 
 ---
 
@@ -271,7 +270,7 @@ All flags are long-options on `arcus init` (see `arcus init --help`).
 | `--no-lattice` | lattice **on** | Omit every path equal to `context/principle-lattice.md` or ending in `/principle-lattice.md` (includes `.arcus/rules/principle-lattice.md`). The shipped `AGENTS.md` template marks lattice-only orientation with HTML-comment markers so the lattice vs no-lattice reading is explicit in-source: `<!-- IF NO-LATTICE: begin remove — … -->` … `<!-- IF NO-LATTICE: end remove -->`, and the optional insert block `<!-- IF NO-LATTICE: begin insert — …` / `IF NO-LATTICE: end insert -->`. Init drops lattice **files**; it does not currently rewrite the AGENTS body — the markers document which paragraphs belong to lattice mode. |
 | `--no-skills` | skills **on** | Omit all of `.arcus/skills/**`. Explicit `--skills` is a no-op when already default-on. |
 | `--no-hooks` | hooks **on** | Do **not** write `.arcus/hooks/**` (paths still appear in the plan as skipped) and skip global `hooks-paths` registration. Explicit `--hooks` is a no-op when already default-on. |
-| `--with-iris` | iris **off** | Plant `.arcus/iris-companion.note.md` (pointer only). `--no-iris` is the explicit default. |
+| `--no-iris` | iris **on** | Skip the companion install. This is also the offline switch — it is the only part of `init` that makes a network request. |
 | `--dry-run` | off | Print the plan; write nothing (no files, no manifest, no hooks-paths). |
 | `--yes` / `-y` | off | Headless-safe; no prompts. **Required** for non-interactive `--force` overwrites. |
 | `--force` | off | Overwrite user-modified files (confirm unless `--yes`). |
@@ -348,8 +347,7 @@ Exact effect of each `--no-*` / default-off opt-in on the default tree:
 | `--no-lattice` | `context/principle-lattice.md`; `.arcus/rules/principle-lattice.md` (any path ending in `/principle-lattice.md`) | Everything else, including `AGENTS.md` (markers retained as comments) |
 | `--no-skills` | Entire `.arcus/skills/**` tree (all 7 skills + support files) | Hooks, lattice, scaffolds, scripts, AGENTS |
 | `--no-hooks` | Write of `.arcus/hooks/**` (plan shows them **skipped**) **and** `hooks-paths` registration | Skills, lattice, scaffolds, scripts, AGENTS |
-| `--with-iris` | *(opt-in)* adds `.arcus/iris-companion.note.md` only | Default tree unchanged otherwise |
-| `--no-iris` | Explicit default; no iris note | Default tree |
+| `--no-iris` | Skips `instruments/iris/`; no network request | Default tree otherwise unchanged |
 
 Combining flags is supported (e.g. `arcus init --no-skills --no-hooks --no-lattice --yes`).
 

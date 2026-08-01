@@ -1,6 +1,6 @@
 // Orientation-count aggregation — the SessionStart-hook style compact summary, as a
 // pure regula read composed from listTasks/listInbox/listReminders/listForge. Entirely
-// daemon-independent (file reads only), so `vitrum status` works with the daemon down.
+// daemon-independent (file reads only), so `iris status` works with the daemon down.
 
 import { listTasks } from './task';
 import { listInbox } from './inbox';

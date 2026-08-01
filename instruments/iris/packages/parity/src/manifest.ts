@@ -36,7 +36,7 @@ export interface ManifestEntry {
 }
 
 export interface Manifest {
-  tool: 'vitrum-parity';
+  tool: 'iris-parity';
   version: 1;
   recordedAt: string;
   base: string;

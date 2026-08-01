@@ -318,7 +318,7 @@ export function exportPdf(doc: PdfDoc, opts: PdfOptions = {}): Promise<PdfResult
       if (!rm()) setTimeout(rm, 1000);
     };
     try {
-      const dir = mkdtempSync(join(tmpdir(), 'vitrum-pdf-'));
+      const dir = mkdtempSync(join(tmpdir(), 'iris-pdf-'));
       tmpDir = dir;
       htmlPath = join(dir, 'doc.html');
       userDataDir = join(dir, 'profile'); // a DEDICATED profile — else Edge/Chrome defers to the

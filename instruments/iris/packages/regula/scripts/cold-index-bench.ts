@@ -1,5 +1,5 @@
 // Cold-index benchmark — the empirical exhibit for the Workstream C language decision
-// (tasks/vitrum-vinculum-master, ratified Bun 2026-07-02 pending this number).
+// (tasks/example-bench, ratified Bun 2026-07-02 pending this number).
 //
 // Simulates the new Bun daemon's cold-start index build over the real org corpus, using the
 // REAL production parse path (gray-matter, regula's parser — the whole point of the Bun

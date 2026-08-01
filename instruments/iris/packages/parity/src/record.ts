@@ -79,7 +79,7 @@ export async function record(base: string, goldenDir: string): Promise<RecordRes
   }
 
   const manifest: Manifest = {
-    tool: 'vitrum-parity',
+    tool: 'iris-parity',
     version: 1,
     recordedAt: new Date().toISOString(),
     base,

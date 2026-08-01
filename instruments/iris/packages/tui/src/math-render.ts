@@ -1,5 +1,5 @@
 /**
- * Terminal math for the Vitrum doc viewer — KaTeX parse tree → Unicode text.
+ * Terminal math for the iris doc viewer — KaTeX parse tree → Unicode text.
  *
  * OpenTUI fixed `<text>` slots cannot host KaTeX HTML/CSS. We use KaTeX only as the
  * **parser** (`katex.__parse`), then walk the parse tree into a readable Unicode string.

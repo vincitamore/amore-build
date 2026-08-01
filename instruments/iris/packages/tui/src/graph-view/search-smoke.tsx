@@ -12,8 +12,8 @@ import type { GraphNode } from '../render/graph';
 
 // 30 task nodes with deliberately overlong labels + paths (both overflow every width tested).
 const nodes: GraphNode[] = Array.from({ length: 30 }, (_, i) => ({
-  id: `tasks/completed/vitrum-search-overlay-window-improvement-round-${i}.md`,
-  label: `Vitrum search overlay improvement ${i}: confirm path and knowledge substrate alignment`,
+  id: `tasks/completed/example-search-overlay-${i}.md`,
+  label: `Example search overlay improvement ${i}: confirm path and knowledge substrate alignment`,
   type: 'task',
   kind: 'doc',
   linkCount: i,
@@ -38,7 +38,7 @@ for (const { cols, pathShown } of CASES) {
   );
   await new Promise((r) => setTimeout(r, 150));
   await renderOnce();
-  await mockInput.typeText('vitrum');
+  await mockInput.typeText('example');
   await new Promise((r) => setTimeout(r, 150));
   await renderOnce();
   const frame = captureCharFrame();
@@ -49,7 +49,7 @@ for (const { cols, pathShown } of CASES) {
   // Exactly one selection marker line (the selected row intact on one physical line, label leading).
   const selRows = lines.filter((l) => l.includes('›'));
   // (label START must lead the row — truncation may cut mid-word at narrow widths)
-  const selShowsLabel = selRows.length === 1 && /› ◆ Vitrum search overlay/.test(selRows[0]);
+  const selShowsLabel = selRows.length === 1 && /› ◆ Example search overlay/.test(selRows[0]);
   // Hint line intact — wrap squashes fragments into it (the garbled-hint defect).
   const hintClean = lines.some((l) => /↑↓ move · ⏎ focus · esc close/.test(l));
   // Overflow counter present (30 results > 12 slots must never truncate silently).

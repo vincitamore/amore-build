@@ -2,7 +2,7 @@
 // skim.ts — a bit-faithful port of
 //   fuzzy_matcher::skim::SkimMatcherV2::default().fuzzy_match(choice, pattern)
 // from the vendored Rust crate `fuzzy-matcher` v0.3.7 (the exact version the
-// legacy Vitrum daemon links; confirmed against src-tauri/Cargo.lock).
+// legacy iris daemon links; confirmed against src-tauri/Cargo.lock).
 //
 // Ground truth ported cell-for-cell:
 //   ~/.cargo/registry/.../fuzzy-matcher-0.3.7/src/skim.rs  (SkimMatcherV2, build_score_matrix)

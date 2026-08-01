@@ -3,7 +3,7 @@
  * package, org-root fallback), wrap the child's stderr in a crash log, and
  * propagate its exit code (annotating native crashes).
  *
- * Consumed by bare `iris` / `iris dash` (not a global `vitrum` bin).
+ * Consumed by bare `iris` / `iris dash` (not a global `iris` bin).
  * Org-write verbs live under `iris <verb>` via
  * `@arcus/regula`; the span names the viewing surface.
  */

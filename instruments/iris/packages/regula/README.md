@@ -10,7 +10,7 @@ surface) so that a mutation — "complete this task", "resolve this inbox item" 
 *correctly by construction* from one place, rather than re-encoded per client.
 
 It exists to remove a duplication: the schema and lifecycle logic was previously
-re-implemented in the examen MCP (TypeScript) and the Vitrum client (TypeScript)
+re-implemented in the examen MCP (TypeScript) and the iris client (TypeScript)
 independently — two write-encoders of the same schema. regula is the one encoder both
 now defer to; examen retired once the CLI reached parity (its code is archived).
 

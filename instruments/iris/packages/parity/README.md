@@ -1,26 +1,21 @@
 # @arcus/parity
 
-> The **golden-master parity harness** for the Vitrum daemon rework (Workstream C).
-> The legacy Rust/Axum daemon's HTTP surface **is** the spec for its Bun
-> replacement. This harness records that surface and diffs any target daemon
-> against it. A rework crate **ships when its endpoints match the recording** —
-> not when its tests pass in isolation.
-
-> **Historical note (2026-07-03)**: the legacy Rust daemon is archived at
-> `archive/instruments/vitrum-legacy/src-tauri/` and no longer runs — the Bun
-> daemon passed the full core matrix (22/22) before the archive. Legacy-target
-> record/replay flows below are historical record. The harness stays: self-replay
-> against the Bun daemon remains a valid consistency check, and the deferred
-> mutating tier's fixture phase will reuse the record/replay machinery.
+>A **golden-master harness** for the daemon's HTTP surface. It records what the
+> daemon actually answers, and later diffs a target daemon against that
+> recording. Use it when changing the daemon and you want proof the read surface
+> did not move underneath its clients.
 
 ## The discipline
 
-The Rust daemon (`archive/instruments/vitrum-legacy/src-tauri/`, archived) served the org index,
-graph, search, and file reads on `http://127.0.0.1:3847`. The Bun replacement
-(`packages/daemon/`, now the shipped primary) had to serve the **same bytes** for the same requests.
-"Same bytes" is not a spec you can write down once — the daemon's real contract
-is whatever its clients already depend on. So we **record the running legacy
-daemon** and treat the recording as the spec.
+A daemon's real contract is not the handler signatures — it is whatever its
+clients already depend on, byte for byte. That is not something you can write
+down once and keep true. So instead of asserting the contract, **record it**:
+capture the running daemon's responses and treat the recording as the spec.
+
+This is how the current Bun daemon was validated when it replaced an earlier
+implementation (the legacy Rust/Axum daemon, archived at
+`archive/instruments/vitrum-legacy/src-tauri/`), and it works the same way for
+any later change: record before, replay after.
 
 Two moves:
 
@@ -30,7 +25,7 @@ Two moves:
    diffs; non-JSON stored raw) — under `golden/`.
 2. **`replay`** re-fires those same requests at a *target* daemon and
    structural-diffs each response against its golden. All-pass ⇒ the target's
-   read surface matches the legacy daemon's. Any diff is a parity gap.
+   read surface matches the recording. Any diff is a parity gap.
 
 ### Why goldens are ephemeral
 
@@ -51,20 +46,20 @@ What **is** tracked (the spec):
 ### The record → replay-same-moment rule
 
 Because goldens are moment-local, **record and replay must straddle the same
-corpus moment.** The intended flow when validating a rework:
+corpus moment.** The flow when validating a change:
 
 ```
-parity record  --base http://127.0.0.1:3847     # legacy daemon, now
-parity replay  --target http://127.0.0.1:3848    # Bun daemon, seconds later
+parity record  --base   http://127.0.0.1:3853    # the daemon as it stands, now
+parity replay  --target http://127.0.0.1:3853    # after your change, seconds later
 ```
 
 Both daemons must read the **same** org tree at the **same** time. If minutes
 pass and the corpus moves between record and replay, the graph/files/search
 bodies will legitimately diverge — that is corpus drift, **not** a parity gap,
 and it is why the flow is record-then-immediately-replay. The `smoke.test.ts`
-self-test enforces the floor of this: record against the legacy daemon, then
-replay against *itself* — which must be 100%, because nothing rework-related has
-changed. (It skips cleanly when no daemon answers.)
+self-test enforces the floor of this: record against the daemon, then
+replay against *itself* — which must be 100%, because nothing has changed. (It
+skips cleanly when no daemon answers.)
 
 ### What is *not* ignored
 
@@ -114,16 +109,15 @@ diverged · `2` infra · `64` usage · `69` daemon unreachable · `124` timeout)
 | `parity commands [--json]` | Capability manifest (the verb table itself). |
 | `parity inventory [--tier T] [--json]` | The discovered endpoint inventory + tier counts. |
 | `parity cases [--json]` | The case matrix — one row per recorded request. |
-| `parity record [--base URL] [--out DIR] [--json]` | Record every core case into `golden/` (default base `http://127.0.0.1:3847`). Read-only GETs against the daemon. |
+| `parity record [--base URL] [--out DIR] [--json]` | Record every core case into `golden/` (default base `http://127.0.0.1:3853`). Read-only GETs against the daemon. |
 | `parity replay --target URL [--golden DIR] [--max-diffs N] [--json]` | Re-fire the recorded cases at a target and diff bodies vs golden. Exit `0` all-pass / `1` any-fail. |
 
 ## Endpoint inventory (tiers)
 
 Discovered — not invented — from the legacy router build
 (`archive/instruments/vitrum-legacy/src-tauri/src/server/mod.rs` + `federation.rs`)
-cross-referenced against the real clients' `/api/` call sites at the time
-(the GUI/PWA client, now `archive/instruments/vitrum-legacy/client/`; `packages/tui`;
-`packages/cli`). **114 registered routes:**
+cross-referenced against every real `/api/` call site in the clients
+(`packages/tui`, `packages/cli`). **114 registered routes:**
 
 | Tier | Count | Meaning |
 |------|-------|---------|
@@ -148,7 +142,7 @@ bun test              # differ units + inventory sanity + live smoke self-test
 bunx tsc --noEmit     # typecheck
 ```
 
-The smoke self-test records against `http://127.0.0.1:3847` and replays against
+The smoke self-test records against `http://127.0.0.1:3853` and replays against
 the same daemon (must be 100%); it **skips cleanly** when no daemon answers, so
 the suite is green online or offline. Override the base with
 `PARITY_SMOKE_BASE`.

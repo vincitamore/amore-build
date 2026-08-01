@@ -38,7 +38,7 @@ export function writeConfig(cfg: IrisConfig): void {
 }
 
 /** Persisted collapsed-group keys for a view, or null if the view has never been touched
- *  (so the caller can apply a default — Vitrum defaults all groups collapsed). */
+ *  (so the caller can apply a default — iris defaults all groups collapsed). */
 export function getCollapsed(key: string): Set<string> | null {
   const arr = readConfig().collapsed?.[key];
   return arr ? new Set(arr) : null;

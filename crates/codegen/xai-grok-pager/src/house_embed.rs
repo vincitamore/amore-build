@@ -1,4 +1,8 @@
-//! Build-time embed of `templates/house/**` for offline `init`.
+//! Build-time embed of `templates/house/**` for `arcus init`.
+//!
+//! The house TREE needs no network — it is compiled in. The iris companion
+//! is fetched separately (see `init_cmd::iris_fetch`), so `init` as a whole
+//! is only network-free with `--no-iris`.
 //!
 //! Source of truth remains the in-repo tree under `templates/house/`. Sibling
 //! content units own that tree; this module only ships whatever is present at

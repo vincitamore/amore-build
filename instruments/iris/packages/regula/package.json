@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "The rule that governs correct org-document form, lifecycle, and placement — the single write/schema authority shared by the Vitrum CLI (agent) and TUI (operator).",
+  "description": "The rule that governs correct org-document form, lifecycle, and placement — the single write/schema authority shared by the iris CLI (agent) and TUI (operator).",
   "main": "src/index.ts",
   "scripts": {
     "test": "bun test"

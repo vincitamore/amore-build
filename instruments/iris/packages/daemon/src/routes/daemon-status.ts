@@ -5,7 +5,7 @@
 // sub-daemon — excluded tier, pty). It exists because the TUI's `isDaemonUp`
 // (packages/tui/src/daemon.ts) probes this exact route and accepts only its
 // shape — `{ port, attached_at_startup, live, binary_path, info }` — as proof
-// that a *Vitrum* daemon (not a port squatter) is answering. Without it, the
+// that an *iris* daemon (not a port squatter) is answering. Without it, the
 // dash treats this daemon as down and tries to spawn the legacy binary over it.
 //
 // The payload is shape-valid and TRUTHFUL: this daemon manages no PTY

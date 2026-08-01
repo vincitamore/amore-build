@@ -11,7 +11,7 @@ import { join } from 'node:path';
 import { record } from './record';
 import { replay } from './replay';
 
-const BASE = process.env.PARITY_SMOKE_BASE ?? 'http://127.0.0.1:3847';
+const BASE = process.env.PARITY_SMOKE_BASE ?? 'http://127.0.0.1:3853';
 
 async function daemonUp(): Promise<boolean> {
   try {

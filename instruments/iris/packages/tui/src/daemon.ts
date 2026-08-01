@@ -27,15 +27,12 @@ export function daemonUrl(port?: number): string {
 }
 
 /**
- * Is a *Vitrum* daemon answering at `url`? A plain `<500` response is NOT enough: a port squatter
+ * Is an *iris* daemon answering at `url`? A plain `<500` response is NOT enough: a port squatter
  * (or the SPA's own HTML on `/`) would read as "up" and clients would then run silently against the
- * wrong process — the stale-/wrong-daemon trap that once cost a full diagnostic loop (see /vitrum
- * §2, and the fine-tooth review's `isDaemonUp` P2). So probe `GET /api/daemon/status` — served
- * by the Bun daemon as its identity handshake (`info.service: vitrum-bun-daemon`, truthful
- * no-PTY fields), and formerly by the legacy Tauri-tier daemons (archived 2026-07-03 at
- * archive/instruments/vitrum-legacy/) — and
- * require the exact JSON shape only that handler emits (originally legacy
- * pty_daemon_client::handle_status):
+ * wrong process — the stale-/wrong-daemon trap that once cost a full diagnostic loop. So probe
+ * `GET /api/daemon/status` — served by the Bun daemon as its identity handshake
+ * (`info.service: iris-bun-daemon`, truthful no-PTY fields) — and
+ * require the exact JSON shape only that handler emits:
  * `{ port: number, attached_at_startup: boolean, live: boolean, binary_path, info }`. That route
  * returns application/json where a squatter's `/` returns HTML, so wrong-shape / non-JSON / parse
  * failure / any error → treated as NOT up.
@@ -46,7 +43,7 @@ export async function isDaemonUp(url: string, timeoutMs = 1500): Promise<boolean
     const res = await fetch(statusUrl, { signal: AbortSignal.timeout(timeoutMs) });
     if (!res.ok) return false;
     const body: unknown = await res.json();
-    if (!isVitrumDaemonStatus(body)) return false;
+    if (!isIrisDaemonStatus(body)) return false;
     // House-identity check (2026-07-22): a shape-valid daemon serving a DIFFERENT
     // org root than this client resolved is the cross-house wire-crossing class
     // (foreign-root incident) — fail loudly rather than silently reading a
@@ -74,8 +71,8 @@ export async function isDaemonUp(url: string, timeoutMs = 1500): Promise<boolean
   }
 }
 
-/** True only for the response shape `GET /api/daemon/status` on a real Vitrum daemon produces. */
-function isVitrumDaemonStatus(body: unknown): boolean {
+/** True only for the response shape `GET /api/daemon/status` on a real iris daemon produces. */
+function isIrisDaemonStatus(body: unknown): boolean {
   if (typeof body !== 'object' || body === null) return false;
   const o = body as Record<string, unknown>;
   return (
@@ -167,7 +164,7 @@ function waitUntilUp(url: string, timeoutMs: number): Promise<void> {
     const tick = async () => {
       if (await isDaemonUp(url)) return resolve();
       if (Date.now() >= deadline) {
-        return reject(new DaemonError('TIMEOUT', `Vitrum daemon did not become ready at ${url} within ${timeoutMs}ms`));
+        return reject(new DaemonError('TIMEOUT', `Iris daemon did not become ready at ${url} within ${timeoutMs}ms`));
       }
       setTimeout(tick, 1000);
     };
@@ -183,15 +180,15 @@ export interface EnsureDaemonOptions {
 }
 
 /**
- * Ensure a Vitrum daemon is reachable, spawning + supervising our own if none is up. Reuses
- * a daemon already on the port (e.g. the Tauri app), so this is a no-op when the GUI is open;
- * launches a detached headless `vitrum-daemon` otherwise. Returns the URL + whether we spawned.
+ * Ensure an iris daemon is reachable, spawning + supervising our own if none is up. Reuses
+ * a daemon already on the port, so this is a no-op when one is already running;
+ * launches a detached headless `iris-daemon` otherwise. Returns the URL + whether we spawned.
  */
 export async function ensureDaemon(opts: EnsureDaemonOptions = {}): Promise<{ url: string; spawned: boolean }> {
   const url = daemonUrl(opts.port);
   if (await isDaemonUp(url)) return { url, spawned: false };
   if (opts.autoSpawn === false) {
-    throw new DaemonError('DOWN', `No Vitrum daemon at ${url} (autoSpawn disabled)`);
+    throw new DaemonError('DOWN', `No iris daemon at ${url} (autoSpawn disabled)`);
   }
   const command = resolveDaemonCommand();
   if (!command) {

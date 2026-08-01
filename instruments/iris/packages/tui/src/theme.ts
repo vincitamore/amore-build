@@ -2,13 +2,13 @@ import { RGBA } from '@opentui/core';
 import { readConfig, writeConfig } from './config';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Vitrum design language — swappable themes, mirrored from the GUI's theme system.
+// Iris design language — swappable themes, mirrored from the GUI's theme system.
 // Flat + dark/light + border-based: 1px borders, HARD corners (no radius), no
 // shadows/blur. Hierarchy is carried by SEMANTIC COLOR, not size. Monospace is a
 // given (terminal). The first six themes mirror the Tauri client EXACTLY
 // (packages/client/src/lib/theme.tsx, the `--term-*` custom properties); the rest
 // are curated additions covering the gamut (incl. light themes). Default: Horizon.
-// The canonical contract lives in the /vitrum skill "Design language" section.
+// The canonical contract lives in the /iris skill "Design language" section.
 // ─────────────────────────────────────────────────────────────────────────────
 
 export type ColorKey =

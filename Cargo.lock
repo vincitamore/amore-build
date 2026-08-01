@@ -19,11 +19,22 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "aes"
+version = "0.8.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b169f7a6d4742236a0a00c541b845991d0ac43e546831af1249753ab4c3aa3a0"
+dependencies = [
+ "cfg-if",
+ "cipher 0.4.4",
+ "cpufeatures 0.2.17",
+]
+
+[[package]]
+name = "aes"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "66bd29a732b644c0431c6140f370d097879203d79b80c94a6747ba0872adaef8"
 dependencies = [
- "cipher",
+ "cipher 0.5.1",
  "cpubits",
  "cpufeatures 0.3.0",
 ]
@@ -1518,6 +1529,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "bzip2"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "49ecfb22d906f800d4fe833b6282cf4dc1c298f5057ca0b5445e5c209735ca47"
+dependencies = [
+ "bzip2-sys",
+]
+
+[[package]]
+name = "bzip2-sys"
+version = "0.1.13+1.0.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "225bff33b2141874fe80d71e07d6eec4f85c5c216453dd96388240f96e1acc14"
+dependencies = [
+ "cc",
+ "pkg-config",
+]
+
+[[package]]
 name = "cached"
 version = "0.56.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1583,7 +1613,7 @@ version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "98db6aeaef0eeef2c1e3ce9a27b739218825dae116076352ac3777076aa22225"
 dependencies = [
- "cipher",
+ "cipher 0.5.1",
 ]
 
 [[package]]
@@ -1696,12 +1726,22 @@ dependencies = [
 
 [[package]]
 name = "cipher"
+version = "0.4.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "773f3b9af64447d2ce9850330c473515014aa235e6a783b02db81ff39e4a3dad"
+dependencies = [
+ "crypto-common 0.1.6",
+ "inout 0.1.4",
+]
+
+[[package]]
+name = "cipher"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e34d8227fe1ba289043aeb13792056ff80fd6de1a9f49137a5f499de8e8c78ea"
 dependencies = [
  "crypto-common 0.2.1",
- "inout",
+ "inout 0.2.2",
 ]
 
 [[package]]
@@ -2521,6 +2561,12 @@ dependencies = [
  "serde",
  "uuid",
 ]
+
+[[package]]
+name = "deflate64"
+version = "0.1.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ac6b926516df9c60bfa16e107b21086399f8285a44ca9711344b9e553c5146e2"
 
 [[package]]
 name = "deltae"
@@ -5406,6 +5452,15 @@ dependencies = [
 
 [[package]]
 name = "inout"
+version = "0.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "879f10e63c20629ecabbb64a8010319738c66a5cd0c29b02d63d272b03751d01"
+dependencies = [
+ "generic-array",
+]
+
+[[package]]
+name = "inout"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4250ce6452e92010fdf7268ccc5d14faa80bb12fc741938534c58f16804e03c7"
@@ -5984,6 +6039,27 @@ dependencies = [
  "serde_json",
  "serde_repr",
  "url",
+]
+
+[[package]]
+name = "lzma-rs"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "297e814c836ae64db86b36cf2a557ba54368d03f6afcd7d947c266692f71115e"
+dependencies = [
+ "byteorder",
+ "crc",
+]
+
+[[package]]
+name = "lzma-sys"
+version = "0.1.20"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5fda04ab3764e6cde78b9974eec4f779acaba7c4e84b36eca3cf77c581b85d27"
+dependencies = [
+ "cc",
+ "libc",
+ "pkg-config",
 ]
 
 [[package]]
@@ -7245,12 +7321,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "pbkdf2"
+version = "0.12.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f8ed6a7761f76e3b9f92dfb0a60a6a6477c61024b775147ff0973a02653abaf2"
+dependencies = [
+ "digest 0.10.7",
+ "hmac",
+]
+
+[[package]]
 name = "pdf_oxide"
 version = "0.3.46"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6ba152347f68db3aa3fbecc2b0104724d74aad532b186d3d9f4d5541681ddd91"
 dependencies = [
- "aes",
+ "aes 0.9.0",
  "base64",
  "bitflags 2.13.0",
  "brotli 8.0.2",
@@ -13473,6 +13559,7 @@ dependencies = [
  "rand 0.9.2",
  "ratatui",
  "regex",
+ "reqwest 0.12.24",
  "rustls",
  "serde",
  "serde_json",
@@ -13527,6 +13614,7 @@ dependencies = [
  "xai-ratatui-textarea",
  "xai-token-estimation",
  "xai-tty-utils",
+ "zip",
 ]
 
 [[package]]
@@ -14613,6 +14701,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec7a2a501ed189703dba8b08142f057e887dfc4b2cc4db2d343ac6376ba3e0b9"
 
 [[package]]
+name = "xz2"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "388c44dc09d76f1536602ead6d325eb532f5c122f17782bd57fb47baeeb767e2"
+dependencies = [
+ "lzma-sys",
+]
+
+[[package]]
 name = "yaml-rust"
 version = "0.4.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -14812,11 +14909,25 @@ version = "3.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "12598812502ed0105f607f941c386f43d441e00148fce9dec3ca5ffb0bde9308"
 dependencies = [
+ "aes 0.8.4",
  "arbitrary",
+ "bzip2",
+ "constant_time_eq",
  "crc32fast",
+ "deflate64",
  "flate2",
+ "getrandom 0.3.4",
+ "hmac",
  "indexmap",
+ "lzma-rs",
  "memchr",
+ "pbkdf2",
+ "sha1",
+ "time",
+ "xz2",
+ "zeroize",
+ "zopfli",
+ "zstd",
 ]
 
 [[package]]
@@ -14836,6 +14947,18 @@ name = "zmij"
 version = "1.0.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3ff05f8caa9038894637571ae6b9e29466c1f4f829d26c9b28f869a29cbe3445"
+
+[[package]]
+name = "zopfli"
+version = "0.8.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f05cd8797d63865425ff89b5c4a48804f35ba0ce8d125800027ad6017d2b5249"
+dependencies = [
+ "bumpalo",
+ "crc32fast",
+ "log",
+ "simd-adler32",
+]
 
 [[package]]
 name = "zstd"

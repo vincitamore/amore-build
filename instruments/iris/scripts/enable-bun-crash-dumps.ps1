@@ -1,6 +1,6 @@
 # Enable Windows full crash dumps for bun.exe — the DEFINITIVE native-segfault diagnostic.
 #
-# The Vitrum TUI runs on Bun over OpenTUI's native Zig renderer. A native segfault (access
+# The iris TUI runs on Bun over OpenTUI's native Zig renderer. A native segfault (access
 # violation) bypasses Bun's JS crash handlers, so the ~/.iris/tui-debug.log breadcrumbs and
 # ~/.iris/tui-crash.log (Bun's stderr trace) narrow WHERE it died — but a full minidump gives
 # the exact native call stack (which Zig/OpenTUI function faulted).

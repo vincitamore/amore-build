@@ -115,8 +115,8 @@ describe('windowBounds', () => {
 });
 
 describe('composeResultRow', () => {
-  const LONG_LABEL = 'Vitrum × Taildown integration: confirm path and knowledge substrate alignment plan';
-  const LONG_PATH = 'tasks/completed/vitrum-taildown-integration-knowledge-substrate.md';
+  const LONG_LABEL = 'Example integration: confirm path and knowledge substrate alignment plan';
+  const LONG_PATH = 'tasks/completed/example-integration.md';
 
   test('invariant: head + tail is EXACTLY inner columns, across widths and content', () => {
     const labels = [LONG_LABEL, 'Short', ''];
@@ -136,7 +136,7 @@ describe('composeResultRow', () => {
 
   test('long label truncates with a trailing ellipsis; the label START always shows', () => {
     const { head } = composeResultRow(LONG_LABEL, LONG_PATH, '◆', true, 66);
-    expect(head.startsWith('› ◆ Vitrum × Taildown')).toBe(true);
+    expect(head.startsWith('› ◆ Example integration')).toBe(true);
     expect(head).toContain('…');
   });
 

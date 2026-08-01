@@ -4,7 +4,7 @@ import { createRoot } from '@opentui/react';
 import { ThemeProvider } from '../ThemeProvider';
 import { DocView } from './DocView';
 
-const path = process.env.DOC ?? 'tasks/vitrum-cli-tui-reskin.md';
+const path = process.env.DOC ?? 'tasks/example-doc.md';
 const { renderer, renderOnce, captureCharFrame } = await createTestRenderer({ width: 84, height: 26 });
 createRoot(renderer).render(
   <ThemeProvider initial="horizon">

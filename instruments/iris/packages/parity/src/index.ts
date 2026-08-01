@@ -100,7 +100,7 @@ if (spec.name === 'cases') {
 
 // ── record ──────────────────────────────────────────────────────────────────
 if (spec.name === 'record') {
-  const base = str(parsed.flags, 'base') ?? 'http://127.0.0.1:3847';
+  const base = str(parsed.flags, 'base') ?? 'http://127.0.0.1:3853';
   const goldenDir = resolve(str(parsed.flags, 'out') ?? 'golden');
   try {
     const r = await record(base, goldenDir);

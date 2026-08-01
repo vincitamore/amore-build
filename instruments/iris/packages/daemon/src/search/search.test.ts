@@ -84,9 +84,9 @@ describe('search compose', () => {
 
   test('tag score is the max over matching tags', () => {
     // The doc with a strong exact tag match outranks a weak one (both tags-only).
-    const strong = doc({ path: 's.md', title: 'zzz', tags: ['vitrum'] });
-    const weak = doc({ path: 'w.md', title: 'zzz', tags: ['v_i_t_r_u_m_x'] });
-    const results = search(fakeIndex([weak, strong]), 'vitrum');
+    const strong = doc({ path: 's.md', title: 'zzz', tags: ['example'] });
+    const weak = doc({ path: 'w.md', title: 'zzz', tags: ['e_x_a_m_p_l_e_x'] });
+    const results = search(fakeIndex([weak, strong]), 'example');
     // strong exact tag scores higher than the gappy one regardless of input order
     expect(results[0].path).toBe('s.md');
   });

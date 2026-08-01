@@ -131,6 +131,12 @@ fn collect_files(root: &Path, dir: &Path, out: &mut BTreeMap<String, Vec<u8>>) {
 fn default_args() -> InitArgs {
     InitArgs {
         yes: true,
+        // Iris is default-ON in the real CLI, and installing it is the only
+        // thing `init` does that touches the network. These are filesystem
+        // goldens: keep them hermetic. The fetch's own logic (target mapping,
+        // checksum enforcement, failure reporting) is unit-tested in
+        // `init_cmd::iris_fetch`.
+        no_iris: true,
         ..InitArgs::default()
     }
 }
@@ -146,7 +152,7 @@ fn fresh_install_writes_tree_and_manifest() {
     assert!(h.exists("context/principle-lattice.md")); // lattice default-on
     assert!(h.exists(".arcus/hooks/demo-hook.json"));
     assert!(h.exists(".arcus/skills/demo-skill/SKILL.md"));
-    assert!(!h.exists(init_cmd::IRIS_NOTE_REL)); // iris default-off
+    assert!(!h.exists(init_cmd::IRIS_NOTE_REL)); // iris pointer not used anymore
 
     // Every selected file present with identical bytes. Compare against
     // `select_entries`, not the raw fixtures: init expands `{{HOUSE_NAME}}` at
@@ -460,15 +466,24 @@ fn dry_run_writes_nothing() {
 }
 
 #[test]
-fn with_iris_plants_pointer_note() {
+fn no_iris_makes_init_fully_offline() {
+    // The opt-out has to be total: not a pointer file, not an empty directory,
+    // no request. It is the switch someone reaches for when they have no
+    // network, so it must not leave a half-state behind.
     let h = Harness::new();
-    h.run(InitArgs {
-        with_iris: true,
-        yes: true,
-        ..InitArgs::default()
-    });
-    assert!(h.exists(init_cmd::IRIS_NOTE_REL));
-    assert!(h.read(init_cmd::IRIS_NOTE_REL).contains("Iris"));
+    let mut out = Vec::new();
+    let args = default_args(); // carries no_iris: true
+    init_cmd::run_with_context(&args, &h.ctx(), &mut out).expect("init succeeds");
+    let summary = String::from_utf8(out).unwrap();
+    assert!(
+        !summary.contains("iris"),
+        "opting out should say nothing about iris: {summary}"
+    );
+    // `instruments/` itself DOES ship (it carries a README explaining the
+    // folder); only the companion install is skipped. Asserting the parent was
+    // absent passed here purely because the golden fixture has no
+    // `instruments/` — it would have been false against the real template.
+    assert!(!h.house().join("instruments/iris").exists());
 }
 
 #[test]

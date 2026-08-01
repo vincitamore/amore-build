@@ -17,7 +17,7 @@ interface PanelProps {
 }
 
 /**
- * The repeating container unit of the Vitrum design language: a flat 1px-bordered
+ * The repeating container unit of the Iris design language: a flat 1px-bordered
  * box with hard corners, a primary-accent header, and no fill beyond the theme bg.
  * Mirrors the GUI's `.border px-4 py-3` card. Borders go subtle by default, active
  * on focus. Every member composes from this so the views stay coherent.

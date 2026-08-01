@@ -16,7 +16,7 @@
 
 const DEFAULT_QUERIES = [
   'sovereignty',
-  'vitrum',
+  'iris',
   'pipeline',
   'graph',
   'federation',

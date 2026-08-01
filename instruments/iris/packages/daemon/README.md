@@ -39,7 +39,7 @@ been a dual-mode daemon into something much simpler:
    residue, not walk behavior.** Legacy's own `should_exclude` skips dot-dirs —
    `.claude/**` never survives a fresh walk; the observed worktree nodes entered
    via the file watcher (which bypasses the walk filter) and are immortalized by
-   the mtime cache (`.vitrum-index.json`: the walk adds, never evicts). So this
+   the mtime cache (`.iris-index.json`: the walk adds, never evicts). So this
    daemon's unconditional `.claude/worktrees/**` exclusion **matches legacy's
    code**; the parity ritual just requires restarting legacy first so its index
    is residue-free (parity against contract, not accident).

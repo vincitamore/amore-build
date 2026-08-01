@@ -58,7 +58,7 @@ export const CASES: Case[] = [
   // (SkimMatcherV2 compose) produces large exact-score ties; take(50) slices a
   // straddling tie by HashMap order — per-process random, so the top-50 SET
   // itself is non-deterministic for such queries (measured: q=sovereignty had
-  // 62 docs tied exactly at the cutoff score; q=vitrum 56). Those queries can
+  // 62 docs tied exactly at the cutoff score; q=example 56). Those queries can
   // never replay clean against a rewrite — not a parity gap. `daemon` and
   // `network` verified tie-safe (set-equal legacy vs rework) 2026-07-02 via
   // packages/daemon/scripts/search-probe.ts. If a search case fails replay and
