@@ -335,7 +335,19 @@ def cmd_update_pin(dry_run: bool, after: str | None, no_fetch: bool) -> int:
     if dry_run:
         print(f"[dry-run] would write SOURCE_REV = {pin}")
         return 0
-    SOURCE_REV_FILE.write_text(pin + "\n", encoding="utf-8")
+
+    # Preserve any header comment: replace only the last non-comment line so
+    # the file keeps its provenance notes across pin moves.
+    lines = SOURCE_REV_FILE.read_text(encoding="utf-8").splitlines()
+    last_data = max((i for i, line in enumerate(lines)
+                     if line.strip() and not line.strip().startswith("#")),
+                    default=-1)
+    if last_data >= 0:
+        lines[last_data] = pin
+        text = "\n".join(lines) + "\n"
+    else:
+        text = pin + "\n"
+    SOURCE_REV_FILE.write_text(text, encoding="utf-8")
     print(f"SOURCE_REV -> {pin}")
     return 0
 
