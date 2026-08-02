@@ -159,7 +159,7 @@ mod tests {
     use super::*;
     use crate::acp::model_state::ModelState;
     use crate::app::actions::Action;
-    use crate::slash::command::{CommandExecCtx, CommandResult};
+    use crate::slash::command::{CommandExecCtx, CommandResult, SlashCommand};
     use crate::slash::registry::CommandRegistry;
     use agent_client_protocol as acp;
     /// Build a ModelState with two models for testing.
@@ -196,6 +196,7 @@ mod tests {
             bundle_state: &DEFAULT_BUNDLE_STATE,
             screen_mode: crate::app::ScreenMode::Inline,
             billing_surface_visible: true,
+            usage_command_visible: true,
             pager_state: crate::settings::PagerLocalSnapshot {
                 multiline_mode: false,
                 yolo_mode: false,
@@ -338,6 +339,7 @@ mod tests {
             "transcript",
             "tutorial",
             "t",
+            "undo",
             "usage",
             "view-plan",
             "vim-mode",
@@ -361,6 +363,7 @@ mod tests {
         assert!(reg.get("welcome").is_some());
         assert!(reg.get("show-plan").is_some());
         assert!(reg.get("plan-view").is_some());
+        assert!(reg.get("undo").is_some());
     }
     #[test]
     fn aliases_resolve_to_same_command() {
@@ -374,6 +377,9 @@ mod tests {
             assert_eq!(reg.get(alias).unwrap().name(), doctor.name());
             assert_eq!(reg.get(alias).unwrap().usage(), doctor.usage());
         }
+        let rewind = reg.get("rewind").unwrap();
+        assert_eq!(reg.get("undo").unwrap().name(), rewind.name());
+        assert_eq!(reg.get("undo").unwrap().usage(), rewind.usage());
     }
     #[test]
     fn exit_returns_quit_action() {
@@ -536,6 +542,7 @@ mod tests {
             cwd: std::path::Path::new("."),
             has_session_announcements: false,
             billing_surface_visible: true,
+            usage_command_visible: true,
             workflows_available: true,
             screen_mode: crate::app::ScreenMode::Fullscreen,
         };
@@ -561,6 +568,7 @@ mod tests {
             cwd: std::path::Path::new("."),
             has_session_announcements: false,
             billing_surface_visible: true,
+            usage_command_visible: true,
             workflows_available: true,
             screen_mode: crate::app::ScreenMode::Fullscreen,
         };
@@ -603,9 +611,13 @@ mod tests {
         ));
     }
     fn run_usage(args: &str, billing: bool) -> CommandResult {
+        run_usage_gated(args, billing, true)
+    }
+    fn run_usage_gated(args: &str, billing: bool, usage_cmd: bool) -> CommandResult {
         let models = ModelState::default();
         let mut ctx = make_ctx(&models);
         ctx.billing_surface_visible = billing;
+        ctx.usage_command_visible = usage_cmd;
         usage::UsageCommand.run(&mut ctx, args)
     }
     #[test]
@@ -644,6 +656,7 @@ mod tests {
             cwd: std::path::Path::new("."),
             has_session_announcements: false,
             billing_surface_visible: true,
+            usage_command_visible: true,
             workflows_available: true,
             screen_mode: crate::app::ScreenMode::Fullscreen,
         };
@@ -660,6 +673,7 @@ mod tests {
             cwd: std::path::Path::new("."),
             has_session_announcements: false,
             billing_surface_visible: true,
+            usage_command_visible: true,
             workflows_available: false,
             screen_mode: crate::app::ScreenMode::Fullscreen,
         };
@@ -678,6 +692,26 @@ mod tests {
                 .get("usage")
                 .is_some()
         );
+    }
+    #[test]
+    fn usage_hidden_when_command_not_visible() {
+        let models = ModelState::default();
+        let ctx = crate::slash::command::AppCtx {
+            models: &models,
+            cwd: std::path::Path::new("."),
+            has_session_announcements: false,
+            billing_surface_visible: true,
+            usage_command_visible: false,
+            workflows_available: false,
+            screen_mode: crate::app::ScreenMode::Fullscreen,
+        };
+        assert!(!usage::UsageCommand.visible(&ctx));
+        assert!(!usage::UsageCommand.takes_args_now(&ctx));
+        assert!(usage::UsageCommand.suggest_args(&ctx, "").is_none());
+        assert!(matches!(
+            run_usage_gated("", true, false),
+            CommandResult::Error(msg) if msg.contains("not available")
+        ));
     }
     #[test]
     fn cd_registered_in_builtin_commands() {
@@ -726,6 +760,7 @@ mod tests {
             cwd: std::path::Path::new("."),
             has_session_announcements: false,
             billing_surface_visible: true,
+            usage_command_visible: true,
             workflows_available: true,
             screen_mode: crate::app::ScreenMode::Fullscreen,
         };

@@ -13,12 +13,14 @@ use tokio_util::sync::CancellationToken;
 #[path = "manager/enrichment.rs"]
 mod enrichment;
 #[path = "manager/lock.rs"]
-mod lock;
+pub(super) mod lock;
 #[path = "manager/sleep_gate.rs"]
 mod sleep_gate;
 
 use lock::try_lock_auth_file_async;
-use sleep_gate::{GateRaise, InFlightGuard, SleepGate};
+use sleep_gate::{InFlightGuard, SleepGate};
+
+use crate::util::dual_clock::DualClock;
 
 use crate::auth::config::GrokComConfig;
 use crate::auth::error::AuthError;
@@ -98,13 +100,13 @@ const RELOAD_RETRY_BACKOFF: StdDuration = StdDuration::from_millis(50);
 struct ScopedRefreshFailure {
     token_key: String,
     error: crate::auth::error::RefreshTokenFailedError,
-    /// Two-clock timestamp (see [`GateRaise`]): the TTL below is *real* time,
+    /// Two-clock timestamp (see [`DualClock`]): the TTL below is *real* time,
     /// so it must keep counting across a system sleep. The monotonic clock
     /// pauses during suspend — with it alone, a failure cached just before
     /// sleep would still short-circuit `auth()` for a further
     /// [`PERMANENT_FAILURE_TTL`] of *awake* time after wake, exactly when the
     /// user comes back and expects a recovered session.
-    recorded_at: GateRaise,
+    recorded_at: DualClock,
 }
 
 /// Auto-expiry safety net for the recoverable reasons (`ClientRejected`,
@@ -164,6 +166,12 @@ pub struct AuthManager {
     /// Used by `ModelsManager` to trigger model catalog recovery
     /// after sleep/wake without relying on the file watcher.
     refresh_notify: Arc<tokio::sync::Notify>,
+    /// Notified on every OS wake (`DidWake`), including dark wakes. Re-arms
+    /// the proactive-refresh loop, whose monotonic sleep pauses during
+    /// suspend — a pre-sleep schedule would otherwise fire hours of
+    /// awake-time late, leaving post-wake requests to discover the expired
+    /// token via 401s. See `start_proactive_refresh`.
+    wake_notify: tokio::sync::Notify,
     /// Last state `read_disk_auth` observed for this manager's scope.
     /// Drives transition-level unified logging: hot retry loops read the
     /// disk every few seconds, so per-read logging would flood and no
@@ -196,11 +204,11 @@ pub struct AuthManager {
     /// manager so repeated 401s on the most-recent dead credential emit once.
     manual_auth: crate::auth::recovery::ManualAuthTracker,
     /// When the current unbroken run of dark-wake refresh deferrals began, on
-    /// two clocks (see [`GateRaise`]); `None` outside such a run. Bounds the
+    /// two clocks (see [`DualClock`]); `None` outside such a run. Bounds the
     /// deferral to [`sleep_gate::DARK_WAKE_DEFER_MAX`] so a machine stuck
     /// reporting dark wake can't defer refresh forever — see
     /// [`AuthManager::should_defer_for_dark_wake`].
-    dark_wake_defer_since: parking_lot::RwLock<Option<GateRaise>>,
+    dark_wake_defer_since: parking_lot::RwLock<Option<DualClock>>,
     /// Test-only override for [`AuthManager::is_dark_wake`]. `Some(_)` forces
     /// the dark-wake decision so the refresh-deferral path is unit-testable
     /// without a real macOS dark wake. `None` = consult the OS.
@@ -289,12 +297,22 @@ impl AuthManager {
             })),
         );
 
+        // ARCUS_AUTH_PATH / GROK_AUTH_PATH: custom file path (overrides default
+        // $ARCUS_HOME/auth.json). Resolved before the ARCUS_AUTH branch so
+        // inline-credential managers also honor it: their later refresh
+        // persistence (`update()`) writes to this path, and previously the
+        // inline branch hardcoded the default — silently splitting reads
+        // (inline) from writes (default path).
+        let path = xai_grok_env::var("ARCUS_AUTH_PATH")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| grok_home.join("auth.json"));
+
         // ARCUS_AUTH / GROK_AUTH: inline JSON credentials (highest priority, read-only).
         if let Ok(inline_json) = xai_grok_env::var("ARCUS_AUTH") {
             if let Ok(auth) = serde_json::from_str::<GrokAuth>(&inline_json) {
                 return Self::assemble(
                     Some(auth),
-                    grok_home.join("auth.json"),
+                    path,
                     scope,
                     grok_com_config,
                     proxy_base_url,
@@ -303,11 +321,6 @@ impl AuthManager {
             }
             tracing::warn!("ARCUS_AUTH/GROK_AUTH set but failed to parse as JSON, falling back to file");
         }
-
-        // ARCUS_AUTH_PATH / GROK_AUTH_PATH: custom file path (overrides default home/auth.json).
-        let path = xai_grok_env::var("ARCUS_AUTH_PATH")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| grok_home.join("auth.json"));
 
         let (auth, auth_read_detail, initial_disk_state) = match read_auth_json(&path) {
             Ok(map) => {
@@ -413,6 +426,7 @@ impl AuthManager {
             #[cfg(test)]
             proactive_starts: std::sync::atomic::AtomicU32::new(0),
             refresh_notify: Arc::new(tokio::sync::Notify::new()),
+            wake_notify: tokio::sync::Notify::new(),
             disk_state: RwLock::new(disk_state),
             static_key_cache: parking_lot::Mutex::new(None),
             process_static_api_key: parking_lot::RwLock::new(None),
@@ -574,11 +588,19 @@ impl AuthManager {
         // Persistent disk anomaly. Discarding a live refresh token here is the
         // step that turns a transient disk blip into irreversible credential
         // loss (the RT may exist nowhere else), so retain it unless it is
-        // already known-dead (a cached permanent_failure) or there is nothing
-        // to protect.
+        // already known-dead or there is nothing to protect. "Known-dead"
+        // means a STICKY verdict (`RefreshTokenRejected` — the IdP rejected
+        // this very credential): a recoverable verdict (`ClientRejected` /
+        // escalated `Other`, e.g. three post-wake network blips) says nothing
+        // about the RT's validity, and a wake-time FS anomaly co-occurring
+        // with those blips must not forfeit the only copy of a live RT.
         let in_mem = self.current_or_expired();
-        let retain = in_mem.as_ref().is_some_and(|a| a.refresh_token.is_some())
-            && self.permanent_failure().is_none();
+        let sticky_verdict = matches!(
+            self.permanent_failure(),
+            Some(AuthError::Refresh(crate::auth::error::RefreshTokenError::Permanent(ref e)))
+                if e.reason.is_sticky()
+        );
+        let retain = in_mem.as_ref().is_some_and(|a| a.refresh_token.is_some()) && !sticky_verdict;
         if let Some(a) = in_mem.filter(|_| retain) {
             xai_grok_telemetry::unified_log::warn(
                 "auth: disk anomaly, retaining in-memory credentials",
@@ -940,6 +962,13 @@ impl AuthManager {
         enrichment::enrich_inline(self, auth).await;
     }
 
+    /// Path to the `auth.json` this manager reads/writes (respects
+    /// `GROK_AUTH_PATH` / constructor home). Prefer this over
+    /// `grok_home()/auth.json` so temp-home tests and custom stores stay isolated.
+    pub(crate) fn auth_json_path(&self) -> &Path {
+        &self.path
+    }
+
     pub(crate) fn grok_com_config(&self) -> &GrokComConfig {
         &self.grok_com_config
     }
@@ -951,6 +980,14 @@ impl AuthManager {
     /// can silently die on macOS after resume.
     pub fn refresh_notifier(&self) -> Arc<tokio::sync::Notify> {
         self.refresh_notify.clone()
+    }
+
+    /// Wake the proactive-refresh loop out of its (monotonic) timer. Called by
+    /// the power listener on every `DidWake` (see
+    /// [`Self::set_system_sleep_imminent`]); safe from any thread —
+    /// `Notify::notify_waiters` is sync and runtime-agnostic.
+    pub(crate) fn notify_wake(&self) {
+        self.wake_notify.notify_waiters();
     }
 
     /// Wait up to `timeout` for another consumer (proactive refresh task,
@@ -1027,9 +1064,15 @@ impl AuthManager {
     /// duplicated at each callsite in `refresh_chain`.
     fn try_adopt_disk_token(&self, reason: RefreshReason, msg: &str) -> Option<GrokAuth> {
         let disk_auth = self.read_disk_auth();
+        // Snapshot the pre-adoption key BEFORE `try_use_disk_token` hot-swaps
+        // the in-memory bearer: reading it afterwards always yielded `None` /
+        // `key_changed: true`, corrupting the prev/adopted attribution this
+        // log exists to capture.
+        let prev = self
+            .current_or_expired()
+            .map(|a| token_suffix(&a.key).to_owned());
         let refreshed = self.try_use_disk_token(disk_auth.as_ref(), reason)?;
         let adopted = token_suffix(&refreshed.key);
-        let prev = self.expired_auth().map(|a| token_suffix(&a.key).to_owned());
         xai_grok_telemetry::unified_log::info(
             msg,
             None,
@@ -1664,6 +1707,21 @@ impl AuthManager {
                     "refresh deferred: system sleep imminent",
                 ));
             }
+            // A dark wake can re-sleep within seconds and sends no `WillSleep`
+            // first, so the ack hold above never runs there. Hold the system
+            // up for the exchange instead; a straddled exchange loses the
+            // rotated token, which is what revokes the family. Best-effort
+            // (`None` ⇒ proceed as before), released when the exchange returns.
+            let _awake = if self.is_dark_wake() {
+                xai_grok_telemetry::unified_log::debug(
+                    "auth.refresh.dark_wake_assertion",
+                    None,
+                    Some(serde_json::json!({ "reason": format!("{reason:?}") })),
+                );
+                xai_system_power::hold_awake("grok: OIDC token refresh")
+            } else {
+                None
+            };
             refresher.refresh(reason).await
         };
         self.apply_refresh_outcome(outcome, reason, attempted_key, &file_lock)
@@ -1733,28 +1791,30 @@ impl AuthManager {
             ));
         }
 
-        // Dark wake (see `xai_system_power::PowerState` for the canonical
-        // explanation): defer the not-yet-started refresh. The refresh token
-        // wasn't sent yet, so retrying on a later full wake is safe, whereas
-        // starting the exchange now risks straddling the re-sleep and losing the
-        // rotated successor token; no user is waiting, so deferring costs
-        // nothing. `should_defer_for_dark_wake` bounds the deferral
-        // (`DARK_WAKE_DEFER_MAX`) so a machine stuck reporting dark wake can't
-        // defer forever and force a logout.
-        if self.should_defer_for_dark_wake() {
-            let has_live_token = self.current().is_some();
+        // Dark wake: an exchange risks straddling a re-sleep, so defer — but
+        // only while deferring is free (a *wire-valid* token can still be
+        // served). With a hard-expired token, or on `ServerRejected`,
+        // deferring converts a delay into a guaranteed 401. Dark-wake
+        // exchanges are protected by the `hold_awake` power assertion and
+        // the suspend probe (the ack hold can't cover them: macOS sends no
+        // `WillSleep` on a maintenance-sleep re-entry).
+        if reason == RefreshReason::PreRequest
+            && self.current_wire_valid().is_some()
+            && self.should_defer_for_dark_wake()
+        {
             xai_grok_telemetry::unified_log::warn(
                 "auth.dark_wake.refresh_deferred",
                 None,
-                Some(serde_json::json!({
-                    "reason": format!("{reason:?}"),
-                    "has_live_token": has_live_token,
-                })),
+                Some(serde_json::json!({ "reason": format!("{reason:?}") })),
             );
             return Err(AuthError::transient(
                 "refresh deferred: dark wake (display off; system may re-sleep)",
             ));
         }
+        // Not deferring: end any deferral run so a leftover budget can't report
+        // a spurious exhaustion on the next one (the lazy clear inside
+        // `should_defer_for_dark_wake` is no longer always reached).
+        *self.dark_wake_defer_since.write() = None;
         Ok(())
     }
 
@@ -2028,7 +2088,7 @@ impl AuthManager {
         *self.permanent_failure.write() = Some(ScopedRefreshFailure {
             token_key,
             error,
-            recorded_at: GateRaise::now(),
+            recorded_at: DualClock::now(),
         });
     }
 
@@ -2060,7 +2120,7 @@ impl AuthManager {
     /// on disk) must be allowed to refresh — otherwise a hard-expired sibling
     /// AT strands a process that could still refresh a live RT.
     ///
-    /// TTL expiry is judged on *both* clocks (see [`GateRaise`]): the monotonic
+    /// TTL expiry is judged on *both* clocks (see [`DualClock`]): the monotonic
     /// clock pauses during a system suspend, so a wall-clock arm is required
     /// for the TTL to elapse across sleep. Without it, a recoverable failure
     /// cached just before the lid closes (e.g. a transient escalation while
@@ -2100,6 +2160,37 @@ impl AuthManager {
         self.permanent_failure().is_some()
     }
 
+    /// Whether the only way back is a manual `/login`: a sticky IdP
+    /// rejection of the refresh token, or no refresh authority/refreshable
+    /// credential at all. `false` for anything that self-heals (transient
+    /// failures, recoverable verdicts). A *live state* query ("can a future
+    /// refresh succeed?"), deliberately separate from
+    /// `recovery::manual_auth_reason` (which buckets a terminal error
+    /// *value* for the KPI). Drives the "`/login` banner vs self-healing"
+    /// decision.
+    pub(crate) fn requires_manual_reauth(&self) -> bool {
+        use crate::auth::error::RefreshTokenError;
+        // Sticky IdP rejection of the credential a refresh would send:
+        // no retry can fix it.
+        if let Some(AuthError::Refresh(RefreshTokenError::Permanent(e))) = self.permanent_failure()
+            && e.reason.is_sticky()
+        {
+            return true;
+        }
+        // No refresh authority wired (static-key manager) → nothing can heal
+        // an expired credential silently.
+        if !self.has_refresher_attached() {
+            return true;
+        }
+        // A refreshable in-memory credential (OIDC RT / external binary) or a
+        // sibling's RT on disk lets a later refresh succeed without the user.
+        let mem_refreshable = self.token_type().is_refreshable();
+        let disk_refreshable = self
+            .read_disk_auth_silent()
+            .is_some_and(|a| a.refresh_token.is_some());
+        !(mem_refreshable || disk_refreshable)
+    }
+
     /// `true` iff a [`TokenRefresher`] is wired in. `false` for static-key
     /// or pre-`configure_refresher` managers.
     pub(crate) fn has_refresher_attached(&self) -> bool {
@@ -2118,7 +2209,7 @@ impl AuthManager {
             // which the asserting test will surface loudly.
             let now_mono = std::time::Instant::now();
             let now_wall = std::time::SystemTime::now();
-            pf.recorded_at = GateRaise {
+            pf.recorded_at = DualClock {
                 mono: now_mono.checked_sub(past_ttl).unwrap_or(now_mono),
                 wall: now_wall.checked_sub(past_ttl).unwrap_or(now_wall),
             };
@@ -2225,8 +2316,9 @@ impl AuthManager {
     /// Idempotent: a second call on the same `Arc` is a no-op (debug
     /// log + return). Sleep duration and back-off conditions are
     /// computed by [`compute_proactive_sleep`]; see its body for the
-    /// four non-busy-loop guards (permanent_failure, non-refreshable
-    /// type, no refresher, no expires_at).
+    /// six non-busy-loop guards (permanent_failure, non-refreshable
+    /// type, no refresher, sleep-gated, dark wake with a wire-valid
+    /// token, no expires_at).
     pub(crate) fn start_proactive_refresh(self: &Arc<Self>, cancel: CancellationToken) {
         use std::sync::atomic::Ordering;
         // AcqRel/Acquire publishes the spawned task's captured Arc to
@@ -2244,8 +2336,15 @@ impl AuthManager {
         self.proactive_starts.fetch_add(1, Ordering::SeqCst);
         let this = self.clone();
         tokio::spawn(async move {
+            // Consecutive failed `auth()` attempts in THIS loop, driving
+            // [`proactive_failure_backoff`]: `compute_proactive_sleep` returns
+            // 0 for any past-refresh-point token regardless of how the last
+            // attempt failed, so without this a hard-expired token during an
+            // outage spins with zero delay. Reset on success or adoption.
+            let mut consecutive_failures: u32 = 0;
             loop {
-                let sleep_dur = compute_proactive_sleep(&this);
+                let sleep_dur = compute_proactive_sleep(&this)
+                    .max(proactive_failure_backoff(consecutive_failures));
 
                 tokio::select! {
                     _ = cancel.cancelled() => {
@@ -2253,6 +2352,14 @@ impl AuthManager {
                         return;
                     }
                     _ = tokio::time::sleep(sleep_dur) => {}
+                    // OS wake: re-evaluate immediately (see `wake_notify`).
+                    // The failure ladder resets too — a wake is a changed
+                    // world that deserves the fast schedule, not a backoff
+                    // cap accumulated across overnight dark-wake misses.
+                    _ = this.wake_notify.notified() => {
+                        consecutive_failures = 0;
+                        tracing::debug!("auth: proactive refresh re-armed by OS wake");
+                    }
                 }
 
                 #[cfg(test)]
@@ -2271,6 +2378,7 @@ impl AuthManager {
                         // Fall through to the normal proactive-refresh sleep
                         // calculation which will schedule the next refresh
                         // based on the adopted token's expiry.
+                        consecutive_failures = 0;
                         continue;
                     }
                     tracing::debug!(
@@ -2323,12 +2431,14 @@ impl AuthManager {
                             "expires_at": expires_at,
                         })),
                     );
+                    consecutive_failures = 0;
                     continue;
                 }
 
                 tracing::info!("auth: proactive refresh starting");
                 match this.auth().await {
                     Ok(auth) => {
+                        consecutive_failures = 0;
                         tracing::info!("auth: proactive refresh succeeded");
                         xai_grok_telemetry::unified_log::info(
                             "auth: proactive refresh completed",
@@ -2341,12 +2451,16 @@ impl AuthManager {
                         );
                     }
                     Err(e) => {
+                        consecutive_failures = consecutive_failures.saturating_add(1);
                         tracing::warn!(error = %e, "auth: proactive refresh failed");
                         xai_grok_telemetry::unified_log::warn(
                             "auth: proactive refresh completed",
                             None,
                             Some(serde_json::json!({
                                 "result": "failed",
+                                "consecutive_failures": consecutive_failures,
+                                "backoff_ms": proactive_failure_backoff(consecutive_failures)
+                                    .as_millis() as u64,
                                 "error": format!("{e}"),
                             })),
                         );
@@ -2356,6 +2470,30 @@ impl AuthManager {
         });
     }
 }
+
+/// Backoff after `n` consecutive failed proactive refresh attempts:
+/// 0 → none, then 5 s · 2^(n−1) capped at [`BACKOFF_INTERVAL`], plus 0–3 s
+/// jitter to de-stagger siblings that failed in lockstep. Sized so the OIDC
+/// transient-escalation threshold cannot be reached inside a typical
+/// post-wake network-recovery window.
+pub(crate) fn proactive_failure_backoff(consecutive_failures: u32) -> StdDuration {
+    if consecutive_failures == 0 {
+        return StdDuration::ZERO;
+    }
+    let exp = consecutive_failures.saturating_sub(1).min(6); // 5s..320s pre-cap
+    let base = StdDuration::from_secs(5)
+        .saturating_mul(1u32 << exp)
+        .min(BACKOFF_INTERVAL);
+    base + StdDuration::from_millis(rand::random_range(0..3000))
+}
+
+/// Floor for the proactive loop's per-iteration sleep. Past the refresh
+/// point the schedule returns "now", and the adopt/skip `continue` paths
+/// re-roll the jitter each pass — a raw zero sleep spins that into
+/// thousands of 1–2 ms iterations inside the 0–60 s jitter window. One
+/// second bounds the spin without meaningfully delaying a due refresh
+/// (the schedule runs off a 5-minute buffer).
+pub(crate) const PROACTIVE_MIN_SLEEP: StdDuration = StdDuration::from_secs(1);
 
 /// Compute the sleep duration for the next iteration of the proactive
 /// refresh loop. Pulled out of `start_proactive_refresh` so the gate
@@ -2392,10 +2530,11 @@ pub(crate) fn compute_proactive_sleep(this: &AuthManager) -> StdDuration {
         // clears on wake or auto-expires (`SLEEP_GATE_MAX`).
         return BACKOFF_INTERVAL;
     }
-    if this.is_dark_wake() {
-        // Dark wake (maintenance / Power Nap): `refresh_chain` defers attempts
-        // (up to `DARK_WAKE_DEFER_MAX`) for the same reason, so back off instead
-        // of busy-looping until the next poll or a full wake.
+    // Dark wake with a wire-valid token: `refresh_chain` would defer, so
+    // back off instead of busy-looping against the deferral. With nothing
+    // usable to serve it no longer defers — fall through to the expiry
+    // schedule rather than strand the session for a full interval.
+    if this.current_wire_valid().is_some() && this.is_dark_wake() {
         return BACKOFF_INTERVAL;
     }
     match this.inner.read().as_ref().and_then(|a| a.expires_at) {
@@ -2410,9 +2549,11 @@ pub(crate) fn compute_proactive_sleep(this: &AuthManager) -> StdDuration {
             let target = expires_at - buffer - jitter;
             let delta = target.signed_duration_since(Utc::now());
             if delta <= Duration::zero() {
-                // Already past the early-invalidation boundary:
-                // `auth()` will enter `refresh_chain` immediately.
-                StdDuration::from_secs(0)
+                // Already past the early-invalidation boundary: `auth()`
+                // will enter `refresh_chain` on the next pass. Floored
+                // (never a raw zero) so the adopt/skip `continue` paths
+                // cannot spin -- see [`PROACTIVE_MIN_SLEEP`].
+                PROACTIVE_MIN_SLEEP
             } else {
                 // The earlier `delta <= 0` branch already handled the
                 // negative case, so `to_std` cannot fail here. expect
@@ -2421,6 +2562,7 @@ pub(crate) fn compute_proactive_sleep(this: &AuthManager) -> StdDuration {
                 delta
                     .to_std()
                     .expect("delta > 0 above; chrono::Duration -> std::Duration must succeed")
+                    .max(PROACTIVE_MIN_SLEEP)
             }
         }
         // No expires_at (typical for external binaries): poll every

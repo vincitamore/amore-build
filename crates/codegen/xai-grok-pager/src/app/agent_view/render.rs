@@ -122,7 +122,7 @@ impl AgentView {
                     ]
                 } else {
                     vec![
-                        HintItem::new(key!(Enter), "approve"),
+                        HintItem::new(key!('a'), "approve"),
                         HintItem::new(key!(Tab), "plan"),
                         HintItem::new(key!(Esc), "back"),
                     ]
@@ -698,6 +698,7 @@ impl AgentView {
             voice_interim,
             esc_owned_before_agent,
         } = app_params;
+        self.scrollback.begin_frame();
         self.in_dashboard_overlay = in_dashboard_overlay;
         let super::BannerSlotParams {
             height: banner_height,
@@ -1324,6 +1325,20 @@ impl AgentView {
             crate::views::agent_status::mcp_status_line(p, self.scrollback.animation_tick(), &theme)
         }) {
             status.push("mcp", mcp_line);
+        }
+        #[cfg(feature = "local-workspace")]
+        if self.chat_kind || self.app_chat_mode {
+            let label = self
+                .workspace_mode
+                .status_label(self.workspace_mode_cli_locked);
+            let mut mode_style = Style::default().fg(theme.accent_user).bg(theme.bg_base);
+            if self.workspace_mode_cli_locked {
+                mode_style = mode_style.add_modifier(ratatui::style::Modifier::DIM);
+            }
+            status.push(
+                "workspace_mode",
+                Line::from(Span::styled(label, mode_style)),
+            );
         }
         let ctx_used = self.context_state.as_ref().map(|c| c.used);
         let model_window = self.session.models.get_context_window();

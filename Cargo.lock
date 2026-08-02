@@ -2379,6 +2379,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "ctor"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ec09e802f5081de6157da9a75701d6c713d8dc3ba52571fd4bd25f412644e8a6"
+dependencies = [
+ "ctor-proc-macro",
+ "dtor",
+]
+
+[[package]]
+name = "ctor-proc-macro"
+version = "0.0.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e2931af7e13dc045d8e9d26afccc6fa115d64e115c9c84b1166288b46f6782c2"
+
+[[package]]
 name = "cursor-icon"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2564,9 +2580,9 @@ dependencies = [
 
 [[package]]
 name = "deflate64"
-version = "0.1.12"
+version = "0.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ac6b926516df9c60bfa16e107b21086399f8285a44ca9711344b9e553c5146e2"
+checksum = "26bf8fc351c5ed29b5c2f0cbbac1b209b74f60ecd62e675a998df72c49af5204"
 
 [[package]]
 name = "deltae"
@@ -2853,6 +2869,21 @@ checksum = "cd1511a7b6a56299bd043a9c167a6d2bfb37bf84a6dfceaba651168adfb43c87"
 dependencies = [
  "dtoa",
 ]
+
+[[package]]
+name = "dtor"
+version = "0.0.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "97cbdf2ad6846025e8e25df05171abfb30e3ababa12ee0a0e44b9bbe570633a8"
+dependencies = [
+ "dtor-proc-macro",
+]
+
+[[package]]
+name = "dtor-proc-macro"
+version = "0.0.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7454e41ff9012c00d53cf7f475c5e3afa3b91b7c90568495495e8d9bf47a1055"
 
 [[package]]
 name = "dunce"
@@ -5360,25 +5391,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "09e54e57b4c48b40f7aec75635392b12b3421fa26fe8b4332e63138ed278459c"
 
 [[package]]
-name = "include_dir"
-version = "0.7.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "923d117408f1e49d914f1a379a309cffe4f18c05cf4e3d12e613a15fc81bd0dd"
-dependencies = [
- "include_dir_macros",
-]
-
-[[package]]
-name = "include_dir_macros"
-version = "0.7.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7cab85a7ed0bd5f0e76d93846e0147172bed2e2d3f859bcc33a8d9699cad1a75"
-dependencies = [
- "proc-macro2",
- "quote",
-]
-
-[[package]]
 name = "indexmap"
 version = "2.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5723,6 +5735,15 @@ dependencies = [
  "sha2 0.10.9",
  "signature",
  "simple_asn1",
+]
+
+[[package]]
+name = "kamadak-exif"
+version = "0.5.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ef4fc70d0ab7e5b6bafa30216a6b48705ea964cdfc29c050f2412295eba58077"
+dependencies = [
+ "mutate_once",
 ]
 
 [[package]]
@@ -6401,6 +6422,12 @@ name = "multimap"
 version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1d87ecb2933e8aeadb3e3a02b828fed80a7528047e68b4f424523a0981a3a084"
+
+[[package]]
+name = "mutate_once"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "13d2233c9842d08cfe13f9eac96e207ca6a2ea10b80259ebe8ad0268be27d2af"
 
 [[package]]
 name = "ndk"
@@ -13331,7 +13358,6 @@ dependencies = [
  "tracing",
  "urlencoding",
  "which",
- "xai-grok-env",
  "xai-grok-version",
  "xai-tty-utils",
 ]
@@ -13357,6 +13383,16 @@ version = "0.1.0"
 dependencies = [
  "tracing",
  "url",
+]
+
+[[package]]
+name = "xai-grok-extra-ca"
+version = "0.1.0"
+dependencies = [
+ "reqwest 0.12.24",
+ "rustls",
+ "tempfile",
+ "tracing",
 ]
 
 [[package]]
@@ -13388,6 +13424,7 @@ dependencies = [
  "serde_json",
  "tracing",
  "xai-grok-auth",
+ "xai-grok-extra-ca",
  "xai-grok-sampler",
  "xai-grok-telemetry",
  "xai-grok-version",
@@ -13454,6 +13491,7 @@ dependencies = [
  "xai-computer-hub-sdk",
  "xai-file-utils",
  "xai-grok-config",
+ "xai-grok-extra-ca",
  "xai-grok-telemetry",
  "xai-grok-tools",
  "xai-grok-version",
@@ -13525,7 +13563,7 @@ dependencies = [
 
 [[package]]
 name = "xai-grok-pager"
-version = "0.2.114"
+version = "0.2.117"
 dependencies = [
  "agent-client-protocol",
  "ansi-to-tui",
@@ -13546,7 +13584,6 @@ dependencies = [
  "flate2",
  "git2",
  "image",
- "include_dir",
  "indexmap",
  "insta",
  "libc",
@@ -13559,7 +13596,6 @@ dependencies = [
  "rand 0.9.2",
  "ratatui",
  "regex",
- "reqwest 0.12.24",
  "rustls",
  "serde",
  "serde_json",
@@ -13585,7 +13621,6 @@ dependencies = [
  "urlencoding",
  "uuid",
  "wait-timeout",
- "which",
  "windows-sys 0.59.0",
  "xai-acp-lib",
  "xai-crash-handler",
@@ -13614,12 +13649,11 @@ dependencies = [
  "xai-ratatui-textarea",
  "xai-token-estimation",
  "xai-tty-utils",
- "zip",
 ]
 
 [[package]]
 name = "xai-grok-pager-bin"
-version = "0.2.114"
+version = "0.2.117"
 dependencies = [
  "anyhow",
  "clap",
@@ -13795,6 +13829,7 @@ dependencies = [
  "tokio-util",
  "tracing",
  "uuid",
+ "xai-grok-extra-ca",
  "xai-grok-sampling-types",
  "xai-grok-test-support",
  "xai-grok-version",
@@ -13883,7 +13918,7 @@ dependencies = [
 
 [[package]]
 name = "xai-grok-shell"
-version = "0.2.114"
+version = "0.2.117"
 dependencies = [
  "agent-client-protocol",
  "anyhow",
@@ -13899,6 +13934,7 @@ dependencies = [
  "chrono",
  "clap",
  "criterion",
+ "ctor",
  "dashmap",
  "dhat",
  "dirs 6.0.0",
@@ -13989,9 +14025,10 @@ dependencies = [
  "xai-grok-compaction",
  "xai-grok-config",
  "xai-grok-config-types",
- "xai-grok-env",
+ "xai-grok-extra-ca",
  "xai-grok-hooks",
  "xai-grok-http",
+ "xai-grok-env",
  "xai-grok-mcp",
  "xai-grok-memory",
  "xai-grok-models",
@@ -14099,6 +14136,7 @@ dependencies = [
  "axum",
  "bytes",
  "chrono",
+ "ctor",
  "dirs 5.0.1",
  "filetime",
  "futures-executor",
@@ -14134,6 +14172,7 @@ dependencies = [
  "xai-grok-auth",
  "xai-grok-config",
  "xai-grok-env",
+ "xai-grok-extra-ca",
  "xai-grok-sampler",
  "xai-grok-secrets",
  "xai-mixpanel",
@@ -14185,6 +14224,7 @@ dependencies = [
  "dirs 5.0.1",
  "dunce",
  "educe",
+ "encoding_rs",
  "flate2",
  "fs2",
  "futures",
@@ -14195,6 +14235,7 @@ dependencies = [
  "image",
  "indexmap",
  "infer 0.19.0",
+ "kamadak-exif",
  "libc",
  "minijinja",
  "nix 0.30.1",
@@ -14211,6 +14252,7 @@ dependencies = [
  "serde_json",
  "serde_path_to_error",
  "serde_yaml",
+ "sha2 0.10.9",
  "shellexpand",
  "similar",
  "strip-ansi-escapes",
@@ -14223,6 +14265,7 @@ dependencies = [
  "tonic",
  "tracing",
  "tracing-subscriber",
+ "unicode-normalization",
  "url",
  "uuid",
  "which",
@@ -14234,6 +14277,7 @@ dependencies = [
  "xai-file-utils",
  "xai-grok-config",
  "xai-grok-env",
+ "xai-grok-extra-ca",
  "xai-grok-sandbox",
  "xai-grok-test-support",
  "xai-grok-tools-api",
@@ -14355,6 +14399,7 @@ dependencies = [
  "rustls",
  "serde",
  "serde_json",
+ "sha1",
  "sha2 0.10.9",
  "smallvec",
  "tar",
@@ -14403,6 +14448,7 @@ dependencies = [
  "xai-tool-types",
  "xai-tracing",
  "xai-tty-utils",
+ "zip",
  "zstd",
 ]
 

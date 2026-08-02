@@ -7,6 +7,7 @@
 //! - `x.ai/session/rename`                  rename a session locally + remote
 //! - `x.ai/session/delete`                  delete a session locally + remote
 //! - `x.ai/session/update_mcp_servers`      mid-session MCP server swap
+//! - `x.ai/session/add_local_workspace`     mid-session local workspace add-only (chat)
 //! - `x.ai/session/fork`                    fork a session into a new one
 //! - `x.ai/internal/reload_all_mcp_servers` config hot-reload, all sessions
 //! - `x.ai/internal/reload_project_mcp_servers` config hot-reload, cwd-scoped
@@ -39,6 +40,8 @@ pub async fn handle(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
         "x.ai/session/rename" => handle_session_rename(agent, args).await,
         "x.ai/session/delete" => handle_session_delete(agent, args).await,
         "x.ai/session/update_mcp_servers" => handle_update_mcp_servers(agent, args).await,
+        #[cfg(feature = "local-workspace")]
+        "x.ai/session/add_local_workspace" => handle_add_local_workspace(agent, args).await,
         "x.ai/session/fork" => handle_session_fork(agent, args).await,
         "x.ai/internal/reload_all_mcp_servers" => handle_reload_all_mcp_servers(agent).await,
         "x.ai/internal/reload_project_mcp_servers" => {
@@ -169,7 +172,7 @@ async fn notify_session_title(agent: &MvpAgent, session_id: acp::SessionId, titl
     use crate::extensions::notification::{SessionNotification, SessionUpdate};
 
     let notification = SessionNotification {
-        session_id,
+        session_id: session_id.clone(),
         update: SessionUpdate::SessionSummaryGenerated {
             session_summary: title.to_owned(),
         },
@@ -180,6 +183,8 @@ async fn notify_session_title(agent: &MvpAgent, session_id: acp::SessionId, titl
             acp::ExtNotification::new("x.ai/session_notification", params.into());
         let _ = agent.gateway.ext_notification(ext_notification).await;
     }
+
+    agent.notify_session_info_update(&session_id, title);
 }
 
 async fn rename_chat_conversation(
@@ -365,6 +370,43 @@ async fn handle_update_mcp_servers(agent: &MvpAgent, args: &acp::ExtRequest) -> 
     }
 
     ExtMethodResult::success(serde_json::json!({ "ok": true }))
+        .to_ext_response()
+        .map_err(|e| acp::Error::internal_error().data(e.to_string()))
+}
+
+// session/add_local_workspace (add-only; local-workspace feature)
+
+#[cfg(feature = "local-workspace")]
+async fn handle_add_local_workspace(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Params {
+        session_id: acp::SessionId,
+        #[serde(default)]
+        meta: Option<acp::Meta>,
+    }
+
+    let params: Params = parse_params(args)?;
+    let cwd = {
+        let sessions = agent.sessions.borrow();
+        let h = sessions
+            .get(&params.session_id)
+            .ok_or_else(|| acp::Error::invalid_params().data("unknown session id"))?;
+        std::path::PathBuf::from(&h.info.cwd)
+    };
+    // Gate on actual chat kind — not `requires_gateway` (true for non-chat
+    // GatewayAttach; false for unknown ids).
+    if !agent.is_chat_kind_session(&params.session_id) {
+        return Err(acp::Error::invalid_params().data(serde_json::json!({
+            "code": "local_workspace_chat_only",
+            "message": "x.ai/session/add_local_workspace is only available on chat-kind sessions",
+        })));
+    }
+
+    let result = agent
+        .add_local_workspace_mid_session(&params.session_id, params.meta, &cwd)
+        .await?;
+    ExtMethodResult::success(result)
         .to_ext_response()
         .map_err(|e| acp::Error::internal_error().data(e.to_string()))
 }
@@ -651,6 +693,29 @@ async fn handle_plugins_reload(agent: &MvpAgent) -> ExtResult {
 async fn handle_commands_list(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtResult {
     let req: crate::session::slash_commands::ListCommandsRequest = parse_params(args)?;
 
+    let availability = agent.command_availability();
+    let skills_config = agent.cfg.borrow().skills.clone();
+    let compat = agent.cfg.borrow().compat_resolved;
+
+    // Chat product catalog never uses cwd plugin discovery / folder-trust.
+    // Prefer kind=chat even when sessionId is set so the pull matches ACU.
+    if req.kind.as_deref() == Some("chat") {
+        let response = crate::session::slash_commands::list_commands(
+            None,
+            &skills_config,
+            None,
+            availability,
+            compat,
+            false,
+            Some("chat"),
+            Some(agent.auth_manager.clone()),
+        )
+        .await?;
+        return Ok(acp::ExtResponse::new(Arc::from(
+            serde_json::value::to_raw_value(&response)?,
+        )));
+    }
+
     if let Some(session_id) = req.session_id.as_ref() {
         let Some(handle) = agent.session_handle_waiting_for_load(session_id).await else {
             return Err(
@@ -662,10 +727,6 @@ async fn handle_commands_list(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtRe
             serde_json::value::to_raw_value(&response)?,
         )));
     }
-
-    let skills_config = agent.cfg.borrow().skills.clone();
-    let compat = agent.cfg.borrow().compat_resolved;
-    let availability = agent.command_availability();
 
     // For a given cwd, compute the plugin registry the same way a session would
     // at spawn time (via build_for_cwd) and the same way reload_plugins_impl does
@@ -713,8 +774,10 @@ async fn handle_commands_list(agent: &MvpAgent, args: &acp::ExtRequest) -> ExtRe
         availability,
         compat,
         false,
+        req.kind.as_deref(),
+        Some(agent.auth_manager.clone()),
     )
-    .await;
+    .await?;
     Ok(acp::ExtResponse::new(Arc::from(
         serde_json::value::to_raw_value(&response)?,
     )))

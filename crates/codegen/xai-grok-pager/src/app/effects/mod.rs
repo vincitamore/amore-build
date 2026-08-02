@@ -18,6 +18,8 @@ pub(crate) use helpers::{
     EffectMeta, RestoreProgressMsg, SessionFlags, persist_permission_mode_and_notify,
     persist_setting, sanitize_user_error,
 };
+#[cfg(feature = "local-workspace")]
+pub(crate) use helpers::reject_non_fs_only_advertised_tools;
 use helpers::*;
 use std::path::{Path, PathBuf};
 use agent_client_protocol as acp;
@@ -142,9 +144,7 @@ pub(crate) fn execute(
             #[allow(unused_mut)]
             let mut meta = session_flags.to_meta();
             let is_chat_path = chat_kind || session_flags.chat_mode;
-            if is_chat_path {
-                apply_chat_kind_meta(&mut meta);
-            }
+            finalize_chat_session_meta(&mut meta, is_chat_path, session_flags);
             if let Some(ref mid) = model_id {
                 meta.get_or_insert_with(acp::Meta::new)
                     .insert("modelId".into(), serde_json::json!(mid.0));
@@ -238,13 +238,11 @@ pub(crate) fn execute(
             let tx = acp_tx.clone();
             let cwd = cwd.to_path_buf();
             let mut meta = session_flags.to_meta();
-            if chat_kind || session_flags.chat_mode {
-                meta.get_or_insert_with(acp::Meta::new)
-                    .insert(
-                        "x.ai/session".into(),
-                        serde_json::json!({ "kind": "chat" }),
-                    );
-            }
+            finalize_chat_session_meta(
+                &mut meta,
+                chat_kind || session_flags.chat_mode,
+                session_flags,
+            );
             if let Some(ref mid) = model_id {
                 meta.get_or_insert_with(acp::Meta::new)
                     .insert("modelId".into(), serde_json::json!(mid.0));
@@ -520,10 +518,7 @@ pub(crate) fn execute(
             let tx = acp_tx.clone();
             let mut meta = session_flags.to_meta();
             let is_chat_path = chat_kind || session_flags.chat_mode;
-            if is_chat_path {
-                apply_chat_kind_meta(&mut meta);
-                scrub_chat_workspace_bind_meta(&mut meta);
-            }
+            finalize_chat_session_meta(&mut meta, is_chat_path, session_flags);
             if let Some(true) = session_flags.restore_code {
                 meta.get_or_insert_with(acp::Meta::new)
                     .insert("x.ai/restore_code".into(), serde_json::Value::Bool(true));
@@ -714,7 +709,7 @@ pub(crate) fn execute(
                     }
                 });
         }
-        Effect::FetchSessionList { query, seq } => {
+        Effect::FetchSessionList { query, seq, kind_filter } => {
             let tx = acp_tx.clone();
             let cwd = cwd.to_path_buf();
             tasks
@@ -727,6 +722,19 @@ pub(crate) fn execute(
                         params["query"] = serde_json::Value::String(q.clone());
                     } else {
                         params["allowRelax"] = serde_json::Value::Bool(true);
+                    }
+                    if let Some(kinds) = &kind_filter {
+                        params["_meta"] = serde_json::json!({
+                        "x.ai/facetFilters": { "kind": kinds },
+                    });
+                        tracing::info!(
+                        target: "grok.pager.workspace_mode",
+                        event = "session_list_fetch",
+                        kind_filter = ?kinds,
+                        query = ?query,
+                        seq,
+                        "FetchSessionList with kind facet filter"
+                    );
                     }
                     let request = acp::ExtRequest::new(
                         "x.ai/session/list",
@@ -3550,6 +3558,7 @@ pub(crate) fn execute(
         }
         Effect::SendBtw { agent_id, session_id, question, minimal_request_id } => {
             let tx = acp_tx.clone();
+            let is_api_key_auth = session_flags.is_api_key_auth;
             tasks
                 .spawn(async move {
                     let request = acp::ExtRequest::new(
@@ -3584,9 +3593,7 @@ pub(crate) fn execute(
                         Err(e) => {
                             TaskResult::BtwResponse {
                                 agent_id,
-                                result: Err(
-                                    sanitize_user_error(&format!("side question failed: {e}")),
-                                ),
+                                result: Err(format_acp_error(&e, is_api_key_auth)),
                                 minimal_request_id,
                             }
                         }

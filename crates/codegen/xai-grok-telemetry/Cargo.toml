@@ -35,6 +35,7 @@ xai-grok-env = { workspace = true }
 xai-grok-secrets = { workspace = true }
 xai-mixpanel = { workspace = true }
 xai-grok-config = { workspace = true }
+xai-grok-extra-ca = { workspace = true }
 xai-grok-sampler = { workspace = true }
 xai-token-estimation = { workspace = true }
 dirs = { workspace = true }
@@ -79,6 +80,8 @@ tokio-stream = { workspace = true }
 tracing-opentelemetry = { workspace = true }
 
 [dev-dependencies]
+# Pre-main unified-log redirect for this crate's own test binary.
+ctor = { workspace = true }
 tonic = { workspace = true, features = ["transport"] }
 # In-memory log/metric exporters for the external-stream wire-shape tests.
 opentelemetry_sdk = { workspace = true, features = ["testing"] }

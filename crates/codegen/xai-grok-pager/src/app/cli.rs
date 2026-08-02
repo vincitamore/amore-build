@@ -502,6 +502,10 @@ pub struct PagerArgs {
     /// Output format for headless mode.
     #[clap(long = "output-format", value_enum, default_value = "plain")]
     pub output_format: OutputFormat,
+    /// Emit incremental `stream_event` lines (text/thinking deltas) alongside
+    /// whole messages. Only affects `--output-format streaming-messages-json`.
+    #[clap(long = "include-partial-messages")]
+    pub include_partial_messages: bool,
     /// JSON Schema for structured output. When set, the model is constrained to
     /// produce JSON matching this schema. Implies --output-format json.
     /// Example: --json-schema '{"type":"object","properties":{"name":{"type":"string"}}}'
@@ -602,6 +606,32 @@ pub struct PagerArgs {
     /// Disable plan mode.
     #[arg(long = "no-plan")]
     pub no_plan: bool,
+    /// Own a local `workspace_server` (replaces remote sandbox). Requires `--chat`.
+    ///
+    /// Compiled only with `--features local-workspace` (not implied by `chat`).
+    #[cfg(feature = "local-workspace")]
+    #[arg(
+        long = "local-workspace",
+        num_args = 0..= 1,
+        value_name = "CWD",
+        conflicts_with = "local_workspace_attach",
+        requires = "chat"
+    )]
+    pub local_workspace: Option<Option<PathBuf>>,
+    /// Attach an existing local `workspace_server` by `server_id`,
+    /// replacing the chat sandbox (ExistingWorkspace only). Requires `--chat`.
+    #[cfg(feature = "local-workspace")]
+    #[arg(
+        long = "local-workspace-attach",
+        value_name = "SERVER_ID",
+        conflicts_with = "local_workspace",
+        requires = "chat"
+    )]
+    pub local_workspace_attach: Option<String>,
+    /// Cwd override for local-workspace attach/own. Requires `--chat`.
+    #[cfg(feature = "local-workspace")]
+    #[arg(long = "local-workspace-cwd", value_name = "PATH", requires = "chat")]
+    pub local_workspace_cwd: Option<PathBuf>,
     /// Disable subagent spawning.
     #[arg(long = "no-subagents")]
     pub no_subagents: bool,
@@ -840,6 +870,21 @@ impl PagerArgs {
     /// feature, so call sites need no `cfg` of their own.
     pub fn chat(&self) -> bool {
         false
+    }
+    /// `--local-workspace[=cwd]` own-mode flag.
+    #[cfg(feature = "local-workspace")]
+    pub fn local_workspace(&self) -> Option<Option<&std::path::Path>> {
+        self.local_workspace.as_ref().map(|inner| inner.as_deref())
+    }
+    /// `--local-workspace-attach=<server_id>`.
+    #[cfg(feature = "local-workspace")]
+    pub fn local_workspace_attach(&self) -> Option<&str> {
+        self.local_workspace_attach.as_deref()
+    }
+    /// `--local-workspace-cwd=<path>`.
+    #[cfg(feature = "local-workspace")]
+    pub fn local_workspace_cwd(&self) -> Option<&std::path::Path> {
+        self.local_workspace_cwd.as_deref()
     }
     /// Get the session ID to resume, from either --resume or --load (hidden alias).
     ///
