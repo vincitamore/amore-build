@@ -50,7 +50,7 @@ REPO = Path(__file__).resolve().parent.parent
 
 # Layers that are upstream substrate / vendored / legacy. Never flagged,
 # never renamed. These are the merge seam.
-SUBDSTRATE_DIRS = ("crates", "third_party", "prod")
+SUBSTRATE_DIRS = ("crates", "third_party", "prod")
 
 # The fork-owned surface: everything else. Scanned for stray mentions.
 SCAN_EXCLUDES = {
@@ -111,6 +111,10 @@ REVIEWED_EXCEPTIONS = [
     # fork home — describing the legacy brand, not using it as the product.
     ("README.md", "upstream brand spellings (`grok` / `~/.grok`)"),
     ("docs/setup-glm.md", "upstream brand paths may still say `~/.grok` / `grok`"),
+    # UPSTREAM.md documents the boundary tooling itself: "grok boundary",
+    # "grok mentions" are prose about the check, not product-name drift.
+    ("UPSTREAM.md", "fork-surface grok boundary is enforced by"),
+    ("UPSTREAM.md", "which `grok` mentions are"),
 ]
 
 
@@ -165,7 +169,7 @@ def surface_files():
         if not p.is_file() or is_skipped(p):
             continue
         rel = p.relative_to(REPO)
-        if rel.parts[0] in SUBDSTRATE_DIRS:
+        if rel.parts[0] in SUBSTRATE_DIRS:
             continue
         yield p
 

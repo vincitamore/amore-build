@@ -1,1 +1,14 @@
-6372e41d828b8a6ee82c29e01a69e27ec895cca9
+# Arcus Build: upstream baseline pin.
+#
+# This file names the public xai-org/grok-build sync-bundle commit the fork is
+# rebased on / last synced from. It is a *public* SHA on upstream/main — not
+# upstream's internal monorepo SHA (the `Source-Revision:` trailer on the
+# "Synced from monorepo" commits), which is not a fetchable git object and
+# makes the pin unverifiable.
+#
+# History: the previous value (6372e41d…) was inherited from selene-build and
+# names a commit that exists in neither fork's history; the fork's real
+# merge-base with upstream is 500129c… (the last upstream bundle this tree's
+# history includes). Moved by `scripts/sync_upstream.py --update-pin` after a
+# verified merge.
+500129c714ad1b10e6095481f4a8387a2ec52649

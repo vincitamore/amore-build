@@ -38,7 +38,6 @@ mode explicitly mutates).
 """
 
 import argparse
-import json
 import re
 import subprocess
 import sys
@@ -49,9 +48,8 @@ SOURCE_REV_FILE = REPO / "SOURCE_REV"
 UPSTREAM_REMOTE = "upstream"
 UPSTREAM_MAIN = f"{UPSTREAM_REMOTE}/main"
 
-# The compiled-in home is `~/.arcus`; the fork's verify checklist keys on
-# these being true after a rebase (UPSTREAM.md §6.4).
-DEFAULT_HOME_MARKER = '.arcus'
+# The fork's verify checklist keys on these being true after a rebase
+# (UPSTREAM.md §6.4).
 HARD_OFF_SENTINEL = "FORK_AUTO_UPDATE_HARD_OFF: bool = true"
 HARD_OFF_FILE = "crates/codegen/xai-grok-update/src/auto_update.rs"
 ARGV0_MARKER = '"arcus" | "arcus-build" | "grok" | "agent"'
@@ -83,11 +81,17 @@ def is_dirty() -> bool:
 
 
 def recorded_pin() -> str | None:
+    """Read the last non-comment line of SOURCE_REV (the SHA). The file may
+    carry a header comment; the pin is the final line."""
     try:
-        v = SOURCE_REV_FILE.read_text(encoding="utf-8").strip()
+        lines = SOURCE_REV_FILE.read_text(encoding="utf-8").splitlines()
     except FileNotFoundError:
         return None
-    return v or None
+    for line in reversed(lines):
+        line = line.strip()
+        if line and not line.startswith("#"):
+            return line
+    return None
 
 
 def fetch_upstream() -> None:
