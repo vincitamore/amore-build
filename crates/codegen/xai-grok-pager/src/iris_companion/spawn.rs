@@ -18,8 +18,8 @@ pub struct SpawnPlan {
 
 /// Build the ordered spawn-plan chain for `bin` on the current OS.
 #[must_use]
-pub fn spawn_plan_for_bin(bin: &Path) -> Vec<SpawnPlan> {
-    build_spawn_plan(bin, host_os_tag())
+pub fn spawn_plan_for_bin(bin: &Path, org_root: Option<&Path>) -> Vec<SpawnPlan> {
+    build_spawn_plan(bin, host_os_tag(), org_root)
 }
 
 /// Host OS tag used by [`build_spawn_plan`] (overridable in tests).
@@ -35,30 +35,38 @@ pub fn host_os_tag() -> &'static str {
 }
 
 /// Pure per-OS plan construction. `os` is `"windows" | "macos" | "linux"`.
+/// `org_root` (when known) is pinned into the launch so the new terminal starts
+/// in the house and iris resolves it regardless of where the tab inherits its
+/// cwd from — see [`try_spawn`] for the env/current_dir application.
 #[must_use]
-pub fn build_spawn_plan(bin: &Path, os: &str) -> Vec<SpawnPlan> {
+pub fn build_spawn_plan(bin: &Path, os: &str, org_root: Option<&Path>) -> Vec<SpawnPlan> {
     let bin_s = bin.display().to_string();
+    let root_s = org_root.map(|p| p.display().to_string());
     match os {
-        "windows" => windows_plans(&bin_s),
+        "windows" => windows_plans(&bin_s, root_s.as_deref()),
         "macos" => macos_plans(&bin_s),
         _ => linux_plans(&bin_s),
     }
 }
 
-fn windows_plans(bin: &str) -> Vec<SpawnPlan> {
-    // 1) Windows Terminal new tab/window
+fn windows_plans(bin: &str, org_root: Option<&str>) -> Vec<SpawnPlan> {
+    // 1) Windows Terminal new tab/window (--startingDirectory pins the tab into
+    //    the org root even where the inherited-cwd path is unreliable)
     // 2) cmd /c start (new console)
     // 3) PowerShell Start-Process
+    let mut wt_args = vec!["new-tab".to_string()];
+    if let Some(root) = org_root {
+        wt_args.push("--startingDirectory".to_string());
+        wt_args.push(root.to_string());
+    }
+    wt_args.push("--".to_string());
+    wt_args.push(bin.to_string());
+    wt_args.push("dash".to_string());
     vec![
         SpawnPlan {
             label: "wt",
             program: "wt.exe".into(),
-            args: vec![
-                "new-tab".into(),
-                "--".into(),
-                bin.into(),
-                "dash".into(),
-            ],
+            args: wt_args,
         },
         SpawnPlan {
             label: "cmd-start",
@@ -166,12 +174,14 @@ fn applescript_string(s: &str) -> String {
 /// Fire-and-forget: try each plan until one `spawn()` succeeds.
 ///
 /// Does not wait on the child. Stdio nulled; TTY-detached where the helper
-/// applies. Never panics.
-pub fn spawn_iris_dash(bin: &Path) -> Result<(), String> {
-    let plans = spawn_plan_for_bin(bin);
+/// applies. `org_root` (when known) is pinned into every attempt — the launched
+/// process starts in it and carries `IRIS_ORG_ROOT`, so iris resolves the house
+/// even when the new terminal's inherited cwd is somewhere else. Never panics.
+pub fn spawn_iris_dash(bin: &Path, org_root: Option<&Path>) -> Result<(), String> {
+    let plans = spawn_plan_for_bin(bin, org_root);
     let mut errors: Vec<String> = Vec::new();
     for plan in &plans {
-        match try_spawn(plan) {
+        match try_spawn(plan, org_root) {
             Ok(()) => return Ok(()),
             Err(e) => errors.push(format!("{}: {e}", plan.label)),
         }
@@ -182,12 +192,19 @@ pub fn spawn_iris_dash(bin: &Path) -> Result<(), String> {
     ))
 }
 
-fn try_spawn(plan: &SpawnPlan) -> Result<(), String> {
+fn try_spawn(plan: &SpawnPlan, org_root: Option<&Path>) -> Result<(), String> {
     let mut cmd = Command::new(&plan.program);
     cmd.args(&plan.args)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
+    // Pin the org root into the launch: the process starts there AND carries
+    // IRIS_ORG_ROOT (iris's resolveOrgRoot honors the env first), so the new
+    // tab opens in the house even when it would otherwise inherit a foreign cwd.
+    if let Some(root) = org_root {
+        cmd.current_dir(root);
+        cmd.env("IRIS_ORG_ROOT", root);
+    }
     xai_tty_utils::detach_std_command(&mut cmd);
     #[cfg(windows)]
     {
@@ -215,7 +232,7 @@ mod tests {
     #[test]
     fn windows_chain_orders_wt_cmd_powershell() {
         let bin = PathBuf::from(r"C:\tools\iris.exe");
-        let plans = build_spawn_plan(&bin, "windows");
+        let plans = build_spawn_plan(&bin, "windows", None);
         assert_eq!(plans.len(), 3);
         assert_eq!(plans[0].label, "wt");
         assert_eq!(plans[0].program, "wt.exe");
@@ -228,9 +245,25 @@ mod tests {
     }
 
     #[test]
+    fn windows_wt_plan_pins_the_org_root_as_starting_directory() {
+        let bin = PathBuf::from(r"C:\tools\iris.exe");
+        let root = PathBuf::from(r"C:\Users\me\house");
+        let plans = build_spawn_plan(&bin, "windows", Some(&root));
+        let wt = &plans[0];
+        assert_eq!(wt.label, "wt");
+        // new-tab --startingDirectory <root> -- <bin> dash
+        let si = wt.args.iter().position(|a| a == "--startingDirectory").expect("startingDirectory");
+        assert_eq!(wt.args[si + 1], r"C:\Users\me\house");
+        assert!(wt.args.iter().any(|a| a == "dash"));
+        // Without an org root there is no --startingDirectory (nothing to pin).
+        let bare = build_spawn_plan(&bin, "windows", None);
+        assert!(!bare[0].args.iter().any(|a| a == "--startingDirectory"));
+    }
+
+    #[test]
     fn macos_chain_has_terminal_and_iterm() {
         let bin = PathBuf::from("/usr/local/bin/iris");
-        let plans = build_spawn_plan(&bin, "macos");
+        let plans = build_spawn_plan(&bin, "macos", None);
         assert_eq!(plans.len(), 2);
         assert_eq!(plans[0].label, "osascript-terminal");
         assert_eq!(plans[0].program, "osascript");
@@ -247,7 +280,7 @@ mod tests {
     #[test]
     fn linux_chain_includes_probe_terminals() {
         let bin = PathBuf::from("/usr/bin/iris");
-        let plans = build_spawn_plan(&bin, "linux");
+        let plans = build_spawn_plan(&bin, "linux", None);
         let labels: Vec<_> = plans.iter().map(|p| p.label).collect();
         assert!(labels.contains(&"x-terminal-emulator"));
         assert!(labels.contains(&"gnome-terminal"));
@@ -266,7 +299,7 @@ mod tests {
     #[test]
     fn gnome_terminal_uses_double_dash_separator() {
         let bin = PathBuf::from("/opt/iris");
-        let plans = build_spawn_plan(&bin, "linux");
+        let plans = build_spawn_plan(&bin, "linux", None);
         let gnome = plans
             .iter()
             .find(|p| p.label == "gnome-terminal")

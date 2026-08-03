@@ -87,6 +87,11 @@ fn parse_pointer_toml(raw: &str) -> Option<PathBuf> {
 
 /// Launch `iris dash` in a new OS terminal for the session-resolved bin.
 ///
+/// The org root (the house the harness is working in) is resolved and pinned
+/// into the spawn so the new terminal opens in the house and iris finds it —
+/// the new tab would otherwise inherit an unrelated cwd and refuse with
+/// "Org root not found" (a tab that flashes and closes = "dash didn't launch").
+///
 /// Returns `Ok(())` when a spawn was kicked off (child is detached).
 /// Returns `Err(message)` suitable for a TUI toast on total failure.
 /// Never panics.
@@ -94,7 +99,39 @@ pub fn open_dash() -> Result<(), String> {
     let Some(bin) = resolved_bin() else {
         return Err("iris not found — install the companion or re-run arcus setup".into());
     };
-    spawn_iris_dash(bin)
+    spawn_iris_dash(bin, resolve_org_root().as_deref())
+}
+
+/// Resolve the org root the harness is operating in — the same walk iris uses:
+/// `$IRIS_ORG_ROOT` if set, else up from the cwd for an orientation file
+/// (`AGENTS.md` / `AGENT.md` / `CLAUDE.md`) beside a `tasks/` directory.
+/// `None` when no house is found (the spawn then pins nothing and iris resolves
+/// from the new tab's own cwd, failing with its standard refusal if absent).
+#[must_use]
+pub fn resolve_org_root() -> Option<PathBuf> {
+    if let Ok(p) = std::env::var("IRIS_ORG_ROOT") {
+        if !p.trim().is_empty() {
+            return Some(PathBuf::from(p));
+        }
+    }
+    org_root_walk_from(std::env::current_dir().ok()?)
+}
+
+/// Pure house-root walk (injectable for tests): the nearest ancestor of `start`
+/// — `start` itself included — that carries an orientation file beside `tasks/`.
+fn org_root_walk_from(start: PathBuf) -> Option<PathBuf> {
+    let mut dir = start;
+    loop {
+        let orient = ["AGENTS.md", "AGENT.md", "CLAUDE.md"]
+            .iter()
+            .any(|m| dir.join(m).is_file());
+        if orient && dir.join("tasks").is_dir() {
+            return Some(dir);
+        }
+        if !dir.pop() {
+            return None;
+        }
+    }
 }
 
 #[cfg(test)]
@@ -165,6 +202,61 @@ mod tests {
     fn detect_iris_on_path_is_callable() {
         // Smoke: must not panic whether or not iris is installed.
         let _ = detect_iris_on_path();
+    }
+
+    #[test]
+    fn org_root_walk_finds_the_house_from_deep_inside() {
+        let dir = tempdir().unwrap();
+        let house = dir.path().join("house");
+        fs::create_dir_all(house.join("tasks")).unwrap();
+        fs::write(house.join("AGENTS.md"), "# house\n").unwrap();
+        let deep = house.join("a/b/c");
+        fs::create_dir_all(&deep).unwrap();
+
+        assert_eq!(org_root_walk_from(deep), Some(house.clone()));
+        assert_eq!(org_root_walk_from(house.clone()), Some(house));
+    }
+
+    #[test]
+    fn org_root_walk_needs_both_orientation_and_tasks() {
+        let dir = tempdir().unwrap();
+        let only_orient = dir.path().join("only-orient");
+        fs::create_dir_all(&only_orient).unwrap();
+        fs::write(only_orient.join("AGENTS.md"), "# not a house\n").unwrap();
+        assert_eq!(org_root_walk_from(only_orient), None);
+
+        let only_tasks = dir.path().join("only-tasks");
+        fs::create_dir_all(only_tasks.join("tasks")).unwrap();
+        assert_eq!(org_root_walk_from(only_tasks), None);
+    }
+
+    #[test]
+    fn org_root_walk_returns_none_in_a_bare_tree() {
+        let dir = tempdir().unwrap();
+        let deep = dir.path().join("x/y/z");
+        fs::create_dir_all(&deep).unwrap();
+        assert_eq!(org_root_walk_from(deep), None);
+    }
+
+    #[test]
+    fn resolve_org_root_env_wins_and_blank_is_absent() {
+        // IRIS_ORG_ROOT is honored first; a blank value falls through to the walk.
+        // set_var/remove_var are unsafe in the 2024 edition (env is process-global).
+        unsafe {
+            std::env::set_var("IRIS_ORG_ROOT", "C:\\some\\house");
+        }
+        assert_eq!(resolve_org_root(), Some(std::path::PathBuf::from("C:\\some\\house")));
+        unsafe {
+            std::env::remove_var("IRIS_ORG_ROOT");
+        }
+
+        unsafe {
+            std::env::set_var("IRIS_ORG_ROOT", "   ");
+        }
+        assert_ne!(resolve_org_root(), Some(std::path::PathBuf::from("   ")));
+        unsafe {
+            std::env::remove_var("IRIS_ORG_ROOT");
+        }
     }
 
     fn toml_basic_string(s: &str) -> String {
