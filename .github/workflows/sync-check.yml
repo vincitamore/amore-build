@@ -1,0 +1,28 @@
+name: sync-check
+
+# Daily drift report: how far behind upstream the fork is, and what the
+# newest "Synced from monorepo" bundle contains. Purely informational —
+# `scripts/sync_upstream.py --check` fetches, reports, and exits 0 always
+# (no prompts, no writes). A red run means the fetch itself failed, which
+# is a real signal, not drift noise.
+on:
+  schedule:
+    - cron: "0 6 * * *" # daily 06:00 UTC
+  workflow_dispatch: {} # manual trigger
+
+permissions:
+  contents: read
+
+jobs:
+  drift-report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The behind/ahead count is `rev-list --left-right --count
+          # upstream/main...HEAD`, which needs the fork's full history.
+          fetch-depth: 0
+      - name: Add upstream remote
+        run: git remote add upstream https://github.com/xai-org/grok-build.git
+      - name: Drift report
+        run: python3 scripts/sync_upstream.py --check
