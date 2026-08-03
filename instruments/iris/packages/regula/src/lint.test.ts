@@ -9,6 +9,7 @@ import {
   lintActiveTaskStaleness,
   lintProjectMapCoverage,
   lintProjectMapStaleness,
+  extractWikilinks,
   CURRENT_STATE_MAX_WORDS,
   CURRENT_STATE_STALE_DAYS,
   ACTIVE_TASK_STALE_DAYS,
@@ -474,4 +475,261 @@ test('lint(): a folder-scoped run does not touch project-map', () => {
   seed('tasks/ok.md', { type: 'task', status: 'active', created: '2026-06-20' });
   const r = lint(root, { folder: 'tasks' });
   expect(r.issues.some((i) => i.field === 'coverage' || i.path === 'context/project-map.md')).toBe(false);
+});
+
+// ── wikilinks (ported from the house lint) ──
+
+/** Seed a root AGENTS.md so [[AGENTS]] resolves (walkAllMd sees it as a referent). */
+function seedAgents() {
+  writeFileSync(join(root, 'AGENTS.md'), '# Agents\n');
+}
+
+test('wikilinks: a scope-dir doc with no wikilink warns, never errors (create scaffolds are linkless until expanded)', () => {
+  seed('tasks/nolink.md', { type: 'task', status: 'active', created: '2026-06-20' });
+  const r = lint(root);
+  const issue = r.issues.find((i) => i.field === 'wikilink' && i.issue.includes('no [[wikilink]]'));
+  expect(issue).toBeDefined();
+  expect(issue!.severity).toBe('warning');
+  expect(r.errorCount).toBe(0);
+  expect(r.valid).toBe(true);
+});
+
+test('wikilinks: a broken link in a scope dir is an error naming the missing file', () => {
+  seed('tasks/broken.md', { type: 'task', status: 'active', created: '2026-06-20' }, 'See [[no/such/file]] for detail.\n');
+  const r = lint(root);
+  const issue = r.issues.find((i) => i.field === 'wikilink' && i.issue.includes('no/such/file.md'));
+  expect(issue).toBeDefined();
+  expect(issue!.severity).toBe('error');
+  expect(issue!.line).toBe(1);
+  expect(r.valid).toBe(false);
+});
+
+test('wikilinks: a wrong-case target that resolves only case-insensitively is broken', () => {
+  seedAgents();
+  seed('tasks/case.md', { type: 'task', status: 'active', created: '2026-06-20' }, 'Link [[agents]] wrong case.\n');
+  const r = lint(root);
+  const issue = r.issues.find((i) => i.path === 'tasks/case.md' && i.field === 'wikilink');
+  expect(issue).toBeDefined();
+  expect(issue!.severity).toBe('error');
+});
+
+test('wikilinks: code fences and inline code are not prose (and a real link resolves)', () => {
+  seedAgents();
+  seed(
+    'tasks/fenced.md',
+    { type: 'task', status: 'active', created: '2026-06-20' },
+    'Real [[AGENTS]].\n```\n[[not-a-link]]\n```\nInline `[[also-not]]`.\n',
+  );
+  const r = lint(root);
+  expect(r.issues.filter((i) => i.path === 'tasks/fenced.md' && i.field === 'wikilink')).toEqual([]);
+});
+
+test('wikilinks: extraction strips code, keeps line numbers, drops anchors and aliases', () => {
+  const text = [
+    'Real link: [[AGENTS]] and [[knowledge/audit-surface-design|alias]].',
+    'Inline code `[[wikilink]]` must not count.',
+    '```',
+    '[[not-a-link]]',
+    '```',
+    'Heading ref: [[context/current-state#Section]].',
+  ].join('\n');
+  const links = extractWikilinks(text);
+  expect(links.map((l) => l.target)).toEqual(['AGENTS', 'knowledge/audit-surface-design', 'context/current-state']);
+  expect(links[2]!.line).toBe(6); // fence-blanked lines keep numbering
+});
+
+test('wikilinks: the Markdown-table-cell `\\|` form is an alias delimiter, not part of the target', () => {
+  const links = extractWikilinks('| [[context/current-state\\|current-state.md]] | Standing reality | Every arrival |');
+  expect(links.map((l) => l.target)).toEqual(['context/current-state']);
+});
+
+test('wikilinks: a broken link in context/ warns (never errors) and previous-state.md is in scope', () => {
+  seedAgents();
+  seed('context/current-state.md', { type: 'context', created: '2026-02-05', tags: ['meta'] }, '# State\n\nBroken [[no/such/file]] here.\n');
+  seed('context/previous-state.md', { type: 'context', created: '2026-02-05', tags: ['meta'] }, '# Old\n\nAlso broken [[no/such/file2]].\n');
+  const r = lint(root);
+  const cs = r.issues.filter((i) => i.path === 'context/current-state.md' && i.field === 'wikilink');
+  const ps = r.issues.filter((i) => i.path === 'context/previous-state.md' && i.field === 'wikilink');
+  expect(cs.length).toBe(1);
+  expect(cs[0]!.severity).toBe('warning');
+  expect(ps.length).toBe(1); // previous-state in scope per operator decision
+  expect(ps[0]!.severity).toBe('warning');
+  expect(r.errorCount).toBe(0);
+  expect(r.valid).toBe(true);
+});
+
+test('wikilinks: a folder-scoped run does not run the context/ wikilink check', () => {
+  seedAgents();
+  seed('context/current-state.md', { type: 'context', created: '2026-02-05', tags: ['meta'] }, '# State\n\nBroken [[no/such/file]] here.\n');
+  seed('tasks/ok.md', { type: 'task', status: 'active', created: '2026-06-20' }, '[[AGENTS]] fine.\n');
+  const r = lint(root, { folder: 'tasks' });
+  expect(r.issues.some((i) => i.path.startsWith('context/'))).toBe(false);
+});
+
+// ── type↔folder + inbox admission ──
+
+test('a knowledge-typed doc in tasks/ is a type↔folder error', () => {
+  seedAgents();
+  seed('tasks/notask.md', { type: 'knowledge', created: '2026-06-20', updated: '2026-06-20', tags: ['x'] }, '[[AGENTS]]\n');
+  const r = lint(root);
+  const issue = r.issues.find((i) => i.field === 'type' && i.issue.includes('requires'));
+  expect(issue).toBeDefined();
+  expect(issue!.severity).toBe('error');
+  expect(r.valid).toBe(false);
+});
+
+test('a README.md index file is exempt from the type↔folder rule', () => {
+  seedAgents();
+  seed('tasks/README.md', { type: 'index', created: '2026-06-20' }, '[[AGENTS]]\n');
+  const r = lint(root);
+  expect(r.issues.some((i) => i.path === 'tasks/README.md' && i.field === 'type')).toBe(false);
+});
+
+test('an unknown inbox folder is an error', () => {
+  seedAgents();
+  seed('inbox/mystery/x.md', { type: 'inbox', created: '2026-06-20', source: 'capture', status: 'open' }, '[[AGENTS]]\n');
+  const r = lint(root);
+  const issue = r.issues.find((i) => i.field === 'file' && i.issue.includes('unknown inbox folder'));
+  expect(issue).toBeDefined();
+  expect(issue!.severity).toBe('error');
+});
+
+// ── value domains + formats (warning class) ──
+
+test('source outside the domain warns, never errors', () => {
+  seedAgents();
+  seed('inbox/ideas/badsrc.md', { type: 'inbox', created: '2026-06-20', source: 'bogus', status: 'open' }, '[[AGENTS]]\n');
+  const r = lint(root);
+  const issue = r.issues.find((i) => i.field === 'source' && i.issue.includes('outside domain'));
+  expect(issue).toBeDefined();
+  expect(issue!.severity).toBe('warning');
+  expect(r.errorCount).toBe(0);
+});
+
+test('repeat outside the domain warns, never errors', () => {
+  seedAgents();
+  seed('reminders/badrepeat.md', { type: 'reminder', created: '2026-06-20', status: 'pending', 'remind-at': '2026-07-01T09:00', repeat: 'fortnightly' }, '[[AGENTS]]\n');
+  const r = lint(root);
+  expect(r.issues.some((i) => i.field === 'repeat' && i.issue.includes('outside domain'))).toBe(true);
+  expect(r.errorCount).toBe(0);
+});
+
+test('a bad date format on a schema date key warns; null is legal', () => {
+  seedAgents();
+  seed('tasks/completed/bad-date.md', { type: 'task', status: 'complete', created: '2026-06-20', completed: 'June 2026' }, '[[AGENTS]]\n');
+  seed('tasks/null-date.md', { type: 'task', status: 'active', created: '2026-06-20', completed: null, tags: ['x'] }, '[[AGENTS]]\n');
+  const r = lint(root);
+  const bad = r.issues.find((i) => i.path === 'tasks/completed/bad-date.md' && i.field === 'completed');
+  expect(bad).toBeDefined();
+  expect(bad!.severity).toBe('warning');
+  expect(r.issues.some((i) => i.path === 'tasks/null-date.md' && i.field === 'completed')).toBe(false);
+  expect(r.errorCount).toBe(0);
+});
+
+test('a time-bearing remind-at passes the datetime format check (normalized ISO form)', () => {
+  seedAgents();
+  seed('reminders/timed.md', { type: 'reminder', created: '2026-06-20', status: 'pending', 'remind-at': '2026-07-01T09:00', tags: ['r'] }, '[[AGENTS]]\n');
+  const r = lint(root);
+  expect(r.issues.some((i) => i.path === 'reminders/timed.md' && i.field === 'remind-at')).toBe(false);
+});
+
+// ── lifecycle additions ──
+
+test('a terminal inbox item without resolved/resolution warns, never errors', () => {
+  seedAgents();
+  seed('inbox/ideas/resolved/nofields.md', { type: 'inbox', created: '2026-06-20', source: 'session', status: 'resolved' }, '[[AGENTS]]\n');
+  const r = lint(root);
+  expect(r.issues.some((i) => i.field === 'resolved' && i.issue.includes('no resolved date'))).toBe(true);
+  expect(r.issues.some((i) => i.field === 'resolution' && i.issue.includes('no resolution line'))).toBe(true);
+  expect(r.errorCount).toBe(0);
+});
+
+test('a terminal inbox item WITH resolved/resolution is clean on those fields', () => {
+  seedAgents();
+  seed('inbox/ideas/resolved/fine.md', { type: 'inbox', created: '2026-06-20', source: 'session', status: 'resolved', resolved: '2026-06-25', resolution: 'Landed in [[tasks/x]].' }, '[[AGENTS]]\n');
+  const r = lint(root);
+  expect(r.issues.some((i) => i.path === 'inbox/ideas/resolved/fine.md' && (i.field === 'resolved' || i.field === 'resolution'))).toBe(false);
+});
+
+test('a snoozed reminder without snoozed-until warns, never errors', () => {
+  seedAgents();
+  seed('reminders/snoozed.md', { type: 'reminder', created: '2026-06-20', status: 'snoozed', 'remind-at': '2026-07-01T09:00' }, '[[AGENTS]]\n');
+  const r = lint(root);
+  const issue = r.issues.find((i) => i.field === 'snoozed-until');
+  expect(issue).toBeDefined();
+  expect(issue!.severity).toBe('warning');
+  expect(r.errorCount).toBe(0);
+});
+
+// ── lattice + orientation-rules drift ──
+
+test('lattice-drift skips with a note when LATTICE_CANONICAL is unset', () => {
+  delete process.env.LATTICE_CANONICAL;
+  const r = lint(root);
+  expect(r.issues.some((i) => i.field === 'lattice-drift')).toBe(false);
+  expect(r.notes.some((n) => n.includes('lattice-drift: skipped'))).toBe(true);
+});
+
+test('lattice-drift errors when the local copy differs from the canonical', () => {
+  mkdirSync(join(root, 'context'), { recursive: true });
+  writeFileSync(join(root, 'context', 'principle-lattice.md'), '# Local lattice\n');
+  const canonical = join(root, 'canonical-lattice.md');
+  writeFileSync(canonical, '# Canonical lattice\n');
+  process.env.LATTICE_CANONICAL = canonical;
+  try {
+    const r = lint(root);
+    const issue = r.issues.find((i) => i.field === 'lattice-drift');
+    expect(issue).toBeDefined();
+    expect(issue!.severity).toBe('error');
+    expect(r.valid).toBe(false);
+  } finally {
+    delete process.env.LATTICE_CANONICAL;
+  }
+});
+
+test('lattice-drift compares BODIES only — house-local headers and line endings are not drift', () => {
+  mkdirSync(join(root, 'context'), { recursive: true });
+  writeFileSync(join(root, 'context', 'principle-lattice.md'), '<!-- house-local loading note -->\n## Lattice\n\nBody.\n');
+  const canonical = join(root, 'canonical-lattice.md');
+  writeFileSync(canonical, '<!-- provenance header -->\r\n## Lattice\r\n\r\nBody.\r\n');
+  process.env.LATTICE_CANONICAL = canonical;
+  try {
+    const r = lint(root);
+    expect(r.issues.some((i) => i.field === 'lattice-drift')).toBe(false);
+  } finally {
+    delete process.env.LATTICE_CANONICAL;
+  }
+});
+
+test('lattice-drift errors when the BODY genuinely drifts under identical headers', () => {
+  mkdirSync(join(root, 'context'), { recursive: true });
+  writeFileSync(join(root, 'context', 'principle-lattice.md'), '<!-- h -->\n## Lattice\n\nLocal body.\n');
+  const canonical = join(root, 'canonical-lattice.md');
+  writeFileSync(canonical, '<!-- h -->\n## Lattice\n\nCanonical body.\n');
+  process.env.LATTICE_CANONICAL = canonical;
+  try {
+    const r = lint(root);
+    const issue = r.issues.find((i) => i.field === 'lattice-drift');
+    expect(issue).toBeDefined();
+    expect(issue!.issue).toContain('lattice body differs');
+  } finally {
+    delete process.env.LATTICE_CANONICAL;
+  }
+});
+
+test('orientation-rules-drift skips with a note when the org root has no rules dir', () => {
+  const r = lint(root);
+  expect(r.issues.some((i) => i.field === 'orientation-rules-drift')).toBe(false);
+  expect(r.notes.some((n) => n.includes('orientation-rules-drift: skipped'))).toBe(true);
+});
+
+test('orientation-rules-drift errors when the org sync script --check fails', () => {
+  mkdirSync(join(root, '.arcus'), { recursive: true });
+  mkdirSync(join(root, 'scripts'), { recursive: true });
+  writeFileSync(join(root, 'scripts', 'sync_orientation_rules.py'), 'import sys\nsys.exit(1)\n');
+  const r = lint(root);
+  const issue = r.issues.find((i) => i.field === 'orientation-rules-drift');
+  expect(issue).toBeDefined();
+  expect(issue!.severity).toBe('error');
+  expect(issue!.issue).toContain('exited 1');
 });
