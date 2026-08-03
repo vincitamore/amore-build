@@ -1185,11 +1185,21 @@ pub(crate) async fn run(
         app.sync_session_announcement_slash_gate();
 
         let remote_tips = remote_settings.as_ref().and_then(|s| s.tips.as_deref());
-        app.tips = resolve_tips(
+        let merged_tips = resolve_tips(
             requirements.as_ref(),
             user_config.as_ref(),
             managed_config.as_ref(),
             remote_tips,
+        );
+        // Fork-owned backstop: when no tip source produced anything (offline,
+        // unreachable remote, provider sends none) and the user has not
+        // explicitly disabled tips, seed the fork's compiled-in defaults so
+        // the welcome screen still teaches arcus-native content. See
+        // `crate::tips::defaults::apply_fork_defaults`.
+        app.tips = crate::tips::defaults::apply_fork_defaults(
+            merged_tips,
+            requirements.as_ref(),
+            user_config.as_ref(),
         );
 
         if !app.tips.is_empty() {

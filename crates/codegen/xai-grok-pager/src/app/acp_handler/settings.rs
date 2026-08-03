@@ -316,11 +316,19 @@ pub(super) fn handle_settings_update(notif: &acp::ExtNotification, app: &mut App
     if let Some(remote_tips) = update.tips {
         use xai_grok_shell::util::config::resolve_tips;
 
-        app.tips = resolve_tips(
+        let merged_tips = resolve_tips(
             requirements.as_ref(),
             user_config.as_ref(),
             managed_config.as_ref(),
             Some(&remote_tips),
+        );
+        // Same fork-owned backstop as the event_loop startup resolve: an empty
+        // merged list (e.g. the remote cleared its tips) falls back to the
+        // fork's compiled-in defaults unless the user disabled tips.
+        app.tips = crate::tips::defaults::apply_fork_defaults(
+            merged_tips,
+            requirements.as_ref(),
+            user_config.as_ref(),
         );
         if !app.tips.is_empty() {
             let grok_home = xai_grok_tools::util::grok_home::grok_home();

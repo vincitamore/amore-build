@@ -9,6 +9,7 @@
 
 pub mod clear_detector;
 pub mod clipboard_focus;
+pub mod defaults;
 pub mod ephemeral;
 pub mod plan_nudge;
 pub mod render;
