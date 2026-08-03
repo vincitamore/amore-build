@@ -477,6 +477,17 @@ pub(super) fn apply_announcements_update(
         Some(remote),
     );
     let announcements = xai_grok_announcements::filter_expired(merged);
+    // Fork-owned: the house stays the announcement source of truth through
+    // live backend pushes too. Every remote_settings write emits a gen-ordered
+    // `x.ai/announcements/update`, so without this gate the startup house
+    // seed would be clobbered moments later by the very promos it replaced.
+    // `GROK_ANNOUNCEMENTS_OVERRIDE` presence still wins (passed through).
+    let announcements = crate::announcements::house::apply_house_override(
+        announcements,
+        &app.cwd,
+        chrono::Utc::now(),
+        std::env::var_os("GROK_ANNOUNCEMENTS_OVERRIDE").is_some(),
+    );
 
     app.announcement = match app.announcement.as_ref() {
         Some(current) => announcements

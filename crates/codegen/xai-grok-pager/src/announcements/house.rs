@@ -472,20 +472,23 @@ fn collect_markdown(dir: &Path, out: &mut Vec<std::path::PathBuf>) {
 // Tests
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Test-only fixture helpers shared across the crate's test modules (the
+/// pager's acp_handler tests exercise the live re-resolve gate with a real
+/// house tree, so the shapes must not drift from the module's own tests).
 #[cfg(test)]
-mod tests {
+pub(crate) mod test_support {
     use super::*;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     /// A std-only temp tree (no new dependency) removed on drop. Shapes mirror
     /// the session-init hook's own fixtures.
-    struct TempTree {
-        path: PathBuf,
+    pub(crate) struct TempTree {
+        pub(crate) path: PathBuf,
     }
 
     impl TempTree {
-        fn new() -> Self {
+        pub(crate) fn new() -> Self {
             let mut path = std::env::temp_dir();
             let unique = format!(
                 "arcus-house-test-{}-{}",
@@ -497,7 +500,7 @@ mod tests {
             Self { path }
         }
 
-        fn write(&self, rel: &str, content: &str) {
+        pub(crate) fn write(&self, rel: &str, content: &str) {
             let p = self.path.join(rel);
             if let Some(parent) = p.parent() {
                 std::fs::create_dir_all(parent).unwrap();
@@ -505,7 +508,7 @@ mod tests {
             std::fs::write(p, content).unwrap();
         }
 
-        fn root(&self) -> &Path {
+        pub(crate) fn root(&self) -> &Path {
             &self.path
         }
     }
@@ -516,11 +519,11 @@ mod tests {
         }
     }
 
-    fn make_house(t: &TempTree) {
-        t.write(
-            "AGENTS.md",
-            "# Test House\n\n> The house.\n",
-        );
+    /// A minimal house: AGENTS.md with an H1, tasks/ (README only), a
+    /// current-state with the standing-reality heading, and a reminders
+    /// index — the shapes the live house carries.
+    pub(crate) fn make_house(t: &TempTree) {
+        t.write("AGENTS.md", "# Test House\n\n> The house.\n");
         t.write(
             "tasks/README.md",
             "---\ntype: task\n---\n\n# Task index\n\nSchema only.\n",
@@ -529,11 +532,14 @@ mod tests {
             "context/current-state.md",
             "---\ntype: context\n---\n\n# Current state\n\n## Where the house is\n\n**Founded 2026-07-31.** Standing opener.\n",
         );
-        t.write(
-            "reminders/README.md",
-            "---\ntype: reminder\n---\n\n# Reminder index\n",
-        );
+        t.write("reminders/README.md", "---\ntype: reminder\n---\n\n# Reminder index\n");
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::test_support::{make_house, TempTree};
+    use super::*;
 
     fn make_task(t: &TempTree, name: &str, status: &str, title: &str) {
         t.write(

@@ -235,3 +235,82 @@
         );
     }
 
+    /// Fork-owned: the house stays the announcement source of truth through
+    /// live backend pushes. Every remote_settings write emits a gen-ordered
+    /// `x.ai/announcements/update`, so without the house gate the startup
+    /// seed would be replaced moments later by the very Grok promos it
+    /// suppressed — the operator-visible symptom that shipped the fix.
+    #[test]
+    fn announcements_update_keeps_house_splash_over_remote_promo_push() {
+        use crate::announcements::house::test_support::{make_house, TempTree};
+
+        let tree = TempTree::new();
+        make_house(&tree);
+        let mut app = make_app_with_agent("sess-ann");
+        app.cwd = tree.root().to_path_buf();
+
+        let promo = xai_grok_announcements::RemoteAnnouncement {
+            id: Some("grok-promo".into()),
+            title: Some("Grok 4.5 is here!".into()),
+            message: Some("Try the new model now.".into()),
+            severity: Some("promo".into()),
+            cta: Some(xai_grok_announcements::AnnouncementCta {
+                label: Some("Get it".into()),
+                url: Some("https://x.ai/grok".into()),
+                caption: None,
+            }),
+            ..Default::default()
+        };
+        apply_announcements_update(&mut app, 1, &[promo.clone()], None, None, None);
+
+        assert_eq!(
+            app.active_announcements.len(),
+            1,
+            "the house splash must survive the push"
+        );
+        assert_eq!(
+            app.active_announcements[0].id.as_deref(),
+            Some("arcus-house")
+        );
+        assert_eq!(
+            app.announcement.as_ref().and_then(|a| a.id.as_deref()),
+            Some("arcus-house"),
+            "the picked welcome announcement must stay the house splash"
+        );
+        assert_eq!(
+            shown_banner_id(&app),
+            None,
+            "the house splash is welcome-only: no in-session banner"
+        );
+    }
+
+    /// The same live push outside a house passes through unchanged — the
+    /// house gate must not suppress remote announcements in a non-house tree.
+    #[test]
+    fn announcements_update_outside_house_keeps_remote_push() {
+        let mut app = make_app_with_agent("sess-ann");
+        // `make_app_with_agent` cwd is the process cwd (the fork tree, not a
+        // house); pin it explicitly so the test cannot drift with the host.
+        app.cwd = std::path::PathBuf::from("/not/a/house");
+
+        let promo = xai_grok_announcements::RemoteAnnouncement {
+            id: Some("grok-promo".into()),
+            title: Some("Grok 4.5 is here!".into()),
+            message: Some("Try the new model now.".into()),
+            severity: Some("promo".into()),
+            cta: Some(xai_grok_announcements::AnnouncementCta {
+                label: Some("Get it".into()),
+                url: Some("https://x.ai/grok".into()),
+                caption: None,
+            }),
+            ..Default::default()
+        };
+        apply_announcements_update(&mut app, 1, &[promo.clone()], None, None, None);
+
+        assert_eq!(
+            app.active_announcements,
+            vec![promo],
+            "non-house trees keep the remote list"
+        );
+    }
+
