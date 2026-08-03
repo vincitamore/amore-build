@@ -252,8 +252,10 @@ Path-style, extension omitted (`[[tasks/completed/example-task]]`).
   truncate a listing between search and conclusion), filter by predicate and
   count, re-run when the claim goes durable.
 - **Leave:** update [[context/current-state]] (standing reality only; keep it
-  short enough to re-read every session), commit with a message the next
-  session can orient from, push per operator policy.
+  short enough to re-read every session — new changes land under
+  `## Recent structural changes (DATE)`; aged sections migrate to
+  `context/previous-state.md`), commit with a message the next session can
+  orient from, push per operator policy.
 - **Honesty over polish:** "I could not do X, here is where I stopped and why"
   beats papering over a gap.
 - Answer mechanical steps directly; spend depth where the problem needs it.
