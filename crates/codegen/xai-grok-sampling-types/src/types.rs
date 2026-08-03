@@ -637,6 +637,14 @@ pub struct ChatChunkDelta {
     pub role: Option<Role>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
+    /// The streamed reasoning trace. The wire field name depends on the ROUTE,
+    /// not the model: directly-served endpoints (xAI, vLLM/SGLang, Z.ai) send
+    /// `reasoning_content`, while OpenRouter normalizes it to `reasoning` (with a
+    /// structured `reasoning_details` beside it). Accept both — the struct has no
+    /// `deny_unknown_fields`, so an unaliased spelling is dropped in silence and
+    /// the harness simply never renders a thought trace. `alias` is
+    /// deserialize-only, so what we serialize on the request path is unchanged.
+    #[serde(alias = "reasoning")]
     pub reasoning_content: Option<String>,
     /// Tool call deltas. Handles `null` in JSON as empty vec.
     #[serde(
@@ -1472,6 +1480,46 @@ mod tests {
         assert_eq!(delta.role, Some(Role::Assistant));
         assert_eq!(delta.content, Some("".to_string()));
         assert!(delta.tool_calls.is_empty());
+    }
+
+    /// Both spellings of the streamed trace must deserialize, because the field
+    /// name is a property of the ROUTE, not the model.
+    ///
+    /// OpenRouter (and the upstream providers behind it) streams the trace as
+    /// `delta.reasoning`, with a structured `delta.reasoning_details` beside it —
+    /// captured live from `deepseek/deepseek-v4-flash-0731` (provider Fireworks)
+    /// on 2026-08-03. Directly-served endpoints — vLLM/SGLang, Z.ai, xAI's own —
+    /// use `delta.reasoning_content`.
+    ///
+    /// `ChatChunkDelta` has no `deny_unknown_fields`, so without the alias the
+    /// OpenRouter spelling is dropped in silence: no error, no log, just a harness
+    /// that never renders a thought trace for any OpenRouter-routed model.
+    #[test]
+    fn chat_chunk_delta_accepts_both_trace_field_spellings() {
+        let openrouter = r#"{
+            "content": "",
+            "role": "assistant",
+            "reasoning": "We need 17*23",
+            "reasoning_details": [
+                {"type":"reasoning.text","text":"We need 17*23","format":"unknown","index":0}
+            ]
+        }"#;
+        let delta: ChatChunkDelta =
+            serde_json::from_str(openrouter).expect("OpenRouter-shaped delta should deserialize");
+        assert_eq!(
+            delta.reasoning_content.as_deref(),
+            Some("We need 17*23"),
+            "OpenRouter's `reasoning` must land in reasoning_content, or traces never render"
+        );
+
+        let direct = r#"{"content":"","role":"assistant","reasoning_content":"direct trace"}"#;
+        let delta: ChatChunkDelta =
+            serde_json::from_str(direct).expect("direct-endpoint delta should deserialize");
+        assert_eq!(
+            delta.reasoning_content.as_deref(),
+            Some("direct trace"),
+            "the directly-served spelling must keep working"
+        );
     }
 
     /// Regression test: cloning `Box<dyn TraceContext>` must not infinitely recurse.
