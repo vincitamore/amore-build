@@ -1176,7 +1176,17 @@ pub(crate) async fn run(
             managed_config.as_ref(),
             remote_announcements,
         );
-        app.active_announcements = xai_grok_announcements::filter_expired(announcements);
+        let resolved_announcements = xai_grok_announcements::filter_expired(announcements);
+        // Fork-owned: when the pager launches inside a house, the house
+        // splash is the announcement source of truth — remote Grok promos
+        // never show there. `GROK_ANNOUNCEMENTS_OVERRIDE` still wins: its
+        // presence (whatever the JSON) suppresses the house override too.
+        app.active_announcements = crate::announcements::house::apply_house_override(
+            resolved_announcements,
+            &app.cwd,
+            chrono::Utc::now(),
+            std::env::var_os("GROK_ANNOUNCEMENTS_OVERRIDE").is_some(),
+        );
         if !app.active_announcements.is_empty() {
             use rand::Rng;
             let idx = rand::rng().random_range(0..app.active_announcements.len());

@@ -4,6 +4,7 @@
 
 pub mod acp;
 pub mod actions;
+pub mod announcements;
 pub mod app;
 pub mod client_identity;
 pub mod completions_cmd;

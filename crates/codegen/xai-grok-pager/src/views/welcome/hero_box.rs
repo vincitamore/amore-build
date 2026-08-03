@@ -501,6 +501,9 @@ pub(super) fn render_announcement_block(
     if let Some(title) = ann.title.as_deref() {
         let title_color = match ann.severity.as_deref() {
             Some("critical") => theme.accent_error,
+            // Fork-owned "house" severity: standing house state rendered
+            // quiet (gray) rather than as a promo warning.
+            Some("house") => theme.gray,
             _ => theme.warning,
         };
         let title_style = Style::default()
@@ -851,6 +854,44 @@ managed devices and accounts. Report security incidents";
         let truncated = render_announcement_block(&mut buf, &theme(), area, &a, false, None);
         assert!(!truncated);
         assert!(!all_text(&buf, area).contains('…'));
+    }
+
+    /// The fork-owned `house` severity renders quiet (gray) — standing house
+    /// state, not a promo warning. Critical stays red; anything else stays
+    /// the promo warning color.
+    #[test]
+    fn house_severity_title_renders_gray_not_warning() {
+        let area = Rect::new(0, 0, 40, 4);
+        let theme = theme();
+
+        let mut buf = Buffer::empty(area);
+        let a = ann(Some("Arcus"), Some("3 active tasks"));
+        let mut house = a.clone();
+        house.severity = Some("house".to_string());
+        render_announcement_block(&mut buf, &theme, area, &house, false, None);
+        assert_eq!(
+            buf.cell((0, 0)).unwrap().fg,
+            theme.gray,
+            "house severity must map to quiet gray"
+        );
+
+        let mut buf = Buffer::empty(area);
+        render_announcement_block(&mut buf, &theme, area, &a, false, None);
+        assert_eq!(
+            buf.cell((0, 0)).unwrap().fg,
+            theme.warning,
+            "default severity keeps the promo warning color"
+        );
+
+        let mut buf = Buffer::empty(area);
+        let mut critical = a.clone();
+        critical.severity = Some("critical".to_string());
+        render_announcement_block(&mut buf, &theme, area, &critical, false, None);
+        assert_eq!(
+            buf.cell((0, 0)).unwrap().fg,
+            theme.accent_error,
+            "critical keeps the error color"
+        );
     }
 
     #[test]
