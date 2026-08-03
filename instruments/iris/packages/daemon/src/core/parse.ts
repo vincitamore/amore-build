@@ -233,6 +233,12 @@ export function inferType(fmType: unknown, relPath: string): string {
         return 'knowledge';
       case 'inbox':
         return 'inbox';
+      // README.md index files carry type: index (the house index-file convention,
+      // exempted from type↔folder by regula's lint). Without this case the path
+      // fallback reclassifies them into their folder's type — inbox/README.md
+      // becomes 'inbox', inflating /api/status byType counts.
+      case 'index':
+        return 'index';
       case 'reminder':
         return 'reminder';
       case 'project':

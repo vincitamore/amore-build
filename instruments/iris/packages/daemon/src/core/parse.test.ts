@@ -87,6 +87,12 @@ test('inferType: path fallback then other', () => {
   expect(inferType(undefined, 'random/x.md')).toBe('other');
 });
 
+test('inferType: index README files keep type index, not their folder type', () => {
+  expect(inferType('index', 'inbox/README.md')).toBe('index');
+  expect(inferType('index', 'tasks/README.md')).toBe('index');
+  expect(inferType('index', 'reminders/README.md')).toBe('index');
+});
+
 // ── DATE HAZARD: raw scalar preservation ──────────────────────────────────────
 
 test('rawScalarField preserves the verbatim scalar (ISO-Z NOT collapsed)', () => {
