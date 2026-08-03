@@ -29,7 +29,7 @@ work it describes.
   Windows consoles, where the braille block has no glyphs.
 - **The bundled knowledge instrument is `iris`** — daemon on `127.0.0.1:3853`,
   sole binary `iris`, offered as an opt-in step by `arcus setup` and reachable
-  from the harness with `Ctrl+Shift+D`.
+  from the harness with `Ctrl+Shift+G`.
 - Inherited from Selene Build: guided first-run setup, `arcus init` planting a
   complete agent house (AGENTS.md, context/tasks/inbox/knowledge scaffold,
   orchestration skills, hooks pack, principle lattice default-on), the native

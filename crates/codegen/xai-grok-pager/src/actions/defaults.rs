@@ -1270,14 +1270,17 @@ pub(super) fn open_iris_dash_action_if(available: bool) -> Option<ActionDef> {
         id: ActionId::OpenIrisDash,
         label: "dash",
         description: "Open Iris dash in a new terminal",
-        // Ctrl+Shift+D — free of existing defaults; mnemonic for "dash".
-        default_key: key!('d', CONTROL | SHIFT),
+        // Ctrl+Shift+G — mnemonic for the "glass" (the dash). Deliberately NOT
+        // Ctrl+Shift+D: Windows Terminal binds that to duplicatePane by default
+        // and eats it before the TUI ever sees the key (the dash appeared to
+        // "not launch" while WT silently opened a duplicated PowerShell tab).
+        default_key: key!('g', CONTROL | SHIFT),
         alt_keys: vec![],
         category: Category::Panels,
         context: When::AgentScreen,
         // Mid-priority: visible when present, never crowds essentials.
         hint_priority: Some(8),
-        hint_key_display: Some("Ctrl+Shift+D"),
+        hint_key_display: Some("Ctrl+Shift+G"),
         requires_confirmation: false,
         long_help: Some(
             "Opens the Iris companion dashboard (`iris dash`) in a new OS terminal window — never inside Arcus's TUI.\nOnly available when Iris is on PATH or pointed at by ~/.arcus/iris-companion.toml (from arcus setup).\nWhen Iris is not installed the shortcut is omitted from the bar and does nothing.",

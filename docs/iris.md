@@ -122,8 +122,10 @@ is not a substitute for installing iris.
 
 When iris is installed and detected, the Arcus Build TUI can surface a
 shortcuts-bar hint that launches **`iris dash` in a new terminal**. The
-action is **Ctrl+Shift+D** (label `dash`). The in-product shortcuts cheatsheet
-is the source of truth if the binding ever moves.
+action is **Ctrl+Shift+G** (label `dash`) — mnemonic for the "glass", and
+deliberately not Ctrl+Shift+D, which Windows Terminal binds to `duplicatePane`
+by default and swallows before the TUI sees it. The in-product shortcuts
+cheatsheet is the source of truth if the binding ever moves.
 When iris is **not** installed, that hint is **hidden**.
 
 ---
