@@ -57,9 +57,16 @@ export type TreeVisible =
   | { kind: 'folder'; node: TreeFolder; depth: number; expanded: boolean }
   | { kind: 'leaf'; leaf: TreeLeaf; depth: number };
 
-/** Flatten the tree to the rows currently visible given the expanded-folder set. */
+/** Flatten the tree to the rows currently visible given the expanded-folder set.
+ * The type root is the implicit container and is ALWAYS open — its direct leaves render as
+ * depth-0 rows, so articles living at the type root (knowledge/foo.md with no subfolder) are
+ * reachable without any expansion. Subfolders are collapsible rows; a folder's own leaves
+ * render only when the folder is expanded. */
 export function flattenTree(root: TreeFolder, expanded: Set<string>): TreeVisible[] {
   const out: TreeVisible[] = [];
+  // Root leaves first: the type root cannot be closed (you are inside it), so its own files
+  // are the top-level content; folder rows follow.
+  for (const leaf of root.leaves) out.push({ kind: 'leaf', leaf, depth: 0 });
   const walk = (folders: TreeFolder[], depth: number) => {
     for (const f of folders) {
       const isExp = expanded.has(f.path);
