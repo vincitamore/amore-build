@@ -31,8 +31,9 @@ const LOGO_SMALL: Art = Art {
     hues: include_str!("../../../assets/logo/logo05.hue.txt"),
 };
 
-/// Primary-bow palette, outermost band first — red outside, violet inside, the
-/// way a real bow orders them. Indices match the digits in the hue map.
+/// Spectral palette, band 0 first. The aqueduct bands vertically, so 0 is the
+/// left abutment and 6 the right; the sweep runs across the span rather than
+/// through an arc's thickness. Indices match the digits in the hue map.
 const BOW: [(u8, u8, u8); 7] = [
     (219, 78, 66),   // red
     (226, 132, 51),  // orange
@@ -181,7 +182,7 @@ fn render_into(area: Rect, buf: &mut Buffer, theme: &Theme, logo: Art) {
         .max(1) as f32;
     let secs = anim_phase_secs();
 
-    // Each glyph belongs to a band of the bow and blends from that band's
+    // Each glyph belongs to a band of the span and blends from that band's
     // resting color toward its lit color by the shine opacity, so the sweep
     // reads as light moving through the colors rather than a gray sheen.
     // Adjacent glyphs that land on the same blended color share one Span to
@@ -345,7 +346,7 @@ mod tests {
 
     // The art and its hue map are two files generated from one shape. Nothing
     // in the type system holds them together, so regenerating one without the
-    // other would silently mis-color the bow — or drop it to gray — with every
+    // other would silently mis-color the mark — or drop it to gray — with every
     // other test still green. This is the pin.
     #[test]
     fn hue_map_matches_art_cell_for_cell() {
@@ -385,7 +386,7 @@ mod tests {
     // that test into a false negative about code-page handling.
     #[test]
     fn art_contains_the_pty_probe_glyphs() {
-        for ch in ['⣷', '⣿'] {
+        for ch in ['⣿', '⣀'] {
             assert!(
                 LOGO.cells.contains(ch),
                 "logo07 lost the pty probe glyph {ch:?}"

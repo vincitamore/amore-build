@@ -1,27 +1,39 @@
-# Generates the Arcus rainbow braille logo assets:
+# Generates the Arcus aqueduct braille logo assets:
 #   assets/logo/logo07.txt      full tier art   (7 rows)
 #   assets/logo/logo07.hue.txt  full tier hues
 #   assets/logo/logo05.txt      small tier art  (5 rows)
 #   assets/logo/logo05.hue.txt  small tier hues
 #
 # Run from the repo root:  python scripts/gen_arcus.py
+#                          python scripts/gen_arcus.py --dry-run   (preview only)
+#
+# The mark is an aqueduct: a deck carried on an arcade of three arches. `arcus`
+# is Latin for arch, and the arcade reads as engineering and infrastructure --
+# chosen over the earlier rainbow bow, which a seven-band arc unavoidably
+# resembles. The bow generator is in this file's git history if it is ever wanted
+# back.
 #
 # Braille cells pack 2x4 dots; in a typical 1:2 terminal cell the dot grid is
-# ~square, so geometry drawn in dot-space renders undistorted. The logo is a
-# filled circular annulus — an arch — supersampled 3x3 per dot for smooth
-# edges. Outer band is red, inner is violet: a real primary rainbow.
+# ~square, so geometry drawn in dot-space renders undistorted. Shapes are filled
+# and supersampled 3x3 per dot, because hand-placed braille reads as scatter and
+# only mass reads as shape.
 #
-# COLOR RESOLUTION IS THE DESIGN CONSTRAINT. A terminal colors whole cells,
-# and a cell is 2x4 dots, so the *silhouette* resolves 4x finer vertically
-# than the *hue* does. Bands are therefore sized in dots for the shape and
-# sampled per cell for the color: each cell takes the band at the mean radius
-# of its lit dots. At the flanks, where bands stack horizontally across 2-dot
-# cells, all seven separate; over the apex, where they stack vertically across
-# 4-dot cells, adjacent bands merge. That asymmetry is inherent to the medium,
-# not a defect to tune away.
+# THE CANVAS IS DERIVED, NOT INHERITED. The dot grid's half-width is exactly
+# `cols`, so any form wider than that is silently clipped by the rasterizer --
+# which is how the previous mark shipped cropped for weeks. Width is also
+# bounded from above by the hero box: `left_col_width = cols + 5` and the menu
+# column gets `inner_width - left_col_width`, which at the narrowest hero-box
+# terminal (90 cols -> inner_width 82) means cols <= 26 keeps the menu's
+# 51-column comfort floor intact. Hence 26.
 #
-# Every line is padded to uniform width with U+2800 blank braille because the
-# welcome renderer centers each line independently (ratatui Line::alignment).
+# ROW COUNT IS LOAD-BEARING. Assets are named logo<rows>.txt and the hero box
+# takes `inner_height = logo_rows.max(right_col_height(..))`; the right column
+# is as short as 7 rows when no announcement is showing, so a taller logo would
+# grow the box and push narrow terminals into the stacked layout sooner. Keep 7.
+#
+# Bands run VERTICALLY (band index from `px` alone), red at the left abutment
+# through violet at the right. Deliberately not banded across an arc's
+# thickness: that is rainbow optics and carries a reading the mark should not.
 
 import math
 import sys
@@ -34,29 +46,70 @@ BITS = {  # (dx, dy) within a cell -> braille bit
 BLANK = "⠀"
 N_BANDS = 7  # red orange yellow green blue indigo violet
 
+# Geometry as fractions of the dot grid, so the two tiers are one drawing at two
+# sizes rather than two drawings.
+MARGIN = 2.0        # blank dots kept at each side wall
+DECK_TOP = 0.107    # deck (the roadway) as a fraction of H
+DECK_BOT = 0.232
+ARCADE_TOP = 0.286  # where the arcade below the deck begins
+SPRING = 0.643      # springing line of the arch openings
+# The three openings, the two piers between them and the two end abutments are
+# solved from the usable span rather than pinned to fractions of W, so masonry
+# stays proportional at every canvas size. Fixed fractions left the small tier's
+# abutments barely a dot wide, which reads as a line rather than a pier.
+#   usable = 2*abutment + 2*pier + 3*(2*radius),  abutment = pier = 0.9*radius
+#         => usable = 9.6*radius
+SOLID_TO_RADIUS = 0.9
 
-def arc(cols, rows, cy, r_out, thickness, n_bands=N_BANDS):
-    """Rasterize an arch onto a (cols*2) x (rows*4) dot grid.
 
-    `cy` is the circle center's row in dot-space, normally at or below the
-    grid's bottom edge so the arc's feet run off-frame the way a real bow
-    meets the horizon. Returns (art_lines, hue_lines, grid).
+def aqueduct(cols, rows, n_bands=N_BANDS):
+    """Rasterize the aqueduct onto a (cols*2) x (rows*4) dot grid.
+
+    Returns (art_lines, hue_lines, grid).
     """
     W, H = cols * 2, rows * 4
     cx = W / 2.0
-    r_in = r_out - thickness
+    floor = float(H - 1)
+    deck_t, deck_b = H * DECK_TOP, H * DECK_BOT
+    arcade_t = H * ARCADE_TOP
+    # The shadow line between deck and arcade is proportional, so at the small
+    # tier it works out thinner than one dot -- and a gap under a dot cannot
+    # render, it only smears the deck into the arcade. Close it below ~1.2 dots
+    # instead: the small tier then reads as a solid deck over the arches, which
+    # is the same silhouette minus a detail it has no resolution for.
+    if arcade_t - deck_b < 1.2:
+        arcade_t = deck_b
+    spring = H * SPRING
+    usable = W - 2.0 * MARGIN
+    rad = usable / (4.0 * SOLID_TO_RADIUS + 6.0)
+    spacing = 2.0 * rad + SOLID_TO_RADIUS * rad
+    bays = (cx - spacing, cx, cx + spacing)
 
-    def radius(px, py):
-        return math.hypot(px - cx, py - cy)
-
-    def inside(px, py):
-        return r_in <= radius(px, py) <= r_out
+    def solid(px, py):
+        # Side walls: the bounds must SUM TO W or the mark is not mirror
+        # symmetric -- an off-by-one here shaves one end abutment.
+        if not (MARGIN <= px <= W - MARGIN):
+            return False
+        on_deck = deck_t <= py <= deck_b
+        in_arcade = arcade_t <= py <= floor
+        if not (on_deck or in_arcade):
+            return False
+        if py <= deck_b + 0.5:
+            return True
+        # subtract the arched openings: a rectangle below the springing line
+        # capped by a semicircle above it
+        for ox in bays:
+            if abs(px - ox) <= rad and py >= spring:
+                return False
+            if math.hypot(px - ox, py - spring) <= rad and py < spring:
+                return False
+        return True
 
     def dot_on(x, y):
         hits = 0
         for sx in (-0.3, 0.0, 0.3):
             for sy in (-0.3, 0.0, 0.3):
-                if inside(x + 0.5 + sx, y + 0.5 + sy):
+                if solid(x + 0.5 + sx, y + 0.5 + sy):
                     hits += 1
         return hits >= 5
 
@@ -67,62 +120,97 @@ def arc(cols, rows, cy, r_out, thickness, n_bands=N_BANDS):
         chars, hues = [], []
         for col in range(cols):
             code = 0x2800
-            radii = []
+            xs = []
             for (dx, dy), bit in BITS.items():
                 x, y = col * 2 + dx, row * 4 + dy
                 if grid[y][x]:
                     code |= bit
-                    radii.append(radius(x + 0.5, y + 0.5))
+                    xs.append(x + 0.5)
             chars.append(chr(code))
-            if radii:
-                # Band 0 is the OUTERMOST ring (red), matching a primary bow.
-                mean_r = sum(radii) / len(radii)
-                band = int((r_out - mean_r) / thickness * n_bands)
+            if xs:
+                # Band 0 is the LEFT abutment (red) sweeping to violet at the
+                # right: vertical stripes, taken from the mean x of the lit dots.
+                band = int(sum(xs) / len(xs) / W * n_bands)
                 hues.append(str(max(0, min(n_bands - 1, band))))
             else:
                 hues.append(".")
         art_lines.append("".join(chars))
         hue_lines.append("".join(hues))
 
+    # Every line is padded to uniform width with U+2800 blank braille because the
+    # welcome renderer centers each line independently (ratatui Line::alignment).
     width = max(len(l) for l in art_lines)
     art_lines = [l.ljust(width, BLANK) for l in art_lines]
     hue_lines = [l.ljust(width, ".") for l in hue_lines]
     return art_lines, hue_lines, grid
 
 
-# Full tier: 21x7 cells = 42x28 dots. The center sits below the grid so the
-# bow's feet leave the frame at the bottom corners rather than closing into a
-# lollipop.
-#
-# thickness/r_out = 0.34 was chosen against the dot grid, not the glyphs. At
-# 0.48 the band is so deep the legs merge and the whole form reads as a dome
-# with a notch; thinning it opens the span and the arch appears. Thinner still
-# and the bands stop separating, since thickness is the entire color budget.
-FULL = dict(cols=21, rows=7, cy=30.0, r_out=29.0, thickness=10.0)
-# Small tier: 15x5 cells = 30x20 dots — the same construction at ~0.71 scale,
-# so the two tiers are one shape at two sizes rather than two drawings.
-SMALL = dict(cols=15, rows=5, cy=21.4, r_out=20.7, thickness=7.1)
+# Full tier: 26x7 cells = 52x28 dots. 26 is the widest the hero box tolerates
+# before the menu column drops under its comfort floor (see header).
+FULL = dict(cols=26, rows=7)
+# Small tier: 18x5 cells = 36x20 dots -- the same construction at ~0.71 scale,
+# used by the stacked layout at terminal heights 22..25.
+SMALL = dict(cols=18, rows=5)
 
 ASSETS = "crates/codegen/xai-grok-pager/assets/logo"
+
+# Glyphs the pty probe test asserts on, to prove multi-byte UTF-8 survived the
+# writer thread. Any braille glyph serves that purpose; these two are structural
+# in this mark (the solid mass, and the deck's top edge).
+PROBE = ("⣿", "⣀")  # U+28FF full cell, U+28C0 bottom-row pair
 
 
 def main():
     sys.stdout.reconfigure(encoding="utf-8")
+    dry = "--dry-run" in sys.argv
+    failures = []
     for name, params in (("logo07", FULL), ("logo05", SMALL)):
-        art, hue, grid = arc(**params)
-        for suffix, lines in ((".txt", art), (".hue.txt", hue)):
-            path = f"{ASSETS}/{name}{suffix}"
-            with open(path, "w", encoding="utf-8", newline="\n") as f:
-                f.write("\n".join(lines) + "\n")
+        art, hue, grid = aqueduct(**params)
+        W = params["cols"] * 2
+        H = params["rows"] * 4
+
         print(f"--- {name}: {params['cols']}x{params['rows']} cells ---")
         for a, h in zip(art, hue):
             print(f"{a}  {h}")
-        for row in grid:
-            print("".join("#" if c else "." for c in row))
+
+        # Invariants, checked every run rather than trusted.
+        cellwise = all((a != BLANK) == (h != ".")
+                       for al, hl in zip(art, hue) for a, h in zip(al, hl))
+        asym = sum(1 for y in range(H) for x in range(W)
+                   if grid[y][x] != grid[y][W - 1 - x])
+        walls = sum(1 for y in range(H) if grid[y][0] or grid[y][W - 1])
         chars = set("".join(art))
-        print("probe chars:", "OK" if {"⣷", "⣿"} <= chars else "MISSING",
-              "| distinct glyphs:", len(chars))
+        probe_ok = set(PROBE) <= chars
+        bands = "".join(sorted(set("".join(hue)) - {"."}))
+        print(f"cellwise art<->hue: {'OK' if cellwise else 'MISMATCH'} | "
+              f"mirror-asymmetric dots: {asym} | side-wall dots: {walls} | "
+              f"probe {'OK' if probe_ok else 'MISSING'} | bands {bands} | "
+              f"distinct glyphs {len(chars)}")
+        if not cellwise:
+            failures.append(f"{name}: hue map does not match art cell for cell")
+        if asym:
+            failures.append(f"{name}: {asym} mirror-asymmetric dots")
+        if walls:
+            failures.append(f"{name}: {walls} dots touch a side wall (clipped)")
+        if name == "logo07" and not probe_ok:
+            failures.append(f"{name}: missing a pty probe glyph {PROBE}")
+        if bands != "0123456":
+            failures.append(f"{name}: bands present are {bands!r}, expected all 7")
+
+        if not dry:
+            for suffix, lines in ((".txt", art), (".hue.txt", hue)):
+                path = f"{ASSETS}/{name}{suffix}"
+                with open(path, "w", encoding="utf-8", newline="\n") as f:
+                    f.write("\n".join(lines) + "\n")
+        print()
+
+    if failures:
+        for f in failures:
+            print(f"FAIL: {f}", file=sys.stderr)
+        return 1
+    print("dry run - no files written" if dry else f"wrote 4 files under {ASSETS}")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
