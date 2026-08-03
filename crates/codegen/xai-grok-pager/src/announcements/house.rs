@@ -3,11 +3,12 @@
 //! The welcome screen's announcement slot is remote-served from `/v1/settings`
 //! (`RemoteAnnouncement`) — a promotional surface ("Grok 4.5 is here!",
 //! "Workflows are now here!"). When the pager launches *inside a house*, this
-//! module synthesizes the splash from the house tree instead: active task
-//! count + top title, due reminders, and — when nothing is due — the
-//! `## Where the house is` opening of `context/current-state.md`. The house
-//! is the announcement source of truth when present: remote Grok promos never
-//! show there ([`apply_house_override`]).
+//! module synthesizes the splash from the house tree instead: a first-class
+//! panel enumerating every active task, due reminder (with compact due-times),
+//! and open inbox item, falling back to the `## Where the house is` opening of
+//! `context/current-state.md` when nothing is open. The house is the
+//! announcement source of truth when present: remote Grok promos never show
+//! there ([`apply_house_override`]).
 //!
 //! The parsing contract deliberately mirrors the house session-init hook
 //! (`house_session_init.py`, live in the house tree): org-marker + `tasks/`
@@ -31,7 +32,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use chrono::{DateTime, FixedOffset, Local, NaiveDate, NaiveDateTime, Utc};
+use chrono::{DateTime, FixedOffset, Local, NaiveDate, NaiveDateTime, Timelike, Utc};
 use xai_grok_announcements::RemoteAnnouncement;
 
 /// Fork-owned severity for house-state splashes. The hero box maps it to
@@ -60,10 +61,11 @@ pub fn is_house_root(root: &Path) -> bool {
 }
 
 /// Active-task summary: the count of `status: active` tasks directly under
-/// `tasks/*.md` (README aside), plus the first such task's title. The scan
-/// is lexicographic by file name — the hook's determinism convention. Returns
-/// `None` when the tasks directory is absent or unreadable.
-pub fn active_task_summary(root: &Path) -> Option<(usize, String)> {
+/// `tasks/*.md` (README aside), plus **every** active task's title, in
+/// lexicographic file-name order (the hook's determinism convention). Returns
+/// `None` when the tasks directory is absent or unreadable; `Some((0, []))`
+/// for an empty house.
+pub fn active_task_summary(root: &Path) -> Option<(usize, Vec<String>)> {
     let tasks_dir = root.join("tasks");
     if !tasks_dir.is_dir() {
         return None;
@@ -104,7 +106,7 @@ pub fn active_task_summary(root: &Path) -> Option<(usize, String)> {
         active.push(heading_title(&body_after_frontmatter(&text), &stem));
     }
     let count = active.len();
-    active.into_iter().next().map(|title| (count, title))
+    Some((count, active))
 }
 
 /// Due reminders under `reminders/**/*.md`, mirroring the hook's
@@ -168,11 +170,77 @@ pub fn due_reminder_summary(root: &Path, now: DateTime<Utc>) -> Vec<(String, Str
     due
 }
 
+/// Open inbox items: every capture (the triage queue carries no lifecycle)
+/// plus decisions/investigations/ideas with `status: open`, skipping the
+/// `resolved/` subtree and READMEs — the same conventions as reminders.
+/// Returns `(type_label, title)` pairs in path order.
+pub fn open_inbox_summary(root: &Path) -> Vec<(String, String)> {
+    const TYPES: &[(&str, &str)] = &[
+        ("captures", "capture"),
+        ("decisions", "decision"),
+        ("investigations", "investigation"),
+        ("ideas", "idea"),
+    ];
+    let inbox_dir = root.join("inbox");
+    if !inbox_dir.is_dir() {
+        return Vec::new();
+    }
+    let mut items: Vec<(String, String)> = Vec::new();
+    for (dir_name, label) in TYPES {
+        let type_dir = inbox_dir.join(dir_name);
+        if !type_dir.is_dir() {
+            continue;
+        }
+        let mut paths: Vec<std::path::PathBuf> = Vec::new();
+        collect_markdown(&type_dir, &mut paths);
+        paths.sort();
+        for path in paths {
+            if path
+                .components()
+                .any(|c| c.as_os_str().to_string_lossy().eq_ignore_ascii_case("resolved"))
+            {
+                continue;
+            }
+            if path
+                .file_name()
+                .map(|n| n.to_string_lossy().eq_ignore_ascii_case("readme.md"))
+                == Some(true)
+            {
+                continue;
+            }
+            let Ok(text) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            let Some(meta) = parse_frontmatter(&text) else {
+                continue;
+            };
+            // Captures carry no lifecycle: every file is open by convention.
+            if *dir_name != "captures" {
+                let status = meta
+                    .get("status")
+                    .map(|s| s.trim().to_ascii_lowercase())
+                    .unwrap_or_default();
+                if status != "open" {
+                    continue;
+                }
+            }
+            let stem = path
+                .file_stem()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let title = heading_title(&body_after_frontmatter(&text), &stem);
+            items.push((label.to_string(), title));
+        }
+    }
+    items
+}
+
 /// Synthesize the house splash announcement for `root` at `now`, or `None`
 /// when `root` is not a house. When it is a house the announcement is always
-/// `Some`: active-task/reminder state when either exists, else the
-/// `## Where the house is` opening of `context/current-state.md`, else a
-/// minimal standing line — the splash always reflects the house.
+/// `Some`: an enumerated panel of active tasks, due reminders, and open
+/// inbox items when any exist, else the `## Where the house is` opening of
+/// `context/current-state.md`, else a minimal standing line — the splash
+/// always reflects the house.
 pub fn house_announcement(root: &Path, now: DateTime<Utc>) -> Option<RemoteAnnouncement> {
     if !is_house_root(root) {
         return None;
@@ -236,40 +304,94 @@ fn house_name(root: &Path) -> String {
     DEFAULT_HOUSE_NAME.to_string()
 }
 
-/// Compose the announcement message from house state.
+/// Compose the announcement message from house state — a first-class panel:
+///
+/// ```text
+/// 6 active tasks
+///   • De-grok the Arcus Build fork and build upstream-sync tooling
+///   • Port house-op skills from opus
+///
+/// 1 reminder due
+///   • Renew certs (due 2026-07-01 09:00)
+///
+/// 3 inbox items
+///   • idea · house_lint should check wikilinks in context/
+///   • investigation · ~10 GB unaccounted after a cargo clean
+/// ```
+///
+/// Hard line breaks are load-bearing: the welcome renderer word-wraps each
+/// line independently (the fork's `wrap_lines` honors `\n`), and the
+/// collapsed hero shows the first two lines with a `…` expand affordance.
 fn compose_message(root: &Path, now: DateTime<Utc>) -> String {
     let active = active_task_summary(root);
     let due = due_reminder_summary(root, now);
+    let inbox = open_inbox_summary(root);
 
-    let mut counts: Vec<String> = Vec::new();
-    if let Some((n, _)) = &active {
-        counts.push(format!("{n} active task{}", if *n == 1 { "" } else { "s" }));
+    let mut sections: Vec<String> = Vec::new();
+    if let Some((count, titles)) = &active
+        && *count > 0
+    {
+        let mut sec = format!("{count} active task{}", if *count == 1 { "" } else { "s" });
+        for title in titles {
+            sec.push('\n');
+            sec.push_str(&format!("  \u{2022} {title}"));
+        }
+        sections.push(sec);
     }
     if !due.is_empty() {
-        counts.push(format!(
+        let mut sec = format!(
             "{} reminder{} due",
             due.len(),
             if due.len() == 1 { "" } else { "s" }
-        ));
-    }
-    if !counts.is_empty() {
-        let mut lines = vec![counts.join(" · ")];
-        // The top line names the focus: the highest-priority active task, or
-        // the first due reminder when no task is active.
-        if let Some((_, title)) = &active {
-            lines.push(title.clone());
-        } else if let Some((title, _)) = due.first() {
-            lines.push(title.clone());
+        );
+        for (title, when) in &due {
+            sec.push('\n');
+            sec.push_str(&format!("  \u{2022} {title} (due {})", display_when(when)));
         }
-        return lines.join("\n");
+        sections.push(sec);
+    }
+    if !inbox.is_empty() {
+        let mut sec = format!(
+            "{} inbox item{}",
+            inbox.len(),
+            if inbox.len() == 1 { "" } else { "s" }
+        );
+        for (ty, title) in &inbox {
+            sec.push('\n');
+            sec.push_str(&format!("  \u{2022} {ty} \u{00b7} {title}"));
+        }
+        sections.push(sec);
+    }
+    if !sections.is_empty() {
+        return sections.join("\n\n");
     }
 
-    // Nothing active or due — always reflect the house: the standing-reality
-    // opener of `context/current-state.md`.
+    // Nothing active, due, or open — always reflect the house: the
+    // standing-reality opener of `context/current-state.md`.
     if let Some(para) = current_state_opening(root) {
         return para;
     }
-    format!("No active tasks · no reminders due — {DEFAULT_HOUSE_NAME} stands")
+    format!("No active tasks · no reminders due · no open inbox — {DEFAULT_HOUSE_NAME} stands")
+}
+
+/// A compact, local, human-readable form of a reminder's due instant:
+/// `2026-07-01 09:00`, date-only when the value carried no time, raw text
+/// when it won't parse.
+fn display_when(raw: &str) -> String {
+    match parse_when(raw) {
+        Some(When::Naive(dt)) => {
+            if dt.hour() == 0 && dt.minute() == 0 && dt.second() == 0 {
+                dt.format("%Y-%m-%d").to_string()
+            } else {
+                dt.format("%Y-%m-%d %H:%M").to_string()
+            }
+        }
+        Some(When::Aware(dt)) => {
+            let dt = dt.with_timezone(&Local);
+            dt.format("%Y-%m-%d %H:%M").to_string()
+        }
+        None => raw.to_string(),
+    }
 }
 
 /// The first paragraph after the `## Where the house is` heading in
@@ -583,9 +705,9 @@ mod tests {
         make_house(&t);
         make_task(&t, "active-one", "active", "First active");
         make_task(&t, "backlog-two", "backlog", "Not today");
-        let (count, title) = active_task_summary(t.root()).expect("summary");
+        let (count, titles) = active_task_summary(t.root()).expect("summary");
         assert_eq!(count, 1);
-        assert_eq!(title, "First active");
+        assert_eq!(titles, vec!["First active"]);
     }
 
     #[test]
@@ -595,10 +717,10 @@ mod tests {
         make_task(&t, "beta", "active", "Beta task");
         make_task(&t, "alpha", "active", "Alpha task");
         make_task(&t, "gamma", "complete", "Done");
-        let (count, title) = active_task_summary(t.root()).expect("summary");
+        let (count, titles) = active_task_summary(t.root()).expect("summary");
         assert_eq!(count, 2);
-        // Lexicographic scan → "alpha" first.
-        assert_eq!(title, "Alpha task");
+        // Lexicographic scan → alpha, then beta.
+        assert_eq!(titles, vec!["Alpha task", "Beta task"]);
     }
 
     #[test]
@@ -606,6 +728,56 @@ mod tests {
         let t = TempTree::new();
         t.write("AGENTS.md", "# Test House\n");
         assert!(active_task_summary(t.root()).is_none());
+    }
+
+    /// Open inbox items: captures (no lifecycle) plus status-open
+    /// decisions/investigations/ideas; the `resolved/` subtree and READMEs
+    /// are skipped by convention.
+    #[test]
+    fn open_inbox_summary_collects_open_items_and_skips_resolved() {
+        let t = TempTree::new();
+        make_house(&t);
+        t.write(
+            "inbox/captures/note.md",
+            "---\ntype: inbox\ncreated: 2026-08-01\n---\n\n# A quick capture\n",
+        );
+        t.write(
+            "inbox/ideas/idea.md",
+            "---\ntype: inbox\nstatus: open\n---\n\n# Idea one\n",
+        );
+        t.write(
+            "inbox/investigations/open-inv.md",
+            "---\ntype: inbox\nstatus: open\n---\n\n# Investigation open\n",
+        );
+        t.write(
+            "inbox/investigations/resolved/done.md",
+            "---\ntype: inbox\nstatus: resolved\nresolved: 2026-08-01\n---\n\n# Resolved one\n",
+        );
+        t.write(
+            "inbox/decisions/README.md",
+            "---\ntype: inbox\nstatus: open\n---\n\n# Index\n",
+        );
+        t.write(
+            "inbox/decisions/dropped.md",
+            "---\ntype: inbox\nstatus: dropped\n---\n\n# Dropped one\n",
+        );
+
+        let items = open_inbox_summary(t.root());
+        assert_eq!(
+            items,
+            vec![
+                ("capture".to_string(), "A quick capture".to_string()),
+                ("investigation".to_string(), "Investigation open".to_string()),
+                ("idea".to_string(), "Idea one".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn open_inbox_summary_empty_without_inbox_dir() {
+        let t = TempTree::new();
+        make_house(&t);
+        assert!(open_inbox_summary(t.root()).is_empty());
     }
 
     #[test]
@@ -650,6 +822,26 @@ mod tests {
         assert_eq!(titles, vec!["Aware", "Date only"]);
     }
 
+    /// The panel's due-times are compact and local: a naive datetime keeps
+    /// its wall-clock, a midnight/date-only value drops the time, an aware
+    /// instant converts to local, and an unparseable value stays raw.
+    #[test]
+    fn display_when_is_compact_and_local() {
+        assert_eq!(display_when("2026-07-01T09:00"), "2026-07-01 09:00");
+        assert_eq!(display_when("2026-07-01"), "2026-07-01");
+        assert_eq!(display_when("2026-07-01T00:00:00"), "2026-07-01");
+        // Aware instants convert to the host's local time — assert against the
+        // same conversion so the expectation cannot drift with the timezone.
+        let aware = "2099-01-01T09:00:00+02:00";
+        let expected = DateTime::parse_from_rfc3339(aware)
+            .unwrap()
+            .with_timezone(&Local)
+            .format("%Y-%m-%d %H:%M")
+            .to_string();
+        assert_eq!(display_when(aware), expected);
+        assert_eq!(display_when("not a date"), "not a date");
+    }
+
     /// 2026-08-03 local — the same test seam the hook's `ARCUS_SESSION_INIT_NOW`
     /// pins (any fixed instant works; fixtures are chosen far from it).
     fn now() -> DateTime<Utc> {
@@ -675,7 +867,9 @@ mod tests {
         assert_eq!(ann.expires_at, None);
         assert_eq!(
             ann.message.as_deref(),
-            Some("2 active tasks · 1 reminder due\nAlpha task")
+            Some(
+                "2 active tasks\n  • Alpha task\n  • Beta task\n\n1 reminder due\n  • Renew certs (due 2026-07-01 09:00)"
+            )
         );
     }
 
@@ -686,7 +880,12 @@ mod tests {
         make_reminder(&t, "due.md", "pending", "remind-at", "2026-07-01T09:00", "Renew certs");
         make_task(&t, "alpha", "active", "Alpha task");
         let ann = house_announcement(t.root(), now()).expect("house announcement");
-        assert_eq!(ann.message.as_deref(), Some("1 active task · 1 reminder due\nAlpha task"));
+        assert_eq!(
+            ann.message.as_deref(),
+            Some(
+                "1 active task\n  • Alpha task\n\n1 reminder due\n  • Renew certs (due 2026-07-01 09:00)"
+            )
+        );
     }
 
     #[test]
@@ -695,7 +894,32 @@ mod tests {
         make_house(&t);
         make_reminder(&t, "due.md", "pending", "remind-at", "2026-07-01T09:00", "Renew certs");
         let ann = house_announcement(t.root(), now()).expect("house announcement");
-        assert_eq!(ann.message.as_deref(), Some("1 reminder due\nRenew certs"));
+        assert_eq!(
+            ann.message.as_deref(),
+            Some("1 reminder due\n  • Renew certs (due 2026-07-01 09:00)")
+        );
+    }
+
+    #[test]
+    fn house_announcement_includes_open_inbox_section() {
+        let t = TempTree::new();
+        make_house(&t);
+        make_task(&t, "alpha", "active", "Alpha task");
+        t.write(
+            "inbox/ideas/idea.md",
+            "---\ntype: inbox\nstatus: open\n---\n\n# Idea one\n",
+        );
+        t.write(
+            "inbox/captures/note.md",
+            "---\ntype: inbox\ncreated: 2026-08-01\n---\n\n# A quick capture\n",
+        );
+        let ann = house_announcement(t.root(), now()).expect("house announcement");
+        assert_eq!(
+            ann.message.as_deref(),
+            Some(
+                "1 active task\n  • Alpha task\n\n2 inbox items\n  • capture · A quick capture\n  • idea · Idea one"
+            )
+        );
     }
 
     #[test]
@@ -717,7 +941,7 @@ mod tests {
         let ann = house_announcement(t.root(), now()).expect("house announcement");
         assert_eq!(
             ann.message.as_deref(),
-            Some("No active tasks · no reminders due — The house stands")
+            Some("No active tasks · no reminders due · no open inbox — The house stands")
         );
     }
 

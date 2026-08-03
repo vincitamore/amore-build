@@ -592,6 +592,11 @@ fn render_hero_changelog(
 
 /// Word-wrap `text` into lines no wider than `width` columns. A single word
 /// longer than `width` becomes its own (over-wide) line; the renderer clips it.
+///
+/// Explicit newlines are hard breaks (fork-owned behavior, used by the
+/// house-context splash's sectioned panel): each paragraph word-wraps
+/// independently, an empty paragraph renders as a blank line, and trailing
+/// empty paragraphs from a trailing newline are dropped.
 fn wrap_lines(text: &str, width: u16) -> Vec<String> {
     use unicode_width::UnicodeWidthStr;
 
@@ -600,20 +605,23 @@ fn wrap_lines(text: &str, width: u16) -> Vec<String> {
     if w == 0 {
         return lines;
     }
-    let mut current = String::new();
-    for word in text.split_whitespace() {
-        if current.is_empty() {
-            current = word.to_string();
-        } else if current.width() + 1 + word.width() <= w {
-            current.push(' ');
-            current.push_str(word);
-        } else {
-            lines.push(std::mem::take(&mut current));
-            current = word.to_string();
+    for paragraph in text.split('\n') {
+        let mut current = String::new();
+        for word in paragraph.split_whitespace() {
+            if current.is_empty() {
+                current = word.to_string();
+            } else if current.width() + 1 + word.width() <= w {
+                current.push(' ');
+                current.push_str(word);
+            } else {
+                lines.push(std::mem::take(&mut current));
+                current = word.to_string();
+            }
         }
-    }
-    if !current.is_empty() {
         lines.push(current);
+    }
+    while lines.last().is_some_and(|l| l.is_empty()) {
+        lines.pop();
     }
     lines
 }
@@ -793,6 +801,57 @@ managed devices and accounts. Report security incidents";
             2,
         );
         assert_eq!(extract_text(&buf, 0, 0, 20), "");
+    }
+
+    /// Explicit newlines are hard breaks (the house-context splash's
+    /// sectioned panel relies on this): each paragraph wraps independently,
+    /// blank lines between sections survive, and a trailing newline adds no
+    /// stray row.
+    #[test]
+    fn wrap_lines_honors_explicit_newlines() {
+        assert_eq!(
+            wrap_lines("a\nb", 20),
+            vec!["a".to_string(), "b".to_string()]
+        );
+        assert_eq!(
+            wrap_lines("one two\nthree four five six", 10),
+            vec![
+                "one two".to_string(),
+                "three four".to_string(),
+                "five six".to_string(),
+            ],
+            "each paragraph word-wraps to the width independently"
+        );
+        assert_eq!(
+            wrap_lines("section one\n\nsection two\n", 20),
+            vec![
+                "section one".to_string(),
+                "".to_string(),
+                "section two".to_string(),
+            ],
+            "blank paragraphs survive; a trailing newline adds nothing"
+        );
+        assert!(wrap_lines("", 20).is_empty());
+    }
+
+    /// The renderer paints hard-break lines on their own rows (no reflow
+    /// into one paragraph).
+    #[test]
+    fn render_wrapped_text_paints_newline_breaks_on_separate_rows() {
+        let mut buf = Buffer::empty(Rect::new(0, 0, 20, 4));
+        render_wrapped_text(
+            &mut buf,
+            0,
+            0,
+            20,
+            "one\ntwo three",
+            Style::default(),
+            Style::default(),
+            4,
+        );
+        assert_eq!(extract_text(&buf, 0, 0, 20), "one");
+        assert_eq!(extract_text(&buf, 0, 1, 20), "two three");
+        assert_eq!(extract_text(&buf, 0, 2, 20), "");
     }
 
     #[test]
