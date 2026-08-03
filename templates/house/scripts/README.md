@@ -5,48 +5,41 @@ adopters run these against their house root (`AGENTS.md` + `tasks/`).
 
 | Script | Runtime | Purpose |
 |--------|---------|---------|
-| [`house_lint.ts`](./house_lint.ts) | **Bun** (zero deps) | Schema-validate `tasks/`, `inbox/`, `knowledge/`, `reminders/` against AGENTS.md catalogs; wikilink existence; optional lattice + orientation-rules drift |
 | [`sync_orientation_rules.py`](./sync_orientation_rules.py) | **Python 3** | Materialize `context/principle-lattice.md` (+ optional `context/praxis.md`) into harness rules; `--check` for drift |
-
-Tests: `bun test` from this directory (or `bun test templates/house/scripts` from the product repo). Fixture trees live under [`tests/fixtures/`](./tests/fixtures/).
 
 ## Requirements
 
-- **Bun** ≥ 1.1 — for `house_lint.ts` and the test suite (`bun:test`)
 - **Python 3** — for `sync_orientation_rules.py` (stdlib only: argparse, hashlib, pathlib, re)
 
-## house_lint.ts
+## House lint — `iris regula lint`
 
-Validates the four scope directories against pinned catalogs (status domains,
-folder-follows-status, required keys, date formats, lifecycle fields, wikilinks).
-Tree-level rules:
-
-- **lattice-drift** — only when `LATTICE_CANONICAL` is set (path to an external
-  canonical lattice); otherwise skipped with a note (local
-  `context/principle-lattice.md` is the authority for single-house adopters).
-- **orientation-rules-drift** — when `.arcus/` or `.grok/` exists, runs
-  `sync_orientation_rules.py --check` (adds `--grok-compat` if only `.grok/` is
-  present).
-
-### Invocation
+**The house lint is `iris regula lint`, not a script in this directory.** The
+former hand-rolled `house_lint.ts` was retired when iris's regula lint reached
+and exceeded its coverage (its rule set + the coverage matrix live in the iris
+instrument: `instruments/iris/packages/regula/src/lint.ts`). Nothing should
+cite `bun scripts/house_lint.ts`; the lint test surface lives in
+`instruments/iris/packages/regula/src/lint.test.ts`.
 
 ```bash
-# From the house root
-bun scripts/house_lint.ts
-bun scripts/house_lint.ts --json
-bun scripts/house_lint.ts --root /path/to/house
-
-# Exit codes
-#   0  clean
-#   1  findings
-#  64  foreign root (no AGENTS.md + tasks/ at the resolved path)
+# From the house root — errors fail (exit 1); warnings don't; notes skip
+iris regula lint
+iris regula lint --folder tasks     # scope to one org folder
 ```
 
-House-root guard: the tool refuses to lint a tree that lacks both `AGENTS.md`
-and a `tasks/` directory. With `--root`, the path must *itself* be the house
-root (no silent walk-up). Without `--root`, the default is the parent of
-`scripts/` (the house root when the template is cloned as-is), with walk-up
-from that candidate if needed.
+Covers: frontmatter schema, type↔folder, inbox folder admission, status↔folder
+placement, source/repeat domains, date formats, lifecycle fields
+(blocked-by/completed/paused/trigger-to-unpause/inbox-terminal/snoozed-until),
+knowledge updated+tags, wikilink presence + resolution (context/ included,
+warning severity), current-state staleness, active-task staleness, project-map
+coverage + staleness, same-stem collisions, and — for houses coupled to a
+canonical lattice — lattice + orientation-rules drift:
+
+- **lattice-drift** — when `LATTICE_CANONICAL` is set (path to an external
+  canonical lattice), the local `context/principle-lattice.md` body is
+  compared against it; error on drift, skip-with-note when unset.
+- **orientation-rules-drift** — when `.arcus/` or `.grok/` exists, runs
+  `sync_orientation_rules.py --check` (adds `--grok-compat` if only `.grok/`
+  is present) and errors on non-zero.
 
 ## sync_orientation_rules.py
 
@@ -75,14 +68,17 @@ Praxis is emitted only when `context/praxis.md` exists (15KB ceiling). If the
 source is removed, the derived `praxis.md` under the rules dir is deleted on
 the next sync.
 
+## Tests
+
+No test suite ships from this directory — the lint test surface is regula's
+(`instruments/iris/packages/regula/src/lint.test.ts`). The `sync-tree`
+fixture under `tests/fixtures/` is retained for a future
+`sync_orientation_rules.py` test (no consumer today) and never ships to a
+house (init filters `scripts/tests/`).
+
 ## Catalog authority
 
-Status domains and required keys are pinned by exact-equality tests and must
-match the public template schemas:
-
-- Task: `active`/`blocked` at `tasks/` root; `review`, `backlog`, `incubating`,
-  `paused`, `complete` in their named subfolders
-- Inbox: `open` in active folders; terminal `resolved`/`dropped`/`superseded`
-  under `*/resolved/`; captures may omit `status`
-- Reminders: `pending`/`snoozed`/`ongoing` at root; `completed`/`dismissed`
-  under `reminders/completed/`
+Status domains and required keys are encoded by `@arcus/regula`
+(`instruments/iris/packages/regula/src/schema.ts`), the single
+schema/lifecycle authority both iris clients defer to — faithful
+machine-readable encoding of AGENTS.md, pinned by regula's own tests.

@@ -522,14 +522,11 @@ pub fn select_entries(entries: &[HouseEntry], args: &InitArgs) -> Vec<HouseEntry
 fn keep_entry(rel: &str, args: &InitArgs) -> bool {
     let norm = rel.replace('\\', "/");
 
-    // The bundled lint's own test suite never ships. It exists to exercise
-    // `house_lint.ts` inside this repository; planted into a house it delivers
-    // three synthetic `AGENTS.md` files, a deliberately-invalid task and two
-    // stub principle lattices sitting beside the real one. A fresh house should
-    // contain nothing that looks like a fixture — the adopter cannot tell which
-    // files are theirs, and the fake constitutions are indistinguishable from
-    // the one they are supposed to edit.
-    if norm.starts_with("scripts/tests/") || norm == "scripts/house_lint.test.ts" {
+    // Test fixtures never ship. They exist to exercise house tooling inside
+    // this repository; planted into a house they would deliver synthetic
+    // `AGENTS.md` files and stub lattices sitting beside the real ones, with
+    // no way for the adopter to tell which files are theirs.
+    if norm.starts_with("scripts/tests/") {
         return false;
     }
 
@@ -888,23 +885,20 @@ mod unit_tests {
     use super::*;
 
     #[test]
-    fn keep_entry_never_plants_the_lints_own_fixtures() {
-        // These shipped once: an adopter's house arrived carrying three
-        // synthetic `AGENTS.md` files and two stub lattices beside the real
-        // ones, with no way to tell which were theirs.
+    fn keep_entry_never_plants_test_fixtures() {
+        // Fixtures under scripts/tests/ never ship — they exercise house tooling
+        // in-repo, and a planted copy would look indistinguishable from house
+        // content (synthetic AGENTS.md files, stub lattices).
         let args = InitArgs::default();
-        assert!(!keep_entry("scripts/tests/fixtures/clean-house/AGENTS.md", &args));
-        assert!(!keep_entry("scripts/tests/fixtures/dirty-house/tasks/wrong-status.md", &args));
+        assert!(!keep_entry("scripts/tests/fixtures/sync-tree/AGENTS.md", &args));
         assert!(!keep_entry(
             "scripts/tests/fixtures/sync-tree/context/principle-lattice.md",
             &args
         ));
-        assert!(!keep_entry("scripts/house_lint.test.ts", &args));
         // Backslash-separated paths normalize the same way.
-        assert!(!keep_entry("scripts\\tests\\fixtures\\clean-house\\AGENTS.md", &args));
+        assert!(!keep_entry("scripts\\tests\\fixtures\\sync-tree\\AGENTS.md", &args));
 
-        // The lint itself still ships — it is the adopter's to run and edit.
-        assert!(keep_entry("scripts/house_lint.ts", &args));
+        // The house tooling itself ships — it is the adopter's to run and edit.
         assert!(keep_entry("scripts/sync_orientation_rules.py", &args));
         // As do the hooks fixtures: canned envelopes for a script they own,
         // documented by the hooks README, and not mistakable for house content.

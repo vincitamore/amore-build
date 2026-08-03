@@ -37,7 +37,8 @@ toolchain ceremony on any host. Windows: `py scripts/...`; unix: `python3`.
 
 The house tree (`arcus/`) is NOT scanned: its `.grok`/`--grok-compat` mentions
 are the documented legacy-fallback lane and are linted by the house's own
-`scripts/house_lint.ts` / `sync_orientation_rules.py --check`.
+`iris regula lint` (orientation-rules-drift) /
+`sync_orientation_rules.py --check`.
 """
 
 import argparse
@@ -122,7 +123,7 @@ def _compat_lane(line: str) -> bool:
     """True when a line is about the *compat lane* (upstream-grok-format
     trees): a `.grok/` path, a `grok-` prefixed flag/token, or the literal
     `grok-compat`. Those are the documented legacy-fallback pattern in house
-    scripts (sync_orientation_rules.py --grok-compat, house_lint.ts), not
+    scripts (sync_orientation_rules.py --grok-compat), not
     product-name drift. Decided per line, not by token, because tokens like
     `grok in` are prose-fragile.
     """
