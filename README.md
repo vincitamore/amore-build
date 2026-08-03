@@ -58,7 +58,7 @@ release build the artifact is typically
 
 ### Release assets
 
-Prebuilt assets ship with **`v0.1.0`** (and later tags) on the project's
+Prebuilt assets ship with **`v0.2.117`** (and later tags) on the project's
 [GitHub Releases page](https://github.com/vincitamore/arcus-build/releases).
 Install the binary for your OS/arch and put it on
 `PATH`.
