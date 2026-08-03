@@ -144,7 +144,7 @@ describe('composeResultRow', () => {
     const { tail } = composeResultRow(LONG_LABEL, LONG_PATH, '◆', false, 80); // pathCol = 32
     const shown = tail.trimStart();
     expect(shown.startsWith('…')).toBe(true);
-    expect(shown.endsWith('substrate.md')).toBe(true); // the tail survives, not the shared prefix
+    expect(shown.endsWith('integration.md')).toBe(true); // the file name survives, not the shared prefix
     expect(shown.length).toBe(32);
   });
 
