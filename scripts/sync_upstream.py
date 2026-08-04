@@ -67,6 +67,7 @@ RESUMED_BIN_FILE = "crates/codegen/xai-grok-pager/src/app/cli.rs"
 RESUME_HINT_FILE = "crates/codegen/xai-grok-pager/src/app/mod.rs"
 SCREEN_RELAUNCH_FILE = "crates/codegen/xai-grok-pager/src/app/screen_mode_relaunch.rs"
 NOTIF_TITLE_FILE = "crates/codegen/xai-grok-pager/src/notifications/title.rs"
+COMPLETIONS_FILE = "crates/codegen/xai-grok-pager/src/completions_cmd.rs"
 
 
 def run(cmd: list[str], **kw) -> subprocess.CompletedProcess:
@@ -321,6 +322,9 @@ def cmd_verify(dry_run: bool) -> int:
     _check_file_contains(
         NOTIF_TITLE_FILE, "resolved_bin_name()",
         "notification title product name uses resolved_bin_name()", problems)
+    _check_file_contains(
+        COMPLETIONS_FILE, "resolved_bin_name()",
+        "shell completions name after the invoked binary", problems)
 
     # 7. build + smoke (this host). Build is the long pole; allow skipping.
     #    The full Linux pager suite remains CI-owned (UPSTREAM.md §5).
