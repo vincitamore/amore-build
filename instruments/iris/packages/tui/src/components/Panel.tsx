@@ -43,10 +43,15 @@ export function Panel({ title, headerRight, children, flexGrow, flexShrink, minH
       marginRight={marginRight}
     >
       {title ? (
-        <box flexDirection="row">
-          <text fg={t.primary}>{title}</text>
+        // flexShrink 0: the header is chrome and must never squash. Without it,
+        // Yoga shrinks this row to zero height when the panel is squeezed below
+        // content size and the body paints OVER the title — interleaved text
+        // with the title's letters showing through the body's spaces. Pinning
+        // the chrome degrades overflow to bottom-edge clipping instead.
+        <box flexDirection="row" flexShrink={0} height={1} overflow="hidden">
+          <text fg={t.primary} wrapMode="none">{title}</text>
           <box flexGrow={1} />
-          {headerRight ? <text fg={t.muted}>{headerRight}</text> : null}
+          {headerRight ? <text fg={t.muted} wrapMode="none">{headerRight}</text> : null}
         </box>
       ) : null}
       {children}
