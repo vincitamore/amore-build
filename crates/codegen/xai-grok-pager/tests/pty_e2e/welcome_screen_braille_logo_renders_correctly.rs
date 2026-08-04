@@ -35,12 +35,12 @@ async fn welcome_screen_braille_logo_renders_correctly() {
     // byte characters each (e.g. Cyrillic). Check for a few that only
     // appear in the logo — not in any ASCII menu label.
     //
-    // From logo07.txt (the amore aqueduct) — the deck and piers are solid ⣿,
-    // and the deck's top edge produces ⣀. Both are pinned by a unit test in
-    // views::welcome::logo so regenerating the art cannot silently drop them.
-    // Any braille glyph serves this test's purpose, so if the mark changes
-    // again, re-pin both sites to glyphs the new art actually contains rather
-    // than keeping a pair that no longer appears.
+    // From logo07.txt (the crowned heart) — the crown band and heart body
+    // are solid ⣿, and the lobe shoulders produce ⣼. Both are pinned by a
+    // unit test in views::welcome::logo so regenerating the art cannot
+    // silently drop them. Any braille glyph serves this test's purpose, so
+    // if the mark changes again, re-pin both sites to glyphs the new art
+    // actually contains rather than keeping a pair that no longer appears.
     assert!(
         screen.contains('⣿'),
         "Braille character ⣿ (U+28FF) not found in screen — \
@@ -48,8 +48,8 @@ async fn welcome_screen_braille_logo_renders_correctly() {
          Screen contents:\n{screen}"
     );
     assert!(
-        screen.contains('⣀'),
-        "Braille character ⣀ (U+28C0) not found in screen — \
+        screen.contains('⣼'),
+        "Braille character ⣼ (U+28FC) not found in screen — \
          logo may be garbled.\n\
          Screen contents:\n{screen}"
     );

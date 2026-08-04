@@ -31,18 +31,19 @@ const LOGO_SMALL: Art = Art {
     hues: include_str!("../../../assets/logo/logo05.hue.txt"),
 };
 
-/// Quiet-stone palette, band 0 first. The aqueduct is masonry: bands run in
-/// courses (0 the light deck course, 6 the dark footing), and the generator
-/// jitters each cell at most one shade off its course so every 8-dot block
-/// reads as its own stone. Indices match the digits in the hue map.
-const STONE: [(u8, u8, u8); 7] = [
-    (198, 186, 164),
-    (188, 176, 154),
-    (177, 165, 144),
-    (166, 154, 134),
-    (154, 142, 124),
-    (142, 131, 114),
-    (128, 118, 104),
+/// Gold-and-rose palette, band 0 first. The crowned heart draws two material
+/// zones: bands 0-1 are the gold crown (bright rim, deeper base), bands 2-6
+/// the rose heart, light at the lobes down to a deep apex — the site accent's
+/// (#e95678) family. Indices match the digits in the hue map; the generator
+/// assigns bands by zone and row (no jitter).
+const GOLD_ROSE: [(u8, u8, u8); 7] = [
+    (224, 184, 116),
+    (200, 156, 88),
+    (238, 150, 164),
+    (222, 122, 142),
+    (204, 96, 120),
+    (184, 72, 100),
+    (156, 50, 80),
 ];
 
 /// Resting scale for a band color — the logo sits at this dimmed level between
@@ -64,7 +65,7 @@ fn adapt(theme: &Theme, c: Color) -> Color {
 
 /// Resting and full-shine colors for hue digit `h`.
 fn band_colors(theme: &Theme, h: u8) -> (Color, Color) {
-    let (r, g, b) = STONE[(h as usize).min(STONE.len() - 1)];
+    let (r, g, b) = GOLD_ROSE[(h as usize).min(GOLD_ROSE.len() - 1)];
     let dim = |v: u8| (v as f32 * REST) as u8;
     let lift = |v: u8| (v as f32 + (255.0 - v as f32) * LIFT) as u8;
     (
@@ -204,7 +205,7 @@ fn render_into(area: Rect, buf: &mut Buffer, theme: &Theme, logo: Art) {
                 // anyway, so the color is never actually seen.
                 let hue = hue_rows.get(row).and_then(|r| r.get(col)).copied();
                 let color = match hue {
-                    Some(h) if h < STONE.len() as u8 => {
+                    Some(h) if h < GOLD_ROSE.len() as u8 => {
                         let (rest, lit) = band_colors(theme, h);
                         blend_color(rest, lit, shine_opacity(diag, secs)).unwrap_or(rest)
                     }
@@ -375,7 +376,7 @@ mod tests {
                     );
                     if hued {
                         let d = hue.to_digit(10).unwrap_or(99) as usize;
-                        assert!(d < STONE.len(), "{name} row {row} col {col}: band {d}");
+                        assert!(d < GOLD_ROSE.len(), "{name} row {row} col {col}: band {d}");
                     }
                 }
             }
@@ -387,7 +388,7 @@ mod tests {
     // that test into a false negative about code-page handling.
     #[test]
     fn art_contains_the_pty_probe_glyphs() {
-        for ch in ['⣿', '⣀'] {
+        for ch in ['⣿', '⣼'] {
             assert!(
                 LOGO.cells.contains(ch),
                 "logo07 lost the pty probe glyph {ch:?}"

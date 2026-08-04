@@ -8,6 +8,12 @@ work it describes.
 
 ## Unreleased
 
+- **The crowned heart.** The welcome mark is now Amore Build's own: a gold
+  three-point crown resting on a rose heart, taken from the site's block art
+  and rasterized in braille. Two hue zones — the crown in gold, the heart in
+  the site accent's rose family — with the same shine sweep reading as light
+  moving across both materials. Both tiers regenerate from
+  `scripts/gen_amore.py`; it replaces the aqueduct.
 - **Iris lands on PATH with the house.** `amore init` now links the freshly
   installed companion binaries beside the running `amore` executable — if
   `amore` resolves on PATH, `iris` (and `iris dash`) now do too, with no
