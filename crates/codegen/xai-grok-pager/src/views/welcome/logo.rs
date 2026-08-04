@@ -31,17 +31,18 @@ const LOGO_SMALL: Art = Art {
     hues: include_str!("../../../assets/logo/logo05.hue.txt"),
 };
 
-/// Spectral palette, band 0 first. The aqueduct bands vertically, so 0 is the
-/// left abutment and 6 the right; the sweep runs across the span rather than
-/// through an arc's thickness. Indices match the digits in the hue map.
-const BOW: [(u8, u8, u8); 7] = [
-    (219, 78, 66),   // red
-    (226, 132, 51),  // orange
-    (222, 188, 62),  // yellow
-    (104, 184, 96),  // green
-    (72, 148, 219),  // blue
-    (88, 101, 196),  // indigo
-    (150, 94, 201),  // violet
+/// Quiet-stone palette, band 0 first. The aqueduct is masonry: bands run in
+/// courses (0 the light deck course, 6 the dark footing), and the generator
+/// jitters each cell at most one shade off its course so every 8-dot block
+/// reads as its own stone. Indices match the digits in the hue map.
+const STONE: [(u8, u8, u8); 7] = [
+    (198, 186, 164),
+    (188, 176, 154),
+    (177, 165, 144),
+    (166, 154, 134),
+    (154, 142, 124),
+    (142, 131, 114),
+    (128, 118, 104),
 ];
 
 /// Resting scale for a band color — the logo sits at this dimmed level between
@@ -63,7 +64,7 @@ fn adapt(theme: &Theme, c: Color) -> Color {
 
 /// Resting and full-shine colors for hue digit `h`.
 fn band_colors(theme: &Theme, h: u8) -> (Color, Color) {
-    let (r, g, b) = BOW[(h as usize).min(BOW.len() - 1)];
+    let (r, g, b) = STONE[(h as usize).min(STONE.len() - 1)];
     let dim = |v: u8| (v as f32 * REST) as u8;
     let lift = |v: u8| (v as f32 + (255.0 - v as f32) * LIFT) as u8;
     (
@@ -203,7 +204,7 @@ fn render_into(area: Rect, buf: &mut Buffer, theme: &Theme, logo: Art) {
                 // anyway, so the color is never actually seen.
                 let hue = hue_rows.get(row).and_then(|r| r.get(col)).copied();
                 let color = match hue {
-                    Some(h) if h < BOW.len() as u8 => {
+                    Some(h) if h < STONE.len() as u8 => {
                         let (rest, lit) = band_colors(theme, h);
                         blend_color(rest, lit, shine_opacity(diag, secs)).unwrap_or(rest)
                     }
@@ -374,7 +375,7 @@ mod tests {
                     );
                     if hued {
                         let d = hue.to_digit(10).unwrap_or(99) as usize;
-                        assert!(d < BOW.len(), "{name} row {row} col {col}: band {d}");
+                        assert!(d < STONE.len(), "{name} row {row} col {col}: band {d}");
                     }
                 }
             }

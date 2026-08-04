@@ -31,9 +31,13 @@
 # is as short as 7 rows when no announcement is showing, so a taller logo would
 # grow the box and push narrow terminals into the stacked layout sooner. Keep 7.
 #
-# Bands run VERTICALLY (band index from `px` alone), red at the left abutment
-# through violet at the right. Deliberately not banded across an arc's
-# thickness: that is rainbow optics and carries a reading the mark should not.
+# Bands are MASONRY: quiet-stone courses (band = cell row, row-proportional at
+# the small tier) with a deterministic per-cell jitter of at most one shade --
+# the "ashlar, tight jitter" treatment chosen on the review artifact
+# 2026-08-04. Every braille cell is one 8-dot stone. The jitter hash must stay
+# bit-identical to the review page's generator (cell_hash in the house's
+# forge/output/welcome-splash-review/build_mock.py): the approved look IS
+# these exact digits.
 
 import math
 import sys
@@ -44,7 +48,28 @@ BITS = {  # (dx, dy) within a cell -> braille bit
 }
 
 BLANK = "⠀"
-N_BANDS = 7  # red orange yellow green blue indigo violet
+N_BANDS = 7  # quiet-stone ramp: 0 the light deck course .. 6 the dark footing
+
+
+def cell_hash(x, y):
+    """Deterministic 32-bit mix of a cell coordinate. Bit-identical to the
+    review page's build_mock.py -- the approved rendering depends on it."""
+    h = (x * 374761393 + y * 668265263) & 0xFFFFFFFF
+    h = ((h ^ (h >> 13)) * 1274126177) & 0xFFFFFFFF
+    return h ^ (h >> 16)
+
+
+def course_band(row, rows):
+    """Course index for a cell row: identity at the 7-row full tier,
+    row-proportional at the 5-row small tier."""
+    return row if rows == 7 else int(row * (N_BANDS - 1) / (rows - 1) + 0.5)
+
+
+def tight_band(col, row, rows):
+    """Ashlar, tight jitter: the row's course drifted at most one shade per
+    cell (uniform -1/0/+1), clamped to the palette."""
+    jitter = cell_hash(col, row) % 3 - 1
+    return max(0, min(N_BANDS - 1, course_band(row, rows) + jitter))
 
 # Geometry as fractions of the dot grid, so the two tiers are one drawing at two
 # sizes rather than two drawings.
@@ -62,7 +87,7 @@ SPRING = 0.643      # springing line of the arch openings
 SOLID_TO_RADIUS = 0.9
 
 
-def aqueduct(cols, rows, n_bands=N_BANDS):
+def aqueduct(cols, rows):
     """Rasterize the aqueduct onto a (cols*2) x (rows*4) dot grid.
 
     Returns (art_lines, hue_lines, grid).
@@ -120,18 +145,15 @@ def aqueduct(cols, rows, n_bands=N_BANDS):
         chars, hues = [], []
         for col in range(cols):
             code = 0x2800
-            xs = []
             for (dx, dy), bit in BITS.items():
                 x, y = col * 2 + dx, row * 4 + dy
                 if grid[y][x]:
                     code |= bit
-                    xs.append(x + 0.5)
             chars.append(chr(code))
-            if xs:
-                # Band 0 is the LEFT abutment (red) sweeping to violet at the
-                # right: vertical stripes, taken from the mean x of the lit dots.
-                band = int(sum(xs) / len(xs) / W * n_bands)
-                hues.append(str(max(0, min(n_bands - 1, band))))
+            if code != 0x2800:
+                # Masonry: the row's course jittered at most one shade per
+                # cell -- every 8-dot block its own stone.
+                hues.append(str(tight_band(col, row, rows)))
             else:
                 hues.append(".")
         art_lines.append("".join(chars))
