@@ -51,14 +51,20 @@ pub fn build_spawn_plan(bin: &Path, os: &str, org_root: Option<&Path>) -> Vec<Sp
 
 fn windows_plans(bin: &str, org_root: Option<&str>) -> Vec<SpawnPlan> {
     // 1) Windows Terminal new tab/window (--startingDirectory pins the tab into
-    //    the org root even where the inherited-cwd path is unreliable)
+    //    the org root even where the inherited-cwd path is unreliable; --size
+    //    opens wide enough for the dash's full member bar — all 8 nav tabs +
+    //    the hint need ~137 columns, so 150 gives them room)
     // 2) cmd /c start (new console)
     // 3) PowerShell Start-Process
+    const DASH_COLS: usize = 150;
+    const DASH_ROWS: usize = 50;
     let mut wt_args = vec!["new-tab".to_string()];
     if let Some(root) = org_root {
         wt_args.push("--startingDirectory".to_string());
         wt_args.push(root.to_string());
     }
+    wt_args.push("--size".to_string());
+    wt_args.push(format!("{DASH_COLS},{DASH_ROWS}"));
     wt_args.push("--".to_string());
     wt_args.push(bin.to_string());
     wt_args.push("dash".to_string());
@@ -251,13 +257,17 @@ mod tests {
         let plans = build_spawn_plan(&bin, "windows", Some(&root));
         let wt = &plans[0];
         assert_eq!(wt.label, "wt");
-        // new-tab --startingDirectory <root> -- <bin> dash
+        // new-tab --startingDirectory <root> --size <cols>,<rows> -- <bin> dash
         let si = wt.args.iter().position(|a| a == "--startingDirectory").expect("startingDirectory");
         assert_eq!(wt.args[si + 1], r"C:\Users\me\house");
+        let sz = wt.args.iter().position(|a| a == "--size").expect("size");
+        assert_eq!(wt.args[sz + 1], "150,50");
         assert!(wt.args.iter().any(|a| a == "dash"));
-        // Without an org root there is no --startingDirectory (nothing to pin).
+        // Without an org root there is no --startingDirectory (nothing to pin),
+        // but the size still applies so the dash opens wide enough for its tabs.
         let bare = build_spawn_plan(&bin, "windows", None);
         assert!(!bare[0].args.iter().any(|a| a == "--startingDirectory"));
+        assert!(bare[0].args.iter().any(|a| a == "--size"));
     }
 
     #[test]
