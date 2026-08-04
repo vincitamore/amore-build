@@ -1,13 +1,20 @@
 # Amore Build
 
-**a terminal coding agent that is not a wrapper around one model**
+**a terminal coding agent that plants a house in your repo**
 
 Amore Build (`amore`) is a terminal AI coding agent: a full-screen TUI that
 understands your codebase, edits files, runs shell commands, searches the web,
 and drives long-running multi-agent work — interactively, headlessly for
-scripting/CI, or embedded in editors via ACP. Bring any OpenAI-compatible
-model; plant a **cooperation harness** in your repo with `amore init`; drive
-the org tree it plants with the **iris** companion dash.
+scripting/CI, or embedded in editors via ACP.
+
+What sets it apart is the **cooperation harness**: `amore init` plants a
+*house* — a working tree built for long-horizon collaboration with an agent,
+with orientation surfaces read at session start, org schemas for tasks /
+captures / knowledge / reminders, a pack of orchestration skills, and session
+hooks including a stop gate — and the **iris** companion keeps the house's
+live index with a loopback-only daemon, org CLI verbs, and an eight-tab dash.
+Any OpenAI-compatible model drives it: every model is one `[model.*]` config
+block, and the harness identity survives the swap.
 
 It is a **permanent engineered fork** of xAI's open-source
 [`grok-build`](https://github.com/xai-org/grok-build) (Apache-2.0). **Not an
@@ -42,10 +49,9 @@ See the [changelog](crates/codegen/xai-grok-shell-base/assets/amore-changelog.md
 for the latest fixes, features, and improvements in each release (also
 rendered in-product on the welcome screen and by `/release-notes`).
 
-> **PATH note:** crates.io already publishes a Lua linter named `amore`.
-> That is a different tool. `amore doctor` (and `amore doctor --json`, field
-> `pathCollision`) detects when another `amore` on `PATH` would shadow Amore
-> Build.
+> **PATH note:** `amore doctor` (and `amore doctor --json`, field
+> `pathCollision`) detects when another `amore` binary on `PATH` would shadow
+> Amore Build.
 
 ### Build from source
 
