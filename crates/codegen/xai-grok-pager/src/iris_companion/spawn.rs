@@ -50,21 +50,25 @@ pub fn build_spawn_plan(bin: &Path, os: &str, org_root: Option<&Path>) -> Vec<Sp
 }
 
 fn windows_plans(bin: &str, org_root: Option<&str>) -> Vec<SpawnPlan> {
-    // 1) Windows Terminal new tab/window (--startingDirectory pins the tab into
-    //    the org root even where the inherited-cwd path is unreliable; --size
-    //    opens wide enough for the dash's full member bar — all 8 nav tabs +
-    //    the hint need ~137 columns, so 150 gives them room)
+    // 1) Windows Terminal new tab/window. --size is a GLOBAL wt option and must
+    //    come BEFORE the new-tab subcommand: placed after it, wt treats the next
+    //    token as the command executable and fails to launch (`150,50 -- …`,
+    //    error 0x80070002). --startingDirectory pins the tab into the org root.
+    //    150×50 opens wide enough for the dash's full member bar — all 8 nav
+    //    tabs + the hint need ~137 columns.
     // 2) cmd /c start (new console)
     // 3) PowerShell Start-Process
     const DASH_COLS: usize = 150;
     const DASH_ROWS: usize = 50;
-    let mut wt_args = vec!["new-tab".to_string()];
+    let mut wt_args = vec![
+        "--size".to_string(),
+        format!("{DASH_COLS},{DASH_ROWS}"),
+        "new-tab".to_string(),
+    ];
     if let Some(root) = org_root {
         wt_args.push("--startingDirectory".to_string());
         wt_args.push(root.to_string());
     }
-    wt_args.push("--size".to_string());
-    wt_args.push(format!("{DASH_COLS},{DASH_ROWS}"));
     wt_args.push("--".to_string());
     wt_args.push(bin.to_string());
     wt_args.push("dash".to_string());
@@ -257,11 +261,14 @@ mod tests {
         let plans = build_spawn_plan(&bin, "windows", Some(&root));
         let wt = &plans[0];
         assert_eq!(wt.label, "wt");
-        // new-tab --startingDirectory <root> --size <cols>,<rows> -- <bin> dash
-        let si = wt.args.iter().position(|a| a == "--startingDirectory").expect("startingDirectory");
-        assert_eq!(wt.args[si + 1], r"C:\Users\me\house");
+        // --size <cols>,<rows> new-tab --startingDirectory <root> -- <bin> dash
+        // (--size is GLOBAL: it must precede new-tab, else wt runs `150,50` as the executable)
         let sz = wt.args.iter().position(|a| a == "--size").expect("size");
         assert_eq!(wt.args[sz + 1], "150,50");
+        let nt = wt.args.iter().position(|a| a == "new-tab").expect("new-tab");
+        assert!(sz < nt, "--size must come before the new-tab subcommand");
+        let si = wt.args.iter().position(|a| a == "--startingDirectory").expect("startingDirectory");
+        assert_eq!(wt.args[si + 1], r"C:\Users\me\house");
         assert!(wt.args.iter().any(|a| a == "dash"));
         // Without an org root there is no --startingDirectory (nothing to pin),
         // but the size still applies so the dash opens wide enough for its tabs.
