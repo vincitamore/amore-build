@@ -82,7 +82,8 @@ jobs:
           out="$(target/release/${{ matrix.bin }} --version)"
           echo "$out"
           echo "$out" | grep -q "$GROK_VERSION" || { echo "::error::version stamp missing $GROK_VERSION"; exit 1; }
-          target/release/${{ matrix.bin }} doctor --json | head -c 200
+          target/release/${{ matrix.bin }} doctor --json > doctor.json
+          head -c 200 doctor.json
           echo
 
       - name: Smoke — --version + doctor --json (windows)
@@ -91,7 +92,9 @@ jobs:
           $out = & "target\release\${{ matrix.bin }}" --version | Out-String
           $out
           if ($out -notmatch [regex]::Escape($env:GROK_VERSION)) { throw "version stamp missing $env:GROK_VERSION" }
-          & "target\release\${{ matrix.bin }}" doctor --json | Select-Object -First 1
+          $doc = & "target\release\${{ matrix.bin }}" doctor --json
+          if ($LASTEXITCODE -ne 0) { throw "doctor --json exited $LASTEXITCODE" }
+          $doc | Select-Object -First 1
 
       - name: Package (unix — tar.gz)
         if: matrix.os != 'windows-latest'
@@ -167,14 +170,17 @@ jobs:
         shell: bash
         run: |
           "dist/${{ matrix.name }}" --help
-          "dist/${{ matrix.name }}" commands --json | head -c 200
+          "dist/${{ matrix.name }}" commands --json > commands.json
+          head -c 200 commands.json
           echo
 
       - name: Smoke — multi-tool + regula surface (windows)
         if: matrix.os == 'windows-latest'
         run: |
           & "dist/${{ matrix.name }}.exe" --help
-          & "dist/${{ matrix.name }}.exe" commands --json | Select-Object -First 1
+          $cmds = & "dist/${{ matrix.name }}.exe" commands --json
+          if ($LASTEXITCODE -ne 0) { throw "commands --json exited $LASTEXITCODE" }
+          $cmds | Select-Object -First 1
 
       - name: Package (unix — tar.gz with multi-tool + dash)
         if: matrix.os != 'windows-latest'

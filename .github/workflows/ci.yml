@@ -74,14 +74,17 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: |
           target/release/amore --version
-          target/release/amore doctor --json | head -c 400
+          target/release/amore doctor --json > doctor.json
+          head -c 400 doctor.json
           echo
 
       - name: Smoke — amore --version stamps the build commit (Windows)
         if: matrix.os == 'windows-latest'
         run: |
           target\release\amore.exe --version
-          target\release\amore.exe doctor --json | Select-Object -First 1
+          $doc = & target\release\amore.exe doctor --json
+          if ($LASTEXITCODE -ne 0) { throw "doctor --json exited $LASTEXITCODE" }
+          $doc | Select-Object -First 1
 
       # Keep the built binary reachable for local inspection (docs captures,
       # bisecting a report against a known commit) without a full local build.
