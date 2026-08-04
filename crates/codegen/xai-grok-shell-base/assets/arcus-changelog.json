@@ -1,6 +1,11 @@
 [
   {
     "category": "features",
+    "description": "**Iris lands on PATH with the house** — `arcus init` links the companion beside the `arcus` binary (no manual PATH step), and the planted `AGENTS.md` wires the resident agent to the iris org verbs and `iris regula lint`.",
+    "breaking_change": false
+  },
+  {
+    "category": "features",
     "description": "**DeepSeek V4 Flash is the recommended model path** — the wizard's first slot writes `deepseek/deepseek-v4-flash-0731` over OpenRouter; GLM-5.2 recipes remain, and the setup docs are model-agnostic (`docs/setup-models.md`).",
     "breaking_change": false
   },

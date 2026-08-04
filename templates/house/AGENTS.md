@@ -168,6 +168,32 @@ Empty containers carry `.gitkeep` so they survive a clone.
 house. The split is by what a thing points at, not by size — see each folder's
 README.
 
+## The iris companion (org surface)
+
+Init installs **iris** under `instruments/iris/` and links it beside the
+`arcus` binary, so it resolves on PATH wherever `arcus` does. It is the
+preferred surface for org CRUD — every write goes through its **regula**
+core, which enforces the frontmatter schemas above, the legal lifecycle
+transitions, and folder placement, so a verb cannot produce a file this
+document would call malformed:
+
+```sh
+iris task list --json          # and create/complete/pause/block/update …
+iris inbox capture "…"         # and list/resolve/move/promote …
+iris reminder list             # and create/complete/snooze/dismiss …
+iris knowledge create --title "…"
+iris search "query"            # fuzzy index search (daemon-backed)
+iris regula lint               # the house lint — errors fail; warnings are
+                               # the open data-quality queue
+iris                           # the dash (interactive; needs a TTY)
+```
+
+Prefer the verbs over hand-editing frontmatter: they cannot drift from the
+schemas, and the live index (daemon on `127.0.0.1:3853`) stays coherent.
+When iris is absent (`--no-iris` installs, unsupported hosts), direct file
+edits against the schemas above are the fallback and remain fully
+legitimate — the files are the source of truth either way.
+
 ### Tasks (`tasks/**/*.md`)
 
 ```yaml
@@ -251,8 +277,10 @@ Path-style, extension omitted (`[[tasks/completed/example-task]]`).
 - **Evidence bar:** an absence claim is a claim — enumerate fully (never
   truncate a listing between search and conclusion), filter by predicate and
   count, re-run when the claim goes durable.
-- **Leave:** update [[context/current-state]] (standing reality only; keep it
-  short enough to re-read every session — new changes land under
+- **Leave:** run `iris regula lint` when the companion is installed (errors
+  fail; warnings are the open data-quality queue), update
+  [[context/current-state]] (standing reality only; keep it short enough to
+  re-read every session — new changes land under
   `## Recent structural changes (DATE)`; aged sections migrate to
   `context/previous-state.md`), commit with a message the next session can
   orient from, push per operator policy.

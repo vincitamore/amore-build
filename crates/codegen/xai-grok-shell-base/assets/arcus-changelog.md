@@ -8,6 +8,17 @@ work it describes.
 
 ## Unreleased
 
+- **Iris lands on PATH with the house.** `arcus init` now links the freshly
+  installed companion binaries beside the running `arcus` executable — if
+  `arcus` resolves on PATH, `iris` (and `iris dash`) now do too, with no
+  shell-config or registry surgery on any platform. The planted `AGENTS.md`
+  also teaches the resident agent the iris org verbs and the
+  `iris regula lint` leave-step, so agent, CLI, and dash all write through
+  the same regula authority.
+- **Dash panels keep their titles under pressure.** Panel headers are pinned
+  chrome now: a vertically squashed panel clips its body instead of painting
+  the body over its own title (the interleaved-text artifact on the
+  Dashboard's Recent Commits pane).
 - **DeepSeek V4 Flash is the recommended model path.** The setup wizard's
   first slot writes `deepseek/deepseek-v4-flash-0731` over OpenRouter at the
   provider's reported completion ceiling; the GLM-5.2 recipes remain, and the

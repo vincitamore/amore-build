@@ -202,8 +202,11 @@ What got installed and what you own: [`docs/onboarding.md`](docs/onboarding.md).
 org CRUD verbs (`task` / `inbox` / `reminder` / `knowledge`), and an
 interactive dash over the tree `arcus init` plants — Dashboard, Tasks,
 Inbox, Reminders, Knowledge, Files, Forge, and Graph tabs. `arcus init`
-installs it into the house by default; it is never required to run Arcus
-Build itself. Local-first: the daemon binds loopback only, and there is no
+installs it into the house by default and links it beside the `arcus`
+binary, so it is on `PATH` with no manual step; it is never required to run
+Arcus Build itself. Every write goes through its **regula** core — schemas,
+legal lifecycle transitions, placement, lint — and the planted `AGENTS.md`
+wires the resident agent to the same verbs. Local-first: the daemon binds loopback only, and there is no
 telemetry. Full story (with a screenshot of every tab):
 [`docs/iris.md`](docs/iris.md).
 

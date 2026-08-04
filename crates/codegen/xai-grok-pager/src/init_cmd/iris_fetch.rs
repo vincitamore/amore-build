@@ -59,7 +59,13 @@ fn asset_names(suffix: &str) -> (String, String) {
 /// What happened, in terms the summary can print verbatim.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IrisOutcome {
-    Installed { rel_path: String, version: String },
+    Installed {
+        rel_path: String,
+        version: String,
+        /// Directory the binaries were also linked into (beside `arcus`), when
+        /// that succeeded — i.e. `iris` is now on PATH wherever `arcus` is.
+        linked: Option<String>,
+    },
     OptedOut,
     /// No published asset for this host.
     UnsupportedHost { host: String },
@@ -71,9 +77,12 @@ impl IrisOutcome {
     /// One line for the init summary. `None` when there is nothing worth saying.
     pub fn summary_line(&self) -> Option<String> {
         match self {
-            Self::Installed { rel_path, version } => {
-                Some(format!("  iris:      installed {rel_path} ({version})"))
-            }
+            Self::Installed { rel_path, version, linked } => Some(match linked {
+                Some(dir) => format!(
+                    "  iris:      installed {rel_path} ({version}) — on PATH beside arcus ({dir})"
+                ),
+                None => format!("  iris:      installed {rel_path} ({version})"),
+            }),
             Self::OptedOut => None,
             Self::UnsupportedHost { host } => Some(format!(
                 "  iris:      no published build for {host} — build it from source: \
@@ -100,12 +109,14 @@ pub fn install(root: &Path, version: &str, dry_run: bool) -> IrisOutcome {
         return IrisOutcome::Installed {
             rel_path: format!("{IRIS_REL}/ (would fetch {archive})"),
             version: version.to_string(),
+            linked: None,
         };
     }
     match try_install(root, version, suffix) {
-        Ok(rel_path) => IrisOutcome::Installed {
+        Ok((rel_path, linked)) => IrisOutcome::Installed {
             rel_path,
             version: version.to_string(),
+            linked,
         },
         Err(err) => IrisOutcome::Failed {
             // `{err:#}` keeps the cause chain — the plain form tells the user
@@ -115,7 +126,7 @@ pub fn install(root: &Path, version: &str, dry_run: bool) -> IrisOutcome {
     }
 }
 
-fn try_install(root: &Path, version: &str, suffix: &str) -> Result<String> {
+fn try_install(root: &Path, version: &str, suffix: &str) -> Result<(String, Option<String>)> {
     let (archive_name, binary_name) = asset_names(suffix);
     let base = format!("{RELEASE_BASE}/v{version}");
     let archive_url = format!("{base}/{archive_name}");
@@ -160,7 +171,58 @@ fn try_install(root: &Path, version: &str, suffix: &str) -> Result<String> {
         make_executable(&dest.join(name));
     }
 
-    Ok(format!("{IRIS_REL}/"))
+    let linked = link_onto_path(&dest, &installed);
+    Ok((format!("{IRIS_REL}/"), linked))
+}
+
+/// Put `iris` on PATH the way `arcus` already is: link the freshly installed
+/// binaries into the directory the running `arcus` executable lives in. If
+/// `arcus` resolves on PATH, `iris` now does too — no rc-file or registry
+/// surgery, and it works identically on every platform. Hard link first
+/// (free, same volume), copy as fallback (different volume). A locked or
+/// unwritable destination degrades silently: the install itself already
+/// succeeded, and the manual hint in the docs still applies.
+///
+/// The dash sibling is linked under its short name (`iris-dash[.exe]`),
+/// which the multi-tool's sibling resolution accepts, so `iris dash` works
+/// from PATH as well.
+fn link_onto_path(dest: &Path, installed: &[String]) -> Option<String> {
+    let bin_dir = std::env::current_exe().ok()?.parent()?.to_path_buf();
+    // Nothing to do if arcus is somehow running out of the install dir.
+    if bin_dir == *dest {
+        return None;
+    }
+    let exe = |name: &str| {
+        if cfg!(windows) { format!("{name}.exe") } else { name.to_string() }
+    };
+    let mut pairs: Vec<(std::path::PathBuf, std::path::PathBuf)> =
+        vec![(dest.join(exe("iris")), bin_dir.join(exe("iris")))];
+    if let Some(dash) = installed.iter().find(|n| n.starts_with("iris-dash")) {
+        pairs.push((dest.join(dash), bin_dir.join(exe("iris-dash"))));
+    }
+    let mut any = false;
+    for (src, target) in pairs {
+        if !src.exists() {
+            continue;
+        }
+        // Move a previous copy aside rather than deleting it: on Windows a
+        // running binary holds its file lock, but a locked file can still be
+        // renamed — the same swap the installers use.
+        if target.exists() {
+            let prev = target.with_extension("prev");
+            let _ = std::fs::remove_file(&prev);
+            if std::fs::rename(&target, &prev).is_err() && target.exists() {
+                continue;
+            }
+        }
+        let ok = std::fs::hard_link(&src, &target).is_ok()
+            || std::fs::copy(&src, &target).is_ok();
+        if ok {
+            make_executable(&target);
+            any = true;
+        }
+    }
+    any.then(|| bin_dir.display().to_string())
 }
 
 fn get_bytes(client: &reqwest::blocking::Client, url: &str) -> Result<Vec<u8>> {

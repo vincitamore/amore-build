@@ -87,6 +87,26 @@ an orientation file (`AGENTS.md` / `AGENT.md` / `CLAUDE.md`) beside a `tasks/`
 directory (the daemon also accepts the root as a positional argument, which
 wins). Callers refuse a silent cwd fallback when no root resolves.
 
+### The regula core
+
+Every write — CLI verb or dash action — goes through **`@arcus/regula`**,
+the org write authority. It owns the document schemas (frontmatter shapes
+per type), the **legal lifecycle transitions** (a task moves
+`active → review → complete`, not arbitrarily; terminal inbox items get a
+`resolution` and move to `resolved/`), **folder placement** (status decides
+the directory, and the verbs move files when status changes), and the
+**lint** (`iris regula lint` — errors fail, warnings are the open
+data-quality queue). The point of routing writes through one core: a verb
+cannot produce a file the house schema would call malformed, and two
+surfaces (CLI, dash) cannot drift apart on what "complete" means.
+
+The house is wired to it natively: the `AGENTS.md` that `arcus init` plants
+teaches the resident agent to prefer the iris verbs for org CRUD and to run
+`iris regula lint` before ending a session — so the agent, the CLI, and the
+dash all write through the same authority. When iris is absent, direct file
+edits against the schemas remain fully legitimate; the files are the source
+of truth either way.
+
 The **dash** auto-spawns the daemon when nothing answers on the port. Plain
 CLI verbs that need the index do not auto-spawn — they fail with a one-line
 hint to start it.
@@ -107,10 +127,13 @@ A failed download never fails the house: the tree is already written, the
 summary names what happened, and `arcus init --refresh` finishes the job
 later.
 
-Init does **not** put iris on your `PATH` — the binaries live in the house.
-Add `instruments/iris/` to `PATH` (or copy the multi-tool somewhere already
-on it) if you want `iris` available everywhere; `arcus setup` step 3 records
-whether it found one.
+Init also puts iris **on your `PATH`** — by linking the binaries (multi-tool
+and dash) into the directory the running `arcus` executable lives in. If
+`arcus` resolves on `PATH`, `iris` now does too; no shell-config or registry
+surgery, same behavior on every platform. The init summary names the
+directory when the link lands; if that directory is unwritable the binaries
+still work from `instruments/iris/`, and `arcus setup` step 3 records
+whether `iris` was found on `PATH`.
 
 Published targets: `linux-x64`, `windows-x64`, `darwin-arm64`. Other hosts
 are told plainly there is no published asset and pointed at the source build.

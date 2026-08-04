@@ -68,12 +68,13 @@ iris companion install (§ below).
 ```
 
 **Iris companion (also installed by default):** init downloads the iris
-release archive for your platform, verifies its published checksum, and
-unpacks the binaries into `instruments/iris/`. This is the only part of
-`init` that touches the network — `--no-iris` skips it and makes `init`
-fully offline. A failed download never fails the house; the summary says
-what happened and `arcus init --refresh` finishes later. See
-[iris.md](iris.md).
+release archive for your platform, verifies its published checksum, unpacks
+the binaries into `instruments/iris/`, and **links them beside the `arcus`
+binary** — so `iris` resolves on `PATH` wherever `arcus` does, with no
+manual step. This is the only part of `init` that touches the network —
+`--no-iris` skips it and makes `init` fully offline. A failed download
+never fails the house; the summary says what happened and
+`arcus init --refresh` finishes later. See [iris.md](iris.md).
 
 **Also (not a house file):** init appends the absolute path of
 `<house>/.arcus/hooks` to the global always-trusted registry
@@ -137,7 +138,7 @@ content belongs to and how to customize it safely.
 |------|------|-------|
 | `.arcus/house-install.json` | Install manifest (`version` + `files` → sha256) | **Tool-managed** — refresh uses it as the source of truth for "untouched". Do not hand-edit hashes. |
 | `~/.arcus/hooks-paths` (global) | Always-trusted hooks directory registry | Re-run init (hooks enabled) re-registers if missing. Remove the project line to drop global trust. |
-| `instruments/iris/` | The iris companion binaries | Fetched from the matching release; `--no-iris` skips (offline switch). |
+| `instruments/iris/` | The iris companion binaries | Fetched from the matching release, then linked beside the `arcus` binary onto `PATH`; `--no-iris` skips (offline switch). |
 
 ---
 
