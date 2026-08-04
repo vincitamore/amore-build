@@ -57,6 +57,17 @@ ARGV0_FILE = "crates/codegen/xai-grok-pager/src/app/cli.rs"
 INIT_OWNERSHIP_TEST = "crates/codegen/xai-grok-pager/tests/init_ownership.rs"
 BOUNDARY_SCRIPT = "scripts/check_grok_boundary.py"
 
+# User-visible branding deltas live in upstream pager files the boundary
+# script cannot see (it scans only the fork-owned surface outside crates/).
+# A sync merge that drops a `resolved_bin_name()` call site silently reverts
+# the resume dialog / title bar to 'grok' with no build failure -- pin the
+# sites here so the re-apply is gated, not remembered.
+RESUMED_BIN_DEF = "pub fn resolved_bin_name"
+RESUMED_BIN_FILE = "crates/codegen/xai-grok-pager/src/app/cli.rs"
+RESUME_HINT_FILE = "crates/codegen/xai-grok-pager/src/app/mod.rs"
+SCREEN_RELAUNCH_FILE = "crates/codegen/xai-grok-pager/src/app/screen_mode_relaunch.rs"
+NOTIF_TITLE_FILE = "crates/codegen/xai-grok-pager/src/notifications/title.rs"
+
 
 def run(cmd: list[str], **kw) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, cwd=REPO, capture_output=True, text=True, **kw)
@@ -295,6 +306,21 @@ def cmd_verify(dry_run: bool) -> int:
             problems.append("fork-surface grok boundary check failed:\n" + r.stdout)
     else:
         print("  --  check_grok_boundary.py absent; boundary check skipped")
+
+    # 6b. user-visible branding deltas still channel through the single
+    #     resolved_bin_name() source of truth (see constants above).
+    _check_file_contains(
+        RESUMED_BIN_FILE, RESUMED_BIN_DEF,
+        "resolved_bin_name() defined in cli.rs", problems)
+    _check_file_contains(
+        RESUME_HINT_FILE, "cli::resolved_bin_name()",
+        "resume hint + window title use resolved_bin_name()", problems)
+    _check_file_contains(
+        SCREEN_RELAUNCH_FILE, "resolved_bin_name()",
+        "relaunch-failure hint uses resolved_bin_name()", problems)
+    _check_file_contains(
+        NOTIF_TITLE_FILE, "resolved_bin_name()",
+        "notification title product name uses resolved_bin_name()", problems)
 
     # 7. build + smoke (this host). Build is the long pole; allow skipping.
     #    The full Linux pager suite remains CI-owned (UPSTREAM.md §5).
