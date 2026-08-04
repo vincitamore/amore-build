@@ -826,24 +826,35 @@ pub fn is_recognized_argv0(name: &str) -> bool {
 /// Canonical clap program name when argv0 is unrecognized.
 pub const DEFAULT_BIN_NAME: &str = "arcus";
 
+/// Resolve the user-facing binary name from argv0, falling back to the
+/// canonical product name when argv0 is missing or unrecognized.
+///
+/// Single source of truth for every user-visible invocation name — clap's
+/// usage line ([`PagerArgs::parse_cli`]), the "Resume this session with…"
+/// exit hints, and the terminal window title. Naming the binary the user
+/// actually launched keeps legacy `grok` / `agent` multi-call installs
+/// honest: a pasted resume command works in the shell it came from.
+pub fn resolved_bin_name() -> String {
+    let raw = std::env::args()
+        .next()
+        .as_deref()
+        .map(std::path::Path::new)
+        .and_then(|p| p.file_name())
+        .and_then(|n| n.to_str())
+        .filter(|n| is_recognized_argv0(n))
+        .unwrap_or(DEFAULT_BIN_NAME)
+        .to_owned();
+    // Strip .exe so usage lines / resume hints stay clean on Windows multi-call.
+    raw.strip_suffix(".exe")
+        .or_else(|| raw.strip_suffix(".EXE"))
+        .unwrap_or(&raw)
+        .to_owned()
+}
+
 impl PagerArgs {
     /// Parse CLI arguments without applying side effects.
     pub fn parse_cli() -> Self {
-        let bin_name = std::env::args()
-            .next()
-            .as_deref()
-            .map(std::path::Path::new)
-            .and_then(|p| p.file_name())
-            .and_then(|n| n.to_str())
-            .filter(|n| is_recognized_argv0(n))
-            .unwrap_or(DEFAULT_BIN_NAME)
-            .to_owned();
-        // Strip .exe so clap's usage line stays clean on Windows multi-call.
-        let bin_name = bin_name
-            .strip_suffix(".exe")
-            .or_else(|| bin_name.strip_suffix(".EXE"))
-            .unwrap_or(&bin_name)
-            .to_owned();
+        let bin_name = resolved_bin_name();
         Self::parse_from(std::iter::once(bin_name).chain(std::env::args().skip(1)))
     }
     /// Apply launch-directory path anchoring and `--cwd` after early commands
