@@ -9,6 +9,8 @@ interface PanelProps {
   children: ReactNode;
   flexGrow?: number;
   flexShrink?: number;
+  /** 0 lets a scrollbox-bearing panel shrink below its content (clip + scroll instead of overflow). */
+  minHeight?: number | 'auto' | `${number}%`;
   width?: number | `${number}%` | 'auto';
   marginTop?: number;
   marginRight?: number;
@@ -22,7 +24,7 @@ interface PanelProps {
  * Mirrors the GUI's `.border px-4 py-3` card. Borders go subtle by default, active
  * on focus. Every member composes from this so the views stay coherent.
  */
-export function Panel({ title, headerRight, children, flexGrow, flexShrink, width, marginTop, marginRight, active }: PanelProps) {
+export function Panel({ title, headerRight, children, flexGrow, flexShrink, minHeight, width, marginTop, marginRight, active }: PanelProps) {
   const t = usePalette();
   return (
     <box
@@ -35,6 +37,7 @@ export function Panel({ title, headerRight, children, flexGrow, flexShrink, widt
       paddingRight={1}
       flexGrow={flexGrow}
       flexShrink={flexShrink}
+      minHeight={minHeight}
       width={width}
       marginTop={marginTop}
       marginRight={marginRight}

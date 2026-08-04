@@ -436,14 +436,14 @@ export function Dashboard({
   const railTotal = rail.reduce((n, s) => n + s.count, 0);
   const railInner = (wide ? agendaW : dims.width - 2) - 5; // inside border(2) + panel padding(2) + scrollbar(1)
   const attentionPanel = (
-    <Panel title="Attention" headerRight={railTotal ? `${railTotal}` : undefined} flexGrow={1}>
+    <Panel title="Attention" headerRight={railTotal ? `${railTotal}` : undefined} flexGrow={1} flexShrink={1} minHeight={0}>
       {rail.length === 0 ? (
         <text fg={t.muted}>nothing needs you right now.</text>
       ) : (
         // onMouseOut on the scrollbox (the container) clears the hover once the cursor leaves the rail
         // entirely; per-element onMouseOver updates it as the cursor moves between rows — the TreeView
         // pattern, which sidesteps the per-element out/over race the throttle can't resolve.
-        <scrollbox scrollY flexGrow={1} onMouseOut={clearHover}>
+        <scrollbox scrollY flexGrow={1} minHeight={0} onMouseOut={clearHover}>
           {rail.map((sec) => {
             const shown = sec.items.slice(0, SECTION_CAP);
             const overflow = sec.items.length - shown.length;
@@ -527,10 +527,13 @@ export function Dashboard({
 
   // — Recent pane: TWO fixed boxes, each filling half + scrolling its OWN content (DocView pattern:
   // a <scrollbox> inside each Panel) — keeps the fullscreen layout clean, no spanning scroll.
+  // minHeight={0} + flexShrink on the chain lets the panels shrink below their content at short
+  // heights so the scrollboxes clip (the "Recent Commits contents overwrite the card" class of
+  // overflow — content must flow downward, not draw over the border).
   const recentPanel = (
-    <box flexDirection="column" flexGrow={wide ? undefined : 1} width={wide ? recentW : undefined} marginTop={wide ? undefined : 1}>
-      <Panel title="Recent Changes" flexGrow={1}>
-        <scrollbox scrollY flexGrow={1}>
+    <box flexDirection="column" flexGrow={1} flexShrink={1} minHeight={0} width={wide ? recentW : undefined} marginTop={wide ? undefined : 1}>
+      <Panel title="Recent Changes" flexGrow={1} flexShrink={1} minHeight={0}>
+        <scrollbox scrollY flexGrow={1} minHeight={0}>
           {narrative.length === 0 ? (
             <text fg={t.muted}>none recorded in current-state.md</text>
           ) : (
@@ -549,8 +552,8 @@ export function Dashboard({
           )}
         </scrollbox>
       </Panel>
-      <Panel title="Recent Commits" headerRight="git" flexGrow={1} marginTop={1}>
-        <scrollbox scrollY flexGrow={1}>
+      <Panel title="Recent Commits" headerRight="git" flexGrow={1} flexShrink={1} minHeight={0} marginTop={1}>
+        <scrollbox scrollY flexGrow={1} minHeight={0}>
           {git.length === 0 ? (
             <text fg={t.muted}>no git history (or not a repo)</text>
           ) : (
@@ -581,7 +584,7 @@ export function Dashboard({
       {/* Left column (Attention + Pulse) + Recent pane — side by side when wide, stacked when narrow */}
       <box flexDirection={wide ? 'row' : 'column'} flexGrow={1} marginTop={1}>
         {wide ? (
-          <box flexDirection="column" width={agendaW} marginRight={1}>
+          <box flexDirection="column" flexGrow={1} flexShrink={1} minHeight={0} width={agendaW} marginRight={1}>
             {attentionPanel}
             {pulsePanel}
           </box>
