@@ -28,7 +28,7 @@ const LOGO_H_PAD: u16 = 3;
 /// message never paints over the button.
 const UPGRADE_CTA_ROWS: u16 = 2;
 
-const HERO_SUBTITLE: &str = "Thanks for trying Arcus Build.";
+const HERO_SUBTITLE: &str = "Thanks for trying Amore Build.";
 
 use super::{PROMPT_HEIGHT, VERSION_GAP};
 
@@ -924,7 +924,7 @@ managed devices and accounts. Report security incidents";
         let theme = theme();
 
         let mut buf = Buffer::empty(area);
-        let a = ann(Some("Arcus"), Some("3 active tasks"));
+        let a = ann(Some("Amore"), Some("3 active tasks"));
         let mut house = a.clone();
         house.severity = Some("house".to_string());
         render_announcement_block(&mut buf, &theme, area, &house, false, None);

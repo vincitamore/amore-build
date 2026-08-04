@@ -17,7 +17,7 @@ This skill is five coupled files: `SKILL.md`, `reference.md`, `theory.md`, `exam
 
 - Rename a stratum or an intensity-tag term → grep all five files for the old term and update every hit, including the preprocessor's docstring, warning strings, `--help` text, and any output notes.
 - Change a formal measure, add, or remove a stratum → update the Seven Strata tables here, the per-stratum formal definitions in `reference.md`, and the treatment in `theory.md`.
-- Change the preprocessor's flags or JSON output shape → update the Preprocessing Tool section's invocation line and the Provides / Does-not-provide table here. The canonical, always-current flag reference is `python .arcus/skills/isda/isda_preprocess.py --help` (or `skill://isda/isda_preprocess.py`); when the prose and `--help` disagree, `--help` is ground truth and the prose is reconciled to it.
+- Change the preprocessor's flags or JSON output shape → update the Preprocessing Tool section's invocation line and the Provides / Does-not-provide table here. The canonical, always-current flag reference is `python .amore/skills/isda/isda_preprocess.py --help` (or `skill://isda/isda_preprocess.py`); when the prose and `--help` disagree, `--help` is ground truth and the prose is reconciled to it.
 - Add a worked example → add it to `examples.md` and update the References section's example list here.
 
 Defer a change only against a concrete trigger (a named term rename, a flag change), never a calendar bucket. The preprocessor is measurement-only and carries no dynamic state; there is no runtime surface whose values could go stale in the prose.
@@ -41,7 +41,7 @@ Three consequences follow. Different telos yields different answers: a 5,000-wor
 Run the preprocessor when precision matters:
 
 ```bash
-python .arcus/skills/isda/isda_preprocess.py <file_path> --telos "<task>" --substrate "<kb>" --pretty
+python .amore/skills/isda/isda_preprocess.py <file_path> --telos "<task>" --substrate "<kb>" --pretty
 ```
 
 Asset form: `skill://isda/isda_preprocess.py`. The `--telos` and `--substrate` flags are optional, strongly recommended. They get recorded in output metadata so downstream analysis carries the interpretive frame.

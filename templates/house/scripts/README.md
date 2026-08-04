@@ -37,7 +37,7 @@ canonical lattice — lattice + orientation-rules drift:
 - **lattice-drift** — when `LATTICE_CANONICAL` is set (path to an external
   canonical lattice), the local `context/principle-lattice.md` body is
   compared against it; error on drift, skip-with-note when unset.
-- **orientation-rules-drift** — when `.arcus/` or `.grok/` exists, runs
+- **orientation-rules-drift** — when `.amore/` or `.grok/` exists, runs
   `sync_orientation_rules.py --check` (adds `--grok-compat` if only `.grok/`
   is present) and errors on non-zero.
 
@@ -47,7 +47,7 @@ Regenerates derived rules files from canonical sources under `context/`.
 
 | Flag | Effect |
 |------|--------|
-| *(default)* | Write to `.arcus/rules/` (Arcus Build lane) |
+| *(default)* | Write to `.amore/rules/` (Amore Build lane) |
 | `--grok-compat` | Write to `.grok/rules/` (upstream-grok lane) |
 | `--check` | Exit 0 if derived files match sources; exit 1 on missing/drift (no write) |
 
@@ -78,7 +78,7 @@ house (init filters `scripts/tests/`).
 
 ## Catalog authority
 
-Status domains and required keys are encoded by `@arcus/regula`
+Status domains and required keys are encoded by `@amore/regula`
 (`instruments/iris/packages/regula/src/schema.ts`), the single
 schema/lifecycle authority both iris clients defer to — faithful
 machine-readable encoding of AGENTS.md, pinned by regula's own tests.

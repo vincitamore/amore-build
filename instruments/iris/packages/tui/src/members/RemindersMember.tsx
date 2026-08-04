@@ -8,7 +8,7 @@ import {
   setReminderStatus,
   snoozeReminder,
   type ReminderListItem,
-} from '@arcus/regula';
+} from '@amore/regula';
 import { resolveOrgRoot } from '../daemon';
 import { usePalette } from '../ThemeProvider';
 import { reminderStatusColor } from '../theme';

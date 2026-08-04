@@ -3,16 +3,16 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "@arcus/iris-workspace",
+      "name": "@amore/iris-workspace",
     },
     "packages/cli": {
-      "name": "@arcus/cli",
+      "name": "@amore/cli",
       "version": "0.0.0",
       "bin": {
         "iris": "./src/iris.ts",
       },
       "dependencies": {
-        "@arcus/regula": "workspace:*",
+        "@amore/regula": "workspace:*",
       },
       "devDependencies": {
         "@types/node": "latest",
@@ -20,10 +20,10 @@
       },
     },
     "packages/daemon": {
-      "name": "@arcus/daemon",
+      "name": "@amore/daemon",
       "version": "0.0.0",
       "dependencies": {
-        "@arcus/regula": "workspace:*",
+        "@amore/regula": "workspace:*",
       },
       "devDependencies": {
         "@types/node": "latest",
@@ -31,7 +31,7 @@
       },
     },
     "packages/parity": {
-      "name": "@arcus/parity",
+      "name": "@amore/parity",
       "version": "0.0.0",
       "bin": {
         "parity": "./src/index.ts",
@@ -42,7 +42,7 @@
       },
     },
     "packages/regula": {
-      "name": "@arcus/regula",
+      "name": "@amore/regula",
       "version": "0.0.0",
       "dependencies": {
         "gray-matter": "^4.0.3",
@@ -53,12 +53,12 @@
       },
     },
     "packages/tui": {
-      "name": "@arcus/tui",
+      "name": "@amore/tui",
       "version": "0.0.0",
       "dependencies": {
         "@opentui/core": "latest",
         "@opentui/react": "latest",
-        "@arcus/regula": "workspace:*",
+        "@amore/regula": "workspace:*",
         "d3-force": "^3.0.0",
         "katex": "^0.16.22",
         "marked": "^18.0.5",
@@ -94,15 +94,15 @@
 
     "@opentui/react": ["@opentui/react@0.4.5", "", { "dependencies": { "@opentui/core": "0.4.5", "react-reconciler": "^0.33.0" }, "peerDependencies": { "react": ">=19.2.0", "react-devtools-core": "^7.0.1", "ws": "^8.18.0" } }, "sha512-n88Vx0cMmAu++/S14WscjvdcT46IDcxve02jMtcfHQ9j6cySRHfILfGEpOB7xxc8RpCwQceEyOjkKkfzPzm6Jg=="],
 
-    "@arcus/cli": ["@arcus/cli@workspace:packages/cli"],
+    "@amore/cli": ["@amore/cli@workspace:packages/cli"],
 
-    "@arcus/daemon": ["@arcus/daemon@workspace:packages/daemon"],
+    "@amore/daemon": ["@amore/daemon@workspace:packages/daemon"],
 
-    "@arcus/parity": ["@arcus/parity@workspace:packages/parity"],
+    "@amore/parity": ["@amore/parity@workspace:packages/parity"],
 
-    "@arcus/regula": ["@arcus/regula@workspace:packages/regula"],
+    "@amore/regula": ["@amore/regula@workspace:packages/regula"],
 
-    "@arcus/tui": ["@arcus/tui@workspace:packages/tui"],
+    "@amore/tui": ["@amore/tui@workspace:packages/tui"],
 
     "@types/d3-force": ["@types/d3-force@3.0.10", "", {}, "sha512-ZYeSaCF3p73RdOKcjj+swRlZfnYpK1EbaDiYICEEp5Q6sUiqFaFQ9qgoshp5CzIyyb/yD09kD9o2zEltCexlgw=="],
 

@@ -1,7 +1,7 @@
 [
   {
     "category": "features",
-    "description": "**Iris lands on PATH with the house** — `arcus init` links the companion beside the `arcus` binary (no manual PATH step), and the planted `AGENTS.md` wires the resident agent to the iris org verbs and `iris regula lint`.",
+    "description": "**Iris lands on PATH with the house** — `amore init` links the companion beside the `amore` binary (no manual PATH step), and the planted `AGENTS.md` wires the resident agent to the iris org verbs and `iris regula lint`.",
     "breaking_change": false
   },
   {
@@ -11,7 +11,7 @@
   },
   {
     "category": "features",
-    "description": "**Iris installs with the house** — `arcus init` downloads the companion by default (`--no-iris` opts out), and the iris daemon now binds loopback only.",
+    "description": "**Iris installs with the house** — `amore init` downloads the companion by default (`--no-iris` opts out), and the iris daemon now binds loopback only.",
     "breaking_change": false
   },
   {

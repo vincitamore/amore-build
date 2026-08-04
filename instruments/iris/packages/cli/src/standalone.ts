@@ -3,7 +3,7 @@
  * Standalone / compiled-binary entry for iris.
  *
  * `bun build --compile` produces a single executable that embeds the CLI verbs
- * (`@arcus/regula` write surface + daemon HTTP reads) and the Bun index daemon.
+ * (`@amore/regula` write surface + daemon HTTP reads) and the Bun index daemon.
  * Routing is in-process: no sibling `.ts` spawns (those only exist in a source tree).
  *
  * OpenTUI dash is intentionally NOT embedded — see BUILD.md.
@@ -68,7 +68,7 @@ const DASH_SOURCE_NOTE = [
 function help(): void {
   process.stdout.write(
     [
-      'iris — Arcus control surface (compiled binary)',
+      'iris — Amore control surface (compiled binary)',
       '',
       '  iris daemon [--port N] [org_root]  start the index/read daemon',
       '  iris status|task|inbox|…           org verbs (regula + daemon reads)',

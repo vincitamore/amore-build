@@ -121,9 +121,9 @@ impl WorkflowRegistry {
         if let Some(cwd) = session_cwd
             && crate::agent::folder_trust::project_scope_allowed(cwd)
         {
-            // Arcus Build: `.arcus/workflows` (fork-native, higher
+            // Amore Build: `.amore/workflows` (fork-native, higher
             // precedence on name collision) then `.grok/workflows` (legacy).
-            dirs.push((project_root(cwd).join(".arcus").join("workflows"), "project"));
+            dirs.push((project_root(cwd).join(".amore").join("workflows"), "project"));
             dirs.push((project_root(cwd).join(".grok").join("workflows"), "project"));
         }
         dirs.push((user_workflow_dir(), "user"));

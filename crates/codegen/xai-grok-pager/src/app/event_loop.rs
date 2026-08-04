@@ -1204,7 +1204,7 @@ pub(crate) async fn run(
         // Fork-owned backstop: when no tip source produced anything (offline,
         // unreachable remote, provider sends none) and the user has not
         // explicitly disabled tips, seed the fork's compiled-in defaults so
-        // the welcome screen still teaches arcus-native content. See
+        // the welcome screen still teaches amore-native content. See
         // `crate::tips::defaults::apply_fork_defaults`.
         app.tips = crate::tips::defaults::apply_fork_defaults(
             merged_tips,

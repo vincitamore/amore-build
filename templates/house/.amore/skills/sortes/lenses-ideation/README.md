@@ -3,8 +3,8 @@
 Sibling to `../lenses/` (code-review). **Not** the default pick target.
 
 ```bash
-bun .arcus/skills/sortes/bin/pick.ts --catalog .arcus/skills/sortes/lenses-ideation
-bun .arcus/skills/sortes/bin/pick.ts --catalog .arcus/skills/sortes/lenses-ideation --n 5
+bun .amore/skills/sortes/bin/pick.ts --catalog .amore/skills/sortes/lenses-ideation
+bun .amore/skills/sortes/bin/pick.ts --catalog .amore/skills/sortes/lenses-ideation --n 5
 ```
 
 Asset form: `skill://sortes/bin/pick.ts` with `--catalog` pointing at this directory.

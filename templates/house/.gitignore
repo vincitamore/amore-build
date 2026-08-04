@@ -11,7 +11,7 @@ projects/*
 !projects/README.md
 
 # Installed instruments are artifacts, not authored source — iris is fetched
-# by `arcus init`, not written by you. Instruments you write yourself are
+# by `amore init`, not written by you. Instruments you write yourself are
 # tracked normally.
 instruments/iris/
 

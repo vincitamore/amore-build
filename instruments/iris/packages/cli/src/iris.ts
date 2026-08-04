@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * iris — house control surface for the Arcus org tree.
+ * iris — house control surface for the Amore org tree.
  *
  *   iris                 → open the dash (the span)
  *   iris dash            → same
@@ -27,7 +27,7 @@ const DEFAULT_PORT = 3853;
 function help(): void {
   process.stdout.write(
     [
-      "iris — Arcus house control surface (Ἶρις: the messenger, whose path is the arc)",
+      "iris — Amore house control surface (Ἶρις: the messenger, whose path is the arc)",
       "",
       "  iris                 open the OpenTUI dash (the span)",
       "  iris dash            same",

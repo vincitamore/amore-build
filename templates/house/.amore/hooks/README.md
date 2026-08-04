@@ -1,7 +1,7 @@
 # House hooks pack
 
 First-class cooperation-harness hooks shipped with every house created by
-`arcus init`. They are not optional extras — they close the turn and orient
+`amore init`. They are not optional extras — they close the turn and orient
 the session.
 
 | File | Event | Role |
@@ -18,7 +18,7 @@ Reads the Stop envelope on stdin. Emits nothing + exit 0 to release; emits
 `{"decision":"block","reason":"..."}` to feed a maintenance checklist back to
 the model. Decision logic:
 
-- once per operator turn (session-scoped state under `~/.arcus/state/stop-gate/`,
+- once per operator turn (session-scoped state under `~/.amore/state/stop-gate/`,
   keyed by `promptId`);
 - line-anchored release phrases (`No maintenance needed`, `Maintenance complete`,
   `Gate released`, …) or a capture-path write in this turn releases;
@@ -65,4 +65,4 @@ type <materialized>.json | python bin\house_stop_gate.py
 type <materialized>.json | python bin\house_session_init.py
 ```
 
-(cwd = this hooks directory; from `templates/house` prefix with `.arcus\hooks\`).
+(cwd = this hooks directory; from `templates/house` prefix with `.amore\hooks\`).

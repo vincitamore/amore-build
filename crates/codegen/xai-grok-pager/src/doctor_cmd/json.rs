@@ -28,7 +28,7 @@ struct JsonReport<'a> {
     findings: Vec<JsonFinding<'a>>,
     probe_notes: Vec<JsonProbeNote<'a>>,
     counts: JsonCounts,
-    /// Always-present PATH-collision check for the public `arcus` binary
+    /// Always-present PATH-collision check for the public `amore` binary
     /// (crates.io Lua-linter mitigation).
     path_collision: JsonPathCollision,
 }
@@ -46,9 +46,9 @@ struct JsonPathCollision {
 
 impl JsonPathCollision {
     fn from_live_check() -> Self {
-        let result = super::path_collision::check_arcus_path_collision();
+        let result = super::path_collision::check_amore_path_collision();
         Self {
-            binary: "arcus",
+            binary: "amore",
             status: result.status_label(),
             shadowed: result.is_shadowed(),
             path: result.path().map(|p| p.display().to_string()),

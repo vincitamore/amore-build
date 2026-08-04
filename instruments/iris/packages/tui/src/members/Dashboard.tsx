@@ -11,7 +11,7 @@ import {
   type InboxListItem,
   type ReminderListItem,
   type TaskListItem,
-} from '@arcus/regula';
+} from '@amore/regula';
 import { resolveOrgRoot } from '../daemon';
 import { dlog } from '../debug';
 import { usePalette } from '../ThemeProvider';

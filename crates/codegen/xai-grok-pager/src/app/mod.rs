@@ -1683,11 +1683,11 @@ mod tests {
     fn terminal_title_strips_control_characters() {
         assert_eq!(
             terminal_title_string("evil\x07\x1b]52;c;payload\x07title"),
-            "evil]52;c;payloadtitle - arcus"
+            "evil]52;c;payloadtitle - amore"
         );
-        assert_eq!(terminal_title_string("\x07\x1b\x00"), "arcus");
-        assert_eq!(terminal_title_string(""), "arcus");
-        assert_eq!(terminal_title_string("My chat"), "My chat - arcus");
+        assert_eq!(terminal_title_string("\x07\x1b\x00"), "amore");
+        assert_eq!(terminal_title_string(""), "amore");
+        assert_eq!(terminal_title_string("My chat"), "My chat - amore");
     }
     #[test]
     fn hunk_tracker_mode_nothing_set_is_none() {
@@ -2181,9 +2181,9 @@ mod tests {
         assert!(!args.no_alt_screen);
     }
     #[test]
-    fn cli_command_name_is_arcus() {
+    fn cli_command_name_is_amore() {
         use clap::CommandFactory;
-        assert_eq!(PagerArgs::command().get_name(), "arcus");
+        assert_eq!(PagerArgs::command().get_name(), "amore");
     }
     #[test]
     fn cli_help_output_header() {
@@ -2193,9 +2193,9 @@ mod tests {
         assert_eq!(
             first_5,
             vec![
-                "Arcus Build TUI",
+                "Amore Build TUI",
                 "",
-                "Usage: arcus [OPTIONS] [PROMPT] [COMMAND]",
+                "Usage: amore [OPTIONS] [PROMPT] [COMMAND]",
                 "",
                 "Arguments:",
             ]
@@ -2241,7 +2241,7 @@ mod tests {
         print_exit_resume_hint(&bare_exit_info("sess-abc", false), 80, &mut buf);
         assert_eq!(
             String::from_utf8(buf).unwrap(),
-            "\nResume this session with:\n  arcus --resume sess-abc\n"
+            "\nResume this session with:\n  amore --resume sess-abc\n"
         );
     }
     #[test]
@@ -2250,7 +2250,7 @@ mod tests {
         print_exit_resume_hint(&bare_exit_info("sess-abc", true), 80, &mut buf);
         assert_eq!(
             String::from_utf8(buf).unwrap(),
-            "\nResume this session with:\n  arcus --minimal --resume sess-abc\n"
+            "\nResume this session with:\n  amore --minimal --resume sess-abc\n"
         );
     }
     #[test]
@@ -2275,7 +2275,7 @@ mod tests {
                 "  Pinned the seed; 200 consecutive green runs.\n",
                 "\n",
                 "Resume this session with:\n",
-                "  arcus --resume sess-abc\n",
+                "  amore --resume sess-abc\n",
             )
         );
     }
@@ -2296,7 +2296,7 @@ mod tests {
         assert!(out.contains(&format!("\n{}…\n", "t".repeat(19))));
         assert!(out.contains(&format!("\n> {}…\n", "p".repeat(17))));
         assert!(out.contains(&format!("\n  {}…\n", "r".repeat(17))));
-        assert!(out.contains("  arcus --resume sess-abc\n"));
+        assert!(out.contains("  amore --resume sess-abc\n"));
     }
     #[test]
     fn print_relaunch_failure_hint_writes_expected_lines() {

@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
-import * as regula from '@arcus/regula';
+import * as regula from '@amore/regula';
 import { type ParsedArgs, csv, str } from './contract';
 import { EXIT } from './contract';
 import { daemonGet } from './daemon';

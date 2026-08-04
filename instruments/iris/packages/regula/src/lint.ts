@@ -754,23 +754,23 @@ export function lintLatticeDrift(orgRoot: string): { issues: LintIssue[]; notes:
 }
 
 /**
- * orientation-rules-drift — the derived harness rules (.arcus/rules/ or .grok/rules/) must
+ * orientation-rules-drift — the derived harness rules (.amore/rules/ or .grok/rules/) must
  * match their context/ sources; verified by the org's own scripts/sync_orientation_rules.py
- * --check. Skip-with-note when neither rules dir nor the script exists (a non-arcus-shape
+ * --check. Skip-with-note when neither rules dir nor the script exists (a non-amore-shape
  * org root), or when python is unavailable. Ported from the house lint; regula-general by
  * discovery — whatever script the org root carries is what gets checked.
  */
 export function lintOrientationRulesDrift(orgRoot: string): { issues: LintIssue[]; notes: string[] } {
-  const hasArcus = existsSync(join(orgRoot, '.arcus'));
+  const hasAmore = existsSync(join(orgRoot, '.amore'));
   const hasGrok = existsSync(join(orgRoot, '.grok'));
-  if (!hasArcus && !hasGrok) {
-    return { issues: [], notes: ['orientation-rules-drift: skipped (.arcus/ and .grok/ absent)'] };
+  if (!hasAmore && !hasGrok) {
+    return { issues: [], notes: ['orientation-rules-drift: skipped (.amore/ and .grok/ absent)'] };
   }
   const script = join(orgRoot, 'scripts', 'sync_orientation_rules.py');
   if (!existsSync(script)) {
     return { issues: [], notes: ['orientation-rules-drift: skipped (sync_orientation_rules.py not found)'] };
   }
-  const extraArgs = hasArcus ? [] : ['--grok-compat'];
+  const extraArgs = hasAmore ? [] : ['--grok-compat'];
   try {
     const proc = spawnSync('python', [script, '--check', ...extraArgs], {
       cwd: orgRoot,
@@ -782,7 +782,7 @@ export function lintOrientationRulesDrift(orgRoot: string): { issues: LintIssue[
       return {
         issues: [
           {
-            path: '.arcus/rules',
+            path: '.amore/rules',
             field: 'orientation-rules-drift',
             issue: `sync_orientation_rules.py --check exited ${proc.status}: ${tail}`,
             severity: 'error',

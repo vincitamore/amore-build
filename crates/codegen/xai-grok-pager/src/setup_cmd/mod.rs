@@ -1,8 +1,8 @@
-//! First-run setup wizard + `arcus setup` headless/explicit entry path (0.11).
+//! First-run setup wizard + `amore setup` headless/explicit entry path (0.11).
 //!
 //! ## Auto-guided first launch
-//! On interactive TUI launch with **no** resolvable credentials, Arcus shows
-//! a guided setup screen once (state under `~/.arcus/setup-wizard-state.json`).
+//! On interactive TUI launch with **no** resolvable credentials, Amore shows
+//! a guided setup screen once (state under `~/.amore/setup-wizard-state.json`).
 //!
 //! ## Hard guards (never auto-fire)
 //! - Headless (`-p` / `--single` / prompt-json/file) or non-TTY / piped I/O
@@ -11,9 +11,9 @@
 //! - Wizard state already `done` or `skipped`
 //!
 //! ## Explicit path
-//! `arcus setup` always runs the flow (interactive when TTY, else headless
+//! `amore setup` always runs the flow (interactive when TTY, else headless
 //! step listing). Team managed config remains available as
-//! `arcus setup --managed` (and legacy `arcus setup --json`).
+//! `amore setup --managed` (and legacy `amore setup --json`).
 
 mod credentials;
 mod flow;
@@ -40,7 +40,7 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 
-/// CLI arguments for `arcus setup`.
+/// CLI arguments for `amore setup`.
 #[derive(Clone, Debug, Eq, PartialEq, clap::Args)]
 pub struct SetupArgs {
     /// Team managed configuration (enterprise path; previous bare `setup` behavior).
@@ -48,7 +48,7 @@ pub struct SetupArgs {
     pub managed: bool,
     /// With `--managed`: print managed configuration as JSON without installing.
     /// Bare `--json` (without other wizard flags) also selects the managed path
-    /// for backward compatibility with `arcus setup --json`.
+    /// for backward compatibility with `amore setup --json`.
     #[arg(long)]
     pub json: bool,
     /// Force headless step listing (no prompts), even on a TTY.
@@ -87,7 +87,7 @@ impl SetupArgs {
     }
 }
 
-/// Production home for the wizard (`$ARCUS_HOME` / `$GROK_HOME` / `~/.arcus`).
+/// Production home for the wizard (`$AMORE_HOME` / `$GROK_HOME` / `~/.amore`).
 pub fn wizard_home() -> PathBuf {
     xai_grok_config::grok_home()
 }

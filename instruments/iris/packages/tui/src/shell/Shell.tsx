@@ -4,7 +4,7 @@ import { graphSignature, layoutWorldAsync, DEFAULT_GRAPH_CONFIG, type GraphConfi
 import type { SemanticLink } from '../render/overlay';
 import { daemonUrl, ensureDaemon, isDaemonUp, resolveOrgRoot } from '../daemon';
 import { docJumpInfo } from '../doc-jump';
-import { listReminders } from '@arcus/regula';
+import { listReminders } from '@amore/regula';
 import { syntheticGraph, syntheticSemanticLinks } from '../graph-view/synthetic';
 import { GraphView } from '../graph-view/GraphView';
 import { LoadingView } from '../graph-view/LoadingView';

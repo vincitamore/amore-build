@@ -7,7 +7,7 @@
  *   linux-x64   → iris-linux-x64
  *   darwin-arm64→ iris-darwin-arm64
  *
- * Embeds: CLI verbs + Bun index daemon (+ @arcus/regula).
+ * Embeds: CLI verbs + Bun index daemon (+ @amore/regula).
  * Optional: `--with-dash` also builds dist/iris-dash-{os}-{arch}[.exe]
  * (OpenTUI native surface — proven on windows-x64; see BUILD.md).
  *

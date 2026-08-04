@@ -74,8 +74,8 @@ pub use version_overrides::{VersionOverrideError, apply_version_overrides};
 
 /// Parse an env var as a boolean. `None` if unset or unrecognized.
 ///
-/// Uses the Arcus identity layer: mapped `GROK_*` / `ARCUS_*` names resolve
-/// with `ARCUS_*` primary and `GROK_*` legacy fallback; unmapped names are
+/// Uses the Amore identity layer: mapped `GROK_*` / `AMORE_*` names resolve
+/// with `AMORE_*` primary and `GROK_*` legacy fallback; unmapped names are
 /// plain env reads.
 pub fn env_bool(name: &str) -> Option<bool> {
     xai_grok_env::aliased_env_bool(name)

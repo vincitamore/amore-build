@@ -102,7 +102,7 @@ async fn unknown_ssh_clipboard_delivery_is_unverified() {
         .wait_for_text("clipboard.delivery-unverified", Duration::from_secs(10))
         .expect("named clipboard finding");
     harness
-        .wait_for_text("arcus wrap ssh <host>", Duration::from_secs(10))
+        .wait_for_text("amore wrap ssh <host>", Duration::from_secs(10))
         .expect("doctor-owned wrapped SSH guidance");
     assert!(!harness.contains_text("Copy failed"));
     assert!(!harness.contains_text("panicked"));

@@ -5,11 +5,11 @@ created: 2026-07-30
 
 # House scaffold
 
-Root index for an **Arcus Build** house — a continuous working tree for
+Root index for an **Amore Build** house — a continuous working tree for
 long-running multi-session agent work. Continuity lives in architecture, not
 in any single model's memory.
 
-`arcus-build init` plants this tree. Customize [[AGENTS]] for house identity
+`amore-build init` plants this tree. Customize [[AGENTS]] for house identity
 and local facts; keep schemas and folder roles stable so sessions and tooling
 share one contract.
 
@@ -25,7 +25,7 @@ share one contract.
 | [[reminders/README\|reminders/]] | Time-based obligations |
 | [[forge/README\|forge/]] | Pipeline products (handles, outputs, session manifests) |
 | `scripts/` | House utilities (lint, orientation sync, …) |
-| `.arcus/` | Skills and hooks (stop gate + session init) |
+| `.amore/` | Skills and hooks (stop gate + session init) |
 
 ## Frontmatter
 

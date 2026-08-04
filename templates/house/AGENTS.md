@@ -1,7 +1,7 @@
 # {{HOUSE_NAME}}
 
 > Cooperation harness for long-running multi-session agent work on
-> **Arcus Build** (fork of Grok Build). One continuous working tree —
+> **Amore Build** (fork of Grok Build). One continuous working tree —
 > continuity lives in architecture, not in any single model's memory.
 
 ## Identity
@@ -15,15 +15,15 @@ utility, compress.
 
 ## Harness of record
 
-Project config lives at **`.arcus/`** (highest-precedence skill and hook root;
+Project config lives at **`.amore/`** (highest-precedence skill and hook root;
 `.grok` and peer tool dirs remain fallbacks). User-tier skills sit at
-`$GROK_HOME/skills` (default `~/.arcus/skills`). Native multi-agent surfaces
+`$GROK_HOME/skills` (default `~/.amore/skills`). Native multi-agent surfaces
 (`spawn_subagent`, monitors, workflows) are the freight path — harness docs
 own tool spellings.
 
 ### Hooks (installed by init — first-class)
 
-`arcus-build init` plants project-tier hooks under `.arcus/hooks/`:
+`amore-build init` plants project-tier hooks under `.amore/hooks/`:
 
 | Hook | Event | Role |
 |------|-------|------|
@@ -39,14 +39,14 @@ own tool spellings.
    `Maintenance not required` · `Gate released`
 2. **Capture-write soft-ack** — this turn already wrote under a capture path
    (`knowledge/`, `inbox/`, `tasks/`, `reminders/`, `context/`,
-   `forge/{handles,output,sessions}/`, `.arcus/skills/`). Manufacturing a
+   `forge/{handles,output,sessions}/`, `.amore/skills/`). Manufacturing a
    low-value capture to satisfy the gate is worse than releasing honestly.
 3. Trivial sessions, non-org workspaces, and non-`end_turn` fires never block.
 
 If in doubt whether real maintenance is owed, **release**.
 
-**Disable:** `arcus-build init --no-hooks`, or remove/rename the registration
-under `.arcus/hooks/`. Hooks are tool-owned — `init --refresh` may restore
+**Disable:** `amore-build init --no-hooks`, or remove/rename the registration
+under `.amore/hooks/`. Hooks are tool-owned — `init --refresh` may restore
 them; keep a local note if you intentionally disable.
 
 **What the gate asks you to consider:** insight → `knowledge/`; decisions /
@@ -99,12 +99,12 @@ into this house's `knowledge/` — regenerate, don't paraphrase.
 
 ## Skills
 
-House skills live at `.arcus/skills/<name>/SKILL.md`. Metadata rides the
+House skills live at `.amore/skills/<name>/SKILL.md`. Metadata rides the
 system prompt at session start; bodies load on demand (`read_file`,
 `skill://<name>`). Subagents inherit the discovered list. User-tier skills under
-`~/.arcus/skills` apply across projects.
+`~/.amore/skills` apply across projects.
 
-Bundled skills (tool-owned; refreshable by `arcus-build init --refresh` —
+Bundled skills (tool-owned; refreshable by `amore-build init --refresh` —
 fork to a new directory name to customize without losing edits):
 
 | Skill | Purpose |
@@ -159,7 +159,7 @@ Frontmatter is the single source of truth.
 ├── projects/              # the work itself (see projects/README.md)
 ├── instruments/           # tools that act on this house (iris lands here)
 ├── scripts/               # house utilities (lint, orientation sync, …)
-└── .arcus/               # skills/, hooks/ (stop gate + session init)
+└── .amore/               # skills/, hooks/ (stop gate + session init)
 ```
 
 Empty containers carry `.gitkeep` so they survive a clone.
@@ -171,7 +171,7 @@ README.
 ## The iris companion (org surface)
 
 Init installs **iris** under `instruments/iris/` and links it beside the
-`arcus` binary, so it resolves on PATH wherever `arcus` does. It is the
+`amore` binary, so it resolves on PATH wherever `amore` does. It is the
 preferred surface for org CRUD — every write goes through its **regula**
 core, which enforces the frontmatter schemas above, the legal lifecycle
 transitions, and folder placement, so a verb cannot produce a file this

@@ -45,7 +45,7 @@ pub fn ssh_wrap_one_off() -> &'static str {
 /// Namespace marker written into managed shell/tmux config blocks. Fixed
 /// rather than argv0-derived: a file marker must be stable across every
 /// invocation name, so it carries the product name, not the invoked name.
-const MANAGED_NAMESPACE: &str = "arcus doctor";
+const MANAGED_NAMESPACE: &str = "amore doctor";
 /// Pre-rename namespace. Blocks written under it are adopted in place by the
 /// plan/apply transaction (see `ManagedConfigRequest::legacy_namespace`).
 const LEGACY_MANAGED_NAMESPACE: &str = "grok doctor";

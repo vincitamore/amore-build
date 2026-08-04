@@ -1,4 +1,4 @@
-import type { ForgeListItem } from '@arcus/regula';
+import type { ForgeListItem } from '@amore/regula';
 
 // Pipeline reconstruction — forge has no "list pipelines" shape on disk; a pipeline is
 // rebuilt from many files (manifest + handle/output pairs) sharing a `pipeline` key. Ported

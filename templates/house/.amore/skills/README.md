@@ -7,7 +7,7 @@ you do not use.
 
 ## How they load
 
-The harness scans `.arcus/skills/` in your house, plus `~/.arcus/skills` for
+The harness scans `.amore/skills/` in your house, plus `~/.amore/skills` for
 anything you want available everywhere. Each skill is a directory containing a
 `SKILL.md` whose frontmatter carries a `name` and a `description`.
 
@@ -47,7 +47,7 @@ path.
 
 ## A note on the principle lattice
 
-`.arcus/rules/principle-lattice.md` is a different thing from a skill: it loads
+`.amore/rules/principle-lattice.md` is a different thing from a skill: it loads
 in full, every session, as a standing lens rather than on-demand guidance. The
 copy planted here is **a worked example, not a prescription** — it is one house's
 set of commitments, written down so the agent can apply them consistently.
@@ -57,4 +57,4 @@ work, delete the ones you do not hold, add the ones you do. An inherited lattice
 you have not examined is worse than none, because it will be applied to your
 work as though you had chosen it.
 
-If you would rather not have one at all, `arcus init --no-lattice` skips it.
+If you would rather not have one at all, `amore init --no-lattice` skips it.

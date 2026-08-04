@@ -1,4 +1,4 @@
-//! `arcus init` — create a house and install the cooperation harness into it.
+//! `amore init` — create a house and install the cooperation harness into it.
 //!
 //! The house tree itself is extracted from `templates/house/**`, compiled into
 //! this binary, with an ownership/refresh policy: never silently overwrite user
@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 use crate::house_embed::{HouseEntry, embedded_house_entries};
 
 /// Relative path of the install manifest inside the target repo.
-pub const MANIFEST_REL: &str = ".arcus/house-install.json";
+pub const MANIFEST_REL: &str = ".amore/house-install.json";
 
 pub mod iris_fetch;
 
@@ -36,7 +36,7 @@ const MANIFEST_VERSION: u32 = 1;
 /// tasks, conventions and running context, and the work itself lives in
 /// `projects/` inside it. That is why it owns its own git history rather than
 /// borrowing a host repo's.
-pub const DEFAULT_HOUSE_DIR: &str = "arcus";
+pub const DEFAULT_HOUSE_DIR: &str = "amore";
 
 #[derive(Clone, Debug, Eq, PartialEq, clap::Args)]
 pub struct InitArgs {
@@ -52,13 +52,13 @@ pub struct InitArgs {
     /// Install bundled skills (default: on; explicit opt-in, no-op when already default).
     #[arg(long = "skills", conflicts_with = "no_skills")]
     pub skills: bool,
-    /// Skip bundled skills under `.arcus/skills/`.
+    /// Skip bundled skills under `.amore/skills/`.
     #[arg(long = "no-skills", conflicts_with = "skills")]
     pub no_skills: bool,
     /// Install project hooks (default: on; explicit opt-in, no-op when already default).
     #[arg(long = "hooks", conflicts_with = "no_hooks")]
     pub hooks: bool,
-    /// Skip `.arcus/hooks/**` install and global hooks-paths registration.
+    /// Skip `.amore/hooks/**` install and global hooks-paths registration.
     #[arg(long = "no-hooks", conflicts_with = "hooks")]
     pub no_hooks: bool,
     /// Skip `context/principle-lattice.md` (lattice is default-on).
@@ -240,7 +240,7 @@ impl HooksRegistryAction {
 #[derive(Debug, Clone)]
 pub struct InitContext {
     pub cwd: PathBuf,
-    /// Global config home (`~/.arcus` / `$GROK_HOME`). Never touch the real one in tests.
+    /// Global config home (`~/.amore` / `$GROK_HOME`). Never touch the real one in tests.
     pub grok_home: PathBuf,
     pub entries: Vec<HouseEntry>,
     pub stdin_is_terminal: bool,
@@ -390,7 +390,7 @@ pub fn run_with_context(
         false
     };
 
-    // Hooks registry: register <root>/.arcus/hooks when hooks files were in the plan.
+    // Hooks registry: register <root>/.amore/hooks when hooks files were in the plan.
     let hooks_registry = register_hooks_path(args, ctx, &root, &plans, writer)?;
 
     // Companion install runs LAST: the house is already complete on disk, so a
@@ -465,12 +465,12 @@ fn plan_files(
 
 fn is_hooks_rel(rel: &str) -> bool {
     let norm = rel.replace('\\', "/");
-    norm.starts_with(".arcus/hooks/") || norm == ".arcus/hooks"
+    norm.starts_with(".amore/hooks/") || norm == ".amore/hooks"
 }
 
 /// The house's own name, taken from the directory being created.
 ///
-/// `arcus init` → `arcus`; `arcus init ../work/atelier` → `atelier`. Falls
+/// `amore init` → `amore`; `amore init ../work/atelier` → `atelier`. Falls
 /// back to the default rather than producing an empty name for an odd path.
 fn house_name_from(dir: &str) -> String {
     Path::new(dir)
@@ -528,7 +528,7 @@ fn keep_entry(rel: &str, args: &InitArgs) -> bool {
     }
 
     if !args.skills_enabled()
-        && (norm.starts_with(".arcus/skills/") || norm == ".arcus/skills")
+        && (norm.starts_with(".amore/skills/") || norm == ".amore/skills")
     {
         return false;
     }
@@ -567,7 +567,7 @@ fn resolve_house_root(
         if !already_a_house && !is_empty {
             bail!(
                 "{} already exists and is not a house.\n\
-                 Choose another name (`arcus init <dir>`), or remove it first.",
+                 Choose another name (`amore init <dir>`), or remove it first.",
                 root.display()
             );
         }
@@ -636,7 +636,7 @@ fn register_hooks_path(
     plans: &[FilePlan],
     writer: &mut impl Write,
 ) -> Result<HooksRegistryReport> {
-    let hooks_dir = root.join(".arcus").join("hooks");
+    let hooks_dir = root.join(".amore").join("hooks");
     let registry_path = ctx.grok_home.join("hooks-paths");
 
     // `--no-hooks` suppresses both file install and global registry write.
@@ -669,14 +669,14 @@ fn register_hooks_path(
         if hooks_dir.is_absolute() {
             hooks_dir.clone()
         } else {
-            root.join(".arcus").join("hooks")
+            root.join(".amore").join("hooks")
         }
     });
     // On dry-run the dir may not exist yet — still report the intended absolute path.
     let hooks_line = if hooks_abs.exists() {
         hooks_abs
     } else {
-        root.join(".arcus").join("hooks")
+        root.join(".amore").join("hooks")
     };
     let hooks_line = if hooks_line.is_absolute() {
         hooks_line
@@ -696,7 +696,7 @@ fn register_hooks_path(
         });
     }
 
-    // Ensure slots exist under the *overridden* grok home (not the real ~/.arcus).
+    // Ensure slots exist under the *overridden* grok home (not the real ~/.amore).
     std::fs::create_dir_all(&ctx.grok_home)
         .with_context(|| format!("create grok home {}", ctx.grok_home.display()))?;
     let hooks_slot = ctx.grok_home.join("hooks");
@@ -808,7 +808,7 @@ fn write_summary(
         writeln!(writer, "  1. cd {house}")?;
         writeln!(
             writer,
-            "  2. Run arcus from there (trust dialog if first time)"
+            "  2. Run amore from there (trust dialog if first time)"
         )?;
         writeln!(
             writer,
@@ -900,7 +900,7 @@ mod unit_tests {
         // As do the hooks fixtures: canned envelopes for a script they own,
         // documented by the hooks README, and not mistakable for house content.
         assert!(keep_entry(
-            ".arcus/hooks/fixtures/stop-gate/01-first-fire-block.json",
+            ".amore/hooks/fixtures/stop-gate/01-first-fire-block.json",
             &args
         ));
     }
@@ -923,7 +923,7 @@ mod unit_tests {
 
     #[test]
     fn house_name_comes_from_the_directory() {
-        assert_eq!(house_name_from("arcus"), "arcus");
+        assert_eq!(house_name_from("amore"), "amore");
         assert_eq!(house_name_from("my-house"), "my-house");
         assert_eq!(house_name_from("../work/atelier"), "atelier");
         // Degenerate input falls back rather than yielding an empty name.
@@ -931,19 +931,19 @@ mod unit_tests {
     }
 
     #[test]
-    fn default_house_dir_is_arcus() {
+    fn default_house_dir_is_amore() {
         assert_eq!(InitArgs::default().dir, DEFAULT_HOUSE_DIR);
-        assert_eq!(DEFAULT_HOUSE_DIR, "arcus");
+        assert_eq!(DEFAULT_HOUSE_DIR, "amore");
     }
 
     #[test]
     fn keep_entry_respects_no_skills_and_no_lattice() {
         let mut args = InitArgs::default();
         assert!(args.skills_enabled());
-        assert!(keep_entry(".arcus/skills/foo/SKILL.md", &args));
+        assert!(keep_entry(".amore/skills/foo/SKILL.md", &args));
         args.no_skills = true;
         assert!(!args.skills_enabled());
-        assert!(!keep_entry(".arcus/skills/foo/SKILL.md", &args));
+        assert!(!keep_entry(".amore/skills/foo/SKILL.md", &args));
         assert!(keep_entry("AGENTS.md", &args));
 
         args = InitArgs::default();
@@ -958,7 +958,7 @@ mod unit_tests {
         args.no_hooks = true;
         assert!(!args.hooks_enabled());
         assert!(
-            keep_entry(".arcus/hooks/demo.json", &args),
+            keep_entry(".amore/hooks/demo.json", &args),
             "hooks remain selectable so the plan can list them as skipped"
         );
     }
@@ -966,7 +966,7 @@ mod unit_tests {
     #[test]
     fn everything_the_house_needs_is_on_by_default() {
         // Iris joined this list when it stopped being an optional extra: a
-        // plain `arcus init` gives you the whole house, and each piece has an
+        // plain `amore init` gives you the whole house, and each piece has an
         // explicit opt-out rather than an opt-in nobody discovers.
         let args = InitArgs::default();
         assert!(args.skills_enabled());

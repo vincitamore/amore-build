@@ -1,11 +1,11 @@
-//! Golden ownership/refresh tests for `arcus init`.
+//! Golden ownership/refresh tests for `amore init`.
 //!
 //! `init` CREATES a house directory under the cwd — it does not overlay the
-//! current repository — so every assertion below targets `<cwd>/arcus`, not
+//! current repository — so every assertion below targets `<cwd>/amore`, not
 //! the cwd itself.
 //!
 //! Fixture pack: `tests/fixtures/house-golden/**` (not the live templates).
-//! Global hooks registry is isolated via a temp `grok_home` (never `~/.arcus`).
+//! Global hooks registry is isolated via a temp `grok_home` (never `~/.amore`).
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -34,7 +34,7 @@ impl Harness {
     fn new() -> Self {
         let tmp = tempfile::tempdir().expect("tempdir");
         let repo = tmp.path().join("repo");
-        let grok_home = tmp.path().join("fake-arcus-home");
+        let grok_home = tmp.path().join("fake-amore-home");
         std::fs::create_dir_all(&repo).unwrap();
         std::fs::create_dir_all(&grok_home).unwrap();
         let entries = load_golden_entries();
@@ -150,9 +150,9 @@ fn fresh_install_writes_tree_and_manifest() {
     assert!(h.exists(MANIFEST_REL));
     assert!(h.exists("AGENTS.md"));
     assert!(h.exists("context/principle-lattice.md")); // lattice default-on
-    assert!(h.exists(".arcus/hooks/demo-hook.json"));
-    assert!(h.exists(".arcus/skills/demo-skill/SKILL.md"));
-    assert!(!h.exists(".arcus/iris-companion.note.md")); // iris pointer note retired
+    assert!(h.exists(".amore/hooks/demo-hook.json"));
+    assert!(h.exists(".amore/skills/demo-skill/SKILL.md"));
+    assert!(!h.exists(".amore/iris-companion.note.md")); // iris pointer note retired
 
     // Every selected file present with identical bytes. Compare against
     // `select_entries`, not the raw fixtures: init expands `{{HOUSE_NAME}}` at
@@ -208,7 +208,7 @@ fn fresh_install_writes_tree_and_manifest() {
     assert!(hooks_report.registry_path.starts_with(&h.grok_home));
     let reg = std::fs::read_to_string(&hooks_report.registry_path).unwrap();
     assert!(
-        reg.lines().any(|l| l.contains(".arcus") && l.contains("hooks")),
+        reg.lines().any(|l| l.contains(".amore") && l.contains("hooks")),
         "registry should list project hooks dir: {reg}"
     );
 }
@@ -270,7 +270,7 @@ fn refresh_preserves_user_modified_file() {
     let hook = report
         .plans
         .iter()
-        .find(|p| p.rel_path == ".arcus/hooks/demo-hook.json")
+        .find(|p| p.rel_path == ".amore/hooks/demo-hook.json")
         .expect("hook plan");
     assert_eq!(hook.action, FileAction::SkipUnchanged);
 }
@@ -283,7 +283,7 @@ fn refresh_rewrites_untouched_when_template_changes() {
     // Simulate a newer binary with updated tool-owned content, same path.
     let mut new_entries = h.entries.clone();
     for e in &mut new_entries {
-        if e.rel_path == ".arcus/hooks/demo-hook.json" {
+        if e.rel_path == ".amore/hooks/demo-hook.json" {
             e.contents = b"{\"hooks\":{\"updated\":true}}\n".to_vec();
         }
     }
@@ -309,11 +309,11 @@ fn refresh_rewrites_untouched_when_template_changes() {
     let hook = report
         .plans
         .iter()
-        .find(|p| p.rel_path == ".arcus/hooks/demo-hook.json")
+        .find(|p| p.rel_path == ".amore/hooks/demo-hook.json")
         .unwrap();
     assert_eq!(hook.action, FileAction::Write);
     assert_eq!(
-        h.read(".arcus/hooks/demo-hook.json"),
+        h.read(".amore/hooks/demo-hook.json"),
         "{\"hooks\":{\"updated\":true}}\n"
     );
 }
@@ -370,14 +370,14 @@ fn no_skills_skips_skills_tree() {
         ..InitArgs::default()
     });
 
-    assert!(!h.exists(".arcus/skills/demo-skill/SKILL.md"));
+    assert!(!h.exists(".amore/skills/demo-skill/SKILL.md"));
     assert!(
         report
             .plans
             .iter()
-            .all(|p| !p.rel_path.starts_with(".arcus/skills/"))
+            .all(|p| !p.rel_path.starts_with(".amore/skills/"))
     );
-    assert!(h.exists(".arcus/hooks/demo-hook.json"));
+    assert!(h.exists(".amore/hooks/demo-hook.json"));
 }
 
 #[test]
@@ -397,18 +397,18 @@ fn no_hooks_skips_hooks_tree_and_registry() {
     let stdout = String::from_utf8_lossy(&out);
 
     // No hooks files on disk.
-    assert!(!h.exists(".arcus/hooks/demo-hook.json"));
-    assert!(!h.exists(".arcus/hooks/README.md"));
+    assert!(!h.exists(".amore/hooks/demo-hook.json"));
+    assert!(!h.exists(".amore/hooks/README.md"));
     // Other harness files still install.
     assert!(h.exists("AGENTS.md"));
-    assert!(h.exists(".arcus/skills/demo-skill/SKILL.md"));
+    assert!(h.exists(".amore/skills/demo-skill/SKILL.md"));
     assert!(h.exists("context/current-state.md"));
 
     // Plan still lists hooks lines, marked skipped (contract for dry-run / report).
     let hook_plans: Vec<_> = report
         .plans
         .iter()
-        .filter(|p| p.rel_path.starts_with(".arcus/hooks/"))
+        .filter(|p| p.rel_path.starts_with(".amore/hooks/"))
         .collect();
     assert!(
         !hook_plans.is_empty(),
@@ -425,7 +425,7 @@ fn no_hooks_skips_hooks_tree_and_registry() {
             .collect::<Vec<_>>()
     );
     assert!(
-        stdout.contains(".arcus/hooks/") && stdout.contains("skipped"),
+        stdout.contains(".amore/hooks/") && stdout.contains("skipped"),
         "summary must list hooks under skipped: {stdout}"
     );
 

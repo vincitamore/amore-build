@@ -1,14 +1,14 @@
-/// Legacy env name; primary is `ARCUS_SYSTEM_PROMPT_LABEL` (identity layer).
+/// Legacy env name; primary is `AMORE_SYSTEM_PROMPT_LABEL` (identity layer).
 pub const ENV_SYSTEM_PROMPT_LABEL: &str = "GROK_SYSTEM_PROMPT_LABEL";
 /// Primary env name for the system-prompt identity label.
-pub const ENV_SYSTEM_PROMPT_LABEL_PRIMARY: &str = "ARCUS_SYSTEM_PROMPT_LABEL";
+pub const ENV_SYSTEM_PROMPT_LABEL_PRIMARY: &str = "AMORE_SYSTEM_PROMPT_LABEL";
 
 pub const DEFAULT_SYSTEM_PROMPT_LABEL: &str = xai_grok_agent::DEFAULT_SYSTEM_PROMPT_LABEL;
 
 /// Resolve system-prompt identity label.
-/// Precedence: env (`ARCUS_SYSTEM_PROMPT_LABEL` primary / `GROK_SYSTEM_PROMPT_LABEL`
+/// Precedence: env (`AMORE_SYSTEM_PROMPT_LABEL` primary / `GROK_SYSTEM_PROMPT_LABEL`
 /// legacy) → config per-model → `[agent]` → GB per-model → GB global →
-/// public default (`Arcus Build` via [`DEFAULT_SYSTEM_PROMPT_LABEL`]).
+/// public default (`Amore Build` via [`DEFAULT_SYSTEM_PROMPT_LABEL`]).
 /// Empty/whitespace falls through.
 ///
 /// Per-model TOML is looked up by session catalog id, then routing slug
@@ -182,10 +182,10 @@ mod system_prompt_label_tests {
     }
 
     #[test]
-    fn arcus_primary_wins_over_grok_legacy() {
+    fn amore_primary_wins_over_grok_legacy() {
         let _guard = ENV_LOCK.lock().unwrap();
         unsafe {
-            std::env::set_var(ENV_SYSTEM_PROMPT_LABEL_PRIMARY, "ArcusPrimary");
+            std::env::set_var(ENV_SYSTEM_PROMPT_LABEL_PRIMARY, "AmorePrimary");
             std::env::set_var(ENV_SYSTEM_PROMPT_LABEL, "GrokLegacy");
         }
         let got = resolve_system_prompt_label_from_tiers(
@@ -198,7 +198,7 @@ mod system_prompt_label_tests {
             std::env::remove_var(ENV_SYSTEM_PROMPT_LABEL_PRIMARY);
             std::env::remove_var(ENV_SYSTEM_PROMPT_LABEL);
         }
-        assert_eq!(got, "ArcusPrimary");
+        assert_eq!(got, "AmorePrimary");
     }
 
     static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());

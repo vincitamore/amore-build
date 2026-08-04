@@ -1,6 +1,6 @@
 name: ci
 
-# Build + test the arcus binary surface on Linux and Windows.
+# Build + test the amore binary surface on Linux and Windows.
 # Iris CI has its own lane (iris-ci.yml) scoped to instruments/iris/**.
 #
 # Build and test are SEPARATE jobs on purpose: one job that produced both a
@@ -55,7 +55,7 @@ jobs:
         with:
           shared-key: ci-build
 
-      - name: Build arcus binary (unix)
+      - name: Build amore binary (unix)
         if: matrix.os != 'windows-latest'
         run: cargo build --release -p xai-grok-pager-bin
 
@@ -64,34 +64,34 @@ jobs:
       # The flags go through RUSTFLAGS, NOT `cargo rustc -- -Clink-args=…`:
       # PowerShell splits `-Clink-args=/DEBUG:NONE` at the colon and rustc then
       # sees `NONE` as a second input filename.
-      - name: Build arcus binary (windows)
+      - name: Build amore binary (windows)
         if: matrix.os == 'windows-latest'
         env:
           RUSTFLAGS: "-Clink-arg=/DEBUG:NONE -Clink-arg=/STACK:8388608"
         run: cargo build --release -p xai-grok-pager-bin
 
-      - name: Smoke — arcus --version stamps the build commit (Linux)
+      - name: Smoke — amore --version stamps the build commit (Linux)
         if: matrix.os == 'ubuntu-latest'
         run: |
-          target/release/arcus --version
-          target/release/arcus doctor --json | head -c 400
+          target/release/amore --version
+          target/release/amore doctor --json | head -c 400
           echo
 
-      - name: Smoke — arcus --version stamps the build commit (Windows)
+      - name: Smoke — amore --version stamps the build commit (Windows)
         if: matrix.os == 'windows-latest'
         run: |
-          target\release\arcus.exe --version
-          target\release\arcus.exe doctor --json | Select-Object -First 1
+          target\release\amore.exe --version
+          target\release\amore.exe doctor --json | Select-Object -First 1
 
       # Keep the built binary reachable for local inspection (docs captures,
       # bisecting a report against a known commit) without a full local build.
       - name: Upload built binary
         uses: actions/upload-artifact@v4
         with:
-          name: arcus-ci-${{ matrix.os }}
+          name: amore-ci-${{ matrix.os }}
           path: |
-            target/release/arcus
-            target/release/arcus.exe
+            target/release/amore
+            target/release/amore.exe
           if-no-files-found: error
           retention-days: 7
 

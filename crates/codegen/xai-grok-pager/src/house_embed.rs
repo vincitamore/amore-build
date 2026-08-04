@@ -1,4 +1,4 @@
-//! Build-time embed of `templates/house/**` for `arcus init`.
+//! Build-time embed of `templates/house/**` for `amore init`.
 //!
 //! The house TREE needs no network — it is compiled in. The iris companion
 //! is fetched separately (see `init_cmd::iris_fetch`), so `init` as a whole

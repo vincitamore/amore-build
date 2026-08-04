@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { ensureMutationTrust, RegulaError } from '@arcus/regula';
+import { ensureMutationTrust, RegulaError } from '@amore/regula';
 import { resolveOrgRoot } from './org-root';
 import { COMMANDS, manifest, resolveCommand } from './commands';
 import {

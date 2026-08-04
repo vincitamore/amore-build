@@ -69,7 +69,7 @@ pub fn collect_report() -> DiagnosticReport {
 
 /// Last path-collision probe result for JSON emission (always present).
 pub fn path_collision_result() -> path_collision::PathCollisionResult {
-    path_collision::check_arcus_path_collision()
+    path_collision::check_amore_path_collision()
 }
 
 fn configured_report_for_terminal(

@@ -13,7 +13,7 @@ use crate::render::color::blend_color;
 use crate::theme::Theme;
 
 /// Braille art paired with its per-cell hue map. Both are generated together
-/// by `scripts/gen_arcus.py` and must stay in lockstep: the hue file has one
+/// by `scripts/gen_amore.py` and must stay in lockstep: the hue file has one
 /// character per cell (`0`–`6` naming a band, `.` for an unlit cell) on lines
 /// padded to the same width as the art.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

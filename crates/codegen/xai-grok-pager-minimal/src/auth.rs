@@ -313,7 +313,7 @@ pub(super) fn render_auth(buf: &mut Buffer, area: Rect, theme: &Theme, hint: &Mi
                 y,
                 bottom,
                 Line::from(Span::styled(
-                    "Arcus Build may run or modify contents in this directory,",
+                    "Amore Build may run or modify contents in this directory,",
                     gray,
                 )),
             );

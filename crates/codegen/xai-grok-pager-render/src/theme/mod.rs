@@ -18,7 +18,7 @@ pub mod md_style;
 pub mod osc11;
 mod oscura;
 mod rosepine;
-mod arcus;
+mod amore;
 pub mod system_appearance;
 mod terminal_default;
 pub mod tokyonight;
@@ -34,7 +34,7 @@ pub enum ThemeKind {
     TokyoNight = 2,
     RosePineMoon = 3,
     OscuraMidnight = 5,
-    Arcus = 6,
+    Amore = 6,
     /// Meta-variant: follow system dark/light appearance.
     ///
     /// Never stored in `cache::CURRENT` — resolved to a concrete
@@ -53,7 +53,7 @@ impl ThemeKind {
         ThemeKind::TokyoNight,
         ThemeKind::RosePineMoon,
         ThemeKind::OscuraMidnight,
-        ThemeKind::Arcus,
+        ThemeKind::Amore,
     ];
 
     /// Theme kinds available on the current terminal.
@@ -81,7 +81,7 @@ impl ThemeKind {
             Self::GrokDay => "grokday",
             Self::RosePineMoon => "rosepine-moon",
             Self::OscuraMidnight => "oscura-midnight",
-            Self::Arcus => "arcus",
+            Self::Amore => "amore",
             Self::Auto => "auto",
         }
     }
@@ -98,7 +98,7 @@ impl ThemeKind {
             Self::GrokDay => false,
             Self::RosePineMoon => true,
             Self::OscuraMidnight => true,
-            Self::Arcus => true,
+            Self::Amore => true,
             // Auto is resolved to a concrete theme before rendering.
             Self::Auto => false,
         }
@@ -117,7 +117,7 @@ impl ThemeKind {
                 Some(Self::RosePineMoon)
             }
             "oscura" | "oscura-midnight" => Some(Self::OscuraMidnight),
-            "arcus" | "arcus-night" | "bow" => Some(Self::Arcus),
+            "amore" | "amore-night" | "bow" => Some(Self::Amore),
             _ => None,
         }
     }
@@ -281,7 +281,7 @@ impl Theme {
             ThemeKind::GrokDay => Self::grokday(),
             ThemeKind::RosePineMoon => Self::rosepine_moon(),
             ThemeKind::OscuraMidnight => Self::oscura_midnight(),
-            ThemeKind::Arcus => Self::arcus(),
+            ThemeKind::Amore => Self::amore(),
             // Auto is resolved to a concrete theme before being stored;
             // if reached, fall back to GrokNight.
             ThemeKind::Auto => Self::groknight(),
@@ -710,7 +710,7 @@ mod tests {
         assert!(Theme::tokyonight().is_dark());
         assert!(Theme::rosepine_moon().is_dark());
         assert!(Theme::oscura_midnight().is_dark());
-        assert!(Theme::arcus().is_dark());
+        assert!(Theme::amore().is_dark());
         assert!(!Theme::grokday().is_dark());
     }
 
@@ -993,7 +993,7 @@ mod tests {
                 ThemeKind::TokyoNight => Theme::tokyonight(),
                 ThemeKind::RosePineMoon => Theme::rosepine_moon(),
                 ThemeKind::OscuraMidnight => Theme::oscura_midnight(),
-                ThemeKind::Arcus => Theme::arcus(),
+                ThemeKind::Amore => Theme::amore(),
                 ThemeKind::Auto => unreachable!("ALL excludes Auto"),
             };
             let track = lum(theme.scrollbar_bg, "scrollbar_bg", kind);

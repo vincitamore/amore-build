@@ -380,9 +380,9 @@ pub(crate) fn session_token_auth_gate(
 }
 
 pub const AUTH_ERROR_SESSION_EXPIRED: &str =
-    "Session expired. Run `arcus login` to re-authenticate.";
+    "Session expired. Run `amore login` to re-authenticate.";
 
-pub const AUTH_ERROR_API_KEY: &str = "Authentication failed. Run `arcus login`, set XAI_API_KEY, or add api_key to ~/.arcus/config.toml.";
+pub const AUTH_ERROR_API_KEY: &str = "Authentication failed. Run `amore login`, set XAI_API_KEY, or add api_key to ~/.amore/config.toml.";
 
 /// Next ACP method id when `cached_token` cannot proceed (missing / expired /
 /// legacy WebLogin), or `None` when fallthrough is forbidden.
@@ -412,7 +412,7 @@ pub const PREFERRED_API_KEY_UNAVAILABLE: &str = "preferred_method=api_key but no
 
 /// Error when `preferred_method=oidc` but the session path cannot proceed.
 pub const PREFERRED_OIDC_UNAVAILABLE: &str =
-    "preferred_method=oidc but no session is available. Run `arcus login` to authenticate.";
+    "preferred_method=oidc but no session is available. Run `amore login` to authenticate.";
 
 pub const XAI_API_KEY_METHOD_ID: &str = "xai.api_key";
 pub(crate) fn xai_api_key_auth_method() -> acp::AuthMethod {

@@ -1,7 +1,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // core/parse.ts — one markdown file → IndexedDoc.
 //
-// Frontmatter is acquired through @arcus/regula's `tryReadDoc` (the cache-skipped
+// Frontmatter is acquired through @amore/regula's `tryReadDoc` (the cache-skipped
 // gray-matter path + real YAML for arrays/nested), with a lenient line-parser
 // fallback for the forge dream manifests that strict js-yaml rejects (unquoted
 // colon in a `goal:` value) — legacy recovers those via `fix_yaml_unquoted_colons`
@@ -36,7 +36,7 @@
 
 import { readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
-import { tryReadDoc } from '@arcus/regula';
+import { tryReadDoc } from '@amore/regula';
 import type { IndexedDoc } from '../contract';
 
 /** Scalar in the YAML sense as js-yaml surfaces it: string/number/boolean/Date/null. */

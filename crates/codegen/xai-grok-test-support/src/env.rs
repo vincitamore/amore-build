@@ -81,7 +81,7 @@ fn target_dir() -> PathBuf {
 fn local_grok_binary_path() -> PathBuf {
     target_dir()
         .join("debug")
-        .join(format!("arcus{}", std::env::consts::EXE_SUFFIX))
+        .join(format!("amore{}", std::env::consts::EXE_SUFFIX))
 }
 
 fn ensure_local_grok_binary(binary: &Path) {
@@ -97,30 +97,30 @@ fn ensure_local_grok_binary(binary: &Path) {
             "-p",
             "xai-grok-pager-bin",
             "--bin",
-            "arcus",
+            "amore",
         ])
         .stdin(std::process::Stdio::null())
         .envs(xai_tty_utils::pager_env());
     xai_tty_utils::detach_std_command(&mut cmd);
     let output = cmd
         .output()
-        .unwrap_or_else(|e| panic!("failed to spawn {cargo} to build arcus: {e}"));
+        .unwrap_or_else(|e| panic!("failed to spawn {cargo} to build amore: {e}"));
 
     assert!(
         output.status.success(),
-        "failed to build arcus for lifecycle tests (exit {:?})\nstdout:\n{}\nstderr:\n{}",
+        "failed to build amore for lifecycle tests (exit {:?})\nstdout:\n{}\nstderr:\n{}",
         output.status.code(),
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr),
     );
     assert!(
         binary.exists(),
-        "arcus build completed but binary missing at {}",
+        "amore build completed but binary missing at {}",
         binary.display()
     );
 }
 
-/// Resolve grok binary: `GROK_BINARY` env (CI) or a locally built `arcus` binary.
+/// Resolve grok binary: `GROK_BINARY` env (CI) or a locally built `amore` binary.
 pub fn grok_binary() -> PathBuf {
     if let Ok(path) = std::env::var("GROK_BINARY") {
         let p = PathBuf::from(path);
@@ -130,7 +130,7 @@ pub fn grok_binary() -> PathBuf {
         return std::path::absolute(&p).unwrap_or(p);
     }
 
-    if let Ok(path) = std::env::var("CARGO_BIN_EXE_arcus") {
+    if let Ok(path) = std::env::var("CARGO_BIN_EXE_amore") {
         let p = PathBuf::from(path);
         if p.exists() {
             return p;

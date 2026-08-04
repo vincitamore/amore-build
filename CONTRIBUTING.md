@@ -5,7 +5,7 @@ start — they keep the fork healthy and reviews fast.
 
 ## What this project is
 
-Arcus Build is a **permanent, engineered fork** of xAI's open-source
+Amore Build is a **permanent, engineered fork** of xAI's open-source
 `grok-build` (Apache-2.0). It is its own product with its own roadmap; it is
 not an upstream contribution queue and not an xAI project. See
 `UPSTREAM.md` for the provenance and sync relationship.
@@ -16,23 +16,23 @@ not an upstream contribution queue and not an xAI project. See
    upstream files. Crate names stay `xai-grok-*` — renaming crates is
    explicitly out of bounds (diff-hygiene ruling). If a change can be an
    upstream PR, propose it upstream instead.
-2. **`.arcus` config-dir semantics.** Every repo-level config surface is
-   `.arcus/` first, with `.grok/` scanned as the legacy fallback (`.arcus`
-   wins when both exist). Home is `~/.arcus`; env surface is `ARCUS_*`
+2. **`.amore` config-dir semantics.** Every repo-level config surface is
+   `.amore/` first, with `.grok/` scanned as the legacy fallback (`.amore`
+   wins when both exist). Home is `~/.amore`; env surface is `AMORE_*`
    primary with `GROK_*` legacy aliases (`XAI_API_KEY` unchanged — it names
    the provider).
 3. **Auto-update and upstream reinjection stay off.** A fork must never
    update itself back into upstream.
 4. **Changelog doctrine.** Any user-visible change updates BOTH
-   `crates/codegen/xai-grok-shell-base/assets/arcus-changelog.md` and
-   `arcus-changelog.json` in the same commit — the welcome screen and
+   `crates/codegen/xai-grok-shell-base/assets/amore-changelog.md` and
+   `amore-changelog.json` in the same commit — the welcome screen and
    `/release-notes` render from them, compiled in.
 5. **Templates stay generic.** Everything under `templates/house/` teaches the
    *adopter's* house — no references to this repository's own development
    environment, maintainers, or private tooling. Reviewers check this by
    reading; a string blocklist cannot catch a section that describes the wrong
    house.
-6. **No secrets, ever.** `~/.arcus/auth.json`, API keys, tokens — never in a
+6. **No secrets, ever.** `~/.amore/auth.json`, API keys, tokens — never in a
    commit, a log, or a test fixture.
 
 ## Build & test
@@ -41,7 +41,7 @@ Prereqs: Rust via the repo-pinned toolchain (`rust-toolchain.toml`),
 `protoc` on PATH; Bun 1.3.x only if you work under `instruments/iris/`.
 
 ```sh
-cargo build --release -p xai-grok-pager-bin   # target/release/arcus
+cargo build --release -p xai-grok-pager-bin   # target/release/amore
 cargo test --lib -p <crate-you-touched>       # per-crate gate; keep failures at zero
 ```
 
@@ -70,4 +70,4 @@ it must be green. Iris CI (`iris-ci.yml`) is scoped to
 ## Style
 
 Match the code around you; keep upstream-file edits minimal and commented
-with a short `// arcus:` note where the diff touches shared seams.
+with a short `// amore:` note where the diff touches shared seams.

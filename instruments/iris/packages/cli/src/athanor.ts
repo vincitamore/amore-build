@@ -30,7 +30,7 @@
 import { spawn } from 'node:child_process';
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { RegulaError, slugify } from '@arcus/regula';
+import { RegulaError, slugify } from '@amore/regula';
 
 // ── paths ──────────────────────────────────────────────────────────────────────
 

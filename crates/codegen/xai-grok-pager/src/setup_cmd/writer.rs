@@ -30,7 +30,7 @@ pub struct ModelEntryPlan {
 /// model — but a label naming the model is a lie the moment the model is
 /// swapped, and the config it lives in is per-model already. Naming the house
 /// keeps the sentence true under every resident.
-const HOUSE_LABEL: &str = "Arcus Build";
+const HOUSE_LABEL: &str = "Amore Build";
 
 impl ModelEntryPlan {
     /// DeepSeek V4 Flash via OpenRouter — recommended public on-ramp
@@ -211,7 +211,7 @@ fn read_or_empty(path: &Path) -> Result<toml_edit::DocumentMut> {
         .with_context(|| format!("parse {}; refusing to overwrite invalid TOML", path.display()))
 }
 
-/// Iris companion pointer planted under the arcus home (not a binary install).
+/// Iris companion pointer planted under the amore home (not a binary install).
 pub const IRIS_POINTER_NAME: &str = "iris-companion.toml";
 
 /// Expected public release-asset name shape (v1 documents only; no download).
@@ -244,8 +244,8 @@ pub fn write_iris_pointer(
     let path = home.join(IRIS_POINTER_NAME);
     let asset = iris_asset_shape();
     let mut body = String::from(
-        "# Iris companion pointer — written by `arcus setup` / first-run wizard.\n\
-         # `arcus init` installs iris; this file only records the asset it expects.\n\
+        "# Iris companion pointer — written by `amore setup` / first-run wizard.\n\
+         # `amore init` installs iris; this file only records the asset it expects.\n\
          # Release asset for this platform:\n",
     );
     body.push_str(&format!("#   {asset}\n"));
@@ -296,7 +296,7 @@ mod tests {
         assert!(body.contains("z-ai/glm-5.2"), "{body}");
         assert!(body.contains("OPENROUTER_API_KEY"), "{body}");
         assert!(body.contains("system_prompt_label"), "{body}");
-        assert!(body.contains("Arcus Build"), "{body}");
+        assert!(body.contains("Amore Build"), "{body}");
         assert!(body.contains("default"), "{body}");
         assert!(body.contains("1048576") || body.contains("1_048_576"), "{body}");
     }

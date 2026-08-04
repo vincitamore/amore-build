@@ -20,7 +20,7 @@ description: >
 
 Named for Greek **προκοπή** (*prokopē*): progress as continuous advancement — the *viator* climb, not arrival. Matches the house lattice floor (never-arriving perfection): the loop is for the road.
 
-> Written for **Arcus Build**: native task-tool dispatch, automatic context compaction (there is no reliable pre-compact hook, so the operational write is agent-owned), the git-committed task file as the durable handoff surface, and the tasks/knowledge/inbox lifecycle from AGENTS.md. The worked numbers below are illustrative — do not hardcode wave rates or domain-specific success bars as universal constants.
+> Written for **Amore Build**: native task-tool dispatch, automatic context compaction (there is no reliable pre-compact hook, so the operational write is agent-owned), the git-committed task file as the durable handoff surface, and the tasks/knowledge/inbox lifecycle from AGENTS.md. The worked numbers below are illustrative — do not hardcode wave rates or domain-specific success bars as universal constants.
 
 ## §0 · Self-updating
 

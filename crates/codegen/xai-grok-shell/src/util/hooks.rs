@@ -96,10 +96,10 @@ pub(crate) fn discover_hook_source_paths(
             project.push(root.join(".claude").join("settings.json"));
             project.push(root.join(".claude").join("settings.local.json"));
         }
-        // Arcus Build: `.arcus/hooks` (fork-native) precedes `.grok/hooks`
+        // Amore Build: `.amore/hooks` (fork-native) precedes `.grok/hooks`
         // (legacy fallback); both load, registry dedup handles byte-identical
         // hooks registered in both.
-        project.push(root.join(".arcus").join("hooks"));
+        project.push(root.join(".amore").join("hooks"));
         project.push(root.join(".grok").join("hooks"));
         if include_cursor {
             project.push(root.join(".cursor").join("hooks.json"));
@@ -157,21 +157,21 @@ mod tests {
     use super::*;
     use xai_grok_tools::types::compat::CompatConfig;
 
-    /// `.arcus/hooks` (fork-native) is discovered with the same project-tier
+    /// `.amore/hooks` (fork-native) is discovered with the same project-tier
     /// semantics as `.grok/hooks` (legacy), and precedes it.
     #[test]
-    fn discover_includes_arcus_hooks_before_grok_hooks() {
+    fn discover_includes_amore_hooks_before_grok_hooks() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
-        std::fs::create_dir_all(root.join(".arcus").join("hooks")).unwrap();
+        std::fs::create_dir_all(root.join(".amore").join("hooks")).unwrap();
         std::fs::create_dir_all(root.join(".grok").join("hooks")).unwrap();
         let paths = discover_hook_source_paths(Some(root), &CompatConfig::default());
 
-        let arcus = root.join(".arcus").join("hooks");
+        let amore = root.join(".amore").join("hooks");
         let grok = root.join(".grok").join("hooks");
         assert!(
-            paths.project.iter().any(|p| p == &arcus),
-            ".arcus/hooks must be a project source; got {:?}",
+            paths.project.iter().any(|p| p == &amore),
+            ".amore/hooks must be a project source; got {:?}",
             paths.project
         );
         assert!(
@@ -179,23 +179,23 @@ mod tests {
             ".grok/hooks must remain a legacy project source; got {:?}",
             paths.project
         );
-        let si = paths.project.iter().position(|p| p == &arcus).unwrap();
+        let si = paths.project.iter().position(|p| p == &amore).unwrap();
         let gi = paths.project.iter().position(|p| p == &grok).unwrap();
         assert!(
             si < gi,
-            ".arcus/hooks must precede .grok/hooks (si={si}, gi={gi})"
+            ".amore/hooks must precede .grok/hooks (si={si}, gi={gi})"
         );
     }
 
     /// End-to-end at the discovery+registry seam: a SessionStart hook declared
-    /// only under `.arcus/hooks` is loadable (parity with `.grok/hooks`).
-    /// Uses project sources only so a developer's `~/.arcus/hooks` cannot
+    /// only under `.amore/hooks` is loadable (parity with `.grok/hooks`).
+    /// Uses project sources only so a developer's `~/.amore/hooks` cannot
     /// inflate the count.
     #[test]
-    fn arcus_hooks_declaration_to_discovery_parity() {
+    fn amore_hooks_declaration_to_discovery_parity() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
-        let hooks_dir = root.join(".arcus").join("hooks");
+        let hooks_dir = root.join(".amore").join("hooks");
         std::fs::create_dir_all(&hooks_dir).unwrap();
         std::fs::write(
             hooks_dir.join("session-init.json"),
@@ -209,7 +209,7 @@ mod tests {
             xai_grok_hooks::discovery::collect_specs_from_sources(&[], &project);
         assert!(
             errors.is_empty(),
-            "unexpected load errors for .arcus/hooks: {errors:?}"
+            "unexpected load errors for .amore/hooks: {errors:?}"
         );
         let registry = xai_grok_hooks::discovery::registry_from_specs_deduped(specs);
         let n = registry
@@ -217,7 +217,7 @@ mod tests {
             .len();
         assert_eq!(
             n, 1,
-            "SessionStart hook under .arcus/hooks must be discovered (got {n})"
+            "SessionStart hook under .amore/hooks must be discovered (got {n})"
         );
     }
 }

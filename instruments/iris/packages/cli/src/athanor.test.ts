@@ -14,7 +14,7 @@ import {
   pipelineStatus,
   previewRun,
 } from './athanor.ts';
-import { RegulaError } from '@arcus/regula';
+import { RegulaError } from '@amore/regula';
 
 let org: string;
 

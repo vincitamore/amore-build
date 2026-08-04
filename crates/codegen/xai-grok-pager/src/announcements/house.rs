@@ -23,7 +23,7 @@
 //!   maps to `theme.gray` (quiet, standing house state) instead of the promo
 //!   warning color. It is not `critical`/`promo`, so it never opens the
 //!   in-session banner slot.
-//! - **`id: "arcus-house"` is stable** so a dismissal persists and dedup is
+//! - **`id: "amore-house"` is stable** so a dismissal persists and dedup is
 //!   by this key; `dismissible: true`, `persistent: false`, no `expires_at`
 //!   (house state is standing, not a promo).
 //! - **`GROK_ANNOUNCEMENTS_OVERRIDE` still wins over everything**: the escape
@@ -42,7 +42,7 @@ use xai_grok_announcements::RemoteAnnouncement;
 pub const HOUSE_SEVERITY: &str = "house";
 
 /// Stable announcement id, so dismissal persists and dedup is by this key.
-pub const HOUSE_ANNOUNCEMENT_ID: &str = "arcus-house";
+pub const HOUSE_ANNOUNCEMENT_ID: &str = "amore-house";
 
 /// The house-name fallback when no org marker carries an H1.
 pub const DEFAULT_HOUSE_NAME: &str = "The house";
@@ -308,7 +308,7 @@ fn house_name(root: &Path) -> String {
 ///
 /// ```text
 /// 6 active tasks
-///   • De-grok the Arcus Build fork and build upstream-sync tooling
+///   • De-grok the Amore Build fork and build upstream-sync tooling
 ///   • Port house-op skills from opus
 ///
 /// 1 reminder due
@@ -613,7 +613,7 @@ pub(crate) mod test_support {
         pub(crate) fn new() -> Self {
             let mut path = std::env::temp_dir();
             let unique = format!(
-                "arcus-house-test-{}-{}",
+                "amore-house-test-{}-{}",
                 std::process::id(),
                 SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
             );
@@ -842,7 +842,7 @@ mod tests {
         assert_eq!(display_when("not a date"), "not a date");
     }
 
-    /// 2026-08-03 local — the same test seam the hook's `ARCUS_SESSION_INIT_NOW`
+    /// 2026-08-03 local — the same test seam the hook's `AMORE_SESSION_INIT_NOW`
     /// pins (any fixed instant works; fixtures are chosen far from it).
     fn now() -> DateTime<Utc> {
         DateTime::parse_from_rfc3339("2026-08-03T12:00:00Z")
@@ -859,7 +859,7 @@ mod tests {
         make_reminder(&t, "due.md", "pending", "remind-at", "2026-07-01T09:00", "Renew certs");
 
         let ann = house_announcement(t.root(), now()).expect("house announcement");
-        assert_eq!(ann.id.as_deref(), Some("arcus-house"));
+        assert_eq!(ann.id.as_deref(), Some("amore-house"));
         assert_eq!(ann.title.as_deref(), Some("Test House"));
         assert_eq!(ann.severity.as_deref(), Some("house"));
         assert_eq!(ann.dismissible, Some(true));
@@ -995,7 +995,7 @@ mod tests {
         ];
         let out = apply_house_override(remote, t.root(), now(), false);
         assert_eq!(out.len(), 1, "only the house announcement survives");
-        assert_eq!(out[0].id.as_deref(), Some("arcus-house"));
+        assert_eq!(out[0].id.as_deref(), Some("amore-house"));
     }
 
     /// `GROK_ANNOUNCEMENTS_OVERRIDE` still wins: with the override active,

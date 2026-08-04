@@ -49,7 +49,7 @@ toml_edit = { workspace = true, features = ["serde"] }
 # Chosen over rust-embed: neither was in Cargo.lock; protocol prefers include_dir.
 include_dir = "0.7"
 
-# PATH lookup for first-run Iris companion detection (`arcus setup`).
+# PATH lookup for first-run Iris companion detection (`amore setup`).
 which = { workspace = true }
 
 # ANSI parsing (tracing pane)
@@ -98,7 +98,7 @@ agent-client-protocol = { workspace = true }
 xai-acp-lib = { workspace = true }
 xai-file-utils = { path = "../xai-file-utils" }
 
-# `arcus init` fetches the iris companion from the matching GitHub release.
+# `amore init` fetches the iris companion from the matching GitHub release.
 # Blocking client: init is dispatched from `fn main` before any async runtime
 # starts, so there is no reactor to conflict with.
 reqwest = { workspace = true, features = ["blocking"] }

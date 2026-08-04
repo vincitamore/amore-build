@@ -1,4 +1,4 @@
-//! Arcus theme — rain-dark ground, light resolved against it.
+//! Amore theme — rain-dark ground, light resolved against it.
 //!
 //! A dark-only theme in the house of night themes: cool tinted backgrounds
 //! like TokyoNight/Oscura. The ground is the storm side of the sky, which is
@@ -15,7 +15,7 @@ const fn rgb(r: u8, g: u8, b: u8) -> Color {
     Color::Rgb(r, g, b)
 }
 
-// Arcus palette — rain-dark blues, accents taken from the bow.
+// Amore palette — rain-dark blues, accents taken from the bow.
 #[allow(dead_code)]
 mod palette {
     use super::*;
@@ -61,11 +61,11 @@ mod palette {
 use palette::*;
 
 impl Theme {
-    /// Arcus theme — rain-dark ground; bow-blue accents, gold user accent.
+    /// Amore theme — rain-dark ground; bow-blue accents, gold user accent.
     ///
     /// Colors are defined in RGB. Call [`Theme::quantized`] to downgrade
     /// them to the terminal's supported color level before rendering.
-    pub const fn arcus() -> Self {
+    pub const fn amore() -> Self {
         Self {
             bg_base: BG_STORM,
             bg_light: BG_HIGHLIGHT,
@@ -157,8 +157,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn arcus_is_dark_with_distinct_accents() {
-        let t = Theme::arcus();
+    fn amore_is_dark_with_distinct_accents() {
+        let t = Theme::amore();
         assert!(t.is_dark());
         assert!(matches!(t.accent_user, Color::Rgb(217, 198, 155)));
         assert!(matches!(t.accent_assistant, Color::Rgb(159, 184, 242)));

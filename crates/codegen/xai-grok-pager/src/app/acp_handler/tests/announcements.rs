@@ -270,11 +270,11 @@
         );
         assert_eq!(
             app.active_announcements[0].id.as_deref(),
-            Some("arcus-house")
+            Some("amore-house")
         );
         assert_eq!(
             app.announcement.as_ref().and_then(|a| a.id.as_deref()),
-            Some("arcus-house"),
+            Some("amore-house"),
             "the picked welcome announcement must stay the house splash"
         );
         assert_eq!(

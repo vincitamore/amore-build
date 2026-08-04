@@ -1,10 +1,10 @@
 # Iris companion
 
-**Iris** is a first-class companion of Arcus Build: the knowledge and
+**Iris** is a first-class companion of Amore Build: the knowledge and
 organization instrument for a house tree. It is **never required** to run
-Arcus Build itself — sessions, models, and the agent loop work without it.
+Amore Build itself — sessions, models, and the agent loop work without it.
 It is what gives a house a live file index, org CRUD verbs, and an
-interactive dash over the same scaffold `arcus init` plants.
+interactive dash over the same scaffold `amore init` plants.
 
 Local-first: the daemon binds loopback only (`127.0.0.1`), and the daemon
 and CLI operate on directories on your machine. There is no product
@@ -23,7 +23,7 @@ Three surfaces share one product name:
 | Surface | Role |
 |---------|------|
 | **Daemon** | Live org index on `127.0.0.1:3853` — recursive file watch, wikilink/backlink graph, fuzzy search (`/api/search`, index mode) |
-| **CLI** (`iris`) | Org verbs powered by `@arcus/regula` (`task`, `inbox`, `reminder`, `knowledge`, plus `status`, `search`, `daemon`, …) and daemon-backed reads |
+| **CLI** (`iris`) | Org verbs powered by `@amore/regula` (`task`, `inbox`, `reminder`, `knowledge`, plus `status`, `search`, `daemon`, …) and daemon-backed reads |
 | **Dash** (TUI) | OpenTUI interactive dashboard — Dashboard / Tasks / Inbox / Reminders / Knowledge / Files / Forge / Graph (hotkeys `1`–`8` in that order) |
 
 Iris ships the full regula org-CRUD surface — every task / inbox / reminder /
@@ -89,7 +89,7 @@ wins). Callers refuse a silent cwd fallback when no root resolves.
 
 ### The regula core
 
-Every write — CLI verb or dash action — goes through **`@arcus/regula`**,
+Every write — CLI verb or dash action — goes through **`@amore/regula`**,
 the org write authority. It owns the document schemas (frontmatter shapes
 per type), the **legal lifecycle transitions** (a task moves
 `active → review → complete`, not arbitrarily; terminal inbox items get a
@@ -100,7 +100,7 @@ data-quality queue). The point of routing writes through one core: a verb
 cannot produce a file the house schema would call malformed, and two
 surfaces (CLI, dash) cannot drift apart on what "complete" means.
 
-The house is wired to it natively: the `AGENTS.md` that `arcus init` plants
+The house is wired to it natively: the `AGENTS.md` that `amore init` plants
 teaches the resident agent to prefer the iris verbs for org CRUD and to run
 `iris regula lint` before ending a session — so the agent, the CLI, and the
 dash all write through the same authority. When iris is absent, direct file
@@ -117,22 +117,22 @@ hint to start it.
 
 ### A. With the house (default)
 
-**`arcus init` installs iris for you.** Creating a house downloads the
+**`amore init` installs iris for you.** Creating a house downloads the
 release archive for your platform, verifies its published checksum, and
 unpacks both binaries into `instruments/iris/` inside the house. This is the
 only part of `init` that touches the network — `--no-iris` skips it and
 makes `init` fully offline.
 
 A failed download never fails the house: the tree is already written, the
-summary names what happened, and `arcus init --refresh` finishes the job
+summary names what happened, and `amore init --refresh` finishes the job
 later.
 
 Init also puts iris **on your `PATH`** — by linking the binaries (multi-tool
-and dash) into the directory the running `arcus` executable lives in. If
-`arcus` resolves on `PATH`, `iris` now does too; no shell-config or registry
+and dash) into the directory the running `amore` executable lives in. If
+`amore` resolves on `PATH`, `iris` now does too; no shell-config or registry
 surgery, same behavior on every platform. The init summary names the
 directory when the link lands; if that directory is unwritable the binaries
-still work from `instruments/iris/`, and `arcus setup` step 3 records
+still work from `instruments/iris/`, and `amore setup` step 3 records
 whether `iris` was found on `PATH`.
 
 Published targets: `linux-x64`, `windows-x64`, `darwin-arm64`. Other hosts
@@ -181,34 +181,34 @@ More detail: [`instruments/iris/README.md`](../instruments/iris/README.md).
 
 ---
 
-## The Arcus Build seam
+## The Amore Build seam
 
 Iris is optional at every layer. Absence is quiet.
 
-### `arcus init`
+### `amore init`
 
 Installs the companion into the house by default (`--no-iris` opts out) —
 see Install §A above.
 
-### `arcus setup`
+### `amore setup`
 
-`arcus setup` is a three-step guided flow: model provider → Grok rail →
+`amore setup` is a three-step guided flow: model provider → Grok rail →
 **Iris companion (recommended, opt-out)**. Step 3 detects whether `iris` is
-on `PATH` and can plant a pointer file under the arcus home:
+on `PATH` and can plant a pointer file under the amore home:
 
 ```
-~/.arcus/iris-companion.toml
+~/.amore/iris-companion.toml
 ```
 
 That file is a **pointer, not an install**. It records whether `iris` was
 found on `PATH` (and the expected asset name for this host when it was not) —
-`arcus init` does the installing. Headless `arcus setup` prints the step
+`amore init` does the installing. Headless `amore setup` prints the step
 only and does not plant unless you re-run interactively (or write the file
 yourself).
 
 ### Shortcuts bar (when the companion is present)
 
-When iris is installed and detected, the Arcus Build TUI surfaces a
+When iris is installed and detected, the Amore Build TUI surfaces a
 shortcuts-bar hint that launches **`iris dash` in a new terminal**. The
 action is **Ctrl+Shift+G** (label `dash`) — mnemonic for the "glass", and
 deliberately not Ctrl+Shift+D, which Windows Terminal binds to `duplicatePane`
@@ -256,7 +256,7 @@ Mutation opt-in channels (any one suffices):
 2. Env `IRIS_ALLOW_FOREIGN_ROOT=1` (also accepts `true` / `yes`)
 3. Path listed in `~/.iris/allowed-roots.json` (interactive TTY confirm can plant this; non-interactive must use flag or env)
 
-Every refusal names a one-line remedy. Writes go through `@arcus/regula`; the
+Every refusal names a one-line remedy. Writes go through `@amore/regula`; the
 CLI calls `ensureMutationTrust` on write verbs before mutating.
 
 **Honest current state:** org-root resolution via `IRIS_ORG_ROOT` and the
@@ -268,20 +268,20 @@ dash trust presentation is a follow-on, not a promised surface.
 
 ## Pointer file
 
-Path: **`~/.arcus/iris-companion.toml`** (under `$ARCUS_HOME` / `$GROK_HOME`
+Path: **`~/.amore/iris-companion.toml`** (under `$AMORE_HOME` / `$GROK_HOME`
 when those override the default home).
 
 | Fact | Detail |
 |------|--------|
-| Who writes it | `arcus setup` interactive step 3 (opt-out with skip) |
+| Who writes it | `amore setup` interactive step 3 (opt-out with skip) |
 | What it is | Companion **pointer** config — PATH detection / expected asset name |
-| What it is not | An installer, a download cache, or a runtime dependency of Arcus Build (`arcus init` does the installing) |
-| Without iris | Arcus Build runs normally; optional UI hint stays hidden |
+| What it is not | An installer, a download cache, or a runtime dependency of Amore Build (`amore init` does the installing) |
+| Without iris | Amore Build runs normally; optional UI hint stays hidden |
 
 Example shape (fields depend on PATH detection):
 
 ```toml
-# Iris companion pointer — written by `arcus setup` / first-run wizard.
+# Iris companion pointer — written by `amore setup` / first-run wizard.
 # Iris is optional; this file is not an install.
 
 [iris]
@@ -293,7 +293,7 @@ expected_asset = "iris-linux-x64"
 
 ## See also
 
-- [onboarding.md](onboarding.md) — what `arcus init` installs; `--no-iris`
+- [onboarding.md](onboarding.md) — what `amore init` installs; `--no-iris`
 - [setup-models.md](setup-models.md) — model recipes (setup wizard step 1)
 - [authentication.md](authentication.md) — OAuth vs BYOK rails (setup wizard step 2)
 - [`instruments/iris/README.md`](../instruments/iris/README.md) — layout, env list, run recipes

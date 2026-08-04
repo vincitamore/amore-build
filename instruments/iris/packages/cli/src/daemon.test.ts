@@ -12,7 +12,7 @@ test('daemonBaseUrl honors IRIS_URL', () => {
   expect(daemonBaseUrl()).toBe('http://example.test:1234');
 });
 
-test('daemonBaseUrl defaults to loopback :3853 (arcus house Bun daemon)', () => {
+test('daemonBaseUrl defaults to loopback :3853 (amore house Bun daemon)', () => {
   delete process.env.IRIS_URL;
   delete process.env.IRIS_PORT;
   expect(daemonBaseUrl()).toBe('http://127.0.0.1:3853');

@@ -1,4 +1,4 @@
-import { type RegulaErrorCode } from '@arcus/regula';
+import { type RegulaErrorCode } from '@amore/regula';
 
 /** Ratified exit codes (the house contract, shared with network-cli/oraculum). */
 export const EXIT = {

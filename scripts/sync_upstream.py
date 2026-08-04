@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Arcus Build: upstream sync tooling.
+"""Amore Build: upstream sync tooling.
 
 Applies upstream xai-org/grok-build sync bundles to the fork with minimal
 friction and a verifiable outcome. Policy is UPSTREAM.md: bundle-shaped
@@ -52,7 +52,7 @@ UPSTREAM_MAIN = f"{UPSTREAM_REMOTE}/main"
 # (UPSTREAM.md §6.4).
 HARD_OFF_SENTINEL = "FORK_AUTO_UPDATE_HARD_OFF: bool = true"
 HARD_OFF_FILE = "crates/codegen/xai-grok-update/src/auto_update.rs"
-ARGV0_MARKER = '"arcus" | "arcus-build" | "grok" | "agent"'
+ARGV0_MARKER = '"amore" | "amore-build" | "grok" | "agent"'
 ARGV0_FILE = "crates/codegen/xai-grok-pager/src/app/cli.rs"
 INIT_OWNERSHIP_TEST = "crates/codegen/xai-grok-pager/tests/init_ownership.rs"
 BOUNDARY_SCRIPT = "scripts/check_grok_boundary.py"
@@ -73,7 +73,7 @@ COMPLETIONS_FILE = "crates/codegen/xai-grok-pager/src/completions_cmd.rs"
 # namespace marker is written into user shell/tmux configs and read back, and
 # the ssh alias body must name a binary that exists on the user's PATH. A
 # merge that drops any of these silently reverts the namespace to `grok
-# doctor` (stranding every arcus-written block) or re-breaks the ssh alias.
+# doctor` (stranding every amore-written block) or re-breaks the ssh alias.
 DOCTOR_FIX_FILE = "crates/codegen/xai-grok-pager/src/diagnostics/fix.rs"
 MANAGED_TEXT_MOD = "crates/codegen/xai-grok-config/src/managed_text/mod.rs"
 MANAGED_TEXT_FORMAT = "crates/codegen/xai-grok-config/src/managed_text/format.rs"
@@ -268,33 +268,33 @@ def cmd_verify(dry_run: bool) -> int:
     print("post-merge verify: fork surfaces")
     print("-" * 50)
 
-    # 1. config-dir precedence: .arcus is the fork-native project root
+    # 1. config-dir precedence: .amore is the fork-native project root
     #    (read files directly -- git grep with quote-y patterns mangles under
     #    git-bash-on-Windows; plain substring checks are host-portable)
-    arcus_load_sites = [
+    amore_load_sites = [
         "crates/codegen/xai-grok-agent/src/prompt/skills.rs",
         "crates/codegen/xai-grok-agent/src/discovery.rs",
         "crates/codegen/xai-grok-agent/src/plugins/discovery.rs",
     ]
     found_site = False
-    for rel in arcus_load_sites:
+    for rel in amore_load_sites:
         p = REPO / rel
-        if p.exists() and '.arcus' in p.read_text(encoding="utf-8", errors="replace"):
+        if p.exists() and '.amore' in p.read_text(encoding="utf-8", errors="replace"):
             found_site = True
             break
     if found_site:
-        print("  ok  .arcus is the fork-native project config root (agent load sites)")
+        print("  ok  .amore is the fork-native project config root (agent load sites)")
     else:
-        problems.append("no .arcus project-root load site found in agent crates")
+        problems.append("no .amore project-root load site found in agent crates")
 
     # 2. default home compiled in
     _check_file_contains(
         "crates/codegen/xai-grok-config/src/paths.rs",
-        'join(".arcus")', "~/.arcus compiled-in default home", problems)
+        'join(".amore")', "~/.amore compiled-in default home", problems)
 
     # 3. binary/identity naming + argv0 aliases
     _check_file_contains(
-        ARGV0_FILE, ARGV0_MARKER, "argv0 alias set (arcus | arcus-build | grok | agent)",
+        ARGV0_FILE, ARGV0_MARKER, "argv0 alias set (amore | amore-build | grok | agent)",
         problems)
 
     # 4. auto-update hard-off
@@ -302,9 +302,9 @@ def cmd_verify(dry_run: bool) -> int:
         HARD_OFF_FILE, HARD_OFF_SENTINEL,
         "auto-update hard-off (FORK_AUTO_UPDATE_HARD_OFF = true)", problems)
 
-    # 5. embed + init ownership tests still target arcus
+    # 5. embed + init ownership tests still target amore
     _check_file_contains(
-        INIT_OWNERSHIP_TEST, "arcus init", "init ownership tests target `arcus init`",
+        INIT_OWNERSHIP_TEST, "amore init", "init ownership tests target `amore init`",
         problems)
 
     # 6. fork-owned surface boundary (Phase-2 script, if present)
@@ -336,12 +336,12 @@ def cmd_verify(dry_run: bool) -> int:
         "shell completions name after the invoked binary", problems)
 
     # 6c. doctor namespace migration (runtime-coupled, not display-only):
-    #     the managed-config namespace is `arcus doctor` with grok-doctor
+    #     the managed-config namespace is `amore doctor` with grok-doctor
     #     legacy adoption, and the doctor/ssh-wrap command strings channel
     #     through the invoked binary name.
     _check_file_contains(
-        DOCTOR_FIX_FILE, 'MANAGED_NAMESPACE: &str = "arcus doctor"',
-        "managed shell/tmux blocks use the `arcus doctor` namespace", problems)
+        DOCTOR_FIX_FILE, 'MANAGED_NAMESPACE: &str = "amore doctor"',
+        "managed shell/tmux blocks use the `amore doctor` namespace", problems)
     _check_file_contains(
         DOCTOR_FIX_FILE, 'LEGACY_MANAGED_NAMESPACE: &str = "grok doctor"',
         "legacy `grok doctor` blocks are adopted (constant present)", problems)
@@ -361,7 +361,7 @@ def cmd_verify(dry_run: bool) -> int:
     # 7. build + smoke (this host). Build is the long pole; allow skipping.
     #    The full Linux pager suite remains CI-owned (UPSTREAM.md §5).
     if dry_run:
-        print("[dry-run] would build xai-grok-pager-bin and smoke arcus")
+        print("[dry-run] would build xai-grok-pager-bin and smoke amore")
     else:
         print("  .. building xai-grok-pager-bin (this can take a while)")
         b = run(["cargo", "build", "--release", "-p", "xai-grok-pager-bin"])
@@ -369,7 +369,7 @@ def cmd_verify(dry_run: bool) -> int:
             problems.append("cargo build -p xai-grok-pager-bin failed:\n" + b.stderr[-2000:])
         else:
             print("  ok  cargo build -p xai-grok-pager-bin")
-            exe = REPO / "target" / "release" / ("arcus.exe" if sys.platform == "win32" else "arcus")
+            exe = REPO / "target" / "release" / ("amore.exe" if sys.platform == "win32" else "amore")
             if exe.exists():
                 v = run([str(exe), "--version"])
                 print(f"  ok  {v.stdout.strip() or v.stderr.strip()}")

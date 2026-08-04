@@ -5,7 +5,7 @@
 Report suspected security issues through **GitHub private vulnerability
 advisories** on this repository:
 
-**[Security → Advisories → "Report a vulnerability"](https://github.com/vincitamore/arcus-build/security/advisories/new)**
+**[Security → Advisories → "Report a vulnerability"](https://github.com/vincitamore/amore-build/security/advisories/new)**
 
 Please do not file public issues for security reports, and do not post details
 in discussions, PRs, or any other public channel, until a fix is public.
@@ -16,13 +16,13 @@ private working thread by construction.
 
 ### What to include
 
-- Affected version / commit (`arcus --version` prints the build commit).
+- Affected version / commit (`amore --version` prints the build commit).
 - Reproduction steps or a proof-of-concept, and the impact you see.
 - Whether the issue reproduces in **upstream** `xai-org/grok-build` — if it
   does, it is an upstream bug and should be reported there as well; this fork
   tracks upstream and will pull their fix. Issues in fork-specific surfaces
-  (identity/branding layer, `.arcus` config-dir handling, `arcus init` /
-  `arcus setup`, the bundled `templates/house/` content, the iris
+  (identity/branding layer, `.amore` config-dir handling, `amore init` /
+  `amore setup`, the bundled `templates/house/` content, the iris
   companion seam, `instruments/iris/`) belong here.
 
 ### Expectations
@@ -35,8 +35,8 @@ credit reporters in release notes unless you ask otherwise.
 ### Scope guidance
 
 - Secrets handling is documented in `docs/authentication.md`
-  (`~/.arcus/auth.json` must never be committed or logged; `ARCUS_*` env
+  (`~/.amore/auth.json` must never be committed or logged; `AMORE_*` env
   vars take precedence over `GROK_*` aliases).
-- `arcus init` / `arcus setup` write templates and config under your user
+- `amore init` / `amore setup` write templates and config under your user
   home and project tree — report anything that writes outside those roots or
   follows input-controlled paths unsafely.

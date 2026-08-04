@@ -31,7 +31,7 @@ import { fuzzyMatch, search } from './search/index.ts';
 
 import { startServer } from './server.ts';
 
-const USAGE = `@arcus/daemon — Bun index/read daemon
+const USAGE = `@amore/daemon — Bun index/read daemon
 
 Usage:
   bun src/index.ts [org_root] [--port N]
@@ -135,7 +135,7 @@ function main(): void {
 
   // Tiered trust (Phase 1.5 D2): the daemon is a READ surface (index / search /
   // graph / dash). Any resolvable org root is fine — no co-location / houseRoot
-  // guard. Mutation trust lives in @arcus/regula root-trust, called by CLI
+  // guard. Mutation trust lives in @amore/regula root-trust, called by CLI
   // write verbs (and optional TUI). --allow-foreign-root remains a no-op here
   // for launcher compatibility (`args.allowForeignRoot` is accepted, unused).
   void args.allowForeignRoot;

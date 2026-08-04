@@ -1,9 +1,9 @@
 {
-  "name": "@arcus/tui",
+  "name": "@amore/tui",
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "The Iris OpenTUI dashboard — the operator's terminal surface. Reads the daemon, mutates via @arcus/regula, renders the knowledge graph with a braille canvas.",
+  "description": "The Iris OpenTUI dashboard — the operator's terminal surface. Reads the daemon, mutates via @amore/regula, renders the knowledge graph with a braille canvas.",
   "scripts": {
     "test": "bun test",
     "dash": "bun src/index.tsx",
@@ -12,7 +12,7 @@
   "dependencies": {
     "@opentui/core": "latest",
     "@opentui/react": "latest",
-    "@arcus/regula": "workspace:*",
+    "@amore/regula": "workspace:*",
     "d3-force": "^3.0.0",
     "katex": "^0.16.22",
     "marked": "^18.0.5",

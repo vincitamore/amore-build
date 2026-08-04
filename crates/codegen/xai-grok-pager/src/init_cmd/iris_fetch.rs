@@ -18,7 +18,7 @@ use std::time::Duration;
 use anyhow::{Context, Result, bail};
 
 /// Where release assets live. The repo's own public URL.
-const RELEASE_BASE: &str = "https://github.com/vincitamore/arcus-build/releases/download";
+const RELEASE_BASE: &str = "https://github.com/vincitamore/amore-build/releases/download";
 
 /// Directory, relative to the house root, that the companion is installed into.
 pub const IRIS_REL: &str = "instruments/iris";
@@ -62,8 +62,8 @@ pub enum IrisOutcome {
     Installed {
         rel_path: String,
         version: String,
-        /// Directory the binaries were also linked into (beside `arcus`), when
-        /// that succeeded — i.e. `iris` is now on PATH wherever `arcus` is.
+        /// Directory the binaries were also linked into (beside `amore`), when
+        /// that succeeded — i.e. `iris` is now on PATH wherever `amore` is.
         linked: Option<String>,
     },
     OptedOut,
@@ -79,18 +79,18 @@ impl IrisOutcome {
         match self {
             Self::Installed { rel_path, version, linked } => Some(match linked {
                 Some(dir) => format!(
-                    "  iris:      installed {rel_path} ({version}) — on PATH beside arcus ({dir})"
+                    "  iris:      installed {rel_path} ({version}) — on PATH beside amore ({dir})"
                 ),
                 None => format!("  iris:      installed {rel_path} ({version})"),
             }),
             Self::OptedOut => None,
             Self::UnsupportedHost { host } => Some(format!(
                 "  iris:      no published build for {host} — build it from source: \
-                 https://github.com/vincitamore/arcus-build/tree/main/instruments/iris"
+                 https://github.com/vincitamore/amore-build/tree/main/instruments/iris"
             )),
             Self::Failed { reason } => Some(format!(
                 "  iris:      not installed ({reason})
-             the house is complete without it — finish later with `arcus init --refresh` here"
+             the house is complete without it — finish later with `amore init --refresh` here"
             )),
         }
     }
@@ -134,7 +134,7 @@ fn try_install(root: &Path, version: &str, suffix: &str) -> Result<(String, Opti
 
     let client = reqwest::blocking::Client::builder()
         .timeout(TIMEOUT)
-        .user_agent(concat!("arcus-init/", env!("CARGO_PKG_VERSION")))
+        .user_agent(concat!("amore-init/", env!("CARGO_PKG_VERSION")))
         .build()
         .context("build http client")?;
 
@@ -175,9 +175,9 @@ fn try_install(root: &Path, version: &str, suffix: &str) -> Result<(String, Opti
     Ok((format!("{IRIS_REL}/"), linked))
 }
 
-/// Put `iris` on PATH the way `arcus` already is: link the freshly installed
-/// binaries into the directory the running `arcus` executable lives in. If
-/// `arcus` resolves on PATH, `iris` now does too — no rc-file or registry
+/// Put `iris` on PATH the way `amore` already is: link the freshly installed
+/// binaries into the directory the running `amore` executable lives in. If
+/// `amore` resolves on PATH, `iris` now does too — no rc-file or registry
 /// surgery, and it works identically on every platform. Hard link first
 /// (free, same volume), copy as fallback (different volume). A locked or
 /// unwritable destination degrades silently: the install itself already
@@ -188,7 +188,7 @@ fn try_install(root: &Path, version: &str, suffix: &str) -> Result<(String, Opti
 /// from PATH as well.
 fn link_onto_path(dest: &Path, installed: &[String]) -> Option<String> {
     let bin_dir = std::env::current_exe().ok()?.parent()?.to_path_buf();
-    // Nothing to do if arcus is somehow running out of the install dir.
+    // Nothing to do if amore is somehow running out of the install dir.
     if bin_dir == *dest {
         return None;
     }

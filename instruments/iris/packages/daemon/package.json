@@ -1,16 +1,16 @@
 {
-  "name": "@arcus/daemon",
+  "name": "@amore/daemon",
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "The iris Bun index/read daemon — parses via @arcus/regula, serves the org index over HTTP. Golden-master parity with the legacy Rust daemon via @arcus/parity.",
+  "description": "The iris Bun index/read daemon — parses via @amore/regula, serves the org index over HTTP. Golden-master parity with the legacy Rust daemon via @amore/parity.",
   "main": "src/index.ts",
   "scripts": {
     "test": "bun test",
     "start": "bun src/index.ts"
   },
   "dependencies": {
-    "@arcus/regula": "workspace:*"
+    "@amore/regula": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "latest",

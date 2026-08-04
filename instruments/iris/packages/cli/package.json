@@ -1,9 +1,9 @@
 {
-  "name": "@arcus/cli",
+  "name": "@amore/cli",
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Arcus house CLI \u2014 sole global bin `iris` (org verbs + sight + daemon; default :3853)",
+  "description": "Amore house CLI \u2014 sole global bin `iris` (org verbs + sight + daemon; default :3853)",
   "bin": {
     "iris": "./src/iris.ts"
   },
@@ -11,7 +11,7 @@
     "test": "bun test"
   },
   "dependencies": {
-    "@arcus/regula": "workspace:*"
+    "@amore/regula": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "latest",

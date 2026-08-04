@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useKeyboard } from '@opentui/react';
-import { completeTask, listTasks, pauseTask, setTaskStatus, type TaskListItem } from '@arcus/regula';
+import { completeTask, listTasks, pauseTask, setTaskStatus, type TaskListItem } from '@amore/regula';
 import { resolveOrgRoot } from '../daemon';
 import { usePalette } from '../ThemeProvider';
 import { taskStatusColor } from '../theme';

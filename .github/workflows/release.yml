@@ -1,6 +1,6 @@
 name: release
 
-# Tag-triggered release: arcus binary ×5 targets + iris companion assets,
+# Tag-triggered release: amore binary ×5 targets + iris companion assets,
 # checksums, version inject, and the GitHub Release attach.
 #
 # Version: the tag drives the compiled version through GROK_VERSION
@@ -25,8 +25,8 @@ permissions:
   contents: write
 
 jobs:
-  arcus:
-    name: arcus — ${{ matrix.artifact }}
+  amore:
+    name: amore — ${{ matrix.artifact }}
     runs-on: ${{ matrix.os }}
     # Release lanes always build cold (no cache is shared into a tag run) and a
     # cold build of this workspace has been measured past 60 minutes on a
@@ -36,11 +36,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: ubuntu-latest,    artifact: arcus-linux-x64,    bin: arcus,     }
-          - { os: ubuntu-24.04-arm, artifact: arcus-linux-arm64,  bin: arcus,     }
-          - { os: windows-latest,   artifact: arcus-windows-x64,  bin: arcus.exe, }
-          - { os: macos-15,         artifact: arcus-darwin-arm64, bin: arcus,     }
-          - { os: macos-15-intel,   artifact: arcus-darwin-x64,   bin: arcus,     }
+          - { os: ubuntu-latest,    artifact: amore-linux-x64,    bin: amore,     }
+          - { os: ubuntu-24.04-arm, artifact: amore-linux-arm64,  bin: amore,     }
+          - { os: windows-latest,   artifact: amore-windows-x64,  bin: amore.exe, }
+          - { os: macos-15,         artifact: amore-darwin-arm64, bin: amore,     }
+          - { os: macos-15-intel,   artifact: amore-darwin-x64,   bin: amore,     }
     steps:
       - uses: actions/checkout@v4
 
@@ -219,7 +219,7 @@ jobs:
 
   release:
     name: GitHub Release
-    needs: [arcus, iris]
+    needs: [amore, iris]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     steps:
@@ -244,7 +244,7 @@ jobs:
           TAG="${GITHUB_REF_NAME}"
           NOTES="docs/release-notes/${TAG}.md"
           {
-            echo "# Arcus Build ${TAG}"
+            echo "# Amore Build ${TAG}"
             echo
             if [ -f "$NOTES" ]; then
               cat "$NOTES"
@@ -259,7 +259,7 @@ jobs:
             echo
             echo "| Asset | Notes |"
             echo "|---|---|"
-            echo "| \`arcus-{platform}\` | TUI agent binary — verify with the adjacent \`.sha256\` |"
+            echo "| \`amore-{platform}\` | TUI agent binary — verify with the adjacent \`.sha256\` |"
             echo "| \`iris-{platform}\` | Companion org/knowledge multi-tool (regula verbs included) |"
             echo "| \`iris-dash-{platform}\` | Optional standalone dash (TTY) — the multi-tool re-execs it when present |"
             echo
@@ -277,7 +277,7 @@ jobs:
       - name: Create release + attach assets
         uses: softprops/action-gh-release@v2
         with:
-          name: Arcus Build ${{ github.ref_name }}
+          name: Amore Build ${{ github.ref_name }}
           body_path: notes.md
           files: assets/**
           fail_on_unmatched_files: true

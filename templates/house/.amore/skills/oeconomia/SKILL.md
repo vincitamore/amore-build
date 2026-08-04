@@ -35,7 +35,7 @@ description: >-
 
 > **SELF-UPDATING.** A stale contract mis-allocates every future session's budget — worse than no contract. Update this file **in the same change that creates the fact**, per §8's triggers; the act of noticing is the trigger. Operational doctrine only — history lives in git and the task record, never accreted here.
 
-> Written for **Arcus Build**: native task-tool dispatch, model resolution via `[subagents.models]`, role/persona defaults, and spawn-time model override.
+> Written for **Amore Build**: native task-tool dispatch, model resolution via `[subagents.models]`, role/persona defaults, and spawn-time model override.
 
 The operational contract. Deeper doctrine and formation notes may live beside this skill as a companion file if the house authors one; this file is what you follow.
 

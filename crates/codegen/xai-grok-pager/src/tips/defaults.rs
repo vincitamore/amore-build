@@ -5,11 +5,11 @@
 //! is empty — offline, unreachable, or a provider that sends none — the fork
 //! falls back to this compiled-in list rather than showing nothing.
 //!
-//! These are **Arcus** tips: they teach real keystrokes, config keys, and
+//! These are **Amore** tips: they teach real keystrokes, config keys, and
 //! commands of this fork, and they carry zero Grok/GROK branding (the product
-//! is Arcus Build). Every string was verified against the fork tree and the
+//! is Amore Build). Every string was verified against the fork tree and the
 //! user guide on 2026-08-03; see
-//! `forge/output/arcus-tips/curated-tips.md` in the house tree for the
+//! `forge/output/amore-tips/curated-tips.md` in the house tree for the
 //! verification trail.
 //!
 //! Constraints (load-bearing):
@@ -27,16 +27,16 @@
 pub const DEFAULT_TIPS: &[&str] = &[
     "system_prompt_label names the harness, never the model",
     "Custom [model.*] blocks need system_prompt_label set",
-    "Prefer env_key over api_key in ~/.arcus/config.toml",
-    "arcus init --refresh never clobbers your house edits",
-    "Auto-update is hard-off; install new arcus builds yourself",
+    "Prefer env_key over api_key in ~/.amore/config.toml",
+    "amore init --refresh never clobbers your house edits",
+    "Auto-update is hard-off; install new amore builds yourself",
     "In multiline mode, Enter is newline and Shift+Enter sends.",
     "Alt+V pastes screenshots into the prompt on Windows.",
     "Ctrl+B backgrounds the running foreground command",
     "Shift+Tab cycles Normal, Plan, then Always-approve",
-    "Put .rhai scripts in .arcus/workflows/; run /workflow name",
+    "Put .rhai scripts in .amore/workflows/; run /workflow name",
     "Pin always-approve: [ui] permission_mode = \"always-approve\"",
-    "arcus -p \"prompt\" runs headless with full tool access",
+    "amore -p \"prompt\" runs headless with full tool access",
     "Ctrl+Z undoes a wiped prompt draft.",
     "@path:10-50 attaches only those lines, not the whole file",
     "Prefix @ with ! to attach gitignored or dotfiles",
@@ -97,7 +97,7 @@ mod tests {
 
     #[test]
     fn defaults_carry_no_grok_branding() {
-        // Product-native: these are Arcus tips. The crate itself is named
+        // Product-native: these are Amore tips. The crate itself is named
         // xai-grok-* (upstream seam), but the *strings* must not name Grok.
         for tip in DEFAULT_TIPS {
             let lower = tip.to_lowercase();

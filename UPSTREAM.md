@@ -1,17 +1,18 @@
 # Upstream relationship
 
-Definitive statement of how **Arcus Build** relates to its upstream source.
+Definitive statement of how **Amore Build** relates to its upstream source.
 Provenance and policy surface — not marketing.
 
 ## 1. What this is
 
-**Arcus Build** is a perpetual friendly fork of xAI's open-sourced Grok Build
-harness (`xai-org/grok-build`, Apache License 2.0).
+**Amore Build** is a perpetual friendly fork of xAI's open-sourced Grok Build
+harness (`xai-org/grok-build`, Apache License 2.0) — by way of the sibling
+fork Selene Build, and briefly named Arcus Build before ever being announced.
 
 | | |
 |---|---|
-| **Product / repo** | Arcus Build (`arcus-build`) |
-| **Primary binary** | `arcus` (argv0 also tolerates `arcus-build`, `grok`, `agent`) |
+| **Product / repo** | Amore Build (`amore-build`) |
+| **Primary binary** | `amore` (argv0 also tolerates `amore-build`, `grok`, `agent`) |
 | **Upstream** | [xai-org/grok-build](https://github.com/xai-org/grok-build) |
 | **License** | Apache-2.0 — see [`LICENSE`](LICENSE) |
 | **Crates** | Upstream names kept (`xai-grok-*` and related `xai-*`). Product rename is binary/docs/config-surface only, not the crate graph. |
@@ -39,12 +40,12 @@ required by Apache-2.0 and by bundled third-party licenses. The root-level
 
 ### Non-affiliation
 
-**Arcus Build is not affiliated with, endorsed by, or supported by xAI or
+**Amore Build is not affiliated with, endorsed by, or supported by xAI or
 X Corp.**
 
-- Independent fork: bugs, support, and feature work for Arcus Build are not
+- Independent fork: bugs, support, and feature work for Amore Build are not
   xAI's responsibility.
-- Do not open issues or PRs on `xai-org/grok-build` for Arcus Build behavior,
+- Do not open issues or PRs on `xai-org/grok-build` for Amore Build behavior,
   branding, templates, or fork-only features.
 - **Trademarks** (xAI, Grok, X, and related marks) belong to their owners.
   Apache-2.0 source use does not grant trademark rights.
@@ -72,7 +73,7 @@ object.
 Live value is always the file. Example shape only:
 
 ```text
-# Arcus Build: upstream baseline pin. (header comment, several lines)
+# Amore Build: upstream baseline pin. (header comment, several lines)
 ed6d543643628663873c5de28298e022ed634238
 ```
 
@@ -99,16 +100,16 @@ thin delta, re-verify fork surfaces, update `SOURCE_REV` when the pin moves.
 
 Honest delta versus stock `xai-org/grok-build`:
 
-**Identity and branding.** Product and binary are Arcus Build / `arcus`.
+**Identity and branding.** Product and binary are Amore Build / `amore`.
 User-visible labels follow the fork identity. Crate package names stay
 `xai-grok-*`.
 
-**Config-dir semantics.** Project roots use **`.arcus`** where upstream reads
+**Config-dir semantics.** Project roots use **`.amore`** where upstream reads
 **`.grok`**. **`.grok` is legacy fallback** so upstream-format trees keep
-working. Default user home is **`~/.arcus`** (compiled in); legacy
-`$GROK_HOME` still works (`$ARCUS_HOME` wins when both are set).
+working. Default user home is **`~/.amore`** (compiled in); legacy
+`$GROK_HOME` still works (`$AMORE_HOME` wins when both are set).
 
-**Environment surface.** Product policy: **`ARCUS_*` primaries**, **`GROK_*`**
+**Environment surface.** Product policy: **`AMORE_*` primaries**, **`GROK_*`**
 legacy aliases on dual-mapped keys. Not every historical `GROK_*` name has a
 twin; resolution follows `xai-grok-config` and related crates.
 
@@ -116,21 +117,21 @@ twin; resolution follows `xai-grok-config` and related crates.
 **embedded at build time** into the binary (`xai-grok-pager` embed machinery)
 for offline install.
 
-**`arcus init`.** Installs the embedded harness into a target repo
+**`amore init`.** Installs the embedded harness into a target repo
 (ownership/refresh policy; offline for the pack itself).
 
 **First-run setup.** Interactive first-run / setup guidance for credentials and
 companion install (wizard surface; explicit setup entry for non-interactive
 use). Must not trap headless or CI paths.
 
-**Iris.** Companion instrument in-tree at `instruments/iris/`. `arcus init`
+**Iris.** Companion instrument in-tree at `instruments/iris/`. `amore init`
 installs its release binaries into a house by default (`--no-iris` opts out;
-a failed download never fails the house); `arcus setup` records PATH
-detection. Never required to run Arcus Build — absence is quiet.
+a failed download never fails the house); `amore setup` records PATH
+detection. Never required to run Amore Build — absence is quiet.
 
 **Auto-update hard-off.** Compile-time policy in `xai-grok-update`
 (`FORK_AUTO_UPDATE_HARD_OFF`): auto-update is forced ineffective so the fork cannot
-self-update back to upstream. Newer builds come from Arcus Build release
+self-update back to upstream. Newer builds come from Amore Build release
 artifacts, not upstream installers.
 
 **Test-suite platform coverage (inherited).** The upstream suite is written
@@ -168,12 +169,12 @@ python scripts/sync_upstream.py --update-pin # SOURCE_REV -> upstream/main
 
 `--apply` refuses a dirty working tree and never commits — the merge is left
 for human review. `--verify` checks the fork surfaces mechanically — eight
-check groups as of 2026-08-04: `.arcus`/`.grok` precedence, `~/.arcus`
+check groups as of 2026-08-04: `.amore`/`.grok` precedence, `~/.amore`
 default home, identity/binary naming (argv0 aliases), auto-update hard-off
 (`FORK_AUTO_UPDATE_HARD_OFF`), the embed + `init` ownership tests, the
 brand-boundary gate, the `resolved_bin_name()` branding call-site pins
 (resume-hint / titles / completions), and the doctor-namespace migration
-pins — then builds and smokes `arcus` on the host. The script is the
+pins — then builds and smokes `amore` on the host. The script is the
 authoritative list; keep this sentence in sync when it grows. The Linux
 pager suite and full crate suite remain CI's job (see §5); `--verify` says
 what it can and cannot run rather than faking a green.
@@ -215,7 +216,7 @@ channel:
 
 - Re-enable auto-update toward upstream install endpoints.
 - Rename workspace crates to “match” the product name.
-- File Arcus Build issues on the upstream GitHub repository.
+- File Amore Build issues on the upstream GitHub repository.
 - Strip or relocate `LICENSE` / `THIRD-PARTY-NOTICES` without a
   license-compliant replacement.
 

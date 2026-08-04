@@ -584,10 +584,10 @@ fn managed_config_stale_at(home: Option<&Path>, identity: &ServingIdentity) -> b
     }
 }
 
-/// Override with `ARCUS_DEPLOYMENT_CONFIG_CACHE_TTL_SECS` (primary) /
+/// Override with `AMORE_DEPLOYMENT_CONFIG_CACHE_TTL_SECS` (primary) /
 /// `GROK_DEPLOYMENT_CONFIG_CACHE_TTL_SECS` (legacy) for testing.
 fn managed_config_stale_threshold() -> std::time::Duration {
-    if let Ok(s) = xai_grok_env::var("ARCUS_DEPLOYMENT_CONFIG_CACHE_TTL_SECS")
+    if let Ok(s) = xai_grok_env::var("AMORE_DEPLOYMENT_CONFIG_CACHE_TTL_SECS")
         && let Ok(secs) = s.parse::<u64>()
     {
         return std::time::Duration::from_secs(secs);

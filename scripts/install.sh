@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
-# Arcus Build installer — macOS / Linux / Git Bash (Windows).
+# Amore Build installer — macOS / Linux / Git Bash (Windows).
 #
-#   curl -fsSL https://amore.build/download/arcus-install-sh | bash
+#   curl -fsSL https://amore.build/download/amore-install-sh | bash
 #
 # Downloads the newest GitHub release asset for this host, verifies its
-# published sha256, and installs the `arcus` binary.
+# published sha256, and installs the `amore` binary.
 #
 # Environment overrides:
-#   ARCUS_VERSION      install a specific tag (e.g. v0.2.120) instead of latest
-#   ARCUS_INSTALL_DIR  target directory (default: ~/.local/bin, or ~/arcus/bin
+#   AMORE_VERSION      install a specific tag (e.g. v0.2.120) instead of latest
+#   AMORE_INSTALL_DIR  target directory (default: ~/.local/bin, or ~/amore/bin
 #                      under Git Bash to match the Windows convention)
 set -euo pipefail
 
-REPO="vincitamore/arcus-build"
+REPO="vincitamore/amore-build"
 
 case "$(uname -s)" in
   Linux)                     os="linux" ;;
@@ -27,23 +27,23 @@ case "$(uname -m)" in
   *) echo "error: unsupported architecture: $(uname -m)" >&2; exit 1 ;;
 esac
 
-artifact="arcus-${os}-${arch}"
+artifact="amore-${os}-${arch}"
 case "$artifact" in
-  arcus-linux-x64|arcus-linux-arm64|arcus-darwin-x64|arcus-darwin-arm64|arcus-windows-x64) ;;
+  amore-linux-x64|amore-linux-arm64|amore-darwin-x64|amore-darwin-arm64|amore-windows-x64) ;;
   *) echo "error: no published build for ${os}-${arch} — build from source:" >&2
      echo "  https://github.com/${REPO}#build-from-source" >&2; exit 1 ;;
 esac
 
 if [ "$os" = "windows" ]; then
-  ext="zip"; bin="arcus.exe"
-  install_dir="${ARCUS_INSTALL_DIR:-$HOME/arcus/bin}"
+  ext="zip"; bin="amore.exe"
+  install_dir="${AMORE_INSTALL_DIR:-$HOME/amore/bin}"
 else
-  ext="tar.gz"; bin="arcus"
-  install_dir="${ARCUS_INSTALL_DIR:-$HOME/.local/bin}"
+  ext="tar.gz"; bin="amore"
+  install_dir="${AMORE_INSTALL_DIR:-$HOME/.local/bin}"
 fi
 
-if [ -n "${ARCUS_VERSION:-}" ]; then
-  base="https://github.com/${REPO}/releases/download/${ARCUS_VERSION}"
+if [ -n "${AMORE_VERSION:-}" ]; then
+  base="https://github.com/${REPO}/releases/download/${AMORE_VERSION}"
 else
   base="https://github.com/${REPO}/releases/latest/download"
 fi
@@ -91,7 +91,7 @@ cp "$tmp/pkg/$bin" "$install_dir/$bin"
 chmod +x "$install_dir/$bin"
 # License hygiene: the release archive carries these; keep them beside the binary.
 for f in LICENSE NOTICE; do
-  [ -f "$tmp/pkg/$f" ] && cp "$tmp/pkg/$f" "$install_dir/$f.arcus" || true
+  [ -f "$tmp/pkg/$f" ] && cp "$tmp/pkg/$f" "$install_dir/$f.amore" || true
 done
 
 echo

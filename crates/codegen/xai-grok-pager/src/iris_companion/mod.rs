@@ -2,7 +2,7 @@
 //! in a **new OS terminal** (never in-process).
 //!
 //! Detection order (once per process / session via [`OnceLock`]):
-//! 1. `~/.arcus/iris-companion.toml` pointer planted by `arcus setup`
+//! 1. `~/.amore/iris-companion.toml` pointer planted by `amore setup`
 //!    (`[iris] detected = true` + `path` naming an existing file)
 //! 2. `iris` on `PATH` ([`detect_iris_on_path`])
 
@@ -15,7 +15,7 @@ pub use spawn::{
     SpawnPlan, build_spawn_plan, spawn_iris_dash, spawn_plan_for_bin,
 };
 
-/// Pointer file name under the arcus home (same as setup writer).
+/// Pointer file name under the amore home (same as setup writer).
 pub const IRIS_POINTER_NAME: &str = "iris-companion.toml";
 
 /// Session-cached resolution of the iris binary (absolute path when found).
@@ -41,7 +41,7 @@ pub fn resolved_bin() -> Option<&'static PathBuf> {
         .as_ref()
 }
 
-/// Live resolve: pointer under arcus home, else PATH. Used once by the cache.
+/// Live resolve: pointer under amore home, else PATH. Used once by the cache.
 fn resolve_live() -> Option<PathBuf> {
     let home = xai_grok_config::grok_home();
     resolve_layered(&home, detect_iris_on_path())
@@ -97,7 +97,7 @@ fn parse_pointer_toml(raw: &str) -> Option<PathBuf> {
 /// Never panics.
 pub fn open_dash() -> Result<(), String> {
     let Some(bin) = resolved_bin() else {
-        return Err("iris not found — install the companion or re-run arcus setup".into());
+        return Err("iris not found — install the companion or re-run amore setup".into());
     };
     spawn_iris_dash(bin, resolve_org_root().as_deref())
 }

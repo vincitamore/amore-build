@@ -434,8 +434,8 @@ fn discovery_change_for_path(path: &Path) -> Option<DiscoveryChange> {
 }
 
 /// Known vendor config root basenames; kept in sync with `collect_skill_config_dirs`.
-/// Arcus Build adds fork-native `.arcus` and keeps `.grok` as the legacy fallback.
-const VENDOR_CONFIG_ROOT_NAMES: &[&str] = &[".arcus", ".grok", ".agents", ".claude", ".cursor"];
+/// Amore Build adds fork-native `.amore` and keeps `.grok` as the legacy fallback.
+const VENDOR_CONFIG_ROOT_NAMES: &[&str] = &[".amore", ".grok", ".agents", ".claude", ".cursor"];
 
 /// Vendor roots (by name or `grok_home`) must use scoped watches — they can
 /// contain large non-skill trees (`worktrees/`, etc.).
@@ -821,7 +821,7 @@ mod tests {
             &home.join("repo").join(".claude"),
             &grok_home
         ));
-        assert!(is_vendor_config_root(&home.join(".arcus"), &grok_home));
+        assert!(is_vendor_config_root(&home.join(".amore"), &grok_home));
 
         assert!(!is_vendor_config_root(&home.join("my-skills"), &grok_home));
         assert!(!is_vendor_config_root(&home.join(".config"), &grok_home));

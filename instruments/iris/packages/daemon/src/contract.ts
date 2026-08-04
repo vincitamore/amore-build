@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// @arcus/daemon — the shared contract.
+// @amore/daemon — the shared contract.
 //
 // The ONE file every module imports. Types + module-boundary signatures only —
 // no implementation. Builders implement their owned module against these
@@ -7,7 +7,7 @@
 //
 // Authority chain:
 //   spec/legacy-shapes.md  — the legacy wire contract (empirically grounded)
-//   spec/regula-api.md     — what @arcus/regula provides vs what we build
+//   spec/regula-api.md     — what @amore/regula provides vs what we build
 //   README.md              — parity discipline + the ratified v2 shape changes
 //
 // Legacy sources (READ-ONLY ground truth when the spec is ambiguous; archived

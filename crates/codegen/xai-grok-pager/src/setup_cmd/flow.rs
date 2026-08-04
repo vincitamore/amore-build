@@ -106,7 +106,7 @@ pub fn run_flow(
 }
 
 fn run_headless(ctx: &FlowContext, out: &mut impl Write, summary: &mut SetupSummary) -> Result<()> {
-    writeln!(out, "Arcus Build — setup (headless)")?;
+    writeln!(out, "Amore Build — setup (headless)")?;
     writeln!(out, "Home: {}", ctx.home.display())?;
     writeln!(out)?;
 
@@ -117,7 +117,7 @@ fn run_headless(ctx: &FlowContext, out: &mut impl Write, summary: &mut SetupSumm
     writeln!(out, "Step 1/3 — model provider (headline)")?;
     writeln!(
         out,
-        "  Choose one and either re-run `arcus setup` interactively, or paste into {}:",
+        "  Choose one and either re-run `amore setup` interactively, or paste into {}:",
         ctx.config_path().display()
     )?;
     writeln!(out)?;
@@ -154,11 +154,11 @@ fn run_headless(ctx: &FlowContext, out: &mut impl Write, summary: &mut SetupSumm
         out,
         "  One login covers the baked catalog + subagent freight (PKCE public client)."
     )?;
-    writeln!(out, "  Option A:  arcus login")?;
+    writeln!(out, "  Option A:  amore login")?;
     writeln!(out, "  Option B:  set XAI_API_KEY in your environment")?;
     writeln!(out)?;
     summary.grok_rail_note = Some(
-        "Run `arcus login` (OAuth) or set XAI_API_KEY — one login covers catalog + subagent freight."
+        "Run `amore login` (OAuth) or set XAI_API_KEY — one login covers catalog + subagent freight."
             .into(),
     );
     summary.skipped_steps.push("grok-rail (headless: printed only)");
@@ -172,7 +172,7 @@ fn run_headless(ctx: &FlowContext, out: &mut impl Write, summary: &mut SetupSumm
             writeln!(out, "  Detected on PATH: {}", p.display())?;
             writeln!(
                 out,
-                "  Re-run interactively to plant ~/.arcus/iris-companion.toml, or create it manually."
+                "  Re-run interactively to plant ~/.amore/iris-companion.toml, or create it manually."
             )?;
         }
         None => {
@@ -180,7 +180,7 @@ fn run_headless(ctx: &FlowContext, out: &mut impl Write, summary: &mut SetupSumm
             writeln!(out, "  Release asset shape for this host: {asset}")?;
             writeln!(
                 out,
-                "  `arcus init` installs the companion into a house automatically; \
+                "  `amore init` installs the companion into a house automatically; \
                  install on PATH separately if you want the CLI everywhere."
             )?;
         }
@@ -214,7 +214,7 @@ fn run_interactive(
         out,
         "  Escape hatch later: [agent] setup_on_first_run = false in config.toml"
     )?;
-    writeln!(out, "  Re-run anytime: arcus setup   |  reset: arcus setup --reset")?;
+    writeln!(out, "  Re-run anytime: amore setup   |  reset: amore setup --reset")?;
     writeln!(out)?;
 
     // ── Step 1: model provider ──────────────────────────────────────────
@@ -284,7 +284,7 @@ fn run_interactive(
     )?;
     writeln!(out, "  (PKCE public client — no client secret).")?;
     writeln!(out)?;
-    writeln!(out, "  [1] I'll run `arcus login` after this wizard")?;
+    writeln!(out, "  [1] I'll run `amore login` after this wizard")?;
     writeln!(out, "  [2] I'll set XAI_API_KEY in my environment")?;
     writeln!(out, "  [s] Skip")?;
     writeln!(out)?;
@@ -294,10 +294,10 @@ fn run_interactive(
     match choice.as_str() {
         "1" | "login" => {
             summary.grok_rail_note = Some(
-                "Next: run `arcus login` (OAuth). One login covers catalog + subagent freight."
+                "Next: run `amore login` (OAuth). One login covers catalog + subagent freight."
                     .into(),
             );
-            writeln!(out, "  Noted — run `arcus login` when ready.")?;
+            writeln!(out, "  Noted — run `amore login` when ready.")?;
         }
         "2" | "key" | "api" => {
             summary.grok_rail_note = Some(
@@ -319,7 +319,7 @@ fn run_interactive(
     match &detected {
         Some(p) => {
             writeln!(out, "  Detected on PATH: {}", p.display())?;
-            writeln!(out, "  [1] Plant companion pointer config under arcus home (recommended)")?;
+            writeln!(out, "  [1] Plant companion pointer config under amore home (recommended)")?;
             writeln!(out, "  [s] Skip")?;
         }
         None => {
@@ -328,7 +328,7 @@ fn run_interactive(
             writeln!(out, "    {asset}")?;
             writeln!(
                 out,
-                "  `arcus init` installs the companion into a house automatically; \
+                "  `amore init` installs the companion into a house automatically; \
                  install on PATH separately for the CLI everywhere, then re-run setup."
             )?;
             writeln!(out, "  [1] Plant companion pointer config (recommended)")?;
@@ -488,7 +488,7 @@ fn write_summary_screen(out: &mut impl Write, summary: &SetupSummary) -> Result<
         writeln!(out, "  State:     {}", p.display())?;
     }
     writeln!(out)?;
-    writeln!(out, "  Next: set any env keys above, then run `arcus`.")?;
+    writeln!(out, "  Next: set any env keys above, then run `amore`.")?;
     writeln!(
         out,
         "  Disable auto first-run: [agent] setup_on_first_run = false"
@@ -499,7 +499,7 @@ fn write_summary_screen(out: &mut impl Write, summary: &SetupSummary) -> Result<
 
 fn banner(out: &mut impl Write) -> Result<()> {
     writeln!(out, "════════════════════════════════════════")?;
-    writeln!(out, "  Arcus Build — first-run setup")?;
+    writeln!(out, "  Amore Build — first-run setup")?;
     writeln!(out, "════════════════════════════════════════")?;
     Ok(())
 }
@@ -580,7 +580,7 @@ mod tests {
         assert!(!dir.path().join("config.toml").exists());
         let text = String::from_utf8(out).unwrap();
         assert!(text.contains("OpenRouter"));
-        assert!(text.contains("arcus login"));
+        assert!(text.contains("amore login"));
         assert!(text.contains("iris-"));
     }
 

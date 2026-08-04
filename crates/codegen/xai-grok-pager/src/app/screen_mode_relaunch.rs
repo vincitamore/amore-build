@@ -837,11 +837,11 @@ mod tests {
         // explicit flag keeps the resume in the right mode if the env is dropped.
         assert_eq!(
             screen_mode_relaunch_resume_hint("abc-sid", false),
-            "GROK_SCREEN_MODE=fullscreen arcus --fullscreen --resume abc-sid"
+            "GROK_SCREEN_MODE=fullscreen amore --fullscreen --resume abc-sid"
         );
         assert_eq!(
             screen_mode_relaunch_resume_hint("abc-sid", true),
-            "GROK_SCREEN_MODE=minimal arcus --minimal --resume abc-sid"
+            "GROK_SCREEN_MODE=minimal amore --minimal --resume abc-sid"
         );
     }
 

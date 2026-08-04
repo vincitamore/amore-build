@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Arcus Build fork: enforce the grok-mention boundary.
+"""Amore Build fork: enforce the grok-mention boundary.
 
 The fork is a perpetual friendly fork of xAI's Grok Build. Most `grok`
 mentions in the tree are *upstream substrate* and must never be renamed:
@@ -35,7 +35,7 @@ Modes:
 Deliberately stdlib-only (re, pathlib, argparse, json) so it runs without
 toolchain ceremony on any host. Windows: `py scripts/...`; unix: `python3`.
 
-The house tree (`arcus/`) is NOT scanned: its `.grok`/`--grok-compat` mentions
+The house tree (`amore/`) is NOT scanned: its `.grok`/`--grok-compat` mentions
 are the documented legacy-fallback lane and are linted by the house's own
 `iris regula lint` (orientation-rules-drift) /
 `sync_orientation_rules.py --check`.
@@ -91,7 +91,7 @@ ALLOWED = [
     r"Grok rail", r"xAI grok", r"xAI's grok", r"grok headless",
     r"argv0 also tolerates",           # the documented multi-call alias list
     r"\bgrok\b, and `agent`",          # argv0 alias tail (README/UPSTREAM)
-    r"tolerates `arcus-build`, `grok`",
+    r"tolerates `amore-build`, `grok`",
     r"grok-4\.5",                      # model name (covers "Grok 4.5")
 ]
 ALLOWED_RE = re.compile("|".join(f"(?:{p})" for p in ALLOWED), re.IGNORECASE)
@@ -106,8 +106,8 @@ ALLOWED_RE = re.compile("|".join(f"(?:{p})" for p in ALLOWED), re.IGNORECASE)
 REVIEWED_EXCEPTIONS = [
     # argv0 alias list: `grok` is the documented multi-call legacy alias the
     # binary still tolerates (DEFAULT_BIN_NAME logic in app/cli.rs).
-    ("README.md", "argv0 also tolerates `arcus-build`, `grok`, and `agent`"),
-    ("UPSTREAM.md", "argv0 also tolerates `arcus-build`, `grok`, `agent`"),
+    ("README.md", "argv0 also tolerates `amore-build`, `grok`, and `agent`"),
+    ("UPSTREAM.md", "argv0 also tolerates `amore-build`, `grok`, `agent`"),
     # Prose that names upstream's own spelling while contrasting it with the
     # fork home — describing the legacy brand, not using it as the product.
     ("README.md", "upstream brand spellings (`grok` / `~/.grok`)"),

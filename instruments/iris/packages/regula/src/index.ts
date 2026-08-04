@@ -1,4 +1,4 @@
-// @arcus/regula — the governing rule of the org system.
+// @amore/regula — the governing rule of the org system.
 // Public entry: the schema/lifecycle spine + the verbs that build on it.
 export * from './schema';
 export * from './errors';

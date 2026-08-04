@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""house stop gate — native Stop hook for Arcus Build houses.
+"""house stop gate — native Stop hook for Amore Build houses.
 
 Parameterized port of the house's native stop gate for public template use.
 
@@ -19,7 +19,7 @@ Gate discipline:
   never fire;
 - session-end observe fires (reason != "end_turn") never fire.
 
-State lives under ~/.arcus/state/stop-gate/ (or $GROK_HOME / $ARCUS_HOME).
+State lives under ~/.amore/state/stop-gate/ (or $GROK_HOME / $AMORE_HOME).
 """
 import json
 import os
@@ -46,7 +46,7 @@ CAPTURE_MARKERS = [
     "forge/handles", "forge\\handles",
     "forge/output", "forge\\output",
     "forge/sessions", "forge\\sessions",
-    ".arcus/skills", ".arcus\\skills",
+    ".amore/skills", ".amore\\skills",
     ".grok/skills", ".grok\\skills",
 ]
 
@@ -64,7 +64,7 @@ This turn ended without an address. Reflect before stopping.
 Did this turn produce any of these? Capture / maintain now if so:
 
 - Reusable insight -> `knowledge/<subfolder>/<topic>.md`
-- New craft for a tool/skill we own (gotcha, contract, workflow, design rule) -> its skill under `.arcus/skills/<skill>/SKILL.md`
+- New craft for a tool/skill we own (gotcha, contract, workflow, design rule) -> its skill under `.amore/skills/<skill>/SKILL.md`
 - Decision needing operator input -> `inbox/decisions/<item>.md`
 - Bug to investigate -> `inbox/investigations/<item>.md`
 - Feature idea -> `inbox/ideas/<item>.md`
@@ -98,13 +98,13 @@ def block() -> None:
     sys.exit(0)
 
 
-def arcus_home() -> Path:
-    for key in ("ARCUS_HOME", "GROK_HOME"):
+def amore_home() -> Path:
+    for key in ("AMORE_HOME", "GROK_HOME"):
         val = os.environ.get(key)
         if val:
             return Path(val)
     base = os.environ.get("USERPROFILE") or str(Path.home())
-    return Path(base) / ".arcus"
+    return Path(base) / ".amore"
 
 
 def normalize_line(raw: str) -> str:
@@ -185,7 +185,7 @@ def is_operator_entry(entry: dict) -> bool:
         or lowered.startswith("<session-context")
         or lowered.startswith("<maintenance-gate")
         or "[house stop gate" in lowered
-        or "[arcus stop gate" in lowered
+        or "[amore stop gate" in lowered
         or "stop hook feedback:" in lowered
     )
     return not synthetic
@@ -280,12 +280,12 @@ def main() -> None:
     if envelope.get("hookEventName") not in ("stop", "Stop"):
         release()
 
-    debug = os.environ.get("ARCUS_STOP_GATE_DEBUG") == "1"
+    debug = os.environ.get("AMORE_STOP_GATE_DEBUG") == "1"
 
     def decide(verdict: str) -> None:
         if debug:
             try:
-                log_dir = arcus_home() / "state" / "stop-gate"
+                log_dir = amore_home() / "state" / "stop-gate"
                 log_dir.mkdir(parents=True, exist_ok=True)
                 row = {
                     "verdict": verdict,
@@ -318,7 +318,7 @@ def main() -> None:
     if not is_org_workspace(Path(root_raw)):
         release_logged("non-org-workspace")
 
-    state_dir = arcus_home() / "state" / "stop-gate"
+    state_dir = amore_home() / "state" / "stop-gate"
     state_file = state_dir / f"{re.sub(r'[^A-Za-z0-9_-]', '_', session_id)}.json"
     state = {"fired_prompt_id": None, "addressed_prompt_id": None}
     try:

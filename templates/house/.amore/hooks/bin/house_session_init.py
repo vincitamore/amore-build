@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""house session-init — SessionStart hook for Arcus Build houses.
+"""house session-init — SessionStart hook for Amore Build houses.
 
 Surfaces due reminders and a one-line orientation pointer at session start.
 
@@ -225,7 +225,7 @@ def main() -> None:
 
         now = datetime.now().astimezone()
         # Allow tests to pin "now" without touching the clock.
-        pinned = os.environ.get("ARCUS_SESSION_INIT_NOW")
+        pinned = os.environ.get("AMORE_SESSION_INIT_NOW")
         if pinned:
             parsed = parse_when(pinned)
             if parsed is not None:

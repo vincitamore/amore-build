@@ -26,7 +26,7 @@
 //! These tests verify the JSON contract so any refactor to `UpdateStatus`,
 //! `check_update_status`, or the npm dispatch path will surface a diff.
 //!
-//! **Fork note.** Arcus Build hard-disables self-update
+//! **Fork note.** Amore Build hard-disables self-update
 //! (`FORK_AUTO_UPDATE_HARD_OFF`): `check_update_status` returns before any
 //! registry is consulted, so every scenario below — 403, stale, newer,
 //! rollback — now produces the same silence. The scenarios are kept rather

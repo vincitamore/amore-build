@@ -1,12 +1,12 @@
-# Arcus Build
+# Amore Build
 
 **a terminal coding agent that is not a wrapper around one model**
 
-Arcus Build (`arcus`) is a terminal AI coding agent: a full-screen TUI that
+Amore Build (`amore`) is a terminal AI coding agent: a full-screen TUI that
 understands your codebase, edits files, runs shell commands, searches the web,
 and drives long-running multi-agent work — interactively, headlessly for
 scripting/CI, or embedded in editors via ACP. Bring any OpenAI-compatible
-model; plant a **cooperation harness** in your repo with `arcus init`; drive
+model; plant a **cooperation harness** in your repo with `amore init`; drive
 the org tree it plants with the **iris** companion dash.
 
 It is a **permanent engineered fork** of xAI's open-source
@@ -14,7 +14,7 @@ It is a **permanent engineered fork** of xAI's open-source
 xAI product, and not affiliated with any model vendor.** Upstream provenance
 and sync cadence: [`UPSTREAM.md`](UPSTREAM.md).
 
-![Arcus Build — the welcome screen](docs/assets/welcome-shimmer.gif)
+![Amore Build — the welcome screen](docs/assets/welcome-shimmer.gif)
 
 ---
 
@@ -25,26 +25,26 @@ and sync cadence: [`UPSTREAM.md`](UPSTREAM.md).
 Prebuilt binaries are published for macOS, Linux, and Windows:
 
 ```sh
-curl -fsSL https://amore.build/download/arcus-install-sh | bash   # macOS / Linux / Git Bash
-irm https://amore.build/download/arcus-install-ps1 | iex          # Windows PowerShell
-arcus --version
+curl -fsSL https://amore.build/download/amore-install-sh | bash   # macOS / Linux / Git Bash
+irm https://amore.build/download/amore-install-ps1 | iex          # Windows PowerShell
+amore --version
 ```
 
-The installers fetch the newest [GitHub Release](https://github.com/vincitamore/arcus-build/releases)
+The installers fetch the newest [GitHub Release](https://github.com/vincitamore/amore-build/releases)
 asset for your platform, verify its published sha256, and install the binary
-(`~/.local/bin` on unix, `%USERPROFILE%\arcus\bin` on Windows — override with
-`ARCUS_INSTALL_DIR`, pin a tag with `ARCUS_VERSION`). They are
+(`~/.local/bin` on unix, `%USERPROFILE%\amore\bin` on Windows — override with
+`AMORE_INSTALL_DIR`, pin a tag with `AMORE_VERSION`). They are
 [`scripts/install.sh`](scripts/install.sh) and
 [`scripts/install.ps1`](scripts/install.ps1) in this repository if you prefer
 to read before you run.
 
-See the [changelog](crates/codegen/xai-grok-shell-base/assets/arcus-changelog.md)
+See the [changelog](crates/codegen/xai-grok-shell-base/assets/amore-changelog.md)
 for the latest fixes, features, and improvements in each release (also
 rendered in-product on the welcome screen and by `/release-notes`).
 
-> **PATH note:** crates.io already publishes a Lua linter named `arcus`.
-> That is a different tool. `arcus doctor` (and `arcus doctor --json`, field
-> `pathCollision`) detects when another `arcus` on `PATH` would shadow Arcus
+> **PATH note:** crates.io already publishes a Lua linter named `amore`.
+> That is a different tool. `amore doctor` (and `amore doctor --json`, field
+> `pathCollision`) detects when another `amore` on `PATH` would shadow Amore
 > Build.
 
 ### Build from source
@@ -61,27 +61,27 @@ Optionally, [DotSlash](https://dotslash-cli.com) can run the pinned tool under
 build falls back to `protoc` on `PATH` by design.
 
 ```sh
-git clone https://github.com/vincitamore/arcus-build.git
-cd arcus-build
+git clone https://github.com/vincitamore/amore-build.git
+cd amore-build
 
 cargo run -p xai-grok-pager-bin              # build + launch the TUI
 cargo build -p xai-grok-pager-bin --release  # release binary
 ```
 
 The composition-root crate is `xai-grok-pager-bin`; the public binary name is
-**`arcus`** (argv0 also tolerates `arcus-build`, `grok`, and `agent`). After a
+**`amore`** (argv0 also tolerates `amore-build`, `grok`, and `agent`). After a
 release build the artifact is typically
-`target/release/arcus` (or `arcus.exe` on Windows).
+`target/release/amore` (or `amore.exe` on Windows).
 
-Home defaults to **`~/.arcus`** (override with `$ARCUS_HOME`; legacy
-`$GROK_HOME` still works). Project config lives under **`.arcus/`** (`.grok/`
-is kept as a legacy fallback; `.arcus` wins when both exist).
+Home defaults to **`~/.amore`** (override with `$AMORE_HOME`; legacy
+`$GROK_HOME` still works). Project config lives under **`.amore/`** (`.grok/`
+is kept as a legacy fallback; `.amore` wins when both exist).
 
 ---
 
 ## Quickstart
 
-Arcus Build is **model-agnostic by design**: every model is a config entry
+Amore Build is **model-agnostic by design**: every model is a config entry
 pointed at an OpenAI-compatible endpoint, and the identity the model is given
 does not name a model at all (see below) — so entries can be swapped and
 compared without the harness caring which one is behind them. The wizard's
@@ -92,24 +92,24 @@ OpenAI-compatible host works. Native xAI grok is the **second rail**
 
 ### Guided path (recommended)
 
-On first interactive launch with no credentials resolved, Arcus opens a
+On first interactive launch with no credentials resolved, Amore opens a
 setup wizard. You can also run it anytime:
 
 ```sh
-arcus setup            # interactive wizard when on a TTY
-arcus setup --headless # print steps without prompts
-arcus setup --reset    # clear wizard state
-arcus setup --force    # re-run past done/skipped
+amore setup            # interactive wizard when on a TTY
+amore setup --headless # print steps without prompts
+amore setup --reset    # clear wizard state
+amore setup --force    # re-run past done/skipped
 ```
 
 Hard guards: the auto first-run wizard **never** fires headless (`-p` / piped),
 in CI, when `[agent] setup_on_first_run = false`, or after state is
-done/skipped under `~/.arcus`. Team managed config is a separate path:
-`arcus setup --managed` (legacy `arcus setup --json` still works).
+done/skipped under `~/.amore`. Team managed config is a separate path:
+`amore setup --managed` (legacy `amore setup --json` still works).
 
 ### Manual paths (condensed)
 
-Config: `~/.arcus/config.toml`. Prefer `env_key` over a literal `api_key`.
+Config: `~/.amore/config.toml`. Prefer `env_key` over a literal `api_key`.
 **Every** custom `[model.*]` block **must** set `system_prompt_label` —
 an unlabeled model falls through the resolver chain to a default and will
 confidently answer to the wrong name.
@@ -137,7 +137,7 @@ model = "deepseek/deepseek-v4-flash-0731"
 base_url = "https://openrouter.ai/api/v1"
 name = "DeepSeek V4 Flash (OpenRouter)"
 env_key = "OPENROUTER_API_KEY"
-system_prompt_label = "Arcus Build"
+system_prompt_label = "Amore Build"
 context_window = 1048576
 # Reasoning tokens draw from this too — it is the provider's reported
 # ceiling, not a target; a lower cap truncates the reasoning pass invisibly.
@@ -150,7 +150,7 @@ Full recipes, pricing stamps, alternate hosts, and verify commands:
 
 ```sh
 export OPENROUTER_API_KEY="sk-or-..."   # your key
-arcus -m deepseek-openrouter -p "Reply with exactly: ARCUS-DS-OK"
+amore -m deepseek-openrouter -p "Reply with exactly: AMORE-DS-OK"
 ```
 
 ---
@@ -161,8 +161,8 @@ Native grok subagent freight and first-party xAI models ride a **separate**
 credential rail from your BYOK model:
 
 ```sh
-arcus login                 # browser OAuth (PKCE) against xAI
-arcus login --device-auth   # device-code for headless / remote
+amore login                 # browser OAuth (PKCE) against xAI
+amore login --device-auth   # device-code for headless / remote
 # or:
 export XAI_API_KEY="xai-..." # console key; no OAuth required
 ```
@@ -176,16 +176,16 @@ Details: [`docs/authentication.md`](docs/authentication.md).
 ## The cooperation harness
 
 ```sh
-arcus init              # create a house: orientation surfaces, schemas, skills, hooks, iris
-arcus init --dry-run    # plan only
-arcus init --refresh    # rewrite files still matching the install manifest
+amore init              # create a house: orientation surfaces, schemas, skills, hooks, iris
+amore init --dry-run    # plan only
+amore init --refresh    # rewrite files still matching the install manifest
 ```
 
-`arcus init` **creates a house** — a working tree for long-horizon
+`amore init` **creates a house** — a working tree for long-horizon
 collaboration with the agent: root `AGENTS.md`, folder schemas (`context/`,
 `inbox/`, `tasks/`, `knowledge/`, `reminders/`, `forge/`), a 6-skill
 orchestration pack, session hooks, the iris companion, and
-`.arcus/house-install.json` recording ownership. **Lattice is default-on**
+`.amore/house-install.json` recording ownership. **Lattice is default-on**
 (`--no-lattice` opt-out); skills and hooks default-on (`--no-skills` /
 `--no-hooks`); iris default-on (`--no-iris` opts out and makes init fully
 offline). Ownership-aware: never silently overwrites user edits; `--refresh`
@@ -200,11 +200,11 @@ What got installed and what you own: [`docs/onboarding.md`](docs/onboarding.md).
 
 **Iris** is the house's knowledge/org instrument: a live file index daemon,
 org CRUD verbs (`task` / `inbox` / `reminder` / `knowledge`), and an
-interactive dash over the tree `arcus init` plants — Dashboard, Tasks,
-Inbox, Reminders, Knowledge, Files, Forge, and Graph tabs. `arcus init`
-installs it into the house by default and links it beside the `arcus`
+interactive dash over the tree `amore init` plants — Dashboard, Tasks,
+Inbox, Reminders, Knowledge, Files, Forge, and Graph tabs. `amore init`
+installs it into the house by default and links it beside the `amore`
 binary, so it is on `PATH` with no manual step; it is never required to run
-Arcus Build itself. Every write goes through its **regula** core — schemas,
+Amore Build itself. Every write goes through its **regula** core — schemas,
 legal lifecycle transitions, placement, lint — and the planted `AGENTS.md`
 wires the resident agent to the same verbs. Local-first: the daemon binds loopback only, and there is no
 telemetry. Full story (with a screenshot of every tab):
@@ -220,7 +220,7 @@ telemetry. Full story (with a screenshot of every tab):
 |-----|------|
 | [`docs/setup-models.md`](docs/setup-models.md) | BYOK model recipes (DeepSeek / GLM / any OpenAI-compatible host) |
 | [`docs/authentication.md`](docs/authentication.md) | OAuth + BYOK dual rail, `auth.json` anti-copy rule |
-| [`docs/onboarding.md`](docs/onboarding.md) | `arcus init` house tree, ownership, refresh |
+| [`docs/onboarding.md`](docs/onboarding.md) | `amore init` house tree, ownership, refresh |
 | [`docs/iris.md`](docs/iris.md) | Iris companion |
 | [`UPSTREAM.md`](UPSTREAM.md) | Fork provenance and sync policy |
 | [`examples/config.multi-provider.toml`](examples/config.multi-provider.toml) | Multi-provider config sample |
@@ -229,11 +229,11 @@ Deep feature reference ships in-tree with the pager crate:
 [`crates/codegen/xai-grok-pager/docs/user-guide/`](crates/codegen/xai-grok-pager/docs/user-guide/)
 (slash commands, theming, MCP, skills, hooks, headless, sandboxing, …). Some
 paths there still use upstream brand spellings (`grok` / `~/.grok`); the fork
-home is `~/.arcus` and the public binary is `arcus`.
+home is `~/.amore` and the public binary is `amore`.
 
-Product env surface: **`ARCUS_*` primary** with silent `GROK_*` legacy
-aliases (`ARCUS_HOME`, `ARCUS_DEFAULT_MODEL`, `ARCUS_SYSTEM_PROMPT_LABEL`,
-`ARCUS_AUTH_*`, …). Provider keys (`XAI_API_KEY`, other vendor keys) stay
+Product env surface: **`AMORE_*` primary** with silent `GROK_*` legacy
+aliases (`AMORE_HOME`, `AMORE_DEFAULT_MODEL`, `AMORE_SYSTEM_PROMPT_LABEL`,
+`AMORE_AUTH_*`, …). Provider keys (`XAI_API_KEY`, other vendor keys) stay
 unaliased. Auto-update is hard-off in this fork (no in-app xAI reinstall
 hints).
 

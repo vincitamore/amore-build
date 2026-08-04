@@ -71,8 +71,8 @@ const THEME_CHOICES: &[EnumChoice] = &[
         description: "Deep dark with warm accents; needs truecolor.",
     },
     EnumChoice {
-        canonical: "arcus",
-        display: "Arcus",
+        canonical: "amore",
+        display: "Amore",
         description: "Rain-dark with colour accents; needs truecolor.",
     },
 ];
@@ -508,8 +508,8 @@ const CONCRETE_THEME_CHOICES: &[EnumChoice] = &[
         description: "Deep dark with warm accents; needs truecolor.",
     },
     EnumChoice {
-        canonical: "arcus",
-        display: "Arcus",
+        canonical: "amore",
+        display: "Amore",
         description: "Rain-dark with colour accents; needs truecolor.",
     },
 ];

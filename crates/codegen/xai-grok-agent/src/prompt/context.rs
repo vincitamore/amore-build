@@ -150,11 +150,11 @@ pub struct PromptContext {
     #[serde(default = "default_system_prompt_label")]
     pub system_prompt_label: String,
 }
-/// Default identity on trim-tool-descriptions (`You are Arcus Build`).
-/// The public product default label is Arcus Build; identity remains
+/// Default identity on trim-tool-descriptions (`You are Amore Build`).
+/// The public product default label is Amore Build; identity remains
 /// settable per-model via `system_prompt_label` in config (and the
 /// env/config resolution chain).
-pub const DEFAULT_SYSTEM_PROMPT_LABEL: &str = "Arcus Build";
+pub const DEFAULT_SYSTEM_PROMPT_LABEL: &str = "Amore Build";
 fn default_system_prompt_label() -> String {
     DEFAULT_SYSTEM_PROMPT_LABEL.to_string()
 }

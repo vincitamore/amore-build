@@ -8,7 +8,7 @@ import {
   markPipelineReviewed,
   resolveProposal,
   type ForgeListItem,
-} from '@arcus/regula';
+} from '@amore/regula';
 import { resolveOrgRoot } from '../daemon';
 import { usePalette } from '../ThemeProvider';
 import type { Palette } from '../theme';

@@ -2,7 +2,7 @@
 GENERATED FILE — do not edit by hand.
 Canonical source: context/principle-lattice.md
 Regenerate: python scripts/sync_orientation_rules.py
-Loaded as a project rule (.arcus/rules/) at session start.
+Loaded as a project rule (.amore/rules/) at session start.
 -->
 
 ## Principle Lattice

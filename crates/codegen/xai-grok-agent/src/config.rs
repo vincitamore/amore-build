@@ -1521,7 +1521,7 @@ impl AgentDefinition {
     pub fn default_grok_build() -> Self {
         Self::base(
             BuiltinAgentName::GrokBuild,
-            "Arcus Build agent for software engineering tasks.",
+            "Amore Build agent for software engineering tasks.",
         )
     }
     /// Grok Build Concise agent definition — concise output format for SFT/RL.
@@ -1531,7 +1531,7 @@ impl AgentDefinition {
             agents_md: false,
             ..Self::base(
                 BuiltinAgentName::GrokBuildConcise,
-                "Arcus Build agent with concise output format.",
+                "Amore Build agent with concise output format.",
             )
         }
     }
@@ -1541,7 +1541,7 @@ impl AgentDefinition {
             tool_config: grok_build_plan_toolset(),
             ..Self::base(
                 BuiltinAgentName::GrokBuildPlan,
-                "Arcus Build agent with plan mode support.",
+                "Amore Build agent with plan mode support.",
             )
         }
     }
@@ -1551,7 +1551,7 @@ impl AgentDefinition {
             tool_config: grok_build_plan_no_subagents_toolset(),
             ..Self::base(
                 BuiltinAgentName::GrokBuildPlanNoSubagents,
-                "Arcus Build agent with plan mode (no subagents).",
+                "Amore Build agent with plan mode (no subagents).",
             )
         }
     }
@@ -1561,7 +1561,7 @@ impl AgentDefinition {
             tool_config: grok_build_ask_user_toolset(),
             ..Self::base(
                 BuiltinAgentName::GrokBuildAskUser,
-                "Arcus Build agent with ask-user-question tool.",
+                "Amore Build agent with ask-user-question tool.",
             )
         }
     }

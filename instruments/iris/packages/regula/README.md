@@ -1,4 +1,4 @@
-# @arcus/regula
+# @amore/regula
 
 > *regula* — Latin: the Rule. As a monastic Rule governs the life of an order, this
 > package governs the life of an org-system document: which lifecycle transitions are
@@ -24,8 +24,8 @@ the index over the daemon's HTTP API.
 
 ## Canonical source
 
-In arcus, the orient surface is **`AGENTS.md`** (schemas + house doctrine). The
-task/inbox/knowledge/reminder domains encode the house AGENTS.md surface — arcus admitted `review`/`incubating` to close the
+In amore, the orient surface is **`AGENTS.md`** (schemas + house doctrine). The
+task/inbox/knowledge/reminder domains encode the house AGENTS.md surface — amore admitted `review`/`incubating` to close the
 last gap on 2026-07-30. This package is a faithful machine-readable encoding of those
 schemas, not a competing definition. When the schema surface changes, regula changes
 with it.

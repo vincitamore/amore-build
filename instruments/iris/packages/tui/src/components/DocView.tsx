@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { useKeyboard, useRenderer } from '@opentui/react';
-import { extractTitle, readDoc, writeDoc, type Frontmatter } from '@arcus/regula';
+import { extractTitle, readDoc, writeDoc, type Frontmatter } from '@amore/regula';
 import { resolveOrgRoot } from '../daemon';
 import { dlog, tickRender } from '../debug';
 import { usePalette, useTheme } from '../ThemeProvider';

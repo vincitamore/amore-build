@@ -1,7 +1,7 @@
 // regula — the rule that governs correct org-document form, lifecycle, and placement.
 //
 // This is the single WRITE/schema authority for the org system, shared by the iris
-// CLI (agent surface) and TUI (operator surface). Canonical orient surface: arcus
+// CLI (agent surface) and TUI (operator surface). Canonical orient surface: amore
 // AGENTS.md — domain statuses/folders aligned with the sibling-house surface
 // (review/incubating admitted 2026-07-30). This module is a faithful machine-readable
 // encoding, not a second source of truth.
@@ -63,7 +63,7 @@ export function taskFolder(status: TaskStatus): string {
  * `blocked-by`. Optional enrichment retained from the port lineage (ratified 2026-05-11
  * lineage-side): the query value is "what am I gating?" by class — `decision`-blocked
  * items become a candidate `inbox/decisions/` triage batch, `peer`-blocked items become
- * the next handle-exchange queue, etc. Arcus's AGENTS.md schema names `blocked-by`;
+ * the next handle-exchange queue, etc. Amore's AGENTS.md schema names `blocked-by`;
  * `blocked-on` rides as an adopted optional field.
  */
 export const BLOCKED_ON_REASONS = ['decision', 'peer', 'corpus', 'hardware', 'external'] as const;

@@ -355,7 +355,7 @@ fn human_wayland_error_includes_detail_once() {
     assert_eq!(
         human::format(&report),
         concat!(
-            "Arcus Doctor\n",
+            "Amore Doctor\n",
             "\n",
             "Environment\n",
             "  · terminal                     Ghostty\n",
@@ -464,7 +464,7 @@ fn human_healthy_fixture_is_exact() {
     assert_eq!(
         human::format(&healthy_report()),
         concat!(
-            "Arcus Doctor\n",
+            "Amore Doctor\n",
             "\n",
             "Environment\n",
             "  · terminal                     Ghostty\n",
@@ -491,7 +491,7 @@ fn human_mixed_fixture_is_exact() {
     assert_eq!(
         human::format(&mixed_report()),
         concat!(
-            "Arcus Doctor\n",
+            "Amore Doctor\n",
             "\n",
             "Environment\n",
             "  · terminal                     Ghostty\n",
@@ -513,12 +513,12 @@ fn human_mixed_fixture_is_exact() {
             "\n",
             "Findings\n",
             "  ! terminal.tmux-clipboard      OSC 52 clipboard passthrough is disabled\n",
-            "    → Automatic setup: `arcus doctor fix tmux-clipboard`\n",
+            "    → Automatic setup: `amore doctor fix tmux-clipboard`\n",
             "    → Add `set -g set-clipboard on` to ~/.tmux.conf\n",
             "      Reload tmux after editing.\n",
             "  i terminal.ssh-wrap            Use local SSH wrapping\n",
-            "    → Automatic setup: `arcus doctor fix ssh-wrap`\n",
-            "    → One-off: `arcus wrap ssh <host>`\n",
+            "    → Automatic setup: `amore doctor fix ssh-wrap`\n",
+            "    → One-off: `amore wrap ssh <host>`\n",
             "\n",
             "Checks not completed\n",
             "  ? tmux.version                 unavailable\n",
@@ -552,10 +552,10 @@ fn fix_preview_contains_exact_change_and_caveats() {
     assert!(preview.contains("File: "));
     assert!(
         preview.contains(
-            "# >>> arcus doctor >>>\n# >>> terminal.ssh-wrap >>>\nalias ssh='arcus wrap ssh'"
+            "# >>> amore doctor >>>\n# >>> terminal.ssh-wrap >>>\nalias ssh='amore wrap ssh'"
         )
     );
-    assert!(preview.contains("To use once without changing config: `arcus wrap ssh <host>`"));
+    assert!(preview.contains("To use once without changing config: `amore wrap ssh <host>`"));
     assert!(preview.contains("Use `command ssh ...` to bypass the alias."));
     assert!(preview.contains("ssh -f"));
     assert!(preview.contains("ControlPersist"));
@@ -651,7 +651,7 @@ fn human_incomplete_fixture_is_exact_without_duplicate_probe_rows() {
     assert_eq!(
         human::format(&report),
         concat!(
-            "Arcus Doctor\n",
+            "Amore Doctor\n",
             "\n",
             "Environment\n",
             "  · terminal                     Ghostty\n",
@@ -680,7 +680,7 @@ fn assert_path_collision_present(json: &serde_json::Value) {
     let pc = json
         .get("pathCollision")
         .expect("doctor JSON must include pathCollision check");
-    assert_eq!(pc["binary"], "arcus");
+    assert_eq!(pc["binary"], "amore");
     assert!(pc["status"].is_string());
     assert!(pc["shadowed"].is_boolean());
     assert!(pc["message"].is_string());
@@ -810,7 +810,7 @@ fn json_contract_is_structural_stable_ordered_and_ansi_free() {
                     },
                     "automaticRemediation": {
                         "fixId": "terminal.tmux-clipboard",
-                        "command": "arcus doctor fix terminal.tmux-clipboard"
+                        "command": "amore doctor fix terminal.tmux-clipboard"
                     },
                     "note": "Reload tmux after editing."
                 },
@@ -818,10 +818,10 @@ fn json_contract_is_structural_stable_ordered_and_ansi_free() {
                     "id": "terminal.ssh-wrap",
                     "disposition": "recommendation",
                     "message": "Use local SSH wrapping",
-                    "remediation": {"fix": "arcus wrap ssh <host>", "configPath": null},
+                    "remediation": {"fix": "amore wrap ssh <host>", "configPath": null},
                     "automaticRemediation": {
                         "fixId": "terminal.ssh-wrap",
-                        "command": "arcus doctor fix terminal.ssh-wrap"
+                        "command": "amore doctor fix terminal.ssh-wrap"
                     },
                     "note": null
                 }
@@ -1052,7 +1052,7 @@ fn clipboard_issue_count_preserves_legacy_reports_without_double_counting_named_
 fn new_named_findings_extend_json_without_schema_changes() {
     let mut report = healthy_report();
     report.facts.clipboard.delivery = ClipboardDelivery::Unverified;
-    report.facts.clipboard.fix = Some("arcus wrap <ssh command> or /minimal".to_owned());
+    report.facts.clipboard.fix = Some("amore wrap <ssh command> or /minimal".to_owned());
     report.findings.push(DiagnosticFinding {
         id: crate::diagnostics::CLIPBOARD_DELIVERY_UNVERIFIED_ID,
         disposition: FindingDisposition::Issue,
@@ -1069,7 +1069,7 @@ fn new_named_findings_extend_json_without_schema_changes() {
     assert_eq!(json["facts"]["clipboard"]["delivery"], "unverified");
     assert_eq!(
         json["facts"]["clipboard"]["fix"],
-        "arcus wrap <ssh command> or /minimal"
+        "amore wrap <ssh command> or /minimal"
     );
     assert_eq!(json["findings"][0]["id"], "clipboard.delivery-unverified");
     assert_eq!(json["counts"]["issues"], 1);

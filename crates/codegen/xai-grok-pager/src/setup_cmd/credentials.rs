@@ -1,7 +1,7 @@
 //! Lightweight credential-presence checks for the first-run gate.
 //!
 //! "Credentials resolve" means any of:
-//! - non-empty `auth.json` session store under the arcus/grok home
+//! - non-empty `auth.json` session store under the amore/grok home
 //! - `XAI_API_KEY` (or legacy `GROK_CODE_XAI_API_KEY`) set in the process env
 //! - a `[model.*]` block whose `api_key` is non-empty or whose `env_key` resolves
 
@@ -162,7 +162,7 @@ mod tests {
 [model.glm]
 model = "z-ai/glm-5.2"
 api_key = "sk-test"
-system_prompt_label = "Arcus Build"
+system_prompt_label = "Amore Build"
 "#,
         )
         .unwrap();
@@ -179,8 +179,8 @@ system_prompt_label = "Arcus Build"
             r#"
 [model.glm]
 model = "z-ai/glm-5.2"
-env_key = "ARCUS_WIZARD_TEST_ENV_KEY_UNSET_ZZZ"
-system_prompt_label = "Arcus Build"
+env_key = "AMORE_WIZARD_TEST_ENV_KEY_UNSET_ZZZ"
+system_prompt_label = "Amore Build"
 "#,
         )
         .unwrap();

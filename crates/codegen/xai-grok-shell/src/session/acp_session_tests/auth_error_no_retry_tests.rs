@@ -570,12 +570,12 @@ async fn legacy_auth_hint_on_404_model_not_found() {
                 "404 with WebLogin must include deprecation message, got: {msg}"
             );
             assert!(
-                msg.contains("arcus logout"),
-                "hint must mention `arcus logout`, got: {msg}"
+                msg.contains("amore logout"),
+                "hint must mention `amore logout`, got: {msg}"
             );
             assert!(
-                msg.contains("arcus login"),
-                "hint must mention `arcus login`, got: {msg}"
+                msg.contains("amore login"),
+                "hint must mention `amore login`, got: {msg}"
             );
             assert!(
                 msg.contains("Version:"),
@@ -641,12 +641,12 @@ async fn legacy_auth_hint_on_401_unauthorized() {
                 "401 with WebLogin must include deprecation message, got: {msg}"
             );
             assert!(
-                msg.contains("arcus logout"),
-                "hint must mention `arcus logout`, got: {msg}"
+                msg.contains("amore logout"),
+                "hint must mention `amore logout`, got: {msg}"
             );
             assert!(
-                msg.contains("arcus login"),
-                "hint must mention `arcus login`, got: {msg}"
+                msg.contains("amore login"),
+                "hint must mention `amore login`, got: {msg}"
             );
         })
         .await;

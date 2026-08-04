@@ -7,7 +7,7 @@ import { dirname, join, resolve } from 'path';
  * neither resolves — callers REFUSE rather than fall back to cwd (a silent cwd
  * fallback would scaffold tasks/ into whatever directory the command happened to
  * run from). Marker recognition for walk-up is separate from mutation trust
- * (`@arcus/regula` root-trust): reads work on any resolved root; writes need a
+ * (`@amore/regula` root-trust): reads work on any resolved root; writes need a
  * house root or explicit opt-in.
  */
 export function resolveOrgRoot(start: string = process.cwd()): string | null {

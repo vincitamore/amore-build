@@ -398,9 +398,9 @@ fn collect_repo_config_kinds(cwd: &Path, first_only: bool) -> Vec<&'static str> 
     // resolve trusted and run ungated. Presence mirrors discovery's "something to
     // gate" check.
     let hook_root = chain.git_root.as_deref().unwrap_or(cwd);
-    // Arcus Build: `.arcus/hooks` (fork-native) and `.grok/hooks` (legacy
+    // Amore Build: `.amore/hooks` (fork-native) and `.grok/hooks` (legacy
     // fallback) are both hook discovery sources; both must gate.
-    if path_present_or_uncertain(&hook_root.join(".arcus").join("hooks"))
+    if path_present_or_uncertain(&hook_root.join(".amore").join("hooks"))
         || path_present_or_uncertain(&hook_root.join(".grok").join("hooks"))
         || hook_root.join(".cursor").join("hooks.json").is_file()
     {
@@ -431,9 +431,9 @@ fn collect_repo_config_kinds(cwd: &Path, first_only: bool) -> Vec<&'static str> 
     if directory_present_or_uncertain(&grok.join("personas")) {
         hit!("personas");
     }
-    // Arcus Build: fork-native `.arcus/workflows` gates alongside legacy
+    // Amore Build: fork-native `.amore/workflows` gates alongside legacy
     // `.grok/workflows`.
-    if directory_present_or_uncertain(&hook_root.join(".arcus").join("workflows"))
+    if directory_present_or_uncertain(&hook_root.join(".amore").join("workflows"))
         || directory_present_or_uncertain(&hook_root.join(".grok").join("workflows"))
     {
         hit!("workflows");

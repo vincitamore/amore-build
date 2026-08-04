@@ -1,13 +1,13 @@
-# Generates the Arcus aqueduct braille logo assets:
+# Generates the Amore aqueduct braille logo assets:
 #   assets/logo/logo07.txt      full tier art   (7 rows)
 #   assets/logo/logo07.hue.txt  full tier hues
 #   assets/logo/logo05.txt      small tier art  (5 rows)
 #   assets/logo/logo05.hue.txt  small tier hues
 #
-# Run from the repo root:  python scripts/gen_arcus.py
-#                          python scripts/gen_arcus.py --dry-run   (preview only)
+# Run from the repo root:  python scripts/gen_amore.py
+#                          python scripts/gen_amore.py --dry-run   (preview only)
 #
-# The mark is an aqueduct: a deck carried on an arcade of three arches. `arcus`
+# The mark is an aqueduct: a deck carried on an arcade of three arches. `amore`
 # is Latin for arch, and the arcade reads as engineering and infrastructure --
 # chosen over the earlier rainbow bow, which a seven-band arc unavoidably
 # resembles. The bow generator is in this file's git history if it is ever wanted

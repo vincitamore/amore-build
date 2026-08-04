@@ -1,10 +1,10 @@
-# @arcus/daemon
+# @amore/daemon
 
 > The iris **Bun index/read daemon** — the rework of the legacy Rust/Axum daemon's
-> core read surface. Parses through `@arcus/regula` (one parser for the whole schema);
+> core read surface. Parses through `@amore/regula` (one parser for the whole schema);
 > serves the org index, wikilink graph, backlinks, and search over HTTP. It is the
 > primary read daemon; the legacy Rust daemon it replaced was archived 2026-07-03, after
-> the Bun daemon passed the full core parity matrix (22/22) via the `@arcus/parity`
+> the Bun daemon passed the full core parity matrix (22/22) via the `@amore/parity`
 > golden-master harness.
 
 ## Charter

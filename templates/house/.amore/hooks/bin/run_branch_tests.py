@@ -8,7 +8,7 @@ substitutes tempfile paths for placeholders (__HOUSE__, __BUSY_TRANSCRIPT__,
   type <materialized>.json | python bin\\house_stop_gate.py
 
 from the hooks directory (equivalent to templates/house with the
-.arcus/hooks/ path prefix). Exit 0 only if every case passes.
+.amore/hooks/ path prefix). Exit 0 only if every case passes.
 """
 from __future__ import annotations
 
@@ -185,8 +185,8 @@ def main() -> int:
 
         env = dict(os.environ)
         env["GROK_HOME"] = str(home)
-        env["ARCUS_HOME"] = str(home)
-        env.pop("ARCUS_SESSION_INIT_NOW", None)
+        env["AMORE_HOME"] = str(home)
+        env.pop("AMORE_SESSION_INIT_NOW", None)
 
         # --- Stop gate (order matters for fired-state: 01 then 02 same session) ---
         stop_cases = [
@@ -214,7 +214,7 @@ def main() -> int:
 
         # --- Session-init ---
         env_due = dict(env)
-        env_due["ARCUS_SESSION_INIT_NOW"] = "2026-07-30T12:00:00"
+        env_due["AMORE_SESSION_INIT_NOW"] = "2026-07-30T12:00:00"
 
         init_cases = [
             ("01-no-reminders-silent.json", "init: no reminders → silent", env,

@@ -4,7 +4,7 @@
 //! (`x.ai/cli/changelogs/<version>.external.{md,json}`) with a disk cache
 //! under `$GROK_HOME`. A permanent fork must not display upstream's release
 //! notes as its own (nor phone the CDN at all), so both formats are baked
-//! into the binary from `assets/arcus-changelog.{md,json}`.
+//! into the binary from `assets/amore-changelog.{md,json}`.
 //!
 //! **Fork doctrine**: every user-visible fork change updates those two
 //! assets in the same commit as the change itself — the welcome screen
@@ -37,8 +37,8 @@ pub struct Changelog {
     pub entries: Option<Vec<ChangelogEntry>>,
 }
 
-const CHANGELOG_MD: &str = include_str!("../../assets/arcus-changelog.md");
-const CHANGELOG_JSON: &str = include_str!("../../assets/arcus-changelog.json");
+const CHANGELOG_MD: &str = include_str!("../../assets/amore-changelog.md");
+const CHANGELOG_JSON: &str = include_str!("../../assets/amore-changelog.json");
 
 /// Kept as a struct with the upstream construction shape
 /// (`ChangelogManager::new().fetch()`) so call sites carry no fork diff.
@@ -101,7 +101,7 @@ mod tests {
             changelog
                 .markdown
                 .as_deref()
-                .is_some_and(|m| m.contains("Arcus")),
+                .is_some_and(|m| m.contains("Amore")),
             "baked markdown must be present and ours"
         );
         let entries = changelog.entries.expect("baked JSON must parse");

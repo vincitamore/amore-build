@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { listKnowledge, type KnowledgeListItem } from '@arcus/regula';
+import { listKnowledge, type KnowledgeListItem } from '@amore/regula';
 import { resolveOrgRoot } from '../daemon';
 import { usePalette } from '../ThemeProvider';
 import { dlog } from '../debug';

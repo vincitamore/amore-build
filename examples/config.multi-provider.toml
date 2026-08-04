@@ -1,5 +1,5 @@
-# Arcus Build — multi-provider example config
-# Copy fields you need into ~/.arcus/config.toml (or $GROK_HOME/config.toml).
+# Amore Build — multi-provider example config
+# Copy fields you need into ~/.amore/config.toml (or $GROK_HOME/config.toml).
 #
 # Product posture: the wizard's recommended default is DeepSeek V4 Flash over
 # OpenRouter, but the harness is not a wrapper around any one model — every
@@ -11,11 +11,11 @@
 # resolve to the product default identity and play the wrong persona in tool
 # loops. The label names the harness and the role, never the model or its
 # lab — see docs/setup-models.md for the full identity-rule doctrine and why
-# every block below uses "Arcus Build" regardless of which model it points
+# every block below uses "Amore Build" regardless of which model it points
 # at.
 #
 # Prefer env_key over literal api_key. Each env_key comment names the process
-# environment variable that must be set before `arcus` runs.
+# environment variable that must be set before `amore` runs.
 #
 # Pricing / ceiling / availability notes in docs/setup-models.md are as of
 # 2026-08-04; re-verify before relying on them.
@@ -44,20 +44,20 @@ default = "deepseek-openrouter"
 base_url = "https://openrouter.ai/api/v1"
 env_key = "OPENROUTER_API_KEY"
 # Optional OpenRouter ranking headers (static; no secrets):
-# extra_headers = { "HTTP-Referer" = "https://example.com", "X-Title" = "Arcus Build" }
+# extra_headers = { "HTTP-Referer" = "https://example.com", "X-Title" = "Amore Build" }
 
 # ---------------------------------------------------------------------------
 # (1) DeepSeek V4 Flash via OpenRouter — recommended on-ramp
 # Wire model id: deepseek/deepseek-v4-flash-0731  (mind the -0731 suffix —
 # the unsuffixed id is the older 0423 release)
 # env: OPENROUTER_API_KEY  (https://openrouter.ai/keys)
-# Probe: arcus -m deepseek-openrouter -p "Reply with exactly: ARCUS-DS-OK"
+# Probe: amore -m deepseek-openrouter -p "Reply with exactly: AMORE-DS-OK"
 # ---------------------------------------------------------------------------
 [model.deepseek-openrouter]
 model = "deepseek/deepseek-v4-flash-0731"
 model_provider = "openrouter"
 name = "DeepSeek V4 Flash (OpenRouter)"
-system_prompt_label = "Arcus Build"
+system_prompt_label = "Amore Build"
 context_window = 1048576
 # Reasoning tokens count against this cap. This is the OpenRouter-reported
 # provider ceiling for this model (as of 2026-08-04) — a ceiling, not a
@@ -69,14 +69,14 @@ max_completion_tokens = 65536
 # (2) DeepSeek direct — the model's own API surface
 # Wire model id: deepseek-v4-flash  (serves DeepSeek-V4-Flash-0731)
 # env: DEEPSEEK_API_KEY  (https://platform.deepseek.com/api_keys)
-# Probe: arcus -m deepseek-direct -p "Reply with exactly: ARCUS-DSD-OK"
+# Probe: amore -m deepseek-direct -p "Reply with exactly: AMORE-DSD-OK"
 # ---------------------------------------------------------------------------
 [model.deepseek-direct]
 model = "deepseek-v4-flash"
 base_url = "https://api.deepseek.com"
 name = "DeepSeek V4 Flash (direct)"
 env_key = "DEEPSEEK_API_KEY"
-system_prompt_label = "Arcus Build"
+system_prompt_label = "Amore Build"
 context_window = 1048576
 max_completion_tokens = 393216
 
@@ -84,13 +84,13 @@ max_completion_tokens = 393216
 # (3) GLM-5.2 via OpenRouter
 # Wire model id: z-ai/glm-5.2
 # env: OPENROUTER_API_KEY  (https://openrouter.ai/keys)
-# Probe: arcus -m glm-openrouter -p "Reply with exactly: ARCUS-OR-OK"
+# Probe: amore -m glm-openrouter -p "Reply with exactly: AMORE-OR-OK"
 # ---------------------------------------------------------------------------
 [model.glm-openrouter]
 model = "z-ai/glm-5.2"
 model_provider = "openrouter"
 name = "GLM-5.2 (OpenRouter)"
-system_prompt_label = "Arcus Build"
+system_prompt_label = "Amore Build"
 context_window = 1048576
 max_completion_tokens = 128000
 
@@ -98,14 +98,14 @@ max_completion_tokens = 128000
 # (4) GLM-5.2 via Z.ai direct — the model's own API surface
 # Wire model id: glm-5.2
 # env: ZAI_API_KEY  (https://z.ai/manage-apikey/apikey-list)
-# Probe: arcus -m glm-zai -p "Reply with exactly: ARCUS-ZAI-OK"
+# Probe: amore -m glm-zai -p "Reply with exactly: AMORE-ZAI-OK"
 # ---------------------------------------------------------------------------
 [model.glm-zai]
 model = "glm-5.2"
 base_url = "https://api.z.ai/api/paas/v4"
 name = "GLM-5.2 (Z.ai)"
 env_key = "ZAI_API_KEY"
-system_prompt_label = "Arcus Build"
+system_prompt_label = "Amore Build"
 context_window = 1048576
 max_completion_tokens = 128000
 
@@ -115,22 +115,22 @@ max_completion_tokens = 128000
 # deployment, or a different model entirely. "openweight" is a placeholder
 # key name, not a reserved identifier — fill in your own wire model id, base
 # URL, and env, and set max_completion_tokens to YOUR host's reported ceiling.
-# Probe: arcus -m openweight -p "Reply with exactly: ARCUS-OW-OK"
+# Probe: amore -m openweight -p "Reply with exactly: AMORE-OW-OK"
 # ---------------------------------------------------------------------------
 [model.openweight]
 model = "REPLACE-WITH-THE-HOST-WIRE-MODEL-ID"
 base_url = "https://YOUR-HOST/v1"
 name = "Open host"
 env_key = "YOUR_HOST_API_KEY"
-system_prompt_label = "Arcus Build"
+system_prompt_label = "Amore Build"
 context_window = 1048576
 max_completion_tokens = 128000
 
 # ---------------------------------------------------------------------------
 # Native grok rail — second path (login-covered or XAI_API_KEY)
-# Interactive: arcus login  → session in ~/.arcus/auth.json
+# Interactive: amore login  → session in ~/.amore/auth.json
 # Headless:    export XAI_API_KEY=xai-...   (https://console.x.ai)
-# Probe: arcus -m grok-4.5 -p "Reply with exactly: GROK-OK"
+# Probe: amore -m grok-4.5 -p "Reply with exactly: GROK-OK"
 #
 # No base_url / env_key here: first-party catalog entry uses session JWT or
 # global XAI_API_KEY. Custom third-party models MUST set their own env_key.
@@ -138,24 +138,24 @@ max_completion_tokens = 128000
 [model.grok-4.5]
 # Override only the label when you want an explicit pin in the picker;
 # omit this whole table if the baked catalog entry is enough. Note the
-# label is still "Arcus Build", not "Grok 4.5" — the model name already
+# label is still "Amore Build", not "Grok 4.5" — the model name already
 # lives in `model` / `name`, and the identity rule carves out no exception
 # for the native rail.
-system_prompt_label = "Arcus Build"
+system_prompt_label = "Amore Build"
 name = "Grok 4.5 (xAI)"
 
 # ---------------------------------------------------------------------------
 # Anthropic Messages — WORKAROUND-TIER only (BYOK, not a headline path)
 # ConfigModelOverride has no auth_scheme field; use messages + headers.
 # env: ANTHROPIC_API_KEY  (via env_http_headers → x-api-key)
-# Probe: arcus -m claude-workaround -p "Reply with exactly: CLAUDE-OK"
+# Probe: amore -m claude-workaround -p "Reply with exactly: CLAUDE-OK"
 # ---------------------------------------------------------------------------
 # [model.claude-workaround]
 # model = "claude-sonnet-4-6"
 # base_url = "https://api.anthropic.com/v1"
 # name = "Claude (Messages workaround)"
 # api_backend = "messages"
-# system_prompt_label = "Arcus Build"
+# system_prompt_label = "Amore Build"
 # context_window = 200000
 # extra_headers = { "anthropic-version" = "2023-06-01" }
 # env_http_headers = { "x-api-key" = "ANTHROPIC_API_KEY" }

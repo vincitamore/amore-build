@@ -1,4 +1,4 @@
-# @arcus/parity
+# @amore/parity
 
 >A **golden-master harness** for the daemon's HTTP surface. It records what the
 > daemon actually answers, and later diffs a target daemon against that

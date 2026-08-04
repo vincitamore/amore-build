@@ -42,7 +42,7 @@ pub enum ManagedConfigError {
     )]
     DeploymentKeyRejected,
     #[error(
-        "Your team sign-in was rejected. It may have expired or lack access. Run `arcus login` to sign in again."
+        "Your team sign-in was rejected. It may have expired or lack access. Run `amore login` to sign in again."
     )]
     TeamAuthRejected,
     #[error("The server returned an unexpected error (HTTP {status}). Try again in a few minutes.")]

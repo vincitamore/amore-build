@@ -649,7 +649,7 @@ fn validator_timeout_is_bounded() {
 
 fn adoption_request(path: &Path, items: &[(&str, &str)]) -> ManagedConfigRequest {
     let mut request = request(path, items);
-    request.namespace = "arcus doctor".to_owned();
+    request.namespace = "amore doctor".to_owned();
     request.legacy_namespace = Some("grok doctor".to_owned());
     request
 }
@@ -662,7 +662,7 @@ fn legacy_namespace_block_is_adopted_and_rewritten() {
     fs::write(&path, legacy).unwrap();
     let plan = ManagedConfig::plan(adoption_request(
         &path,
-        &[("terminal.ssh-wrap", "alias ssh='arcus wrap ssh'")],
+        &[("terminal.ssh-wrap", "alias ssh='amore wrap ssh'")],
     ))
     .unwrap();
     assert!(plan.changes_file());
@@ -676,7 +676,7 @@ fn legacy_namespace_block_is_adopted_and_rewritten() {
     ManagedConfig::apply(plan).unwrap();
     assert_eq!(
         fs::read_to_string(&path).unwrap(),
-        "before\n# >>> arcus doctor >>>\n# >>> terminal.ssh-wrap >>>\nalias ssh='arcus wrap ssh'\n# <<< terminal.ssh-wrap <<<\n# <<< arcus doctor <<<\nafter\n"
+        "before\n# >>> amore doctor >>>\n# >>> terminal.ssh-wrap >>>\nalias ssh='amore wrap ssh'\n# <<< terminal.ssh-wrap <<<\n# <<< amore doctor <<<\nafter\n"
     );
 }
 
@@ -699,7 +699,7 @@ fn legacy_adoption_rewrites_markers_even_when_items_are_exact() {
     ManagedConfig::apply(plan).unwrap();
     assert_eq!(
         fs::read_to_string(&path).unwrap(),
-        "# >>> arcus doctor >>>\n# >>> terminal.opt >>>\nset -g x on\n# <<< terminal.opt <<<\n# <<< arcus doctor <<<\n"
+        "# >>> amore doctor >>>\n# >>> terminal.opt >>>\nset -g x on\n# <<< terminal.opt <<<\n# <<< amore doctor <<<\n"
     );
 }
 
@@ -707,7 +707,7 @@ fn legacy_adoption_rewrites_markers_even_when_items_are_exact() {
 fn current_namespace_block_is_untouched_when_legacy_is_requested() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("config.rc");
-    let current = "# >>> arcus doctor >>>\n# >>> terminal.opt >>>\nset -g x on\n# <<< terminal.opt <<<\n# <<< arcus doctor <<<\n";
+    let current = "# >>> amore doctor >>>\n# >>> terminal.opt >>>\nset -g x on\n# <<< terminal.opt <<<\n# <<< amore doctor <<<\n";
     fs::write(&path, current).unwrap();
     let plan = ManagedConfig::plan(adoption_request(&path, &[("terminal.opt", "set -g x on")]))
         .unwrap();
@@ -724,7 +724,7 @@ fn coexisting_legacy_and_current_blocks_fail_loud() {
     let path = temp.path().join("config.rc");
     fs::write(
         &path,
-        "# >>> grok doctor >>>\n# >>> terminal.old >>>\nset -g x on\n# <<< terminal.old <<<\n# <<< grok doctor <<<\n# >>> arcus doctor >>>\n# >>> terminal.opt >>>\nset -g y on\n# <<< terminal.opt <<<\n# <<< arcus doctor <<<\n",
+        "# >>> grok doctor >>>\n# >>> terminal.old >>>\nset -g x on\n# <<< terminal.old <<<\n# <<< grok doctor <<<\n# >>> amore doctor >>>\n# >>> terminal.opt >>>\nset -g y on\n# <<< terminal.opt <<<\n# <<< amore doctor <<<\n",
     )
     .unwrap();
     let result = ManagedConfig::plan(adoption_request(&path, &[("terminal.opt", "set -g y on")]));
@@ -744,7 +744,7 @@ fn legacy_block_without_legacy_namespace_request_fails_loud() {
     )
     .unwrap();
     let mut no_legacy = request(&path, &[("terminal.opt", "set -g x on")]);
-    no_legacy.namespace = "arcus doctor".to_owned();
+    no_legacy.namespace = "amore doctor".to_owned();
     let result = ManagedConfig::plan(no_legacy);
     assert!(matches!(
         result,

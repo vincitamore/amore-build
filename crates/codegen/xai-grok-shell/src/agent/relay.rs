@@ -169,7 +169,7 @@ async fn attempt_auth_recovery(
     context: &str,
 ) -> bool {
     let Some(ref am) = config.auth_manager else {
-        teprintln!("Authentication required. Run `arcus login` to re-authenticate.");
+        teprintln!("Authentication required. Run `amore login` to re-authenticate.");
         cancel.cancel();
         return false;
     };

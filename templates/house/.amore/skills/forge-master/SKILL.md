@@ -5,7 +5,7 @@ description: "Dynamic multi-agent pipeline orchestration. The main session becom
 
 # Forge Master — Dynamic Pipeline Mode
 
-> Written for **Arcus Build**: native task-tool / orchestrator subagent dispatch, `forge/` contracts, AGENTS.md orientation.
+> Written for **Amore Build**: native task-tool / orchestrator subagent dispatch, `forge/` contracts, AGENTS.md orientation.
 
 ## §0 SELF-UPDATING
 

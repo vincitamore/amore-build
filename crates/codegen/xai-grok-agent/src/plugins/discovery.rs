@@ -256,7 +256,7 @@ pub fn project_plugin_dirs(cwd: Option<&Path>) -> (Vec<PathBuf>, Option<PathBuf>
     (project_plugin_dirs_in(&chain.dirs), chain.git_root)
 }
 
-/// Existing project plugin parent dirs (`.arcus/plugins` [Arcus Build
+/// Existing project plugin parent dirs (`.amore/plugins` [Amore Build
 /// fork-native], `.grok/plugins` [legacy fallback], `.claude/plugins`)
 /// under each dir of a precomputed cwd→git-root chain
 /// ([`crate::repo::RepoDirChain`]). The folder-trust gate reuses its one shared
@@ -264,7 +264,7 @@ pub fn project_plugin_dirs(cwd: Option<&Path>) -> (Vec<PathBuf>, Option<PathBuf>
 pub fn project_plugin_dirs_in(chain_dirs: &[PathBuf]) -> Vec<PathBuf> {
     crate::repo::existing_subdirs_along(
         chain_dirs,
-        &[".arcus/plugins", ".grok/plugins", ".claude/plugins"],
+        &[".amore/plugins", ".grok/plugins", ".claude/plugins"],
     )
 }
 

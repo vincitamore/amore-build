@@ -4,16 +4,16 @@ version = "0.2.120"
 edition.workspace = true
 license = "Apache-2.0"
 authors = ["xAI"]
-default-run = "arcus"
+default-run = "amore"
 
-# Composition-root binary for the Arcus Build TUI. Public artifact name is
-# `arcus` (repo remains arcus-build). This package exists so the binary can
+# Composition-root binary for the Amore Build TUI. Public artifact name is
+# `amore` (repo remains amore-build). This package exists so the binary can
 # link both the pager library and the optional `xai-grok-pager-minimal` render
 # mode: `minimal` depends on `xai-grok-pager`, so the pager library cannot
 # depend back on it (cargo cycle). The binary installs the minimal-mode IoC
-# hooks at startup. argv0 multi-call tolerates arcus | arcus-build | grok | agent.
+# hooks at startup. argv0 multi-call tolerates amore | amore-build | grok | agent.
 [[bin]]
-name = "arcus"
+name = "amore"
 path = "src/main.rs"
 
 [dependencies]

@@ -5,7 +5,7 @@
  *
  * Consumed by bare `iris` / `iris dash` (not a global `iris` bin).
  * Org-write verbs live under `iris <verb>` via
- * `@arcus/regula`; the span names the viewing surface.
+ * `@amore/regula`; the span names the viewing surface.
  */
 import { EXIT, fail } from './contract';
 

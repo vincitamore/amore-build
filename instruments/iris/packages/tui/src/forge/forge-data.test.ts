@@ -1,5 +1,5 @@
 import { test, expect } from 'bun:test';
-import type { ForgeListItem } from '@arcus/regula';
+import type { ForgeListItem } from '@amore/regula';
 import { buildForgeData, pipelineAgentCount, pipelineLayerCount } from './forge-data';
 import { flattenForge, forgeTabs, rowOpenPath, type ForgeViewState } from './forge-rows';
 

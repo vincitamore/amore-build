@@ -12,9 +12,9 @@ use crate::app::PagerArgs;
 /// Generate and print the completion script for the given shell.
 pub fn run(shell: Shell) {
     // Name the script after the binary the user actually invoked, so the
-    // completion registers for the command they type (arcus, or a legacy
+    // completion registers for the command they type (amore, or a legacy
     // grok/agent alias). Upstream pinned this to "grok" for its installers;
-    // the fork's install surface is arcus-native, so a `grok`-named script
+    // the fork's install surface is amore-native, so a `grok`-named script
     // completed nothing for the primary binary. This is a short-lived
     // subcommand, so leaking the resolved name is harmless.
     let bin_name = Box::leak(crate::app::cli::resolved_bin_name().into_boxed_str());
@@ -45,7 +45,7 @@ pub fn run(shell: Shell) {
 /// The generated root `_arguments` spec emits a `'::prompt …'` slot before
 /// the subcommand slot but dispatches subcommands with `case $line[2]`. zsh
 /// assigns the typed subcommand to the *prompt* slot (`$line[1]`), leaves
-/// `$line[2]` empty, and the dispatch falls through — so `arcus worktree <TAB>`
+/// `$line[2]` empty, and the dispatch falls through — so `amore worktree <TAB>`
 /// re-offers every top-level command. (`hide = true` on the positional does
 /// not change the generated script.)
 ///

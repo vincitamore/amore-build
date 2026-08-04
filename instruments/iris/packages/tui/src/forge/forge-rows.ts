@@ -1,4 +1,4 @@
-import type { ForgeListItem } from '@arcus/regula';
+import type { ForgeListItem } from '@amore/regula';
 import { type AgentPair, type ForgeData, type Pipeline, roleLabel } from './forge-data';
 
 export type ForgeSection = 'pipelines' | 'dreams' | 'recipes' | 'proposals';

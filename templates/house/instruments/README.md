@@ -12,7 +12,7 @@ together, the instruments get lost among the work.
 
 ## iris
 
-`arcus init` installs **iris** here — the companion instrument for this
+`amore init` installs **iris** here — the companion instrument for this
 house. It provides:
 
 - a **daemon** that indexes the house and watches it for changes, serving
@@ -25,7 +25,7 @@ house. It provides:
 Run `iris` with no arguments to open the dash, or `iris --help` for the
 verbs. It operates only on directories on your machine.
 
-If you would rather not have it, `arcus init --no-iris` skips the install,
+If you would rather not have it, `amore init --no-iris` skips the install,
 and removing this directory later breaks nothing else.
 
 ## Adding your own

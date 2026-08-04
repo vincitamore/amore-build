@@ -731,7 +731,7 @@ test('orientation-rules-drift skips with a note when the org root has no rules d
 });
 
 test('orientation-rules-drift errors when the org sync script --check fails', () => {
-  mkdirSync(join(root, '.arcus'), { recursive: true });
+  mkdirSync(join(root, '.amore'), { recursive: true });
   mkdirSync(join(root, 'scripts'), { recursive: true });
   writeFileSync(join(root, 'scripts', 'sync_orientation_rules.py'), 'import sys\nsys.exit(1)\n');
   const r = lint(root);

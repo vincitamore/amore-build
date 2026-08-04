@@ -89,7 +89,7 @@ function isIrisDaemonStatus(body: unknown): boolean {
  * THROWS when neither resolves rather than silently falling back to cwd — mirrors the
  * CLI's refusal (a cwd fallback would scaffold `tasks/` into whatever directory the dash
  * happened to launch from). index.tsx guards this at startup so the refusal surfaces as
- * a clean message + exit before the renderer takes the terminal. AGENTS.md covers arcus.
+ * a clean message + exit before the renderer takes the terminal. AGENTS.md covers amore.
  */
 export function resolveOrgRoot(start: string = process.cwd()): string {
   if (process.env.IRIS_ORG_ROOT) return process.env.IRIS_ORG_ROOT;

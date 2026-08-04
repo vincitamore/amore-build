@@ -84,7 +84,7 @@ def main() -> int:
                     help="series inter-frame interval in milliseconds")
     args = ap.parse_args()
 
-    # Absolutize: these become the CHILD's env (USERPROFILE / ARCUS_HOME), and
+    # Absolutize: these become the CHILD's env (USERPROFILE / AMORE_HOME), and
     # a relative path there resolves against the child's cwd, not ours —
     # silently pointing the app at an empty home.
     args.home = os.path.abspath(args.home)
@@ -99,7 +99,7 @@ def main() -> int:
     env.update({
         "USERPROFILE": args.home,
         "HOME": args.home,
-        "ARCUS_HOME": os.path.join(args.home, ".arcus"),
+        "AMORE_HOME": os.path.join(args.home, ".amore"),
         "TERM": "xterm-256color",
         "COLORTERM": "truecolor",
         # Modern-terminal glyph path: the frame should show what a real

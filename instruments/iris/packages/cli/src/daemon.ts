@@ -11,7 +11,7 @@ export class DaemonError extends Error {
 }
 
 /** Daemon base URL: `$IRIS_URL`, else `http://127.0.0.1:$IRIS_PORT` (default 3853 —
- *  arcus house Bun daemon). */
+ *  amore house Bun daemon). */
 export function daemonBaseUrl(): string {
   if (process.env.IRIS_URL) return process.env.IRIS_URL;
   const port = process.env.IRIS_PORT ?? '3853';

@@ -294,24 +294,24 @@ impl AuthManager {
                 "scope": &scope,
                 "grok_home": grok_home.display().to_string(),
                 "HOME": std::env::var("HOME").unwrap_or_else(|_| "(unset)".into()),
-                "GROK_HOME": xai_grok_env::var("ARCUS_HOME").unwrap_or_else(|_| "(unset)".into()),
-                "GROK_AUTH_PATH": xai_grok_env::var("ARCUS_AUTH_PATH").unwrap_or_else(|_| "(unset)".into()),
-                "GROK_AUTH": xai_grok_env::var("ARCUS_AUTH").map(|_| "(set)".to_string()).unwrap_or_else(|_| "(unset)".into()),
+                "GROK_HOME": xai_grok_env::var("AMORE_HOME").unwrap_or_else(|_| "(unset)".into()),
+                "GROK_AUTH_PATH": xai_grok_env::var("AMORE_AUTH_PATH").unwrap_or_else(|_| "(unset)".into()),
+                "GROK_AUTH": xai_grok_env::var("AMORE_AUTH").map(|_| "(set)".to_string()).unwrap_or_else(|_| "(unset)".into()),
             })),
         );
 
-        // ARCUS_AUTH_PATH / GROK_AUTH_PATH: custom file path (overrides default
-        // $ARCUS_HOME/auth.json). Resolved before the ARCUS_AUTH branch so
+        // AMORE_AUTH_PATH / GROK_AUTH_PATH: custom file path (overrides default
+        // $AMORE_HOME/auth.json). Resolved before the AMORE_AUTH branch so
         // inline-credential managers also honor it: their later refresh
         // persistence (`update()`) writes to this path, and previously the
         // inline branch hardcoded the default — silently splitting reads
         // (inline) from writes (default path).
-        let path = xai_grok_env::var("ARCUS_AUTH_PATH")
+        let path = xai_grok_env::var("AMORE_AUTH_PATH")
             .map(PathBuf::from)
             .unwrap_or_else(|_| grok_home.join("auth.json"));
 
-        // ARCUS_AUTH / GROK_AUTH: inline JSON credentials (highest priority, read-only).
-        if let Ok(inline_json) = xai_grok_env::var("ARCUS_AUTH") {
+        // AMORE_AUTH / GROK_AUTH: inline JSON credentials (highest priority, read-only).
+        if let Ok(inline_json) = xai_grok_env::var("AMORE_AUTH") {
             if let Ok(auth) = serde_json::from_str::<GrokAuth>(&inline_json) {
                 return Self::assemble(
                     Some(auth),
@@ -322,7 +322,7 @@ impl AuthManager {
                     None,
                 );
             }
-            tracing::warn!("ARCUS_AUTH/GROK_AUTH set but failed to parse as JSON, falling back to file");
+            tracing::warn!("AMORE_AUTH/GROK_AUTH set but failed to parse as JSON, falling back to file");
         }
 
         let (auth, auth_read_detail, initial_disk_state) = match read_auth_json(&path) {

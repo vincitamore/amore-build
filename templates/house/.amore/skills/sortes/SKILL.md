@@ -44,13 +44,13 @@ Two **named sampling spaces**, one pick primitive. Do not blend them into a defa
 
 ```bash
 # One draw (names + bodies), live cooldown:
-bun .arcus/skills/sortes/bin/pick.ts
+bun .amore/skills/sortes/bin/pick.ts
 
-bun .arcus/skills/sortes/bin/pick.ts --n 5        # bigger draw
-bun .arcus/skills/sortes/bin/pick.ts --print      # names only
-bun .arcus/skills/sortes/bin/pick.ts --json       # ok-first envelope, for a workflow to consume
-bun .arcus/skills/sortes/bin/pick.ts --seed 42    # deterministic, no mtime side-effect (tests/repro)
-bun .arcus/skills/sortes/bin/pick.ts --catalog DIR  # a different lens catalog
+bun .amore/skills/sortes/bin/pick.ts --n 5        # bigger draw
+bun .amore/skills/sortes/bin/pick.ts --print      # names only
+bun .amore/skills/sortes/bin/pick.ts --json       # ok-first envelope, for a workflow to consume
+bun .amore/skills/sortes/bin/pick.ts --seed 42    # deterministic, no mtime side-effect (tests/repro)
+bun .amore/skills/sortes/bin/pick.ts --catalog DIR  # a different lens catalog
 ```
 
 Asset path form for skill-aware loaders: `skill://sortes/bin/pick.ts`. Default catalog resolves relative to the picker (`../lenses`).

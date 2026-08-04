@@ -7,7 +7,7 @@ description: "Operational campaign orchestration under an explicit cost discipli
 
 > *Auriga* — the charioteer: one hand, many horses; the reins are the handle contracts; the race is won on pace management. Judgment holds the reins; cheaper muscle pulls.
 
-> Written for **Arcus Build**: native task-tool dispatch, forge + AGENTS.md surfaces, cost accounting as window/turn/dispatch counts rather than dollar rate tables.
+> Written for **Amore Build**: native task-tool dispatch, forge + AGENTS.md surfaces, cost accounting as window/turn/dispatch counts rather than dollar rate tables.
 
 **SELF-UPDATING.** Same inline discipline as oeconomia §8: a measured claim that fails to reproduce, a verdict flip, or a hazard bite gets corrected here **in the same change that creates the fact**.
 

@@ -313,7 +313,7 @@ mod tests {
         let mut mgr = TitleManager::new(&cfg);
         let state = idle_state();
         mgr.update(&state);
-        assert_eq!(mgr.last_title, "arcus");
+        assert_eq!(mgr.last_title, "amore");
     }
 
     #[test]
@@ -325,7 +325,7 @@ mod tests {
             ..idle_state()
         };
         mgr.update(&state);
-        assert_eq!(mgr.last_title, "my project - arcus");
+        assert_eq!(mgr.last_title, "my project - amore");
     }
 
     #[test]
@@ -334,7 +334,7 @@ mod tests {
         let mut mgr = TitleManager::new(&cfg);
         let state = idle_state();
         mgr.update(&state);
-        assert_eq!(mgr.last_title, "arcus");
+        assert_eq!(mgr.last_title, "amore");
     }
 
     #[test]
@@ -346,7 +346,7 @@ mod tests {
             ..idle_state()
         };
         mgr.update(&state);
-        assert_eq!(mgr.last_title, "arcus");
+        assert_eq!(mgr.last_title, "amore");
     }
 
     #[test]
@@ -356,7 +356,7 @@ mod tests {
 
         // Idle: spinner absent
         mgr.update(&idle_state());
-        assert_eq!(mgr.last_title, "arcus");
+        assert_eq!(mgr.last_title, "amore");
 
         // Active: spinner present
         let activity = TurnActivity::Thinking;
@@ -365,7 +365,7 @@ mod tests {
             ..idle_state()
         };
         mgr.update(&state);
-        assert!(mgr.last_title.contains(" - arcus"));
+        assert!(mgr.last_title.contains(" - amore"));
         let spinner_part: String = mgr.last_title.chars().take(1).collect();
         assert!(
             TITLE_SPINNER.contains(&spinner_part.chars().next().unwrap()),
@@ -526,7 +526,7 @@ mod tests {
         let cfg = config_with_items(vec![TitleItem::Activity, TitleItem::Grok]);
         let mut mgr = TitleManager::new(&cfg);
         mgr.update(&idle_state());
-        assert_eq!(mgr.last_title, "arcus");
+        assert_eq!(mgr.last_title, "amore");
     }
 
     #[test]
@@ -538,7 +538,7 @@ mod tests {
             ..idle_state()
         };
         mgr.update(&state);
-        assert!(mgr.last_title.contains(" - arcus"));
+        assert!(mgr.last_title.contains(" - amore"));
         let spinner_part: String = mgr.last_title.chars().take(1).collect();
         assert!(
             TITLE_SPINNER.contains(&spinner_part.chars().next().unwrap()),
@@ -556,7 +556,7 @@ mod tests {
             ..idle_state()
         };
         mgr.update(&state);
-        assert_eq!(mgr.last_title, "Waiting - arcus");
+        assert_eq!(mgr.last_title, "Waiting - amore");
     }
 
     #[test]
@@ -570,7 +570,7 @@ mod tests {
             ..idle_state()
         };
         mgr.update(&state);
-        assert_eq!(mgr.last_title, "Thinking - arcus");
+        assert_eq!(mgr.last_title, "Thinking - amore");
     }
 
     // --- Action Required blinking ---
@@ -634,9 +634,9 @@ mod tests {
             ..idle_state()
         };
         mgr.update(&state);
-        assert_eq!(mgr.last_title, "arcus");
+        assert_eq!(mgr.last_title, "amore");
         mgr.update(&state);
-        assert_eq!(mgr.last_title, "arcus");
+        assert_eq!(mgr.last_title, "amore");
     }
 
     // --- Dedup (no-op when unchanged) ---
@@ -648,7 +648,7 @@ mod tests {
         let state = idle_state();
 
         mgr.update(&state);
-        assert_eq!(mgr.last_title, "arcus");
+        assert_eq!(mgr.last_title, "amore");
 
         // Second update: title is identical, last_title stays the same (no re-emit).
         let title_before = mgr.last_title.clone();
@@ -663,7 +663,7 @@ mod tests {
         let cfg = config_with_items(vec![]);
         let mut mgr = TitleManager::new(&cfg);
         mgr.update(&idle_state());
-        assert_eq!(mgr.last_title, "arcus");
+        assert_eq!(mgr.last_title, "amore");
     }
 
     // --- Model item ---
@@ -677,7 +677,7 @@ mod tests {
             ..idle_state()
         };
         mgr.update(&state);
-        assert_eq!(mgr.last_title, "grok-3 - arcus");
+        assert_eq!(mgr.last_title, "grok-3 - amore");
     }
 
     #[test]
@@ -685,7 +685,7 @@ mod tests {
         let cfg = config_with_items(vec![TitleItem::Model, TitleItem::Grok]);
         let mut mgr = TitleManager::new(&cfg);
         mgr.update(&idle_state());
-        assert_eq!(mgr.last_title, "arcus");
+        assert_eq!(mgr.last_title, "amore");
     }
 
     // --- Cwd item ---
@@ -699,7 +699,7 @@ mod tests {
             ..idle_state()
         };
         mgr.update(&state);
-        assert_eq!(mgr.last_title, "my-project - arcus");
+        assert_eq!(mgr.last_title, "my-project - amore");
     }
 
     // --- TurnTimer item ---
@@ -713,7 +713,7 @@ mod tests {
             ..idle_state()
         };
         mgr.update(&state);
-        assert_eq!(mgr.last_title, "42s - arcus");
+        assert_eq!(mgr.last_title, "42s - amore");
     }
 
     #[test]
@@ -725,7 +725,7 @@ mod tests {
             ..idle_state()
         };
         mgr.update(&state);
-        assert_eq!(mgr.last_title, "arcus");
+        assert_eq!(mgr.last_title, "amore");
     }
 
     // --- Truncation ---
@@ -770,10 +770,10 @@ mod tests {
             ..idle_state()
         };
         mgr.update(&state);
-        assert_ne!(mgr.last_title, "arcus");
+        assert_ne!(mgr.last_title, "amore");
 
         mgr.reset();
-        assert_eq!(mgr.last_title, "arcus");
+        assert_eq!(mgr.last_title, "amore");
         assert_eq!(mgr.spinner_frame, 0);
         assert_eq!(mgr.tick_count, 0);
     }
@@ -806,7 +806,7 @@ mod tests {
 
         // Both should contain the persistent parts.
         for t in [&t1, &t2] {
-            assert!(t.contains("arcus"), "title missing 'arcus': {t}");
+            assert!(t.contains("amore"), "title missing 'amore': {t}");
             assert!(t.contains("Responding"), "title missing 'Responding': {t}");
             assert!(t.contains("my-session"), "title missing session name: {t}");
         }
@@ -821,7 +821,7 @@ mod tests {
         let cfg = default_config();
         let mut mgr = TitleManager::new(&cfg);
         mgr.update(&idle_state());
-        assert_eq!(mgr.last_title, "arcus");
+        assert_eq!(mgr.last_title, "amore");
     }
 
     // --- Multi-item combinations ---
@@ -847,7 +847,7 @@ mod tests {
         mgr.update(&state);
         assert_eq!(
             mgr.last_title,
-            "Thinking - proj - grok-3 - workspace - arcus"
+            "Thinking - proj - grok-3 - workspace - amore"
         );
     }
 

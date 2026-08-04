@@ -1,15 +1,15 @@
 # iris
 
-The messenger of an arcus house — the knowledge/org instrument.
+The messenger of an amore house — the knowledge/org instrument.
 *iris* (Ἶρις): in Homer the herald of the gods, who carries word between the far
 and the near; her path between heaven and earth is the arc itself. The same name
 belongs to the ring that admits light in every optical instrument. Both readings
 name one function: fetching what is asked for, and regulating what gets through.
 A Bun/TypeScript workspace: one daemon that owns the live org index, and clients
-that read it. Write authority is `@arcus/regula`; every writer goes through it.
+that read it. Write authority is `@amore/regula`; every writer goes through it.
 
-Public home of the instrument inside the `arcus-build` repo
-(`instruments/iris/`). Packages keep the `@arcus/*` product identity.
+Public home of the instrument inside the `amore-build` repo
+(`instruments/iris/`). Packages keep the `@amore/*` product identity.
 
 ## Layout
 

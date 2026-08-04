@@ -1283,7 +1283,7 @@ pub(super) fn open_iris_dash_action_if(available: bool) -> Option<ActionDef> {
         hint_key_display: Some("Ctrl+Shift+G"),
         requires_confirmation: false,
         long_help: Some(
-            "Opens the Iris companion dashboard (`iris dash`) in a new OS terminal window — never inside Arcus's TUI.\nOnly available when Iris is on PATH or pointed at by ~/.arcus/iris-companion.toml (from arcus setup).\nWhen Iris is not installed the shortcut is omitted from the bar and does nothing.",
+            "Opens the Iris companion dashboard (`iris dash`) in a new OS terminal window — never inside Amore's TUI.\nOnly available when Iris is on PATH or pointed at by ~/.amore/iris-companion.toml (from amore setup).\nWhen Iris is not installed the shortcut is omitted from the bar and does nothing.",
         ),
     })
 }
