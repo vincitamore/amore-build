@@ -413,6 +413,9 @@ export function lintWikilinks(
   for (const link of links) {
     if (seen.has(link.target)) continue;
     seen.add(link.target);
+    // skill:// references (e.g. [[skill://tui]]) resolve through the harness's
+    // skill loader, not the repo — they are never file paths, so skip them.
+    if (link.target.startsWith('skill://')) continue;
     const rel = link.target.endsWith('.md') ? link.target : `${link.target}.md`;
     if (repoMd.has(rel)) continue;
     const severity: LintSeverity = inContext ? 'warning' : 'error';

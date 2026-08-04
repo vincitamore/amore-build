@@ -524,6 +524,13 @@ test('wikilinks: code fences and inline code are not prose (and a real link reso
   expect(r.issues.filter((i) => i.path === 'tasks/fenced.md' && i.field === 'wikilink')).toEqual([]);
 });
 
+test('wikilinks: skill:// references are not file paths and never resolve (or warn)', () => {
+  seedAgents();
+  seed('tasks/skillref.md', { type: 'task', status: 'active', created: '2026-06-20' }, 'See [[skill://tui]] for the craft.\n');
+  const r = lint(root);
+  expect(r.issues.filter((i) => i.path === 'tasks/skillref.md' && i.field === 'wikilink')).toEqual([]);
+});
+
 test('wikilinks: extraction strips code, keeps line numbers, drops anchors and aliases', () => {
   const text = [
     'Real link: [[AGENTS]] and [[knowledge/audit-surface-design|alias]].',
