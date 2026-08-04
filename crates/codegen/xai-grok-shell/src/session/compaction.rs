@@ -3707,6 +3707,7 @@ mod inline_auto_compact_flow_tests {
             message: "prompt is too long".to_string(),
             is_retryable: false,
             retry_after_secs: None,
+            should_retry: None,
             model_metadata: Some(crate::sampling::ResponseModelMetadata {
                 context_window: Some(context_window),
                 max_completion_tokens: None,
@@ -3768,6 +3769,7 @@ mod inline_auto_compact_flow_tests {
                     message: "prompt is too long".to_string(),
                     is_retryable: false,
                     retry_after_secs: None,
+                    should_retry: None,
                     model_metadata: None,
                     empty_response_context: None,
                     doom_loop_triggers: None,
