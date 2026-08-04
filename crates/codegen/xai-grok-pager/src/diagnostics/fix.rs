@@ -1,6 +1,7 @@
 //! Exact planning and application for diagnostic fixes.
 
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use xai_grok_config::managed_text::{
@@ -15,12 +16,55 @@ pub const SSH_WRAP_ID: DiagnosticId = DiagnosticId::new("terminal", "ssh-wrap");
 pub const TMUX_CLIPBOARD_ID: DiagnosticId = DiagnosticId::new("terminal", "tmux-clipboard");
 pub const DCS_PASSTHROUGH_ID: DiagnosticId = DiagnosticId::new("terminal", "dcs-passthrough");
 pub const TMUX_EXTENDED_KEYS_ID: DiagnosticId = DiagnosticId::new("terminal", "tmux-extended-keys");
-pub const SSH_WRAP_FIX_COMMAND: &str = "grok doctor fix terminal.ssh-wrap";
-pub const SSH_WRAP_ONE_OFF: &str = "grok wrap ssh <host>";
+/// Invoked binary name, resolved once per process — the single branding
+/// source for every user-visible doctor command string and for the managed
+/// ssh alias body (mirrors [`crate::app::cli::resolved_bin_name`]; resolves
+/// to the product default under an unrecognized argv0).
+pub(crate) fn invoked_bin() -> &'static str {
+    static NAME: OnceLock<String> = OnceLock::new();
+    NAME.get_or_init(crate::app::cli::resolved_bin_name)
+}
 
-const MANAGED_NAMESPACE: &str = "grok doctor";
-const SSH_WRAP_ALIAS_POSIX: &str = "alias ssh='grok wrap ssh'";
-const SSH_WRAP_ALIAS_FISH: &str = "alias ssh 'grok wrap ssh'";
+/// `<bin> doctor fix terminal.ssh-wrap` for the invoked binary.
+pub fn ssh_wrap_fix_command() -> &'static str {
+    fix_spec(SSH_WRAP_ID)
+        .expect("registered SSH wrap fix")
+        .command()
+}
+
+/// `<bin> wrap ssh <host>` for the invoked binary.
+pub fn ssh_wrap_one_off() -> &'static str {
+    static VALUE: OnceLock<String> = OnceLock::new();
+    VALUE.get_or_init(|| format!("{} wrap ssh <host>", invoked_bin()))
+}
+
+/// Namespace marker written into managed shell/tmux config blocks. Fixed
+/// rather than argv0-derived: a file marker must be stable across every
+/// invocation name, so it carries the product name, not the invoked name.
+const MANAGED_NAMESPACE: &str = "arcus doctor";
+/// Pre-rename namespace. Blocks written under it are adopted in place by the
+/// plan/apply transaction (see `ManagedConfigRequest::legacy_namespace`).
+const LEGACY_MANAGED_NAMESPACE: &str = "grok doctor";
+
+fn ssh_wrap_alias_posix() -> &'static str {
+    static VALUE: OnceLock<String> = OnceLock::new();
+    VALUE.get_or_init(|| format!("alias ssh='{} wrap ssh'", invoked_bin()))
+}
+
+fn ssh_wrap_alias_fish() -> &'static str {
+    static VALUE: OnceLock<String> = OnceLock::new();
+    VALUE.get_or_init(|| format!("alias ssh '{} wrap ssh'", invoked_bin()))
+}
+
+fn ssh_wrap_noloop_caveat() -> &'static str {
+    static VALUE: OnceLock<String> = OnceLock::new();
+    VALUE.get_or_init(|| {
+        format!(
+            "`{} wrap` starts the SSH process directly, so the alias does not loop.",
+            invoked_bin()
+        )
+    })
+}
 const TMUX_SCANNER_CAVEAT: &str = "Grok checks this file for direct global assignments of this option. Review sourced files, conditionals, plugins, and generated tmux setup yourself.";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -132,8 +176,8 @@ impl ShellKind {
 
     fn alias(self) -> &'static str {
         match self {
-            Self::Bash | Self::Zsh => SSH_WRAP_ALIAS_POSIX,
-            Self::Fish => SSH_WRAP_ALIAS_FISH,
+            Self::Bash | Self::Zsh => ssh_wrap_alias_posix(),
+            Self::Fish => ssh_wrap_alias_fish(),
         }
     }
 }
@@ -308,11 +352,13 @@ impl std::fmt::Display for FixError {
         match self {
             Self::UnknownId(id) => write!(
                 formatter,
-                "`{id}` is not an available Doctor fix. Run `grok doctor fix` to list available fixes."
+                "`{id}` is not an available Doctor fix. Run `{} doctor fix` to list available fixes.",
+                invoked_bin()
             ),
             Self::PlatformUnsupported => write!(
                 formatter,
-                "Automatic SSH setup is not available on Windows. Run `{SSH_WRAP_ONE_OFF}` when needed."
+                "Automatic SSH setup is not available on Windows. Run `{}` when needed.",
+                ssh_wrap_one_off()
             ),
             Self::HomeUnavailable => formatter.write_str("Grok could not find your home directory."),
             Self::NotApplicable => formatter
@@ -323,7 +369,8 @@ impl std::fmt::Display for FixError {
                 .write_str("Run this fix on your local computer, not in the SSH session."),
             Self::UnsupportedShell => write!(
                 formatter,
-                "Automatic setup supports Bash, zsh, and fish. For another shell, run `{SSH_WRAP_ONE_OFF}` when needed."
+                "Automatic setup supports Bash, zsh, and fish. For another shell, run `{}` when needed.",
+                ssh_wrap_one_off()
             ),
             Self::ByobuConfigUnavailable => formatter.write_str(
                 "Grok could not determine Byobu's effective config directory. Keep `BYOBU_CONFIG_DIR` set in this session, then run the fix again.",
@@ -396,8 +443,26 @@ struct FixSpec {
     id: DiagnosticId,
     handle: &'static str,
     label: &'static str,
-    command: &'static str,
     kind: FixKind,
+}
+
+impl FixSpec {
+    /// `<bin> doctor fix <id>` for the invoked binary, computed once per
+    /// process for the whole registry.
+    fn command(&self) -> &'static str {
+        static COMMANDS: OnceLock<Vec<String>> = OnceLock::new();
+        let commands = COMMANDS.get_or_init(|| {
+            FIX_REGISTRY
+                .iter()
+                .map(|spec| format!("{} doctor fix {}", invoked_bin(), spec.id))
+                .collect()
+        });
+        let index = FIX_REGISTRY
+            .iter()
+            .position(|spec| spec.id == self.id)
+            .expect("spec comes from the registry");
+        commands[index].as_str()
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -451,28 +516,24 @@ const FIX_REGISTRY: &[FixSpec] = &[
         id: SSH_WRAP_ID,
         handle: "ssh-wrap",
         label: "Set up local SSH wrapping",
-        command: SSH_WRAP_FIX_COMMAND,
         kind: FixKind::SshWrap,
     },
     FixSpec {
         id: TMUX_CLIPBOARD_ID,
         handle: "tmux-clipboard",
         label: TMUX_CLIPBOARD_SPEC.label,
-        command: "grok doctor fix terminal.tmux-clipboard",
         kind: FixKind::TmuxOption(&TMUX_CLIPBOARD_SPEC),
     },
     FixSpec {
         id: DCS_PASSTHROUGH_ID,
         handle: "dcs-passthrough",
         label: DCS_PASSTHROUGH_SPEC.label,
-        command: "grok doctor fix terminal.dcs-passthrough",
         kind: FixKind::TmuxOption(&DCS_PASSTHROUGH_SPEC),
     },
     FixSpec {
         id: TMUX_EXTENDED_KEYS_ID,
         handle: "tmux-extended-keys",
         label: TMUX_EXTENDED_KEYS_SPEC.label,
-        command: "grok doctor fix terminal.tmux-extended-keys",
         kind: FixKind::TmuxOption(&TMUX_EXTENDED_KEYS_SPEC),
     },
 ];
@@ -490,7 +551,7 @@ pub fn resolve_fix_id(value: &str) -> Result<DiagnosticId, FixError> {
 }
 
 pub(crate) fn human_fix_command(id: DiagnosticId) -> Option<String> {
-    fix_spec(id).map(|spec| format!("grok doctor fix {}", spec.handle))
+    fix_spec(id).map(|spec| format!("{} doctor fix {}", invoked_bin(), spec.handle))
 }
 
 pub(crate) fn automatic_fix_choices()
@@ -503,7 +564,7 @@ pub(crate) fn automatic_fix_choices()
 pub(crate) fn automatic_remediation_for(id: DiagnosticId) -> Option<AutomaticRemediation> {
     fix_spec(id).map(|spec| AutomaticRemediation {
         fix_id: id,
-        command: spec.command,
+        command: spec.command(),
     })
 }
 
@@ -571,10 +632,12 @@ pub(crate) fn format_applicable_automatic_fixes(
         output.push_str(&format!("  {handle:<20} {label}\n"));
         match availability {
             AutomaticFixAvailability::Here => output.push_str(&format!(
-                "    Run: grok doctor fix {handle}\n    In Grok: /doctor fix {handle}\n"
+                "    Run: {bin} doctor fix {handle}\n    In Grok: /doctor fix {handle}\n",
+                bin = invoked_bin()
             )),
             AutomaticFixAvailability::RunLocally => output.push_str(&format!(
-                "    On your local computer, run: grok doctor fix {handle}\n"
+                "    On your local computer, run: {bin} doctor fix {handle}\n",
+                bin = invoked_bin()
             )),
         }
     }
@@ -615,12 +678,15 @@ pub(crate) fn format_fix_preview(plan: &FixPlan) -> String {
     }
     match &plan.payload {
         FixPayload::SshWrap(_) => {
-            output.push_str(
-                "\nWhat this changes:\n  In new interactive shells, `ssh ...` runs as `grok wrap ssh ...`.\n",
+            let _ = writeln!(
+                output,
+                "\nWhat this changes:\n  In new interactive shells, `ssh ...` runs as `{} wrap ssh ...`.",
+                invoked_bin()
             );
             let _ = writeln!(
                 output,
-                "  To use once without changing config: `{SSH_WRAP_ONE_OFF}`."
+                "  To use once without changing config: `{}`.",
+                ssh_wrap_one_off()
             );
         }
         FixPayload::TmuxOption(payload) => {
@@ -678,6 +744,7 @@ fn plan_ssh_wrap(
         items: vec![ManagedItem::new(request.id.to_string(), shell.alias())],
         comments: CommentSyntax::hash(),
         validator: validator_for(shell, request.validator),
+        legacy_namespace: Some(LEGACY_MANAGED_NAMESPACE.to_owned()),
     })?;
     if let Some(detail) = detect_ssh_customization(managed.inspection().unmanaged_text(), shell) {
         return Err(FixError::ExistingCustomization {
@@ -693,7 +760,7 @@ fn plan_ssh_wrap(
             "The alias loads only in new interactive shells.",
             "Use `command ssh ...` to bypass the alias.",
             "For manually entered `ssh -f`, ControlPersist workflows, or OpenSSH `~^Z` local suspend, use `command ssh ...`. Wrapping does not fully preserve those behaviors.",
-            "`grok wrap` starts the SSH process directly, so the alias does not loop.",
+            ssh_wrap_noloop_caveat(),
             "Grok checks this file for direct SSH aliases and functions. Review sourced files, plugins, and generated shell setup yourself.",
         ],
         payload: FixPayload::SshWrap(SshWrapPlan { shell, managed }),
@@ -721,6 +788,7 @@ fn plan_tmux_option(
         items: vec![ManagedItem::new(spec.id.to_string(), spec.line)],
         comments: CommentSyntax::hash(),
         validator: None,
+        legacy_namespace: Some(LEGACY_MANAGED_NAMESPACE.to_owned()),
     })
     .map_err(FixError::TmuxManaged)?;
     let direct = scan_direct_tmux_option(
@@ -990,6 +1058,7 @@ pub fn managed_alias_configured(path: &Path, shell: ShellKind) -> bool {
         items: vec![ManagedItem::new(SSH_WRAP_ID.to_string(), shell.alias())],
         comments: CommentSyntax::hash(),
         validator: None,
+        legacy_namespace: Some(LEGACY_MANAGED_NAMESPACE.to_owned()),
     };
     ManagedConfig::plan(request).is_ok_and(|plan| {
         !plan.changes_file()
@@ -1005,6 +1074,7 @@ fn tmux_option_configured(path: &Path, spec: &'static TmuxOptionSpec) -> bool {
         items: vec![ManagedItem::new(spec.id.to_string(), spec.line)],
         comments: CommentSyntax::hash(),
         validator: None,
+        legacy_namespace: Some(LEGACY_MANAGED_NAMESPACE.to_owned()),
     };
     ManagedConfig::plan(request).is_ok_and(|plan| {
         let direct =

@@ -21,9 +21,9 @@ pub use doctor_format::format_doctor;
 pub(crate) use fix::test_fix_plan;
 pub use fix::{
     AutomaticRemediation, DCS_PASSTHROUGH_ID, FixActivation, FixError, FixOutcome, FixPlan,
-    FixRequest, FixStatus, PlannedChange, SSH_WRAP_FIX_COMMAND, SSH_WRAP_ID, SSH_WRAP_ONE_OFF,
-    ShellKind, TMUX_CLIPBOARD_ID, TMUX_EXTENDED_KEYS_ID, apply_fix, configured_report,
-    managed_alias_configured, plan_fix, resolve_fix_id, ssh_wrap_automatic_remediation,
+    FixRequest, FixStatus, PlannedChange, SSH_WRAP_ID, ShellKind, TMUX_CLIPBOARD_ID,
+    TMUX_EXTENDED_KEYS_ID, apply_fix, configured_report, managed_alias_configured, plan_fix,
+    resolve_fix_id, ssh_wrap_automatic_remediation, ssh_wrap_fix_command, ssh_wrap_one_off,
     verify_persistent_fix,
 };
 pub(crate) use fix::{
@@ -247,12 +247,12 @@ pub(crate) fn collect_startup_warnings_from(
             None,
             None,
         );
-        warning.note = Some(
+        warning.note = Some(format!(
             "Grok also saves each copy to the backup file shown in the copy message. To copy \
-             directly, run `grok wrap ssh <host>` on your local computer or use a terminal that \
-             supports OSC 52. You can also use `/copy <file>` or `/minimal`."
-                .to_owned(),
-        );
+             directly, run `{}` on your local computer or use a terminal that \
+             supports OSC 52. You can also use `/copy <file>` or `/minimal`.",
+            ssh_wrap_one_off()
+        ));
         warnings.push(warning);
     }
 
@@ -481,7 +481,7 @@ pub fn ssh_wrap_hint(
     let mut warning = TerminalWarning::new(
         WarningCategory::SshWithoutWrap,
         "Use local SSH wrapping for more reliable clipboard copy and terminal recovery",
-        Some("grok wrap ssh <host>"),
+        Some(ssh_wrap_one_off()),
         None,
     );
     warning.note = Some(
@@ -2192,7 +2192,7 @@ mod tests {
         // is_ssh, no sink, not VS Code remote → recommend wrap.
         let w = ssh_wrap_hint(true, false, false).expect("hint must fire");
         assert_eq!(w.category, WarningCategory::SshWithoutWrap);
-        assert_eq!(w.fix.as_deref(), Some("grok wrap ssh <host>"));
+        assert_eq!(w.fix.as_deref(), Some(ssh_wrap_one_off()));
         assert!(
             w.config_path.is_none(),
             "fix is a command, not a config line"

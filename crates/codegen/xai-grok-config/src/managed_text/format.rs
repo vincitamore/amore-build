@@ -34,6 +34,14 @@ pub(super) struct RenderedUpdate {
 pub(super) fn validate_request(request: &ManagedConfigRequest) -> Result<(), ManagedConfigError> {
     validate_name(&request.namespace, "namespace")?;
     validate_name(&request.owned_item_prefix, "owned item prefix")?;
+    if let Some(legacy) = &request.legacy_namespace {
+        validate_name(legacy, "legacy namespace")?;
+        if legacy == &request.namespace {
+            return Err(ManagedConfigError::InvalidRequest(
+                "legacy namespace must differ from namespace".to_owned(),
+            ));
+        }
+    }
     if request.items.is_empty() {
         return Err(ManagedConfigError::InvalidRequest(
             "at least one managed item is required".to_owned(),
@@ -92,6 +100,47 @@ pub(super) fn outer_block(
     Ok(parsed
         .outer_range
         .map(|(start, end)| text[start..end].trim_end_matches(['\r', '\n']).to_owned()))
+}
+
+/// Adopt a coherent legacy-namespace outer block by renaming its outer
+/// markers to `namespace`, returning the normalized text.
+///
+/// Returns `None` when there is nothing to adopt: the text is already
+/// coherent under `namespace` (no legacy block can then hold owned items —
+/// they would have failed that parse), the legacy parse does not produce an
+/// outer block, or the legacy parse fails for its own reasons. In every
+/// `None` case the caller proceeds with the original text and any genuine
+/// marker error surfaces from the current-namespace parse downstream.
+pub(super) fn adopt_legacy_namespace(
+    text: &str,
+    namespace: &str,
+    legacy_namespace: &str,
+    owned_item_prefix: &str,
+    comments: &CommentSyntax,
+    path: &Path,
+) -> Option<String> {
+    if parse_block(text, namespace, owned_item_prefix, comments, path).is_ok() {
+        return None;
+    }
+    let parsed = parse_block(text, legacy_namespace, owned_item_prefix, comments, path).ok()?;
+    parsed.outer_range?;
+    let open_old = format!("{} >>> {} >>>", comments.prefix, legacy_namespace);
+    let close_old = format!("{} <<< {} <<<", comments.prefix, legacy_namespace);
+    let open_new = format!("{} >>> {} >>>", comments.prefix, namespace);
+    let close_new = format!("{} <<< {} <<<", comments.prefix, namespace);
+    let mut updated = String::with_capacity(text.len());
+    for line in lines(text) {
+        let content = line.content(text);
+        if content == open_old {
+            updated.push_str(&open_new);
+        } else if content == close_old {
+            updated.push_str(&close_new);
+        } else {
+            updated.push_str(content);
+        }
+        updated.push_str(&text[line.content_end..line.end]);
+    }
+    Some(updated)
 }
 
 pub(super) fn item_state(

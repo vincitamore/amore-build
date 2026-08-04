@@ -279,15 +279,29 @@ impl ClipboardRecovery {
     }
 
     fn legacy_fix(self) -> Option<&'static str> {
+        use std::sync::OnceLock;
+        fn wrap_ssh_or_minimal() -> &'static str {
+            static VALUE: OnceLock<String> = OnceLock::new();
+            VALUE.get_or_init(|| {
+                format!("{} wrap <ssh command> or /minimal", super::fix::invoked_bin())
+            })
+        }
+        fn wrap_command_or_minimal() -> &'static str {
+            static VALUE: OnceLock<String> = OnceLock::new();
+            VALUE
+                .get_or_init(|| format!("{} wrap <command> or /minimal", super::fix::invoked_bin()))
+        }
+        fn wrap_or_minimal() -> &'static str {
+            static VALUE: OnceLock<String> = OnceLock::new();
+            VALUE.get_or_init(|| format!("{} wrap or /minimal", super::fix::invoked_bin()))
+        }
         match self {
             Self::Confirmed => None,
-            Self::UnverifiedSsh | Self::UnavailableSsh => {
-                Some("grok wrap <ssh command> or /minimal")
-            }
+            Self::UnverifiedSsh | Self::UnavailableSsh => Some(wrap_ssh_or_minimal()),
             Self::UnverifiedContainer | Self::UnavailableContainer => {
-                Some("grok wrap <command> or /minimal")
+                Some(wrap_command_or_minimal())
             }
-            Self::UnverifiedOther => Some("grok wrap or /minimal"),
+            Self::UnverifiedOther => Some(wrap_or_minimal()),
             Self::UnavailableLocal => Some("/minimal"),
         }
     }
@@ -389,44 +403,62 @@ fn clipboard_findings(
             crate::diagnostics::CLIPBOARD_DELIVERY_UNVERIFIED_ID,
             FindingDisposition::Issue,
             "Grok can't verify this clipboard route across the remote boundary",
-            "When you copy, Grok sends OSC 52 but can't confirm that the outer terminal accepted \
-             it. Each copy is also saved to a backup file; the copy message shows the path. If \
-             paste fails, run `grok wrap ssh <host>` on your local computer or use `/minimal`. \
-             For repeated SSH sessions, run `grok doctor fix ssh-wrap` on your local computer.",
+            format!(
+                "When you copy, Grok sends OSC 52 but can't confirm that the outer terminal \
+                 accepted it. Each copy is also saved to a backup file; the copy message shows \
+                 the path. If paste fails, run `{one_off}` on your local computer or use \
+                 `/minimal`. For repeated SSH sessions, run `{bin} doctor fix ssh-wrap` on your \
+                 local computer.",
+                one_off = crate::diagnostics::ssh_wrap_one_off(),
+                bin = crate::diagnostics::fix::invoked_bin(),
+            ),
         )),
         ClipboardRecovery::UnverifiedContainer => findings.push(manual_finding(
             crate::diagnostics::CLIPBOARD_DELIVERY_UNVERIFIED_ID,
             FindingDisposition::Issue,
             "Grok can't verify this clipboard route across the container boundary",
-            "When you copy, Grok sends OSC 52 but can't confirm that the outer terminal accepted \
-             it. Each copy is also saved to a backup file; the copy message shows the path. If \
-             paste fails, start the container command with local `grok wrap <command>`, or use \
-             `/minimal`.",
+            format!(
+                "When you copy, Grok sends OSC 52 but can't confirm that the outer terminal \
+                 accepted it. Each copy is also saved to a backup file; the copy message shows \
+                 the path. If paste fails, start the container command with local `{} wrap \
+                 <command>`, or use `/minimal`.",
+                crate::diagnostics::fix::invoked_bin(),
+            ),
         )),
         ClipboardRecovery::UnverifiedOther => findings.push(manual_finding(
             crate::diagnostics::CLIPBOARD_DELIVERY_UNVERIFIED_ID,
             FindingDisposition::Issue,
             "Grok can't verify this clipboard route",
-            "Each copy is also saved to a backup file; the copy message shows the path. For a \
-             remote or container command, use local `grok wrap <command>`. You can also use \
-             `/minimal` to select text in the terminal.",
+            format!(
+                "Each copy is also saved to a backup file; the copy message shows the path. For \
+                 a remote or container command, use local `{} wrap <command>`. You can also use \
+                 `/minimal` to select text in the terminal.",
+                crate::diagnostics::fix::invoked_bin(),
+            ),
         )),
         ClipboardRecovery::UnavailableSsh => findings.push(manual_finding(
             crate::diagnostics::CLIPBOARD_DELIVERY_UNAVAILABLE_ID,
             FindingDisposition::Issue,
             "This clipboard route can't reach the target clipboard",
-            "When you copy, Grok saves the text to the backup file shown in the copy message. To \
-             copy directly, run `grok wrap ssh <host>` on your local computer. For repeated SSH \
-             sessions, run `grok doctor fix ssh-wrap` there. You can also use `/copy <file>` or \
-             `/minimal`.",
+            format!(
+                "When you copy, Grok saves the text to the backup file shown in the copy \
+                 message. To copy directly, run `{one_off}` on your local computer. For repeated \
+                 SSH sessions, run `{bin} doctor fix ssh-wrap` there. You can also use `/copy \
+                 <file>` or `/minimal`.",
+                one_off = crate::diagnostics::ssh_wrap_one_off(),
+                bin = crate::diagnostics::fix::invoked_bin(),
+            ),
         )),
         ClipboardRecovery::UnavailableContainer => findings.push(manual_finding(
             crate::diagnostics::CLIPBOARD_DELIVERY_UNAVAILABLE_ID,
             FindingDisposition::Issue,
             "This clipboard route can't reach the target clipboard",
-            "When you copy, Grok saves the text to the backup file shown in the copy message. \
-             Start the container command with local `grok wrap <command>`, use `/copy <file>`, or \
-             use `/minimal`.",
+            format!(
+                "When you copy, Grok saves the text to the backup file shown in the copy \
+                 message. Start the container command with local `{} wrap <command>`, use `/copy \
+                 <file>`, or use `/minimal`.",
+                crate::diagnostics::fix::invoked_bin(),
+            ),
         )),
         ClipboardRecovery::UnavailableLocal => findings.push(manual_finding(
             crate::diagnostics::CLIPBOARD_DELIVERY_UNAVAILABLE_ID,

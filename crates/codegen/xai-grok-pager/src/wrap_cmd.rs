@@ -30,7 +30,9 @@ pub fn run(args: &WrapArgs) -> Result<()> {
     let program = args
         .command
         .first()
-        .ok_or_else(|| anyhow::anyhow!("grok wrap: no command given"))?;
+        .ok_or_else(|| {
+            anyhow::anyhow!("{} wrap: no command given", crate::app::cli::resolved_bin_name())
+        })?;
 
     // Unix: derive both spawn plans up front from one env snapshot so the PTY
     // attempt and its fallback route consistently. The wrapped run uses
@@ -62,7 +64,10 @@ pub fn run(args: &WrapArgs) -> Result<()> {
             Err(e) => {
                 // PTY setup failed; keep the chosen route without our PTY so
                 // the command still works (just without clipboard forwarding).
-                eprintln!("grok wrap: wrapped mode failed, running without PTY wrapping: {e}");
+                eprintln!(
+                    "{} wrap: wrapped mode failed, running without PTY wrapping: {e}",
+                    crate::app::cli::resolved_bin_name()
+                );
                 exec_command(&fallback.program, &fallback.args)
             }
         }

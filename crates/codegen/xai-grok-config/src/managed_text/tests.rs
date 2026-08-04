@@ -26,6 +26,7 @@ fn request(path: &Path, items: &[(&str, &str)]) -> ManagedConfigRequest {
             .collect(),
         comments: CommentSyntax::hash(),
         validator: None,
+        legacy_namespace: None,
     }
 }
 
@@ -644,4 +645,121 @@ fn validator_timeout_is_bounded() {
     assert!(ManagedConfig::apply(ManagedConfig::plan(request).unwrap()).is_err());
     assert!(started.elapsed() < Duration::from_secs(1));
     assert_eq!(fs::read_to_string(&path).unwrap(), "original\n");
+}
+
+fn adoption_request(path: &Path, items: &[(&str, &str)]) -> ManagedConfigRequest {
+    let mut request = request(path, items);
+    request.namespace = "arcus doctor".to_owned();
+    request.legacy_namespace = Some("grok doctor".to_owned());
+    request
+}
+
+#[test]
+fn legacy_namespace_block_is_adopted_and_rewritten() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("config.rc");
+    let legacy = "before\n# >>> grok doctor >>>\n# >>> terminal.ssh-wrap >>>\nalias ssh='grok wrap ssh'\n# <<< terminal.ssh-wrap <<<\n# <<< grok doctor <<<\nafter\n";
+    fs::write(&path, legacy).unwrap();
+    let plan = ManagedConfig::plan(adoption_request(
+        &path,
+        &[("terminal.ssh-wrap", "alias ssh='arcus wrap ssh'")],
+    ))
+    .unwrap();
+    assert!(plan.changes_file());
+    assert_eq!(plan.inspection().original_text(), Some(legacy));
+    assert_eq!(plan.inspection().unmanaged_text(), "before\nafter\n");
+    assert_eq!(
+        plan.inspection().requested_item_state(0),
+        Some(ManagedItemState::NeedsUpdate)
+    );
+    assert!(plan.backup_path_hint().is_some());
+    ManagedConfig::apply(plan).unwrap();
+    assert_eq!(
+        fs::read_to_string(&path).unwrap(),
+        "before\n# >>> arcus doctor >>>\n# >>> terminal.ssh-wrap >>>\nalias ssh='arcus wrap ssh'\n# <<< terminal.ssh-wrap <<<\n# <<< arcus doctor <<<\nafter\n"
+    );
+}
+
+#[test]
+fn legacy_adoption_rewrites_markers_even_when_items_are_exact() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("config.rc");
+    fs::write(
+        &path,
+        "# >>> grok doctor >>>\n# >>> terminal.opt >>>\nset -g x on\n# <<< terminal.opt <<<\n# <<< grok doctor <<<\n",
+    )
+    .unwrap();
+    let plan = ManagedConfig::plan(adoption_request(&path, &[("terminal.opt", "set -g x on")]))
+        .unwrap();
+    assert_eq!(
+        plan.inspection().requested_item_state(0),
+        Some(ManagedItemState::Exact)
+    );
+    assert!(plan.changes_file());
+    ManagedConfig::apply(plan).unwrap();
+    assert_eq!(
+        fs::read_to_string(&path).unwrap(),
+        "# >>> arcus doctor >>>\n# >>> terminal.opt >>>\nset -g x on\n# <<< terminal.opt <<<\n# <<< arcus doctor <<<\n"
+    );
+}
+
+#[test]
+fn current_namespace_block_is_untouched_when_legacy_is_requested() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("config.rc");
+    let current = "# >>> arcus doctor >>>\n# >>> terminal.opt >>>\nset -g x on\n# <<< terminal.opt <<<\n# <<< arcus doctor <<<\n";
+    fs::write(&path, current).unwrap();
+    let plan = ManagedConfig::plan(adoption_request(&path, &[("terminal.opt", "set -g x on")]))
+        .unwrap();
+    assert!(!plan.changes_file());
+    assert_eq!(
+        plan.inspection().requested_item_state(0),
+        Some(ManagedItemState::Exact)
+    );
+}
+
+#[test]
+fn coexisting_legacy_and_current_blocks_fail_loud() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("config.rc");
+    fs::write(
+        &path,
+        "# >>> grok doctor >>>\n# >>> terminal.old >>>\nset -g x on\n# <<< terminal.old <<<\n# <<< grok doctor <<<\n# >>> arcus doctor >>>\n# >>> terminal.opt >>>\nset -g y on\n# <<< terminal.opt <<<\n# <<< arcus doctor <<<\n",
+    )
+    .unwrap();
+    let result = ManagedConfig::plan(adoption_request(&path, &[("terminal.opt", "set -g y on")]));
+    assert!(matches!(
+        result,
+        Err(ManagedConfigError::InvalidMarkers { .. })
+    ));
+}
+
+#[test]
+fn legacy_block_without_legacy_namespace_request_fails_loud() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("config.rc");
+    fs::write(
+        &path,
+        "# >>> grok doctor >>>\n# >>> terminal.opt >>>\nset -g x on\n# <<< terminal.opt <<<\n# <<< grok doctor <<<\n",
+    )
+    .unwrap();
+    let mut no_legacy = request(&path, &[("terminal.opt", "set -g x on")]);
+    no_legacy.namespace = "arcus doctor".to_owned();
+    let result = ManagedConfig::plan(no_legacy);
+    assert!(matches!(
+        result,
+        Err(ManagedConfigError::InvalidMarkers { .. })
+    ));
+}
+
+#[test]
+fn legacy_namespace_must_differ_from_namespace() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("config.rc");
+    let mut same = request(&path, &[("terminal.opt", "set -g x on")]);
+    same.legacy_namespace = Some(same.namespace.clone());
+    assert!(matches!(
+        ManagedConfig::plan(same),
+        Err(ManagedConfigError::InvalidRequest(_))
+    ));
 }

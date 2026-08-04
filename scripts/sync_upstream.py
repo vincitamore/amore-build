@@ -69,6 +69,15 @@ SCREEN_RELAUNCH_FILE = "crates/codegen/xai-grok-pager/src/app/screen_mode_relaun
 NOTIF_TITLE_FILE = "crates/codegen/xai-grok-pager/src/notifications/title.rs"
 COMPLETIONS_FILE = "crates/codegen/xai-grok-pager/src/completions_cmd.rs"
 
+# The doctor fix surface is runtime-coupled, not display-only: the managed
+# namespace marker is written into user shell/tmux configs and read back, and
+# the ssh alias body must name a binary that exists on the user's PATH. A
+# merge that drops any of these silently reverts the namespace to `grok
+# doctor` (stranding every arcus-written block) or re-breaks the ssh alias.
+DOCTOR_FIX_FILE = "crates/codegen/xai-grok-pager/src/diagnostics/fix.rs"
+MANAGED_TEXT_MOD = "crates/codegen/xai-grok-config/src/managed_text/mod.rs"
+MANAGED_TEXT_FORMAT = "crates/codegen/xai-grok-config/src/managed_text/format.rs"
+
 
 def run(cmd: list[str], **kw) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, cwd=REPO, capture_output=True, text=True, **kw)
@@ -325,6 +334,29 @@ def cmd_verify(dry_run: bool) -> int:
     _check_file_contains(
         COMPLETIONS_FILE, "resolved_bin_name()",
         "shell completions name after the invoked binary", problems)
+
+    # 6c. doctor namespace migration (runtime-coupled, not display-only):
+    #     the managed-config namespace is `arcus doctor` with grok-doctor
+    #     legacy adoption, and the doctor/ssh-wrap command strings channel
+    #     through the invoked binary name.
+    _check_file_contains(
+        DOCTOR_FIX_FILE, 'MANAGED_NAMESPACE: &str = "arcus doctor"',
+        "managed shell/tmux blocks use the `arcus doctor` namespace", problems)
+    _check_file_contains(
+        DOCTOR_FIX_FILE, 'LEGACY_MANAGED_NAMESPACE: &str = "grok doctor"',
+        "legacy `grok doctor` blocks are adopted (constant present)", problems)
+    _check_file_contains(
+        DOCTOR_FIX_FILE, "legacy_namespace: Some(LEGACY_MANAGED_NAMESPACE.to_owned())",
+        "doctor fix requests wire legacy-namespace adoption", problems)
+    _check_file_contains(
+        DOCTOR_FIX_FILE, "NAME.get_or_init(crate::app::cli::resolved_bin_name)",
+        "doctor command strings + ssh alias derive from resolved_bin_name()", problems)
+    _check_file_contains(
+        MANAGED_TEXT_MOD, "pub legacy_namespace: Option<String>",
+        "ManagedConfigRequest carries legacy_namespace", problems)
+    _check_file_contains(
+        MANAGED_TEXT_FORMAT, "fn adopt_legacy_namespace",
+        "managed_text adopts legacy-namespace blocks in plan", problems)
 
     # 7. build + smoke (this host). Build is the long pole; allow skipping.
     #    The full Linux pager suite remains CI-owned (UPSTREAM.md §5).

@@ -38,6 +38,14 @@ pub struct ManagedConfigRequest {
     pub items: Vec<ManagedItem>,
     pub comments: CommentSyntax,
     pub validator: Option<SyntaxValidator>,
+    /// Former namespace this writer previously published blocks under. When a
+    /// coherent block with these outer markers is found (and no block under
+    /// `namespace` exists), the plan adopts it in place: the outer markers are
+    /// renamed to `namespace` as part of the planned update, so the migration
+    /// rides the ordinary preview + backup + validator transaction. Read-only
+    /// planning reports the adoption as a pending change; nothing is written
+    /// until apply.
+    pub legacy_namespace: Option<String>,
 }
 
 /// Validated source from the snapshot used to build the plan.
@@ -217,7 +225,18 @@ impl ManagedConfig {
             })?;
         let parent_plan = ParentPlan::capture(parent)?;
         let original = source::read_source(&target_path)?;
-        let text = original.text(&target_path)?;
+        let disk_text = original.text(&target_path)?;
+        let adopted = request.legacy_namespace.as_deref().and_then(|legacy| {
+            format::adopt_legacy_namespace(
+                disk_text,
+                &request.namespace,
+                legacy,
+                &request.owned_item_prefix,
+                &request.comments,
+                &target_path,
+            )
+        });
+        let text = adopted.as_deref().unwrap_or(disk_text);
         let requested_items = request
             .items
             .iter()
@@ -241,7 +260,7 @@ impl ManagedConfig {
             &target_path,
         )?;
         let inspection = ManagedTextInspection {
-            original_text: original.bytes.as_ref().map(|_| text.to_owned()),
+            original_text: original.bytes.as_ref().map(|_| disk_text.to_owned()),
             unmanaged_text: rendered.unmanaged_text,
             requested_items,
         };
