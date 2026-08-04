@@ -17,8 +17,8 @@ Public home of the instrument inside the `arcus-build` repo
 |---------|------|
 | `packages/daemon` | The iris daemon (`127.0.0.1:3853`) — live org index (recursive file-watcher), wikilink/backlink resolver, graph (typed-edge merge, `?shape=v2`), fuzzy search |
 | `packages/regula` | The write authority — org-document schema, legal lifecycle transitions, folder placement, lint. See its README for the charter |
-| `packages/cli` | Sole global bin **`iris`** — org verbs + span + daemon control |
-| `packages/tui` | The OpenTUI dashboard (bare `iris` / `iris dash` opens it) — Dashboard / Tasks / Inbox / Reminders / Knowledge / Files / Graph / Forge |
+| `packages/cli` | The product bin **`iris`** — org verbs + the span (bare `iris`) + daemon control |
+| `packages/tui` | The OpenTUI dashboard (bare `iris` / `iris dash` opens it) — Dashboard / Tasks / Inbox / Reminders / Knowledge / Files / Forge / Graph (hotkeys `1`–`8`) |
 | `packages/parity` | Golden-master parity harness (`parity record` / `parity replay`) used to verify the Bun daemon against a historical legacy daemon; still useful for self-replay |
 
 Building from source and packaging: **[BUILD.md](BUILD.md)**. Foreign-root

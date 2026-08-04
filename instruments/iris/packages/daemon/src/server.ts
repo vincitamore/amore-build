@@ -97,7 +97,15 @@ export function buildFetch(deps: DaemonDeps): (req: Request) => Response | Promi
   return (req) => handle(deps, req);
 }
 
-/** Start Bun.serve on config.port with the wired deps. Returns the Bun server. */
+/** Start Bun.serve on config.port with the wired deps. Returns the Bun server.
+ *
+ *  Loopback-only by design: iris is a local-first instrument and its index is
+ *  the org tree — Bun's default hostname is 0.0.0.0 (all interfaces), which
+ *  would expose it to the LAN. Pinned, not configurable. */
 export function startServer(deps: DaemonDeps): ReturnType<typeof Bun.serve> {
-  return Bun.serve({ port: deps.config.port, fetch: buildFetch(deps) });
+  return Bun.serve({
+    hostname: "127.0.0.1",
+    port: deps.config.port,
+    fetch: buildFetch(deps),
+  });
 }
