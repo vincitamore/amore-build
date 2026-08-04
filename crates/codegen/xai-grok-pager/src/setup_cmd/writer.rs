@@ -1,7 +1,7 @@
 //! Config.toml writer for first-run wizard model entries.
 //!
-//! Field set matches `ConfigModelOverride` + `docs/setup-glm.md` (wave-3
-//! schema-verified shapes). `system_prompt_label` is mandatory on every write.
+//! Field set matches `ConfigModelOverride` + `docs/setup-models.md`
+//! (schema-verified shapes). `system_prompt_label` is mandatory on every write.
 
 use std::path::Path;
 
@@ -10,7 +10,7 @@ use anyhow::{Context, Result, bail};
 /// A planned `[model.<id>]` block.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModelEntryPlan {
-    /// Catalog / config id (table key), e.g. `glm-openrouter`.
+    /// Catalog / config id (table key), e.g. `deepseek-openrouter`.
     pub id: String,
     pub model: String,
     pub base_url: String,
@@ -33,8 +33,29 @@ pub struct ModelEntryPlan {
 const HOUSE_LABEL: &str = "Arcus Build";
 
 impl ModelEntryPlan {
-    /// OpenRouter path — recommended public on-ramp (`docs/setup-glm.md` §1).
-    pub fn openrouter() -> Self {
+    /// DeepSeek V4 Flash via OpenRouter — recommended public on-ramp
+    /// (`docs/setup-models.md` §1).
+    ///
+    /// `max_completion_tokens` is the OpenRouter-reported provider ceiling for
+    /// this model (65,536 as of 2026-08-04) — a ceiling, not a target;
+    /// reasoning tokens draw from the same budget, so a lower cap truncates
+    /// the reasoning pass invisibly.
+    pub fn deepseek_openrouter() -> Self {
+        Self {
+            id: "deepseek-openrouter".into(),
+            model: "deepseek/deepseek-v4-flash-0731".into(),
+            base_url: "https://openrouter.ai/api/v1".into(),
+            name: "DeepSeek V4 Flash (OpenRouter)".into(),
+            env_key: "OPENROUTER_API_KEY".into(),
+            system_prompt_label: HOUSE_LABEL.into(),
+            context_window: 1_048_576,
+            max_completion_tokens: 65_536,
+            set_as_default: true,
+        }
+    }
+
+    /// GLM-5.2 via OpenRouter (`docs/setup-models.md` §3).
+    pub fn glm_openrouter() -> Self {
         Self {
             id: "glm-openrouter".into(),
             model: "z-ai/glm-5.2".into(),
@@ -48,7 +69,7 @@ impl ModelEntryPlan {
         }
     }
 
-    /// Z.ai direct (`docs/setup-glm.md` §2).
+    /// GLM-5.2 via Z.ai direct (`docs/setup-models.md` §4).
     pub fn zai() -> Self {
         Self {
             id: "glm-zai".into(),
@@ -267,7 +288,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let path = dir.path().join("config.toml");
         fs::write(&path, "[ui]\ntheme = \"dark\"\n").unwrap();
-        let plan = ModelEntryPlan::openrouter();
+        let plan = ModelEntryPlan::glm_openrouter();
         let report = write_model_entry(&path, &plan, false).unwrap();
         assert_eq!(report.model_id, "glm-openrouter");
         let body = fs::read_to_string(&path).unwrap();
@@ -292,7 +313,7 @@ mod tests {
     fn dry_run_creates_no_parent_dir() {
         let dir = tempdir().unwrap();
         let nested = dir.path().join("never-created").join("config.toml");
-        write_model_entry(&nested, &ModelEntryPlan::openrouter(), true).unwrap();
+        write_model_entry(&nested, &ModelEntryPlan::glm_openrouter(), true).unwrap();
         assert!(
             !dir.path().join("never-created").exists(),
             "dry-run must not create parent directories"
@@ -305,7 +326,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let path = dir.path().join("config.toml");
         fs::write(&path, "[ui]\ntheme = \"dark\"\n").unwrap();
-        write_model_entry(&path, &ModelEntryPlan::openrouter(), false).unwrap();
+        write_model_entry(&path, &ModelEntryPlan::glm_openrouter(), false).unwrap();
         let body = fs::read_to_string(&path).unwrap();
         assert!(body.contains("glm-openrouter"), "{body}");
         assert!(body.contains("theme"), "sibling preserved: {body}");
@@ -326,7 +347,7 @@ mod tests {
     fn refuses_empty_system_prompt_label() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("config.toml");
-        let mut plan = ModelEntryPlan::openrouter();
+        let mut plan = ModelEntryPlan::glm_openrouter();
         plan.system_prompt_label = "  ".into();
         assert!(write_model_entry(&path, &plan, false).is_err());
     }

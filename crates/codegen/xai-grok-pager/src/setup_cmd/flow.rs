@@ -121,7 +121,15 @@ fn run_headless(ctx: &FlowContext, out: &mut impl Write, summary: &mut SetupSumm
         ctx.config_path().display()
     )?;
     writeln!(out)?;
-    writeln!(out, "  [OpenRouter — recommended]")?;
+    writeln!(out, "  [DeepSeek V4 Flash via OpenRouter — recommended]")?;
+    writeln!(out, "    env:  OPENROUTER_API_KEY")?;
+    writeln!(
+        out,
+        "    model id: deepseek-openrouter  wire: deepseek/deepseek-v4-flash-0731"
+    )?;
+    writeln!(out, "    base: https://openrouter.ai/api/v1")?;
+    writeln!(out)?;
+    writeln!(out, "  [GLM-5.2 via OpenRouter]")?;
     writeln!(out, "    env:  OPENROUTER_API_KEY")?;
     writeln!(out, "    model id: glm-openrouter  wire: z-ai/glm-5.2")?;
     writeln!(out, "    base: https://openrouter.ai/api/v1")?;
@@ -136,7 +144,7 @@ fn run_headless(ctx: &FlowContext, out: &mut impl Write, summary: &mut SetupSumm
         out,
         "    Provide base_url + env_key + model; system_prompt_label is mandatory."
     )?;
-    writeln!(out, "    See docs/setup-glm.md for verified shapes.")?;
+    writeln!(out, "    See docs/setup-models.md for verified shapes.")?;
     writeln!(out)?;
     summary.skipped_steps.push("model-provider (headless: printed only)");
 
@@ -169,13 +177,11 @@ fn run_headless(ctx: &FlowContext, out: &mut impl Write, summary: &mut SetupSumm
         }
         None => {
             writeln!(out, "  Not on PATH.")?;
+            writeln!(out, "  Release asset shape for this host: {asset}")?;
             writeln!(
                 out,
-                "  Recommended install asset shape (download deferred in v1): {asset}"
-            )?;
-            writeln!(
-                out,
-                "  See product docs for the companion install story (no auto-fetch in this release)."
+                "  `arcus init` installs the companion into a house automatically; \
+                 install on PATH separately if you want the CLI everywhere."
             )?;
         }
     }
@@ -213,13 +219,17 @@ fn run_interactive(
 
     // ── Step 1: model provider ──────────────────────────────────────────
     step_header(out, 1, 3, "model provider (headline)")?;
-    writeln!(out, "  [1] OpenRouter   (recommended)  z-ai/glm-5.2")?;
-    writeln!(out, "  [2] Z.ai direct                 glm-5.2")?;
-    writeln!(out, "  [3] Open-weight host            base URL + env key")?;
+    writeln!(
+        out,
+        "  [1] OpenRouter   (recommended)  deepseek/deepseek-v4-flash-0731"
+    )?;
+    writeln!(out, "  [2] OpenRouter                  z-ai/glm-5.2")?;
+    writeln!(out, "  [3] Z.ai direct                 glm-5.2")?;
+    writeln!(out, "  [4] Open-weight host            base URL + env key")?;
     writeln!(out, "  [s] Skip this step")?;
     writeln!(out, "  [q] Quit setup")?;
     writeln!(out)?;
-    write!(out, "  Choice [1/2/3/s/q]: ")?;
+    write!(out, "  Choice [1/2/3/4/s/q]: ")?;
     out.flush()?;
 
     let choice = read_choice(input)?;
@@ -236,18 +246,29 @@ fn run_interactive(
             writeln!(out, "  Skipped model provider.")?;
             summary.skipped_steps.push("model-provider");
         }
-        "1" | "openrouter" | "or" => {
-            let plan = ModelEntryPlan::openrouter();
+        "1" | "deepseek" | "ds" => {
+            let plan = ModelEntryPlan::deepseek_openrouter();
             apply_model(ctx, out, summary, plan)?;
         }
-        "2" | "zai" | "z" => {
+        "2" | "glm" | "openrouter" | "or" => {
+            let plan = ModelEntryPlan::glm_openrouter();
+            apply_model(ctx, out, summary, plan)?;
+        }
+        "3" | "zai" | "z" => {
             let plan = ModelEntryPlan::zai();
             apply_model(ctx, out, summary, plan)?;
         }
-        "3" | "open" | "host" => {
-            let plan = prompt_open_weight(input, out)?;
-            apply_model(ctx, out, summary, plan)?;
-        }
+        "4" | "open" | "host" => match prompt_open_weight(input, out)? {
+            Some(plan) => apply_model(ctx, out, summary, plan)?,
+            None => {
+                writeln!(
+                    out,
+                    "  No wire model id given — skipping model step (a custom host's \
+                     model id cannot be guessed)."
+                )?;
+                summary.skipped_steps.push("model-provider");
+            }
+        },
         other => {
             writeln!(out, "  Unrecognized choice `{other}` — skipping model step.")?;
             summary.skipped_steps.push("model-provider");
@@ -303,14 +324,12 @@ fn run_interactive(
         }
         None => {
             writeln!(out, "  Not found on PATH.")?;
-            writeln!(
-                out,
-                "  Recommended release asset shape (v1 names only; download deferred):"
-            )?;
+            writeln!(out, "  Release asset shape for this host:")?;
             writeln!(out, "    {asset}")?;
             writeln!(
                 out,
-                "  Install separately, then re-run setup — or plant a pointer now."
+                "  `arcus init` installs the companion into a house automatically; \
+                 install on PATH separately for the CLI everywhere, then re-run setup."
             )?;
             writeln!(out, "  [1] Plant companion pointer config (recommended)")?;
             writeln!(out, "  [s] Skip (opt-out)")?;
@@ -385,7 +404,13 @@ fn apply_model(
     Ok(())
 }
 
-fn prompt_open_weight(input: &mut impl BufRead, out: &mut impl Write) -> Result<ModelEntryPlan> {
+/// `Ok(None)` = no wire model id was given; the caller skips the step. A
+/// custom host's model id cannot be defaulted — any guess would be wrong for
+/// most hosts and silently written into config.
+fn prompt_open_weight(
+    input: &mut impl BufRead,
+    out: &mut impl Write,
+) -> Result<Option<ModelEntryPlan>> {
     write!(out, "  Base URL (OpenAI-compat, include /v1): ")?;
     out.flush()?;
     let base_url = read_line(input)?;
@@ -402,21 +427,17 @@ fn prompt_open_weight(input: &mut impl BufRead, out: &mut impl Write) -> Result<
             v
         }
     };
-    write!(out, "  Wire model id [z-ai/glm-5.2]: ")?;
+    write!(out, "  Wire model id (as your host names it): ")?;
     out.flush()?;
-    let model = {
-        let v = read_line(input)?;
-        if v.trim().is_empty() {
-            "z-ai/glm-5.2".into()
-        } else {
-            v
-        }
-    };
-    Ok(ModelEntryPlan::open_weight(
+    let model = read_line(input)?;
+    if model.trim().is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(ModelEntryPlan::open_weight(
         base_url.trim().to_string(),
         env_key.trim().to_string(),
         model.trim().to_string(),
-    ))
+    )))
 }
 
 fn write_summary_screen(out: &mut impl Write, summary: &SetupSummary) -> Result<()> {
@@ -534,9 +555,9 @@ mod tests {
         let mut input = Cursor::new("1\ns\ns\n");
         let mut out = Vec::new();
         let summary = run_flow(&ctx, &mut input, &mut out).unwrap();
-        assert_eq!(summary.model.as_ref().unwrap().id, "glm-openrouter");
+        assert_eq!(summary.model.as_ref().unwrap().id, "deepseek-openrouter");
         let body = std::fs::read_to_string(dir.path().join("config.toml")).unwrap();
-        assert!(body.contains("z-ai/glm-5.2"));
+        assert!(body.contains("deepseek/deepseek-v4-flash-0731"));
         assert!(body.contains("system_prompt_label"));
         assert_eq!(summary.state_status, Some(WizardStatus::Done));
         assert!(WizardState::path_in(dir.path()).exists());
