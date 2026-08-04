@@ -34,9 +34,8 @@ honored in-tree:
 | [`third_party/NOTICE`](third_party/NOTICE) | Notices for vendored projects under `third_party/` |
 
 Distributions must preserve copyright notices, license text, and attributions
-required by Apache-2.0 and by bundled third-party licenses. A root-level
-`NOTICE` may be added as release hygiene; when present it is part of the same
-obligation set.
+required by Apache-2.0 and by bundled third-party licenses. The root-level
+[`NOTICE`](NOTICE) is part of the same obligation set.
 
 ### Non-affiliation
 
@@ -54,26 +53,31 @@ X Corp.**
 
 ## 3. Provenance pinning (`SOURCE_REV`)
 
-[`SOURCE_REV`](SOURCE_REV) at the repo root names the **upstream monorepo
-revision** this tree is rebased on (or last synced from). Upstream's public
-tree uses the same pattern: one root file, one full monorepo commit SHA.
+[`SOURCE_REV`](SOURCE_REV) at the repo root names the upstream baseline this
+tree is rebased on (or last synced from). **The pin stores the public
+sync-bundle SHA** — the newest "Synced from monorepo" commit on
+`xai-org/grok-build` that has been merged — not upstream's *internal*
+monorepo SHA (the `Source-Revision:` trailer), which is not a fetchable git
+object.
 
 ### How to read it
 
 1. Open `SOURCE_REV` at the repository root.
-2. Read the single line — a 40-character hexadecimal Git SHA (no other fields).
-3. That SHA is the upstream baseline. Fork-only commits sit above the history
-   that includes that sync; they are not part of the upstream monorepo.
+2. Skip the `#`-prefixed header comment; the payload is the single
+   non-comment line — a 40-character hexadecimal Git SHA.
+3. That SHA is the upstream baseline, resolvable on `xai-org/grok-build`.
+   Fork-only commits sit above the history that includes that sync; they are
+   not part of the upstream tree.
 
 Live value is always the file. Example shape only:
 
 ```text
-6372e41d828b8a6ee82c29e01a69e27ec895cca9
+# Arcus Build: upstream baseline pin. (header comment, several lines)
+ed6d543643628663873c5de28298e022ed634238
 ```
 
-Each public release should ship a `SOURCE_REV` for the upstream revision that
-release was rebased on. Consumers pin **upstream baseline + fork tip**
-(`SOURCE_REV` + tag/commit).
+Each public release ships the `SOURCE_REV` its tree was rebased on.
+Consumers pin **upstream baseline + fork tip** (`SOURCE_REV` + tag/commit).
 
 ## 4. Rebase and cadence policy
 
@@ -119,8 +123,10 @@ for offline install.
 companion install (wizard surface; explicit setup entry for non-interactive
 use). Must not trap headless or CI paths.
 
-**Iris.** Companion instrument in-tree at `instruments/iris/`. Optional
-detection/init pointer; absence is quiet.
+**Iris.** Companion instrument in-tree at `instruments/iris/`. `arcus init`
+installs its release binaries into a house by default (`--no-iris` opts out;
+a failed download never fails the house); `arcus setup` records PATH
+detection. Never required to run Arcus Build — absence is quiet.
 
 **Auto-update hard-off.** Compile-time policy in `xai-grok-update`
 (`FORK_AUTO_UPDATE_HARD_OFF`): auto-update is forced ineffective so the fork cannot
@@ -161,12 +167,16 @@ python scripts/sync_upstream.py --update-pin # SOURCE_REV -> upstream/main
 ```
 
 `--apply` refuses a dirty working tree and never commits — the merge is left
-for human review. `--verify` checks the five fork surfaces mechanically:
-`.arcus`/`.grok` precedence, `~/.arcus` default home, identity/binary naming
-(argv0 aliases), auto-update hard-off (`FORK_AUTO_UPDATE_HARD_OFF`), and the
-embed + `init` ownership tests — then builds and smokes `arcus` on the host.
-The Linux pager suite and full crate suite remain CI's job (see §5); `--verify`
-says what it can and cannot run rather than faking a green.
+for human review. `--verify` checks the fork surfaces mechanically — eight
+check groups as of 2026-08-04: `.arcus`/`.grok` precedence, `~/.arcus`
+default home, identity/binary naming (argv0 aliases), auto-update hard-off
+(`FORK_AUTO_UPDATE_HARD_OFF`), the embed + `init` ownership tests, the
+brand-boundary gate, the `resolved_bin_name()` branding call-site pins
+(resume-hint / titles / completions), and the doctor-namespace migration
+pins — then builds and smokes `arcus` on the host. The script is the
+authoritative list; keep this sentence in sync when it grows. The Linux
+pager suite and full crate suite remain CI's job (see §5); `--verify` says
+what it can and cannot run rather than faking a green.
 
 ### Operators / release maintainers
 
@@ -179,7 +189,7 @@ says what it can and cannot run rather than faking a green.
    (`--update-pin`). **The pin stores the public sync-bundle SHA** — the last
    one merged — not upstream's internal monorepo SHA (`Source-Revision:`),
    which is not a fetchable git object.
-4. After every rebase, re-check at least the five surfaces — `--verify` does
+4. After every rebase, re-check the fork surfaces — `--verify` does
    this; keep the checklist in sync with the script when it grows.
 5. Fast-follow security fixes; batch ordinary drift into the next sync rebase.
 
@@ -197,10 +207,9 @@ channel:
   ours to change (fork-owned surface) versus upstream substrate (crate ids,
   paths, env, model name, provenance) that must stay untouched for merge
   economics. Add reviewed exceptions there, not by editing around the check.
-- A longer **rebase checklist** (every `.grok` load site, test matrix, Windows
-  notes) is intended for contributor AGENTS / maintainer docs when published.
-  Until then, §4–§5 plus thin-diff / rebase-rarely are the binding written
-  policy.
+- The mechanical rebase checklist **is** `sync_upstream.py --verify` — its
+  check groups are the published, executable form. §4–§5 plus thin-diff /
+  rebase-rarely are the binding written policy around it.
 
 ### Do not
 
@@ -216,7 +225,7 @@ channel:
 |---|---|
 | [`LICENSE`](LICENSE) | Apache-2.0 |
 | [`THIRD-PARTY-NOTICES`](THIRD-PARTY-NOTICES) | Dependency attributions |
-| [`SOURCE_REV`](SOURCE_REV) | Upstream monorepo SHA pin |
+| [`SOURCE_REV`](SOURCE_REV) | Upstream sync-bundle SHA pin |
 | [`SECURITY.md`](SECURITY.md) | Vulnerability reporting |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | Contribution / non-PR policy |
 | [`templates/house/`](templates/house/) | Embedded cooperation-harness pack |

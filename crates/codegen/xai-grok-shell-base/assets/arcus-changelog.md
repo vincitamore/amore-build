@@ -8,6 +8,23 @@ work it describes.
 
 ## Unreleased
 
+- **DeepSeek V4 Flash is the recommended model path.** The setup wizard's
+  first slot writes `deepseek/deepseek-v4-flash-0731` over OpenRouter at the
+  provider's reported completion ceiling; the GLM-5.2 recipes remain, and the
+  docs are model-agnostic — every path is the same `[model.*]` primitive
+  pointed at a different host (`docs/setup-models.md`).
+- **Install one-liners.** `scripts/install.sh` and `scripts/install.ps1`
+  fetch the newest release asset for the host, verify its published sha256,
+  and install the binary with a rollback of any previous copy.
+- **Iris installs with the house, and its daemon binds loopback only.**
+  `arcus init` downloads the companion into `instruments/iris/` by default
+  (`--no-iris` opts out and makes init fully offline; a failed download never
+  fails the house), and the index daemon now pins `127.0.0.1` — a local-first
+  instrument should not listen on the LAN.
+- **The aqueduct in quiet stone.** The welcome mark is a deck on an arcade of
+  three arches, hue-banded as masonry with per-cell jitter, replacing the
+  spectral bow. Both tiers regenerate from `scripts/gen_arcus.py`; the shine
+  sweep is unchanged and reads as a glint moving across stone.
 - **The fork begins.** Cloned from Selene Build and re-branded end to end:
   `ARCUS_*` environment primary with the upstream `GROK_*` chain intact as
   legacy aliases, `.arcus` repo config with `.grok` as fallback, home at

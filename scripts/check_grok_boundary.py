@@ -111,7 +111,7 @@ REVIEWED_EXCEPTIONS = [
     # Prose that names upstream's own spelling while contrasting it with the
     # fork home — describing the legacy brand, not using it as the product.
     ("README.md", "upstream brand spellings (`grok` / `~/.grok`)"),
-    ("docs/setup-glm.md", "upstream brand paths may still say `~/.grok` / `grok`"),
+    ("docs/setup-models.md", "upstream brand paths may still say `~/.grok` / `grok`"),
     # UPSTREAM.md documents the boundary tooling itself: "grok boundary",
     # "grok mentions" are prose about the check, not product-name drift.
     ("UPSTREAM.md", "fork-surface grok boundary is enforced by"),

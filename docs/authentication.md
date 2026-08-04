@@ -6,10 +6,10 @@ they do not require each other.
 | Rail | What it covers | How you enroll |
 |------|----------------|----------------|
 | **OAuth session** (`arcus login`) | First-party model catalog + native grok subagent freight | Interactive browser (PKCE) or device-code |
-| **BYOK** (bring your own key) | Any `[model.*]` with its own key, including the headline GLM-5.2 path | Env / TOML — **never** needs OAuth |
+| **BYOK** (bring your own key) | Any `[model.*]` with its own key — every recommended model path | Env / TOML — **never** needs OAuth |
 
-For the headline model setup (OpenRouter / Z.ai / any OpenAI-compatible host), see
-[setup-glm.md](setup-glm.md). For what `arcus init` installs into a repo, see
+For model setup (OpenRouter / vendor-direct / any OpenAI-compatible host), see
+[setup-models.md](setup-models.md). For what `arcus init` installs, see
 [onboarding.md](onboarding.md).
 
 ---
@@ -130,14 +130,14 @@ to `ARCUS_*`.
 ### Per-model BYOK in `~/.arcus/config.toml`
 
 Under `[model.<name>]`, prefer `env_key` over a literal `api_key` so secrets stay
-out of the file. Full examples: [setup-glm.md](setup-glm.md).
+out of the file. Full examples: [setup-models.md](setup-models.md).
 
 ```toml
-[model.glm-openrouter]
-model = "z-ai/glm-5.2"
+[model.deepseek-openrouter]
+model = "deepseek/deepseek-v4-flash-0731"
 base_url = "https://openrouter.ai/api/v1"
 env_key = "OPENROUTER_API_KEY"
-# The harness and the role — never the model. See setup-glm.md.
+# The harness and the role — never the model. See setup-models.md.
 system_prompt_label = "Arcus Build"
 ```
 
@@ -180,14 +180,12 @@ this repo.
 
 What that means in practice:
 
-Until that test lands and this page is updated:
-
-- Require **an xAI account** that can complete `arcus login` and authorize the
-  CLI scopes listed above.
-- Treat **plan eligibility as verified before v0.1.0, or noted here** after the
-  pre-GA check — do not assume “any free account” or “SuperGrok required.”
-- For **plan-independent** use today, configure **BYOK** models (K3 path or
-  `XAI_API_KEY` / per-model keys).
+- The native rail requires **an xAI account** that can complete `arcus login`
+  and authorize the CLI scopes listed above — do not assume "any free
+  account" or "a paid plan required"; neither is encoded here.
+- For **plan-independent** use, configure **BYOK** models (any
+  [setup-models.md](setup-models.md) path, or `XAI_API_KEY` / per-model
+  keys). BYOK never depends on xAI plan policy.
 
 Do **not** invent a subscription claim in marketing copy from this doc alone.
 
@@ -197,14 +195,18 @@ Do **not** invent a subscription claim in marketing copy from this doc alone.
 
 | Situation | Need `arcus login`? |
 |-----------|----------------------|
-| Only third-party K3 (OpenRouter / Moonshot / host) via `env_key` | **No** |
+| Only third-party BYOK models (OpenRouter / vendor-direct / host) via `env_key` | **No** |
 | Only `XAI_API_KEY` (or per-model xAI key) for first-party models | **No** (session optional) |
 | Native catalog + subagent freight on the session grant | **Yes** (or API key rail above) |
-| Mix: K3 primary + grok freight | K3 key **and** (login **or** `XAI_API_KEY`) — two meters, two credentials |
+| Mix: BYOK primary + grok freight | BYOK key **and** (login **or** `XAI_API_KEY`) — two meters, two credentials |
 
-Credential precedence always prefers a model’s **own** key over the session
-(`resolve_credentials`). A third-party base without its own credentials is
-**fail-closed** — the session JWT is not sent to foreign hosts.
+Credential precedence always prefers a model's **own** key over the session
+(`resolve_credentials`) — a third-party block that sets `env_key` or
+`api_key` never receives the session JWT. That is the contract to rely on:
+**always give third-party blocks their own credential.** A third-party block
+*without* one is a misconfiguration, not a supported mode — resolution falls
+through to whatever credential exists (session, `XAI_API_KEY`), or to no
+Authorization header at all.
 
 ---
 
@@ -215,13 +217,13 @@ Credential precedence always prefers a model’s **own** key over the session
 | Auth / 401 loops after copying a home dir | **Do not recopy `auth.json`.** `arcus logout` then `arcus login` on that machine |
 | Headless host, no browser | `arcus login --device-auth` |
 | CI / automation | `XAI_API_KEY` or per-model `env_key` — skip OAuth |
-| “Model has env_key configured but none … are set” | Export the env named in TOML (see [setup-glm.md](setup-glm.md)) |
+| “Model has env_key configured but none … are set” | Export the env named in TOML (see [setup-models.md](setup-models.md)) |
 | Want a clean slate | `arcus logout` then login or set keys again |
 
 ---
 
 ## Related
 
-- [setup-glm.md](setup-glm.md) — K3 BYOK paths and multi-provider TOML
+- [setup-models.md](setup-models.md) — BYOK model paths and multi-provider TOML
 - [onboarding.md](onboarding.md) — `arcus init` house pack (not credentials)
 - Upstream user guide (vendor-shaped detail): `crates/codegen/xai-grok-pager/docs/user-guide/02-authentication.md`

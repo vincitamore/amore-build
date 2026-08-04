@@ -1,23 +1,24 @@
 # Arcus Build — multi-provider example config
 # Copy fields you need into ~/.arcus/config.toml (or $GROK_HOME/config.toml).
 #
-# Product posture: the shipped default is GLM-5.2 over OpenRouter, but the
-# harness is not a wrapper around any one model. Native grok is the second
-# rail (login / XAI_API_KEY). Baked catalog grok-4.5 is technical fallback
-# only — not the default.
+# Product posture: the wizard's recommended default is DeepSeek V4 Flash over
+# OpenRouter, but the harness is not a wrapper around any one model — every
+# block below is the same [model.*] primitive pointed at a different host.
+# Native grok is the second rail (login / XAI_API_KEY). Baked catalog
+# grok-4.5 is technical fallback only — not the default.
 #
 # EVERY custom [model.*] MUST set system_prompt_label. Unlabeled models
 # resolve to the product default identity and play the wrong persona in tool
 # loops. The label names the harness and the role, never the model or its
-# lab — see docs/setup-glm.md for the full identity-rule doctrine and why
+# lab — see docs/setup-models.md for the full identity-rule doctrine and why
 # every block below uses "Arcus Build" regardless of which model it points
 # at.
 #
 # Prefer env_key over literal api_key. Each env_key comment names the process
 # environment variable that must be set before `arcus` runs.
 #
-# Pricing / availability notes in docs/setup-glm.md are as of 2026-07-31;
-# re-verify before relying on them.
+# Pricing / ceiling / availability notes in docs/setup-models.md are as of
+# 2026-08-04; re-verify before relying on them.
 #
 # Schema: [model.<id>] → ConfigModelOverride
 #   crates/codegen/xai-grok-shell/src/agent/config.rs (ConfigModelOverride)
@@ -28,7 +29,9 @@
 # Default: pick ONE headline path after you set the matching env var.
 # ---------------------------------------------------------------------------
 [models]
-default = "glm-openrouter"
+default = "deepseek-openrouter"
+# default = "deepseek-direct"
+# default = "glm-openrouter"
 # default = "glm-zai"
 # default = "openweight"
 # default = "grok-4.5"   # technical fallback / freight only — not marketed default
@@ -44,7 +47,41 @@ env_key = "OPENROUTER_API_KEY"
 # extra_headers = { "HTTP-Referer" = "https://example.com", "X-Title" = "Arcus Build" }
 
 # ---------------------------------------------------------------------------
-# (1) GLM-5.2 via OpenRouter — preferred on-ramp
+# (1) DeepSeek V4 Flash via OpenRouter — recommended on-ramp
+# Wire model id: deepseek/deepseek-v4-flash-0731  (mind the -0731 suffix —
+# the unsuffixed id is the older 0423 release)
+# env: OPENROUTER_API_KEY  (https://openrouter.ai/keys)
+# Probe: arcus -m deepseek-openrouter -p "Reply with exactly: ARCUS-DS-OK"
+# ---------------------------------------------------------------------------
+[model.deepseek-openrouter]
+model = "deepseek/deepseek-v4-flash-0731"
+model_provider = "openrouter"
+name = "DeepSeek V4 Flash (OpenRouter)"
+system_prompt_label = "Arcus Build"
+context_window = 1048576
+# Reasoning tokens count against this cap. This is the OpenRouter-reported
+# provider ceiling for this model (as of 2026-08-04) — a ceiling, not a
+# target; a lower cap truncates the reasoning pass invisibly.
+max_completion_tokens = 65536
+# api_backend defaults to "chat_completions" — correct for OpenRouter
+
+# ---------------------------------------------------------------------------
+# (2) DeepSeek direct — the model's own API surface
+# Wire model id: deepseek-v4-flash  (serves DeepSeek-V4-Flash-0731)
+# env: DEEPSEEK_API_KEY  (https://platform.deepseek.com/api_keys)
+# Probe: arcus -m deepseek-direct -p "Reply with exactly: ARCUS-DSD-OK"
+# ---------------------------------------------------------------------------
+[model.deepseek-direct]
+model = "deepseek-v4-flash"
+base_url = "https://api.deepseek.com"
+name = "DeepSeek V4 Flash (direct)"
+env_key = "DEEPSEEK_API_KEY"
+system_prompt_label = "Arcus Build"
+context_window = 1048576
+max_completion_tokens = 393216
+
+# ---------------------------------------------------------------------------
+# (3) GLM-5.2 via OpenRouter
 # Wire model id: z-ai/glm-5.2
 # env: OPENROUTER_API_KEY  (https://openrouter.ai/keys)
 # Probe: arcus -m glm-openrouter -p "Reply with exactly: ARCUS-OR-OK"
@@ -55,14 +92,10 @@ model_provider = "openrouter"
 name = "GLM-5.2 (OpenRouter)"
 system_prompt_label = "Arcus Build"
 context_window = 1048576
-# Reasoning tokens count against this cap. OpenRouter reports a provider
-# ceiling of 128000. Set it there: a lower cap truncates the reasoning pass
-# invisibly, and this field is a ceiling, not a target.
 max_completion_tokens = 128000
-# api_backend defaults to "chat_completions" — correct for OpenRouter
 
 # ---------------------------------------------------------------------------
-# (2) GLM-5.2 via Z.ai direct — the model's own API surface
+# (4) GLM-5.2 via Z.ai direct — the model's own API surface
 # Wire model id: glm-5.2
 # env: ZAI_API_KEY  (https://z.ai/manage-apikey/apikey-list)
 # Probe: arcus -m glm-zai -p "Reply with exactly: ARCUS-ZAI-OK"
@@ -77,10 +110,11 @@ context_window = 1048576
 max_completion_tokens = 128000
 
 # ---------------------------------------------------------------------------
-# (3) Any other OpenAI-compatible host
-# Not OpenRouter, not Z.ai: a hyperscaler endpoint, a dedicated deployment,
-# or a different model entirely. "openweight" is a placeholder key name, not
-# a reserved identifier — fill in your own wire model id, base URL, and env.
+# (5) Any other OpenAI-compatible host
+# Not covered above: a hyperscaler endpoint, a self-hosted vLLM/SGLang
+# deployment, or a different model entirely. "openweight" is a placeholder
+# key name, not a reserved identifier — fill in your own wire model id, base
+# URL, and env, and set max_completion_tokens to YOUR host's reported ceiling.
 # Probe: arcus -m openweight -p "Reply with exactly: ARCUS-OW-OK"
 # ---------------------------------------------------------------------------
 [model.openweight]
@@ -111,7 +145,7 @@ system_prompt_label = "Arcus Build"
 name = "Grok 4.5 (xAI)"
 
 # ---------------------------------------------------------------------------
-# Anthropic Messages — WORKAROUND-TIER only (BYOK, not the shipped default)
+# Anthropic Messages — WORKAROUND-TIER only (BYOK, not a headline path)
 # ConfigModelOverride has no auth_scheme field; use messages + headers.
 # env: ANTHROPIC_API_KEY  (via env_http_headers → x-api-key)
 # Probe: arcus -m claude-workaround -p "Reply with exactly: CLAUDE-OK"

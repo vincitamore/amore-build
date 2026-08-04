@@ -1,17 +1,17 @@
 [
   {
     "category": "features",
-    "description": "**The fork begins.** Arcus Build, re-branded end to end from Selene Build: `ARCUS_*` environment primary, `.arcus` repo config, home `~/.arcus`, binary `arcus`. The upstream `GROK_*` alias chain is left intact.",
+    "description": "**DeepSeek V4 Flash is the recommended model path** — the wizard's first slot writes `deepseek/deepseek-v4-flash-0731` over OpenRouter; GLM-5.2 recipes remain, and the setup docs are model-agnostic (`docs/setup-models.md`).",
     "breaking_change": false
   },
   {
     "category": "features",
-    "description": "**The identity is the house, not the model.** Model entries carry `system_prompt_label = \"Arcus Build\"` — a label naming the model would become false the moment the model is swapped.",
+    "description": "**Iris installs with the house** — `arcus init` downloads the companion by default (`--no-iris` opts out), and the iris daemon now binds loopback only.",
     "breaking_change": false
   },
   {
     "category": "features",
-    "description": "**A rainbow where the logo goes** — a filled multi-band arc rasterized from geometry, with a per-cell hue map so the shine sweep moves light through the colors. GLM-5.2 is the headline model path; the bundled knowledge instrument is `iris` on :3853.",
+    "description": "**Install one-liners** — installer scripts fetch the newest release asset for your platform, verify its sha256, and keep a rollback of any previous install.",
     "breaking_change": false
   }
 ]
