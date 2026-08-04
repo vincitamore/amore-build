@@ -152,7 +152,7 @@ fn fresh_install_writes_tree_and_manifest() {
     assert!(h.exists("context/principle-lattice.md")); // lattice default-on
     assert!(h.exists(".arcus/hooks/demo-hook.json"));
     assert!(h.exists(".arcus/skills/demo-skill/SKILL.md"));
-    assert!(!h.exists(init_cmd::IRIS_NOTE_REL)); // iris pointer not used anymore
+    assert!(!h.exists(".arcus/iris-companion.note.md")); // iris pointer note retired
 
     // Every selected file present with identical bytes. Compare against
     // `select_entries`, not the raw fixtures: init expands `{{HOUSE_NAME}}` at

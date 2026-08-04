@@ -18,7 +18,7 @@ use std::time::Duration;
 use anyhow::{Context, Result, bail};
 
 /// Where release assets live. The repo's own public URL.
-const RELEASE_BASE: &str = "https://github.com/amoyer/arcus-build/releases/download";
+const RELEASE_BASE: &str = "https://github.com/vincitamore/arcus-build/releases/download";
 
 /// Directory, relative to the house root, that the companion is installed into.
 pub const IRIS_REL: &str = "instruments/iris";
@@ -77,7 +77,7 @@ impl IrisOutcome {
             Self::OptedOut => None,
             Self::UnsupportedHost { host } => Some(format!(
                 "  iris:      no published build for {host} — build it from source: \
-                 https://github.com/amoyer/arcus-build/tree/main/instruments/iris"
+                 https://github.com/vincitamore/arcus-build/tree/main/instruments/iris"
             )),
             Self::Failed { reason } => Some(format!(
                 "  iris:      not installed ({reason})

@@ -81,6 +81,7 @@ In your next assistant message, output exactly one of these lines as plain visib
 
 No maintenance needed
 Maintenance complete
+Maintenance not required
 Gate released
 
 A capture write to one of the paths above releases the gate for this operator turn too. Manufacturing a low-value capture to satisfy the gate is worse than releasing. If there is any doubt about whether real maintenance is owed, release.

@@ -25,9 +25,6 @@ use crate::house_embed::{HouseEntry, embedded_house_entries};
 /// Relative path of the install manifest inside the target repo.
 pub const MANIFEST_REL: &str = ".arcus/house-install.json";
 
-/// Iris companion pointer note (only when `--with-iris`).
-pub const IRIS_NOTE_REL: &str = ".arcus/iris-companion.note.md";
-
 pub mod iris_fetch;
 
 const MANIFEST_VERSION: u32 = 1;
@@ -503,7 +500,7 @@ fn expand_placeholders(contents: &[u8], house_name: &str) -> Vec<u8> {
         .into_bytes()
 }
 
-/// Filter embedded entries by CLI flags + inject iris note when requested.
+/// Filter embedded entries by CLI flags and expand house-name placeholders.
 pub fn select_entries(entries: &[HouseEntry], args: &InitArgs) -> Vec<HouseEntry> {
     let house_name = house_name_from(&args.dir);
     let mut out: Vec<HouseEntry> = entries
