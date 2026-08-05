@@ -20,6 +20,14 @@ use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use common::{FakeBinGuard, reset_home, set_test_version, test_home};
+
+/// Fork: these scenarios assert live update-check/relaunch behavior, which
+/// FORK_AUTO_UPDATE_HARD_OFF compiles out (check reports no update,
+/// ensure_latest is a no-op, by policy). Skipped under the fork; flip the
+/// constant in a working tree to exercise them.
+fn fork_update_hard_off() -> bool {
+    xai_grok_update::auto_update::fork_auto_update_hard_off()
+}
 use xai_grok_update::UpdateConfig;
 use xai_grok_update::auto_update::{
     auto_update_target, check_update_status, ensure_latest_on_disk, install_internal_from_base,
@@ -299,6 +307,10 @@ fn setup_gh(current_version: &str) -> FakeBinGuard {
 #[tokio::test]
 #[serial]
 async fn npm_upgrade_reports_update() {
+    if fork_update_hard_off() {
+        eprintln!("skipping: auto-update is hard-off in this fork");
+        return;
+    }
     let g = setup_npm("0.2.5");
     g.set_stdout("\"0.2.7\"");
 
@@ -349,6 +361,10 @@ async fn npm_drastically_old_registry_does_not_report_update() {
 #[tokio::test]
 #[serial]
 async fn gh_release_upgrade_reports_update() {
+    if fork_update_hard_off() {
+        eprintln!("skipping: auto-update is hard-off in this fork");
+        return;
+    }
     let g = setup_gh("0.2.5");
     g.set_stable_only_stdout("v0.2.7\n");
 
@@ -360,6 +376,10 @@ async fn gh_release_upgrade_reports_update() {
 #[tokio::test]
 #[serial]
 async fn gh_release_rollback_not_advertised_by_check() {
+    if fork_update_hard_off() {
+        eprintln!("skipping: auto-update is hard-off in this fork");
+        return;
+    }
     // `update --check` advertises upgrades only; a rollback still converges via
     // the auto-install path (covered by the internal_install_* tests), not here.
     let g = setup_gh("0.2.7");
@@ -483,6 +503,10 @@ async fn installed_on_disk_version_reads_symlink_target() {
 #[tokio::test]
 #[serial]
 async fn ensure_latest_skips_download_when_disk_current_but_still_relaunches() {
+    if fork_update_hard_off() {
+        eprintln!("skipping: auto-update is hard-off in this fork");
+        return;
+    }
     // Running 0.2.5, pointer 0.2.7, disk already at 0.2.7 (another process
     // downloaded it): no download, but the stale running process must relaunch.
     let g = setup_gh("0.2.5");
@@ -514,6 +538,10 @@ async fn ensure_latest_noop_when_running_and_disk_current() {
 #[tokio::test]
 #[serial]
 async fn ensure_latest_relaunches_onto_rolled_back_disk() {
+    if fork_update_hard_off() {
+        eprintln!("skipping: auto-update is hard-off in this fork");
+        return;
+    }
     // Pointer rolled back to 0.2.22 and the disk already converged; a running
     // 0.2.26 leader must relaunch onto the older binary (gh-release is an
     // authoritative installer → downgrades allowed).
@@ -538,6 +566,10 @@ async fn ensure_latest_relaunches_onto_rolled_back_disk() {
 #[tokio::test]
 #[serial]
 async fn npm_user_upgraded_then_stable_rolled_back_stays_on_newer() {
+    if fork_update_hard_off() {
+        eprintln!("skipping: auto-update is hard-off in this fork");
+        return;
+    }
     // User ran `grok update` and got 0.2.7. Then stable was rolled back to
     // 0.2.5. Next check_update_status sees 0.2.5 from npm. npm installer
     // must NOT report a downgrade.
@@ -552,6 +584,10 @@ async fn npm_user_upgraded_then_stable_rolled_back_stays_on_newer() {
 #[tokio::test]
 #[serial]
 async fn gh_release_user_ahead_of_pointer_check_reports_no_update() {
+    if fork_update_hard_off() {
+        eprintln!("skipping: auto-update is hard-off in this fork");
+        return;
+    }
     // User manually installed 0.2.26 (ahead of the stable pointer 0.2.22);
     // `update --check` must not present the older pointer as a new version.
     let g = setup_gh("0.2.26");
@@ -569,6 +605,10 @@ async fn gh_release_user_ahead_of_pointer_check_reports_no_update() {
 #[tokio::test]
 #[serial]
 async fn npm_alpha_user_upgrade_after_stable_surpasses_alpha() {
+    if fork_update_hard_off() {
+        eprintln!("skipping: auto-update is hard-off in this fork");
+        return;
+    }
     // Alpha user on 0.2.6-alpha.2. Stable ships 0.2.7. npm returns 0.2.7
     // for the @latest tag. User should upgrade.
     let g = setup_npm("0.2.6-alpha.2");
