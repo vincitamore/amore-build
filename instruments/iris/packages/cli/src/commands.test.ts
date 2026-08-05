@@ -226,7 +226,14 @@ test('human formatters are opt-in on orientation/review verbs only', () => {
   expect(byName['edges list'].human).toBeDefined();
   expect(byName['edges show'].human).toBeDefined();
   expect(byName['edges update'].human).toBeDefined();
-  const humanOk = new Set(['status', 'edges list', 'edges show', 'edges update']);
+  const humanOk = new Set([
+    'status',
+    'edges list',
+    'edges show',
+    'edges update',
+    'qmd setup',
+    'qmd status',
+  ]);
   for (const c of COMMANDS) {
     if (humanOk.has(c.name)) continue;
     expect(c.human).toBeUndefined();

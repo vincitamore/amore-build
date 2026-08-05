@@ -7,6 +7,7 @@ import { daemonGet } from './daemon';
 import * as athanor from './athanor';
 import * as edges from './edges';
 import * as lucerna from './lucerna';
+import * as qmd from './qmd';
 
 export interface RunContext {
   orgRoot: string;
@@ -663,23 +664,24 @@ export const COMMANDS: CommandSpec[] = [
   },
   {
     name: 'search',
-    summary: 'Fuzzy search via the daemon index (--mode index only in the public port)',
+    summary:
+      'Search the house: --mode index (fuzzy, default), lex (BM25), vec (vectors), query (hybrid)',
     isWrite: false,
     booleanFlags: [],
     flags: {
       query: 'search query (or first positional)',
-      mode: 'index (default; only supported mode)',
-      type: 'restrict to a doc type (client-side filter — the daemon search route ignores type)',
-      n: 'result count (slices client-side)',
+      mode: 'index|lex|vec|query (default index; non-index modes need iris qmd setup)',
+      type: 'restrict to a doc type (client-side filter on index mode; ignored by qmd ranking)',
+      n: 'result count (passed as limit for qmd modes; client-side slice for index)',
     },
     run: async ({ args }) => {
       const q = str(args.flags, 'query') ?? args.positional[0];
       if (!q) throw new regula.RegulaError('USAGE', 'search requires a query (positional or --query)');
-      const mode = str(args.flags, 'mode') ?? 'index';
-      if (mode !== 'index') {
+      const mode = (str(args.flags, 'mode') ?? 'index').toLowerCase();
+      if (!['index', 'lex', 'vec', 'query'].includes(mode)) {
         throw new regula.RegulaError(
           'USAGE',
-          `Invalid --mode '${mode}' (only 'index' is supported; semantic search backends were removed from the public port)`,
+          `Invalid --mode '${mode}' (expected index|lex|vec|query)`,
         );
       }
       const nStr = str(args.flags, 'n');
@@ -691,19 +693,35 @@ export const COMMANDS: CommandSpec[] = [
         }
       }
 
-      // The daemon's /api/search route only honors `q` (SearchQuery is {q} — see
-      // packages/parity/src/inventory.ts) — type/n are NOT server-filtered, so they're
-      // applied client-side here rather than sent as dead-weight query params.
-      const raw = (await daemonGet(`/api/search?q=${encodeURIComponent(q)}`)) as {
+      const params = new URLSearchParams();
+      params.set('q', q);
+      if (mode !== 'index') params.set('mode', mode);
+      if (n !== undefined) params.set('limit', String(n));
+      const raw = (await daemonGet(`/api/search?${params}`)) as {
         query: string;
         count: number;
         total: number;
         items: Array<Record<string, unknown>>;
+        available?: boolean;
+        reason?: string;
+        backend?: string;
+        mode?: string;
       };
       const type = str(args.flags, 'type');
       let items = type ? raw.items.filter((it) => it.type === type) : raw.items;
-      if (n !== undefined) items = items.slice(0, n);
-      return { query: raw.query, mode, count: items.length, total: raw.total, items };
+      if (mode === 'index' && n !== undefined) items = items.slice(0, n);
+      return {
+        query: raw.query,
+        mode,
+        count: items.length,
+        total: raw.total,
+        items,
+        ...(raw.available === false
+          ? { available: false, reason: raw.reason }
+          : raw.backend
+            ? { available: true, backend: raw.backend }
+            : {}),
+      };
     },
   },
   {
@@ -1122,6 +1140,38 @@ export const COMMANDS: CommandSpec[] = [
     run: ({ orgRoot, args }) => edges.runEdgesUpdateCmd(orgRoot, args),
     human: edges.edgesUpdateHuman,
     exit: edges.edgesUpdateExit,
+  },
+
+  // ── qmd (managed local semantic search companion) ──
+  {
+    name: 'qmd setup',
+    summary:
+      'Install pinned qmd, bootstrap house collections, first index; download hybrid models unless --no-models',
+    isWrite: true,
+    booleanFlags: ['no-models', 'use-global'],
+    flags: {},
+    run: ({ orgRoot, args }) => qmd.runQmdSetup(orgRoot, args),
+    human: qmd.qmdSetupHuman,
+    exit: qmd.qmdExit,
+  },
+  {
+    name: 'qmd status',
+    summary: 'Runtime pin, model presence, index doc/vector/pending counts, refresh state',
+    isWrite: false,
+    booleanFlags: [],
+    flags: {},
+    run: ({ orgRoot, args }) => qmd.runQmdStatus(orgRoot, args),
+    human: qmd.qmdStatusHuman,
+    exit: qmd.qmdExit,
+  },
+  {
+    name: 'qmd update',
+    summary: 'Incremental re-walk of house collections; --embed processes pending vectors when models exist',
+    isWrite: true,
+    booleanFlags: ['embed'],
+    flags: {},
+    run: ({ orgRoot, args }) => qmd.runQmdUpdate(orgRoot, args),
+    exit: qmd.qmdExit,
   },
 ];
 

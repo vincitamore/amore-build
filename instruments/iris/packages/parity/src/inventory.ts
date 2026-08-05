@@ -63,7 +63,7 @@ export const ENDPOINTS: Endpoint[] = [
   { method: 'GET', path: '/api/files', pathParams: [], queryParams: ['type', 'prefix', 'exclude_prefix'], consumers: ['client', 'tui', 'cli'], tier: 'core', note: 'client also sends tag/folder — the handler ignores them (only type/prefix/exclude_prefix in ListFilesQuery)' },
   { method: 'GET', path: '/api/files/{*path}', pathParams: ['path'], queryParams: [], consumers: ['client', 'tui'], tier: 'core', note: 'single doc + resolved backlinks/outbound; 404 when not indexed' },
   { method: 'GET', path: '/api/assets/{*path}', pathParams: ['path'], queryParams: [], consumers: ['client', 'pwa'], tier: 'core', note: 'raw file bytes + mime; NON-JSON body' },
-  { method: 'GET', path: '/api/search', pathParams: [], queryParams: ['q'], consumers: ['client', 'tui', 'cli'], tier: 'core', note: 'client/tui send type/tag/limit — the handler ignores them (SearchQuery is {q} only)' },
+  { method: 'GET', path: '/api/search', pathParams: [], queryParams: ['q', 'mode', 'limit'], consumers: ['client', 'tui', 'cli'], tier: 'core', note: 'mode=index (default) is fuzzy byte-compatible; mode=lex|vec|query proxies managed qmd (available:false when missing); limit honored for qmd modes' },
   { method: 'GET', path: '/api/graph', pathParams: [], queryParams: ['scope', 'depth', 'group_by', 'include_tags', 'edges'], consumers: ['client', 'tui', 'cli'], tier: 'core', note: 'edges=wiki|semantic|both; scope=workspace|folder:<p>|seed:<id>|tag:<n>' },
   { method: 'GET', path: '/api/projects', pathParams: [], queryParams: [], consumers: ['client', 'tui'], tier: 'core' },
   { method: 'GET', path: '/api/projects/{name}/tree', pathParams: ['name'], queryParams: [], consumers: ['client'], tier: 'core' },
