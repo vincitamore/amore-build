@@ -16,9 +16,9 @@ function toneStyle(p: Palette, tone: Tone): { fg: RGBA; bg?: RGBA; bold?: boolea
       return { fg: p.primary, bold: true };
     case 'h3':
       return { fg: p.secondary, bold: true };
-    // code: a subtle bg tint across the whole block (lines are padded to width), syntax-colored
+    // code: secondary accent + selection bg so inline code is distinct from link (info/cyan)
     case 'code':
-      return { fg: p.info, bg: p.selection };
+      return { fg: p.secondary, bg: p.selection };
     case 'codeblock':
       return { fg: p.foreground, bg: p.selection };
     case 'kw':
