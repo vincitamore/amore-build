@@ -19,6 +19,28 @@ amore init --refresh    # upgrade untouched files only
 
 `init` writes into a new directory (or an existing house); it **refuses a
 non-empty directory that is not already a house** rather than overlaying it.
+Running bare `amore init` from inside an existing house is also refused so a
+nested `amore/` tree is never planted by accident. Refresh that house with
+`amore init .` from its root (or pass `--force-new` only when a nested house
+is intentional).
+
+### Adopting a pre-manifest house
+
+A directory that already holds house content but has no
+`.amore/house-install.json` is not treated as a house yet: `amore init .`
+refuses non-empty non-house directories. To adopt it without overwriting
+customized files, write a minimal install manifest first, then run init on
+the house root:
+
+```sh
+mkdir -p .amore
+printf '%s\n' '{"version":1,"files":{}}' > .amore/house-install.json
+amore init .
+```
+
+Init then preserves every existing file whose content differs from the pack
+and writes only paths that are still missing. Prefer this path over nesting
+a second house under the first.
 
 ---
 
@@ -168,6 +190,7 @@ All flags are long-options on `amore init` (see `amore init --help`).
 | `--dry-run` | off | Print the plan; write nothing (no files, no manifest, no hooks-paths, no download). |
 | `--yes` / `-y` | off | Headless-safe; no prompts. **Required** for non-interactive `--force` overwrites. |
 | `--force` | off | Overwrite user-modified files (confirm unless `--yes`). |
+| `--force-new` | off | Allow creating a new house while the current directory sits inside an existing house (default refuses nested creates). |
 | `--refresh` | off | Rewrite only files whose **on-disk sha256 still matches** the install-manifest hash (untouched since install). Diverged files are preserved. |
 
 ---

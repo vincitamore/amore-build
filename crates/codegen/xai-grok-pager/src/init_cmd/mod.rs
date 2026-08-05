@@ -88,6 +88,10 @@ pub struct InitArgs {
     /// Install the speculum session mirror from the matching release (default: off).
     #[arg(long = "with-speculum")]
     pub with_speculum: bool,
+    /// Allow creating a new house even when the current directory sits inside
+    /// an existing house (default: refuse, so bare `init` never nests).
+    #[arg(long = "force-new")]
+    pub force_new: bool,
     /// Print the plan; write nothing.
     #[arg(long)]
     pub dry_run: bool,
@@ -112,6 +116,7 @@ impl Default for InitArgs {
             no_qmd: false,
             with_lucerna: false,
             with_speculum: false,
+            force_new: false,
             dry_run: false,
             yes: false,
         }
@@ -612,6 +617,44 @@ fn keep_entry(rel: &str, args: &InitArgs) -> bool {
     true
 }
 
+/// Walk from `start` upward looking for `.amore/house-install.json`.
+///
+/// Used by the ancestor-house guard so bare `amore init` from inside a house
+/// never silently nests a second house under it.
+pub fn find_ancestor_house(start: &Path) -> Option<PathBuf> {
+    let mut dir = if start.is_file() {
+        start.parent()?.to_path_buf()
+    } else {
+        start.to_path_buf()
+    };
+    loop {
+        if dir.join(MANIFEST_REL).is_file() {
+            return Some(dir);
+        }
+        if !dir.pop() {
+            return None;
+        }
+    }
+}
+
+/// When creating a **new** house at `root`, return the enclosing house that
+/// should block the create (if any). Refresh of a manifested house is never
+/// blocked. Pass `force_new` to skip the guard.
+pub fn ancestor_house_blocks_new_init(
+    cwd: &Path,
+    root: &Path,
+    force_new: bool,
+) -> Option<PathBuf> {
+    if force_new {
+        return None;
+    }
+    // Target is already a house: refresh / re-run path, not a nested create.
+    if root.join(MANIFEST_REL).is_file() {
+        return None;
+    }
+    find_ancestor_house(cwd)
+}
+
 /// Resolve — and, unless this is a dry run, create — the house directory.
 ///
 /// `init` creates a house rather than overlaying an existing repository. It is
@@ -619,13 +662,24 @@ fn keep_entry(rel: &str, args: &InitArgs) -> bool {
 /// treated as this house and refreshed in place. A directory that holds
 /// something else is refused rather than merged into, because silently
 /// scattering a house across someone's unrelated project is not recoverable by
-/// reading the summary afterwards.
+/// reading the summary afterwards. Creating a new house while the current
+/// directory sits inside an existing house is refused (see
+/// [`ancestor_house_blocks_new_init`]) so bare `init` never nests.
 fn resolve_house_root(
     args: &InitArgs,
     ctx: &InitContext,
     writer: &mut impl Write,
 ) -> Result<PathBuf> {
     let root = ctx.cwd.join(&args.dir);
+
+    if let Some(house) = ancestor_house_blocks_new_init(&ctx.cwd, &root, args.force_new) {
+        bail!(
+            "refusing to create a new house under an existing house at {}.\n\
+             Run `amore init .` from that directory to refresh the house, \
+             or pass `--force-new` to create a nested house deliberately.",
+            house.display()
+        );
+    }
 
     if root.exists() {
         if !root.is_dir() {
@@ -1105,5 +1159,128 @@ mod unit_tests {
         assert!(!on.iris_enabled());
         assert!(on.lucerna_enabled());
         assert!(on.speculum_enabled());
+    }
+
+    #[test]
+    fn find_ancestor_house_walks_up_to_manifest() {
+        let tmp = tempfile::tempdir().unwrap();
+        let house = tmp.path().join("house");
+        let nested = house.join("projects").join("work");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::create_dir_all(house.join(".amore")).unwrap();
+        std::fs::write(house.join(MANIFEST_REL), r#"{"version":1,"files":{}}"#).unwrap();
+
+        assert_eq!(find_ancestor_house(&nested).as_deref(), Some(house.as_path()));
+        assert_eq!(find_ancestor_house(&house).as_deref(), Some(house.as_path()));
+        assert_eq!(find_ancestor_house(tmp.path()), None);
+    }
+
+    #[test]
+    fn ancestor_guard_refuses_nested_create_inside_house() {
+        let tmp = tempfile::tempdir().unwrap();
+        let house = tmp.path().join("house");
+        std::fs::create_dir_all(house.join(".amore")).unwrap();
+        std::fs::write(house.join(MANIFEST_REL), r#"{"version":1,"files":{}}"#).unwrap();
+
+        // Bare default: cwd=house, root=house/amore (new nested path).
+        let nested_root = house.join(DEFAULT_HOUSE_DIR);
+        let blocked = ancestor_house_blocks_new_init(&house, &nested_root, false);
+        assert_eq!(blocked.as_deref(), Some(house.as_path()));
+
+        // Escape hatch.
+        assert_eq!(
+            ancestor_house_blocks_new_init(&house, &nested_root, true),
+            None
+        );
+    }
+
+    #[test]
+    fn ancestor_guard_allows_refresh_of_manifested_house() {
+        let tmp = tempfile::tempdir().unwrap();
+        let house = tmp.path().join("house");
+        std::fs::create_dir_all(house.join(".amore")).unwrap();
+        std::fs::write(house.join(MANIFEST_REL), r#"{"version":1,"files":{}}"#).unwrap();
+
+        // `amore init .` from the house: root is the house itself.
+        assert_eq!(
+            ancestor_house_blocks_new_init(&house, &house, false),
+            None
+        );
+    }
+
+    #[test]
+    fn ancestor_guard_allows_fresh_dir_outside_any_house() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cwd = tmp.path();
+        let root = cwd.join(DEFAULT_HOUSE_DIR);
+        assert_eq!(ancestor_house_blocks_new_init(cwd, &root, false), None);
+    }
+
+    #[test]
+    fn resolve_house_root_refuses_nested_init_via_context() {
+        let tmp = tempfile::tempdir().unwrap();
+        let house = tmp.path().join("house");
+        std::fs::create_dir_all(house.join(".amore")).unwrap();
+        std::fs::write(house.join(MANIFEST_REL), r#"{"version":1,"files":{}}"#).unwrap();
+
+        let grok_home = tmp.path().join("grok-home");
+        std::fs::create_dir_all(&grok_home).unwrap();
+        let ctx = InitContext {
+            cwd: house.clone(),
+            grok_home,
+            entries: vec![],
+            stdin_is_terminal: false,
+        };
+        let args = InitArgs {
+            no_iris: true,
+            no_qmd: true,
+            ..InitArgs::default()
+        };
+        let mut out = Vec::new();
+        let err = run_with_context(&args, &ctx, &mut out).expect_err("must refuse nested init");
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("refusing to create a new house") || msg.contains("existing house"),
+            "unexpected message: {msg}"
+        );
+        assert!(
+            msg.contains("amore init .") || msg.contains("init ."),
+            "message should suggest init . : {msg}"
+        );
+        // Nested directory must not have been created.
+        assert!(!house.join(DEFAULT_HOUSE_DIR).exists());
+    }
+
+    #[test]
+    fn resolve_house_root_refresh_manifested_dot_succeeds() {
+        let tmp = tempfile::tempdir().unwrap();
+        let house = tmp.path().join("house");
+        std::fs::create_dir_all(house.join(".amore")).unwrap();
+        std::fs::write(house.join(MANIFEST_REL), r#"{"version":1,"files":{}}"#).unwrap();
+
+        let grok_home = tmp.path().join("grok-home");
+        std::fs::create_dir_all(&grok_home).unwrap();
+        let ctx = InitContext {
+            cwd: house.clone(),
+            grok_home,
+            entries: vec![HouseEntry {
+                rel_path: "AGENTS.md".into(),
+                contents: b"# house\n".to_vec(),
+            }],
+            stdin_is_terminal: false,
+        };
+        let args = InitArgs {
+            dir: ".".into(),
+            no_iris: true,
+            no_qmd: true,
+            no_hooks: true,
+            yes: true,
+            ..InitArgs::default()
+        };
+        let mut out = Vec::new();
+        let report = run_with_context(&args, &ctx, &mut out).expect("init . should refresh house");
+        assert_eq!(report.root, house);
+        // Customized? New AGENTS should write if missing.
+        assert!(house.join("AGENTS.md").exists());
     }
 }

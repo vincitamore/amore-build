@@ -419,6 +419,9 @@ def cmd_verify(dry_run: bool) -> int:
         INIT_CMD_FILE, "qmd_setup::run",
         "init calls qmd_setup::run after iris companion install", problems)
     _check_file_contains(
+        INIT_CMD_FILE, "fn ancestor_house_blocks_new_init",
+        "init ancestor-house guard blocks nested house creates", problems)
+    _check_file_contains(
         INSTRUMENTS_DIAG_FILE, "probe_qmd_search",
         "doctor instruments probe registers qmd/search probe (probe_qmd_search)", problems)
     _check_file_contains(
