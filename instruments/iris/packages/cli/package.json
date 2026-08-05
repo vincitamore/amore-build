@@ -11,7 +11,8 @@
     "test": "bun test"
   },
   "dependencies": {
-    "@amore/regula": "workspace:*"
+    "@amore/regula": "workspace:*",
+    "@amore/vinculum": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "latest",
