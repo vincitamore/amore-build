@@ -37,6 +37,15 @@ describe('formatLogCell', () => {
     expect(out).not.toMatch(/[^\t\r\n\x20-\x7e\u00b7\u2026]/);
   });
 
+  test('md-render list bullet and up/down arrows map to ASCII (not ?)', () => {
+    expect(formatLogCell('  • item one', 16)).toBe('  - item one    ');
+    expect(formatLogCell('  • item one', 16)).not.toContain('?');
+    const arrows = formatLogCell('esc · ↑↓ scroll', 20);
+    expect(arrows).toContain('up');
+    expect(arrows).toContain('dn');
+    expect(arrows).not.toMatch(/\?/);
+  });
+
   test('zero width → empty', () => {
     expect(formatLogCell('x', 0)).toBe('');
   });

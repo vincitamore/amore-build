@@ -74,6 +74,11 @@ export function mdLineTone(line: MdLine): Tone {
 /**
  * Build display lines for tests / overlay: markdown → fixed-width plain rows
  * with a semantic tone per row (color only at the view layer).
+ *
+ * Uses the same `renderMarkdown` / `parseInline` pipeline as Forge's MarkdownView
+ * (labels for `[[wikilinks]]` and `[text](url)` — no second link convention).
+ * Lucerna's opaque-row scrub maps md-render's bullet (•) to ASCII hyphen so
+ * list markers never become "?" on this surface.
  */
 export function buildReviewOverlayLines(
   body: string,
@@ -85,6 +90,16 @@ export function buildReviewOverlayLines(
     text: formatLucernaDisplayLine(mdLineToText(line), w),
     tone: mdLineTone(line),
   }));
+}
+
+/** Footer hint vocabulary — ASCII, matches Activity Log / member footers (`up/dn`). */
+export function reviewOverlayFooterHint(
+  model: Pick<ReviewOverlayModel, 'kind' | 'pending'> | null,
+): string {
+  if (model == null) return 'esc close';
+  if (!model.pending) return 'esc close · up/dn scroll';
+  if (model.kind === 'dream') return 'esc close · up/dn scroll · v mark reviewed';
+  return 'esc close · up/dn scroll · v apply (status) · x close proposal';
 }
 
 export function LucernaReviewOverlay({
@@ -159,14 +174,7 @@ export function LucernaReviewOverlay({
       ? ''
       : `${model.statusLabel}${model.reportPath ? ` · report ${model.reportPath}` : ''} · ${model.path}`;
 
-  const footer =
-    model == null
-      ? 'esc close'
-      : model.pending
-        ? model.kind === 'dream'
-          ? 'esc close · ↑↓ scroll · v mark reviewed'
-          : 'esc close · ↑↓ scroll · v apply (status) · x close proposal'
-        : 'esc close · ↑↓ scroll';
+  const footer = reviewOverlayFooterHint(model);
 
   return (
     <box

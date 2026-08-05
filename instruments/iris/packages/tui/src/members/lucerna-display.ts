@@ -25,10 +25,18 @@ export function formatLogCell(line: string, width: number): string {
   const cleaned = line
     .replace(/\u2192/g, '->')
     .replace(/\u2190/g, '<-')
+    // md-render list bullet (U+2022) — must not become "?" (overlay defect)
+    .replace(/\u2022/g, '-')
+    // Arrow keys often appear in footer hints; dash vocabulary is "up/dn"
+    .replace(/\u2191/g, 'up')
+    .replace(/\u2193/g, 'dn')
     .replace(/\u2014/g, '-')
     .replace(/\u2013/g, '-')
     .replace(/\u00a0/g, ' ')
-    // Keep middle-dot (Pulse siblings) and ellipsis (Dashboard truncate); map the rest.
+    // md-render image placeholder / light box-drawing (tables) → ASCII
+    .replace(/\u25a3/g, '#') // ▣
+    .replace(/[\u2500-\u257f]/g, '-') // box drawing
+    // Keep middle-dot (Pulse siblings / tab bar) and ellipsis (Dashboard truncate); map the rest.
     .replace(/[^\t\r\n\x20-\x7e\u00b7\u2026]/g, '?');
   const t = truncate(cleaned, width);
   return t.length >= width ? t.slice(0, width) : t.padEnd(width, ' ');
