@@ -37,12 +37,17 @@ describe('formatLogCell', () => {
     expect(out).not.toMatch(/[^\t\r\n\x20-\x7e\u00b7\u2026]/);
   });
 
-  test('md-render list bullet and up/down arrows map to ASCII (not ?)', () => {
-    expect(formatLogCell('  • item one', 16)).toBe('  - item one    ');
+  test('typography fallbacks (≥ arrows) and BMP pass-through (bullet, middle-dot)', () => {
+    // ≥ is in the ASCII fallback table
+    expect(formatLogCell('cluster ≥3', 16)).toContain('>=3');
+    expect(formatLogCell('cluster ≥3', 16)).not.toContain('?');
+    // list bullet is narrow BMP — pass through (not ?)
+    expect(formatLogCell('  • item one', 16)).toContain('•');
     expect(formatLogCell('  • item one', 16)).not.toContain('?');
-    const arrows = formatLogCell('esc · ↑↓ scroll', 20);
+    const arrows = formatLogCell('esc · ↑↓ scroll', 24);
     expect(arrows).toContain('up');
     expect(arrows).toContain('dn');
+    expect(arrows).toContain(MIDDOT);
     expect(arrows).not.toMatch(/\?/);
   });
 

@@ -130,10 +130,32 @@ export function parseInline(text: string, base: Tone = 'text', attrs: Attrs = {}
   return segs.length ? segs : [{ text, tone: base, ...attrs }];
 }
 
+// ── Soft line joining (hard-wrapped source → logical block text) ─────────────
+
+/**
+ * Join hard-wrapped source lines into one logical string.
+ * Each continuation's leading whitespace collapses to a single join space
+ * (so `"failed with\\n  agentic"` → `"failed with agentic"`, not triple spaces).
+ */
+export function joinSoftWrappedLines(parts: string[]): string {
+  if (parts.length === 0) return '';
+  const out: string[] = [];
+  for (let i = 0; i < parts.length; i++) {
+    const p = parts[i] ?? '';
+    if (i === 0) {
+      out.push(p.replace(/[ \t]+$/g, ''));
+    } else {
+      const t = p.trim();
+      if (t.length) out.push(t);
+    }
+  }
+  return out.join(' ');
+}
+
 // ── Word wrapping (style-preserving) ─────────────────────────────────────────
 
 /** Flow styled segments into lines ≤ `width`, breaking on spaces; hard-break over-long tokens. */
-function wrapSegs(segs: MdSeg[], width: number, prefix?: MdSeg, hanging = 0): MdLine[] {
+export function wrapSegs(segs: MdSeg[], width: number, prefix?: MdSeg, hanging = 0): MdLine[] {
   const w = Math.max(4, width);
   const lines: MdLine[] = [];
   const indent = (): MdSeg[] => (hanging > 0 ? [{ text: ' '.repeat(hanging), tone: 'text' }] : []);
@@ -381,30 +403,48 @@ export function renderMarkdown(md: string, width: number): MdLine[] {
         q.push((lines[i].match(QUOTE) as RegExpMatchArray)[1]);
         i++;
       }
-      const segs = parseInline(q.join(' ').trim(), 'quote');
+      // Soft-join quote continuations (collapse leading indent on each line)
+      const segs = parseInline(joinSoftWrappedLines(q), 'quote');
       for (const l of wrapSegs(segs, w - 2, { text: '│ ', tone: 'qbar' }, 2)) out.push(l);
       continue;
     }
     const li = line.match(LIST);
     if (li) {
+      // Block assembly: list item = marker line + indented continuations (not nested lists).
       const indentN = Math.floor(li[1].replace(/\t/g, '  ').length / 2);
       const ordered = /\d/.test(li[2]);
       const marker = ordered ? `${li[2]} ` : '• ';
       const pad = '  '.repeat(indentN + 1); // +1 = a base indent so lists sit in from the body margin
-      const segs = parseInline(li[3]);
+      const contentParts: string[] = [li[3]];
+      i++;
+      while (i < lines.length) {
+        const cur = lines[i];
+        if (cur.trim() === '') break;
+        if (isBlockStart(cur, lines[i + 1])) break;
+        // Nested list items are separate blocks (handled on the next outer iteration).
+        const nested = cur.match(LIST);
+        if (nested) {
+          const nestIndent = Math.floor(nested[1].replace(/\t/g, '  ').length / 2);
+          if (nestIndent > indentN) break;
+          break;
+        }
+        contentParts.push(cur);
+        i++;
+      }
+      const segs = parseInline(joinSoftWrappedLines(contentParts));
+      // Hang wrap to the item's text column (pad + marker); nested levels keep deeper pad.
       const hang = pad.length + marker.length;
       for (const l of wrapSegs(segs, w, { text: pad + marker, tone: 'marker' }, hang)) out.push(l);
-      i++;
       continue;
     }
-    // paragraph: gather until a blank line or the next block starts
+    // paragraph: gather until a blank line or the next block starts, then soft-join
     const para: string[] = [line];
     i++;
     while (i < lines.length && lines[i].trim() !== '' && !isBlockStart(lines[i], lines[i + 1])) {
       para.push(lines[i]);
       i++;
     }
-    for (const l of wrapSegs(parseInline(para.join(' ')), w)) out.push(l);
+    for (const l of wrapSegs(parseInline(joinSoftWrappedLines(para)), w)) out.push(l);
   }
   // collapse leading/trailing/multiple blank spacer lines
   return out;

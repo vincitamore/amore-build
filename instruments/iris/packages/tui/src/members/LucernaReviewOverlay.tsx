@@ -13,7 +13,7 @@ import { usePalette } from '../ThemeProvider';
 import type { Palette } from '../theme';
 import { useStableDimensions } from '../use-stable-dimensions';
 import { renderMarkdown, type MdLine, type MdSeg, type Tone } from '../md-render';
-import { emptyDisplayRow, formatLucernaDisplayLine } from './lucerna-display';
+import { emptyDisplayRow, formatLucernaDisplayLine, sanitizeDisplayText } from './lucerna-display';
 
 /**
  * Full-screen-ish detail overlay for Lucerna review items (SearchOverlay layout:
@@ -53,25 +53,19 @@ export interface OverlayLine {
 }
 
 /**
- * Scrub multi-byte glyphs the same way formatLogCell does, but without width
- * pad — applied per segment so styles stay span-aligned.
+ * Per-segment glyph scrub (same policy as formatLogCell / sanitizeDisplayText).
+ * Span-aligned so styles do not shift.
  */
 export function scrubOverlayGlyphs(s: string): string {
-  return s
-    .replace(/\u2192/g, '->')
-    .replace(/\u2190/g, '<-')
-    .replace(/\u2022/g, '-') // list bullet
-    .replace(/\u2191/g, 'up')
-    .replace(/\u2193/g, 'dn')
-    .replace(/\u2014/g, '-')
-    .replace(/\u2013/g, '-')
-    .replace(/\u00a0/g, ' ')
-    .replace(/\u25a3/g, '#')
-    .replace(/[\u2500-\u257f]/g, '-')
-    // Keep middle-dot + ellipsis; other non-ASCII → ?
-    .replace(/[^\t\r\n\x20-\x7e\u00b7\u2026]/g, '?');
+  return sanitizeDisplayText(s);
 }
 
+/**
+ * Map md-render tones → palette.
+ * **code** uses `secondary` (warm accent) so backtick spans are distinct from
+ * **link** which stays `info` (cyan) — whole-line blue wash fixed by spans + this split.
+ * **italic** is an attribute (OpenTUI italic()), not a tone.
+ */
 function toneColor(t: Palette, tone: Tone): string {
   switch (tone) {
     case 'h1':
@@ -84,7 +78,8 @@ function toneColor(t: Palette, tone: Tone): string {
     case 'kw':
     case 'str':
     case 'num':
-      return t.info;
+      // Distinct from link (info): secondary accent for inline/fenced code.
+      return t.secondary;
     case 'comment':
     case 'quote':
       return t.muted;

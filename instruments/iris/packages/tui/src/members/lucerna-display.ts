@@ -14,30 +14,73 @@ function truncate(s: string, n: number): string {
 }
 
 /**
+ * Known typography → ASCII (always applied). Other narrow BMP (box drawing,
+ * braille, middle-dot, bullets, etc.) passes through; only wide/combining/
+ * non-BMP classes fall back to '?'.
+ */
+const TYPO_ASCII: Array<[RegExp, string]> = [
+  [/\u2192/g, '->'], // →
+  [/\u2190/g, '<-'], // ←
+  [/\u21d2/g, '=>'], // ⇒
+  [/\u21d0/g, '<='], // ⇐
+  [/\u21d4/g, '<=>'], // ⇔
+  [/\u2191/g, 'up'], // ↑ (footer hints)
+  [/\u2193/g, 'dn'], // ↓
+  [/\u2265/g, '>='], // ≥
+  [/\u2264/g, '<='], // ≤
+  [/\u2260/g, '!='], // ≠
+  [/\u00d7/g, 'x'], // ×
+  [/\u00f7/g, '/'], // ÷
+  [/\u2014/g, '-'], // em dash
+  [/\u2013/g, '-'], // en dash
+  [/\u00a0/g, ' '], // nbsp
+  [/\u25a3/g, '#'], // ▣ image placeholder from md-render
+];
+
+function isUnrenderableCodePoint(cp: number): boolean {
+  // C0 controls (keep tab handled upstream as space-ish if present)
+  if (cp < 0x20 && cp !== 0x09 && cp !== 0x0a && cp !== 0x0d) return true;
+  if (cp === 0x7f) return true;
+  // Combining diacriticals
+  if (cp >= 0x0300 && cp <= 0x036f) return true;
+  if (cp >= 0x1ab0 && cp <= 0x1aff) return true;
+  if (cp >= 0x20d0 && cp <= 0x20ff) return true;
+  // Fullwidth / halfwidth forms (wide cells)
+  if (cp >= 0xff01 && cp <= 0xff60) return true;
+  if (cp >= 0xffe0 && cp <= 0xffe6) return true;
+  // Non-BMP (emoji / astral) — cell advance unreliable
+  if (cp > 0xffff) return true;
+  // Private use / noncharacters in BMP
+  if (cp >= 0xe000 && cp <= 0xf8ff) return true;
+  return false;
+}
+
+/**
+ * Display sanitizer for Lucerna rows and the review overlay.
+ * 1) Map known typography to ASCII
+ * 2) Pass through other printable narrow BMP (box drawing, braille, bullets, …)
+ * 3) Replace unrenderable classes with '?'
+ */
+export function sanitizeDisplayText(line: string): string {
+  let s = line;
+  for (const [re, rep] of TYPO_ASCII) s = s.replace(re, rep);
+  let out = '';
+  for (const ch of s) {
+    const cp = ch.codePointAt(0)!;
+    if (isUnrenderableCodePoint(cp)) out += '?';
+    else out += ch;
+  }
+  return out;
+}
+
+/**
  * Fixed-width cell for Lucerna/Dashboard list rows.
- * Multi-byte glyphs that mis-advance the cell grid are mapped to ASCII; the
- * middle-dot separator (\u00b7) and ellipsis (\u2026) are kept so pulse rows
- * match sibling Pulse lines. Truncate then pad so string length always equals
- * `width` (paired with an opaque row background for full repaint clear).
+ * Sanitize glyphs, then truncate/pad so string length equals `width`
+ * (paired with an opaque row background for full repaint clear).
  */
 export function formatLogCell(line: string, width: number): string {
   if (width <= 0) return '';
-  const cleaned = line
-    .replace(/\u2192/g, '->')
-    .replace(/\u2190/g, '<-')
-    // md-render list bullet (U+2022) — must not become "?" (overlay defect)
-    .replace(/\u2022/g, '-')
-    // Arrow keys often appear in footer hints; dash vocabulary is "up/dn"
-    .replace(/\u2191/g, 'up')
-    .replace(/\u2193/g, 'dn')
-    .replace(/\u2014/g, '-')
-    .replace(/\u2013/g, '-')
-    .replace(/\u00a0/g, ' ')
-    // md-render image placeholder / light box-drawing (tables) → ASCII
-    .replace(/\u25a3/g, '#') // ▣
-    .replace(/[\u2500-\u257f]/g, '-') // box drawing
-    // Keep middle-dot (Pulse siblings / tab bar) and ellipsis (Dashboard truncate); map the rest.
-    .replace(/[^\t\r\n\x20-\x7e\u00b7\u2026]/g, '?');
+  const cleaned = sanitizeDisplayText(line);
   const t = truncate(cleaned, width);
   return t.length >= width ? t.slice(0, width) : t.padEnd(width, ' ');
 }

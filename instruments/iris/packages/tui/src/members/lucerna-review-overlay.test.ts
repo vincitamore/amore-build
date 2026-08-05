@@ -53,7 +53,7 @@ Done with \`inline\`.
     ).toBe(true);
   });
 
-  test('list bullets are hyphen not question-mark (md-render • scrub)', () => {
+  test('list bullets are not question-mark (bullet glyph pass-through)', () => {
     const body = `- first item
 - second item
 * third item
@@ -62,9 +62,9 @@ Done with \`inline\`.
     const joined = lines.map((l) => l.text).join('\n');
     expect(joined).not.toMatch(/\?\s+first/);
     expect(joined).not.toMatch(/\?\s+second/);
-    expect(joined).toMatch(/-\s+first/);
-    expect(joined).toMatch(/-\s+second/);
-    expect(formatLogCell('  • first item', 20)).toContain('- first');
+    expect(joined).toMatch(/[•\-]\s+first/);
+    expect(joined).toMatch(/[•\-]\s+second/);
+    expect(formatLogCell('  • first item', 20)).toContain('•');
     expect(formatLogCell('  • first item', 20)).not.toContain('?');
   });
 
@@ -227,5 +227,68 @@ describe('reviewOverlayFooterHint (ASCII-safe)', () => {
       expect(formatLucernaDisplayLine(h, 64)).not.toMatch(/\?\?/);
       expect(formatLucernaDisplayLine(h, 64)).toContain('up/dn');
     }
+  });
+});
+
+describe('block assembly shapes (self-orient report)', () => {
+  test('hard-wrapped bullet continuation: single space join + hang', () => {
+    const body = [
+      '- for this dream: prior agentic spawn **failed** with',
+      '  `agentic spawn failed: ENOENT: no such file or directory`',
+    ].join('\n');
+    const lines = buildReviewOverlayLines(body, 52);
+    // Drop hang-indent whitespace-only leading segs, then join content — soft-join
+    // must not leave multi-space between "with" and "agentic".
+    const content = lines
+      .map((l) => {
+        let segs = l.segs;
+        while (segs[0] && /^\s+$/.test(segs[0].text)) segs = segs.slice(1);
+        return segs.map((s) => s.text).join('');
+      })
+      .join(' ')
+      .replace(/\s+/g, ' ');
+    expect(content).toContain('failed with agentic spawn failed');
+    expect(content).not.toMatch(/with\s{2,}agentic/);
+    expect(allSegs(lines).some((s) => s.tone === 'code')).toBe(true);
+    // Continuation rows hang (leading spaces before content)
+    if (lines.length > 1) {
+      expect(/^\s{2,}/.test(lines[1]!.text)).toBe(true);
+    }
+  });
+
+  test('nested list preserves per-level indent', () => {
+    const body = ['- parent item', '  - child item', '    - grand item'].join('\n');
+    const lines = buildReviewOverlayLines(body, 60);
+    const texts = lines.map((l) => l.text);
+    const p = texts.find((t) => t.includes('parent'))!;
+    const c = texts.find((t) => t.includes('child'))!;
+    const g = texts.find((t) => t.includes('grand'))!;
+    expect(c.indexOf('child')).toBeGreaterThan(p.indexOf('parent') - 2);
+    expect(g.indexOf('grand')).toBeGreaterThan(c.indexOf('child') - 2);
+    // child marker further right than parent
+    const pMark = p.search(/[•\-]/);
+    const cMark = c.search(/[•\-]/);
+    const gMark = g.search(/[•\-]/);
+    expect(cMark).toBeGreaterThan(pMark);
+    expect(gMark).toBeGreaterThan(cMark);
+  });
+
+  test('paragraph: inline code + link + ≥ + italic attributes', () => {
+    const body =
+      'See [[context/current-state.md]] and `tasks/README.md`; no cluster ≥3. The *coherent* house.';
+    const lines = buildReviewOverlayLines(body, 40);
+    const segs = allSegs(lines);
+    expect(segs.some((s) => s.tone === 'link')).toBe(true);
+    expect(segs.some((s) => s.tone === 'code')).toBe(true);
+    // ≥ → >= via sanitizer; not ?
+    const text = lines.map((l) => l.text).join('');
+    expect(text).toContain('>=3');
+    expect(text).not.toMatch(/cluster \?3/);
+    // italic preserved as attribute on span
+    expect(segs.some((s) => s.italic && s.text.includes('coherent'))).toBe(true);
+    // code and link are different tones (not conflated)
+    const code = segs.find((s) => s.tone === 'code');
+    const link = segs.find((s) => s.tone === 'link');
+    expect(code && link && code.tone !== link.tone).toBe(true);
   });
 });

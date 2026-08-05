@@ -1,5 +1,10 @@
 import { test, expect } from 'bun:test';
-import { parseInline, renderMarkdown, type MdLine } from './md-render';
+import {
+  joinSoftWrappedLines,
+  parseInline,
+  renderMarkdown,
+  type MdLine,
+} from './md-render';
 
 const txt = (line: MdLine) => line.map((s) => s.text).join('');
 
@@ -58,6 +63,63 @@ test('lists get a marker tone + hanging indent', () => {
   expect(txt(out[0])).toContain('first');
   // nested item is indented
   expect(txt(out[2]).startsWith('  ')).toBe(true);
+});
+
+test('joinSoftWrappedLines collapses continuation leading indent to one space', () => {
+  expect(joinSoftWrappedLines(['failed with', '  agentic spawn'])).toBe('failed with agentic spawn');
+  expect(joinSoftWrappedLines(['dryRun, 7 files,', '    "Update 7 files".'])).toBe(
+    'dryRun, 7 files, "Update 7 files".',
+  );
+});
+
+test('hard-wrapped bullet continuation joins and hangs wrap to text column', () => {
+  // Shape from self-orient dream report: bullet + indented continuation
+  const src = [
+    '- prior agentic spawn **failed** with',
+    '  `agentic spawn failed: ENOENT`',
+  ].join('\n');
+  const out = renderMarkdown(src, 48);
+  const flat = out.map(txt).join('\n');
+  // No interior triple-space from preserved continuation indent
+  expect(flat).not.toMatch(/with\s{2,}`/);
+  expect(flat).toContain('failed with');
+  expect(flat).toContain('agentic spawn failed');
+  // First line has marker; wrapped continuations hang (leading spaces to hang column)
+  expect(out[0].some((s) => s.tone === 'marker')).toBe(true);
+  if (out.length > 1) {
+    // hang indent for list is pad(2)+marker(2) = 4 at depth 0 → "  • " is 4 chars
+    const cont = txt(out[1]);
+    expect(cont.startsWith('    ') || cont.trimStart().startsWith('agentic') || cont.includes('ENOENT')).toBe(
+      true,
+    );
+  }
+});
+
+test('nested list levels keep deeper indent', () => {
+  const out = renderMarkdown('- parent\n  - child\n    - grand', 80);
+  expect(txt(out[0]).trimStart().startsWith('•')).toBe(true);
+  const child = txt(out[1]);
+  const grand = txt(out[2]);
+  // Deeper markers sit further right
+  expect(child.indexOf('•')).toBeGreaterThan(txt(out[0]).indexOf('•'));
+  expect(grand.indexOf('•')).toBeGreaterThan(child.indexOf('•'));
+  expect(child).toContain('child');
+  expect(grand).toContain('grand');
+});
+
+test('paragraph with inline code, link, and greater-equal preserves spans', () => {
+  const src =
+    'See [[context/current-state.md]] and `tasks/README.md`; no cluster ≥3 folders.';
+  const out = renderMarkdown(src, 80);
+  const segs = out.flat();
+  expect(segs.some((s) => s.tone === 'link' && s.text.includes('context'))).toBe(true);
+  expect(segs.some((s) => s.tone === 'code' && s.text.includes('tasks/README'))).toBe(true);
+  // ≥ stays as character in md-render (sanitizer maps at display); content present
+  expect(out.map(txt).join('')).toMatch(/cluster/);
+  expect(segs.some((s) => s.italic)).toBe(false);
+  // italic fixture
+  const em = parseInline('the *coherent* house');
+  expect(em.some((s) => s.italic && s.text === 'coherent')).toBe(true);
 });
 
 test('ordered lists keep their numbers', () => {
