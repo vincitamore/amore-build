@@ -39,6 +39,10 @@ export async function lucernaLog(n: number, filter?: string): Promise<Record<str
   };
 }
 
+export async function lucernaNotifications(n: number = 20): Promise<Record<string, unknown>> {
+  return daemonGet(`/api/lucerna/notifications?n=${n}`) as Promise<Record<string, unknown>>;
+}
+
 export function lucernaHalt(): Promise<Record<string, unknown>> {
   return daemonPost('/api/lucerna/halt') as Promise<Record<string, unknown>>;
 }
@@ -49,4 +53,39 @@ export function lucernaWake(): Promise<Record<string, unknown>> {
 
 export function lucernaSleep(): Promise<Record<string, unknown>> {
   return daemonPost('/api/lucerna/sleep') as Promise<Record<string, unknown>>;
+}
+
+export function lucernaStart(): Promise<Record<string, unknown>> {
+  return daemonPost('/api/lucerna/start') as Promise<Record<string, unknown>>;
+}
+
+export function lucernaStop(): Promise<Record<string, unknown>> {
+  return daemonPost('/api/lucerna/stop') as Promise<Record<string, unknown>>;
+}
+
+/**
+ * Set durable enablement flags via the daemon proxy.
+ * flag: "dreams" | "auto-commit-live"; value: "on" | "off".
+ */
+export function lucernaEnable(
+  flag: string,
+  value: string,
+): Promise<Record<string, unknown>> {
+  const on = value === 'on' || value === 'true' || value === '1';
+  const off = value === 'off' || value === 'false' || value === '0';
+  if (!on && !off) {
+    throw new Error(`enable value must be on|off (got '${value}')`);
+  }
+  const bool = on;
+  if (flag === 'dreams') {
+    return daemonPost('/api/lucerna/enable', { dreamsEnabled: bool }) as Promise<
+      Record<string, unknown>
+    >;
+  }
+  if (flag === 'auto-commit-live' || flag === 'autoCommitLive') {
+    return daemonPost('/api/lucerna/enable', { autoCommitLive: bool }) as Promise<
+      Record<string, unknown>
+    >;
+  }
+  throw new Error(`enable flag must be dreams|auto-commit-live (got '${flag}')`);
 }

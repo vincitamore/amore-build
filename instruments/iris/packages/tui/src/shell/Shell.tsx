@@ -46,6 +46,36 @@ const MDocView = memo(DocView);
 
 const MEMBERS = ['Dashboard', 'Tasks', 'Inbox', 'Reminders', 'Knowledge', 'Files', 'Forge', 'Lucerna', 'Graph'] as const;
 
+/**
+ * Initial member index for launch presets.
+ * Resolution: argv `--member <Name>` / `--member=<Name>`, else env `IRIS_MEMBER`.
+ * Names match the tab bar (case-insensitive). Unknown values fall back to Dashboard (0).
+ */
+export function resolveInitialMemberIndex(
+  argv: string[] = process.argv.slice(2),
+  env: NodeJS.ProcessEnv = process.env,
+): number {
+  let name: string | undefined;
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === '--member' && argv[i + 1]) {
+      name = argv[++i];
+      break;
+    }
+    if (a.startsWith('--member=')) {
+      name = a.slice('--member='.length);
+      break;
+    }
+  }
+  if (!name) {
+    const fromEnv = env.IRIS_MEMBER ?? env.IRIS_TAB;
+    if (fromEnv && fromEnv.trim()) name = fromEnv.trim();
+  }
+  if (!name) return 0;
+  const idx = MEMBERS.findIndex((m) => m.toLowerCase() === name!.toLowerCase());
+  return idx >= 0 ? idx : 0;
+}
+
 // Layout modes the graph's `m` key cycles through, in order. See render/graph.ts for each.
 const LAYOUT_MODES: LayoutMode[] = ['force', 'cluster', 'status', 'community', 'radial'];
 
@@ -105,7 +135,7 @@ async function fetchSemantic(url: string): Promise<SemanticLink[]> {
  */
 export function Shell({ onQuit }: { onQuit?: () => void }) {
   const t = usePalette();
-  const [active, setActive] = useState(0);
+  const [active, setActive] = useState(() => resolveInitialMemberIndex());
   // Members are ALL mounted once at boot and kept alive; switching only toggles OpenTUI's `visible`
   // (yoga display:none), never mount/unmount. This is the cure for the native use-after-free that
   // segfaulted on screen switches — the crash is in OpenTUI's renderable TEARDOWN *and* first-MOUNT,

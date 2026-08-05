@@ -375,8 +375,15 @@ export function Dashboard({
   }, [active, root]);
 
   const [status, setStatus] = useState<ServerStatus | null>(null);
-  // LIVE poll while active — /api/status (docs/uptime). Every 3s while the Dashboard is shown;
-  // paused when hidden (no work behind other screens).
+  /** Compact Lucerna pulse for the System Pulse panel (state, beat age, last notice). */
+  const [lucernaPulse, setLucernaPulse] = useState<{
+    available: boolean;
+    state: string;
+    beatAgeSec: number | null;
+    lastNotification: { message?: string; kind?: string; level?: string } | null;
+  } | null>(null);
+  // LIVE poll while active — /api/status (docs/uptime) + lucerna pulse. Every 3s while the
+  // Dashboard is shown; paused when hidden (no work behind other screens).
   useEffect(() => {
     if (!daemonUrl || !active) return;
     let alive = true;
@@ -386,6 +393,21 @@ export function Dashboard({
         if (r.ok && alive) setStatus((await r.json()) as ServerStatus);
       } catch {
         // index still building
+      }
+      try {
+        const r = await fetch(`${daemonUrl}/api/lucerna/pulse`);
+        if (r.ok && alive) {
+          setLucernaPulse(
+            (await r.json()) as {
+              available: boolean;
+              state: string;
+              beatAgeSec: number | null;
+              lastNotification: { message?: string; kind?: string; level?: string } | null;
+            },
+          );
+        }
+      } catch {
+        // lucerna proxy optional while iris is up
       }
     };
     void poll();
@@ -522,6 +544,43 @@ export function Dashboard({
         <box flexGrow={1} />
         <text fg={t.muted}>{status ? `up ${fmtUptime(status.server.uptime)} · ${status.documents.total} docs` : 'starting…'}</text>
       </box>
+      <box flexDirection="row">
+        <text
+          fg={
+            lucernaPulse?.state === 'running'
+              ? t.success
+              : lucernaPulse?.state === 'stale'
+                ? t.error
+                : t.muted
+          }
+        >
+          ●
+        </text>
+        <text fg={t.foreground}> Lucerna</text>
+        <box flexGrow={1} />
+        <text fg={t.muted}>
+          {!lucernaPulse || !lucernaPulse.available
+            ? 'not installed'
+            : lucernaPulse.state === 'running'
+              ? `live · beat ${
+                  lucernaPulse.beatAgeSec === null || lucernaPulse.beatAgeSec === undefined
+                    ? '—'
+                    : lucernaPulse.beatAgeSec < 60
+                      ? `${Math.floor(lucernaPulse.beatAgeSec)}s`
+                      : `${Math.floor(lucernaPulse.beatAgeSec / 60)}m`
+                }`
+              : lucernaPulse.state === 'stale'
+                ? 'hung'
+                : 'stopped'}
+        </text>
+      </box>
+      <text fg={t.muted}>
+        {`   ${
+          lucernaPulse?.lastNotification?.message
+            ? truncate(String(lucernaPulse.lastNotification.message), Math.max(12, Math.floor(dims.width / 3)))
+            : 'no notifications'
+        }`}
+      </text>
     </Panel>
   );
 

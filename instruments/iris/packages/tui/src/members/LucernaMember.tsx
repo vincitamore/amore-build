@@ -39,6 +39,14 @@ interface Status {
   enablement?: Enablement;
 }
 
+interface Notification {
+  ts: string;
+  level: string;
+  kind: string;
+  message: string;
+  ref?: string;
+}
+
 function truncate(s: string, n: number): string {
   return s.length <= n ? s : `${s.slice(0, Math.max(1, n - 1))}.`;
 }
@@ -121,6 +129,10 @@ function lastActionsSummary(lastActions: unknown): string {
   return 'none yet';
 }
 
+function formatNotification(n: Notification): string {
+  return `${n.level} ${n.kind}: ${n.message}`;
+}
+
 type UiState = 'daemon-down' | 'not-installed' | 'stopped' | 'running' | 'stale';
 
 function deriveState(daemonUrl: string | null | undefined, health: Health | null, status: Status | null): UiState {
@@ -141,11 +153,12 @@ function deriveState(daemonUrl: string | null | undefined, health: Health | null
 }
 
 const SCROLLBACK = 200;
+const NOTE_LIMIT = 8;
 
 /**
  * Lucerna member — agency operations console. Honest at every state:
  * iris-daemon-down, not-installed, stopped, running, stale/hung.
- * Control: h halt · w wake · s sleep (POSTs via the iris daemon proxy).
+ * Ops: r start · k stop · h halt · w wake · s sleep · d dreams · a auto-commit.
  */
 export function LucernaMember({
   inputActive,
@@ -162,9 +175,11 @@ export function LucernaMember({
   const [health, setHealth] = useState<Health | null>(null);
   const [status, setStatus] = useState<Status | null>(null);
   const [logLines, setLogLines] = useState<string[]>([]);
+  const [notes, setNotes] = useState<Notification[]>([]);
   const [scroll, setScroll] = useState(0);
   const [flash, setFlash] = useFlash();
   const [confirm, setConfirm] = useState<{ msg: string; run: () => void } | null>(null);
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     if (!inputActive && confirm) setConfirm(null);
@@ -175,35 +190,46 @@ export function LucernaMember({
   }, [confirm, onCapture]);
   useEffect(() => () => onCapture?.(false), [onCapture]);
 
+  const refresh = async (url: string, alive: () => boolean) => {
+    try {
+      const r = await fetch(`${url}/api/lucerna/health`);
+      if (r.ok && alive()) setHealth((await r.json()) as Health);
+    } catch {
+      /* daemon warming */
+    }
+    try {
+      const r = await fetch(`${url}/api/lucerna/status`);
+      if (r.ok && alive()) setStatus((await r.json()) as Status);
+    } catch {
+      /* ignore */
+    }
+    try {
+      const r = await fetch(`${url}/api/lucerna/log?n=${SCROLLBACK}`);
+      if (r.ok && alive()) {
+        const body = (await r.json()) as { lines?: string[] };
+        setLogLines(body.lines ?? []);
+      }
+    } catch {
+      /* ignore */
+    }
+    try {
+      const r = await fetch(`${url}/api/lucerna/notifications?n=${NOTE_LIMIT}`);
+      if (r.ok && alive()) {
+        const body = (await r.json()) as { entries?: Notification[] };
+        setNotes(body.entries ?? []);
+      }
+    } catch {
+      /* ignore */
+    }
+  };
+
   // HTTP poll against the iris daemon's Lucerna proxy while this tab is active.
   useEffect(() => {
     if (!daemonUrl || !inputActive) return;
     let alive = true;
-    const pull = async () => {
-      try {
-        const r = await fetch(`${daemonUrl}/api/lucerna/health`);
-        if (r.ok && alive) setHealth((await r.json()) as Health);
-      } catch {
-        /* daemon warming */
-      }
-      try {
-        const r = await fetch(`${daemonUrl}/api/lucerna/status`);
-        if (r.ok && alive) setStatus((await r.json()) as Status);
-      } catch {
-        /* ignore */
-      }
-      try {
-        const r = await fetch(`${daemonUrl}/api/lucerna/log?n=${SCROLLBACK}`);
-        if (r.ok && alive) {
-          const body = (await r.json()) as { lines?: string[] };
-          setLogLines(body.lines ?? []);
-        }
-      } catch {
-        /* ignore */
-      }
-    };
-    void pull();
-    const id = setInterval(() => alive && void pull(), 5000);
+    const pull = () => void refresh(daemonUrl, () => alive);
+    pull();
+    const id = setInterval(() => alive && pull(), 5000);
     return () => {
       alive = false;
       clearInterval(id);
@@ -215,7 +241,7 @@ export function LucernaMember({
   const uiState = deriveState(daemonUrl, health, status);
   const enablement: Enablement = status?.enablement ?? { dreamsEnabled: false, autoCommitLive: false };
 
-  const reserve = 12; // status cards + badges + footer + borders
+  const reserve = 16; // status cards + badges + notifications + footer + borders
   const visible = Math.max(3, dims.height - reserve);
   const innerW = Math.max(16, dims.width - 6);
   const maxScroll = Math.max(0, logLines.length - visible);
@@ -231,27 +257,54 @@ export function LucernaMember({
     if (delta > 0) setScroll((s) => (s > 0 ? Math.min(s + delta, Math.max(0, len - visible)) : 0));
   }, [logLines.length, visible]);
 
-  const post = async (path: string, label: string) => {
+  const post = async (path: string, label: string, body?: Record<string, unknown>) => {
     if (!daemonUrl) return setFlash('Iris daemon down — cannot reach Lucerna proxy');
+    setBusy(true);
     try {
       const r = await fetch(`${daemonUrl}/api/lucerna/${path}`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({}),
+        body: JSON.stringify(body ?? {}),
       });
-      const j = (await r.json()) as { ok?: boolean; available?: boolean; reason?: string };
+      const j = (await r.json()) as {
+        ok?: boolean;
+        available?: boolean;
+        reason?: string;
+        outcome?: string;
+        enablement?: Enablement;
+        graceful?: boolean;
+        escalated?: boolean;
+      };
       if (j.available === false && j.reason === 'not-installed') {
         setFlash(`${label}: Lucerna not installed`);
+      } else if (path === 'start' || path === 'stop') {
+        const outcome = j.outcome ?? (j.ok === false ? 'failed' : 'ok');
+        setFlash(j.ok === false ? `${label}: ${outcome}` : `${label}: ${outcome}`);
+      } else if (path === 'enable') {
+        if (j.ok === false) setFlash(`${label} failed`);
+        else {
+          const e = j.enablement;
+          setFlash(
+            e
+              ? `enablement: dreams ${e.dreamsEnabled ? 'on' : 'off'} · auto-commit ${e.autoCommitLive ? 'live' : 'dry-run'}`
+              : label,
+          );
+          // Force status re-read so TUI always shows file truth after write
+          if (daemonUrl) await refresh(daemonUrl, () => true);
+        }
       } else {
         setFlash(j.ok === false ? `${label} failed` : label);
       }
+      if (daemonUrl && path !== 'enable') await refresh(daemonUrl, () => true);
     } catch {
       setFlash(`${label} failed`);
+    } finally {
+      setBusy(false);
     }
   };
 
   useKeyboard((key: { name?: string }) => {
-    if (!inputActive || confirm) return;
+    if (!inputActive || confirm || busy) return;
     const n = (key.name ?? '').toLowerCase().replace('arrow', '');
     if (n === 'up') return setScroll((s) => Math.min(s + 1, maxScroll));
     if (n === 'down') return setScroll((s) => Math.max(s - 1, 0));
@@ -259,9 +312,35 @@ export function LucernaMember({
     if (n === 'pagedown') return setScroll((s) => Math.max(s - visible, 0));
     if (n === 'home') return setScroll(maxScroll);
     if (n === 'end') return setScroll(0);
-    if (n === 'h') return setConfirm({ msg: 'Halt Lucerna — write halt sentinel?', run: () => void post('halt', 'halted') });
+    if (n === 'r') return void post('start', 'start');
+    if (n === 'k') {
+      return setConfirm({
+        msg: 'Stop Lucerna (halt, then pid kill if needed)?',
+        run: () => void post('stop', 'stop'),
+      });
+    }
+    if (n === 'h') {
+      return setConfirm({
+        msg: 'Halt Lucerna — write halt sentinel?',
+        run: () => void post('halt', 'halted'),
+      });
+    }
     if (n === 'w') return void post('wake', 'wake sent');
     if (n === 's') return void post('sleep', 'sleep sent');
+    if (n === 'd') {
+      const next = !enablement.dreamsEnabled;
+      return setConfirm({
+        msg: `Set dreams ${next ? 'ON' : 'OFF'} in lucerna.enable.json?`,
+        run: () => void post('enable', 'dreams', { dreamsEnabled: next }),
+      });
+    }
+    if (n === 'a') {
+      const next = !enablement.autoCommitLive;
+      return setConfirm({
+        msg: `Set auto-commit ${next ? 'LIVE' : 'dry-run'} in lucerna.enable.json?`,
+        run: () => void post('enable', 'auto-commit', { autoCommitLive: next }),
+      });
+    }
   });
 
   const onLogScroll = (e: { scroll?: { direction?: string }; button?: number }) => {
@@ -328,6 +407,7 @@ export function LucernaMember({
           </Panel>
           <Panel title="Enablement" flexGrow={1}>
             <text fg={t.foreground}>{`${dreamsBadge} · ${commitBadge}`}</text>
+            <text fg={t.muted}>d toggle dreams · a toggle auto-commit (confirm)</text>
           </Panel>
         </box>
         <box flexShrink={0} marginTop={1}>
@@ -342,6 +422,24 @@ export function LucernaMember({
   return (
     <box flexDirection="column" flexGrow={1} paddingLeft={1} paddingRight={1} paddingTop={1}>
       {statusSection}
+
+      {showLog && notes.length > 0 ? (
+        <Panel title="Notifications" flexShrink={0} marginTop={1} headerRight={`${notes.length} newest`}>
+          <box flexDirection="column">
+            {notes.slice(0, 5).map((n, i) => (
+              <text key={`n-${i}`} fg={n.level === 'error' ? t.error : n.level === 'warn' ? t.warning : t.muted}>
+                {formatLogCell(formatNotification(n), innerW)}
+              </text>
+            ))}
+          </box>
+        </Panel>
+      ) : null}
+
+      {showLog && notes.length === 0 && uiState !== 'not-installed' ? (
+        <box flexShrink={0} marginTop={1}>
+          <text fg={t.muted}>Notifications: (none yet — house instruments/lucerna/notifications.jsonl)</text>
+        </box>
+      ) : null}
 
       {showLog ? (
         <Panel
@@ -367,8 +465,8 @@ export function LucernaMember({
           {flash
             ? `${flash}   `
             : uiState === 'not-installed' || uiState === 'daemon-down'
-              ? 'h halt · w wake · s sleep (needs installed Lucerna + iris daemon)'
-              : 'h halt · w wake · s sleep · up/dn scroll'}
+              ? 'r start · k stop · h halt · w wake · s sleep · d dreams · a auto-commit'
+              : 'r start · k stop · h halt · w wake · s sleep · d dreams · a auto-commit · up/dn'}
         </text>
       </box>
 

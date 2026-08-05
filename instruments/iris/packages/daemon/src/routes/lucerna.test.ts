@@ -111,6 +111,58 @@ describe('POST governance', () => {
     expect(b.ok).toBe(false);
     expect(b.reason).toBe('not-installed');
   });
+
+  test('enable writes enablement file', async () => {
+    ensureDir();
+    const r = await lucernaRoute(
+      config,
+      post('/api/lucerna/enable', { dreamsEnabled: true, autoCommitLive: false }),
+    );
+    expect(r.status).toBe(200);
+    const b = (await r.json()) as {
+      ok: boolean;
+      enablement: { dreamsEnabled: boolean; autoCommitLive: boolean };
+    };
+    expect(b.ok).toBe(true);
+    expect(b.enablement).toEqual({ dreamsEnabled: true, autoCommitLive: false });
+    expect(JSON.parse(readFileSync(join(ldir, 'lucerna.enable.json'), 'utf8'))).toEqual({
+      dreamsEnabled: true,
+      autoCommitLive: false,
+    });
+  });
+
+  test('enable rejects empty body', async () => {
+    ensureDir();
+    const r = await lucernaRoute(config, post('/api/lucerna/enable', {}));
+    expect(r.status).toBe(400);
+  });
+});
+
+describe('GET notifications + pulse', () => {
+  test('notifications absent → empty', async () => {
+    ensureDir();
+    const r = await lucernaRoute(config, get('/api/lucerna/notifications'));
+    expect(r.status).toBe(200);
+    const b = (await r.json()) as { available: boolean; entries: unknown[]; total: number };
+    expect(b.available).toBe(true);
+    expect(b.entries).toEqual([]);
+    expect(b.total).toBe(0);
+  });
+
+  test('pulse shape', async () => {
+    ensureDir();
+    const r = await lucernaRoute(config, get('/api/lucerna/pulse'));
+    expect(r.status).toBe(200);
+    const b = (await r.json()) as {
+      available: boolean;
+      state: string;
+      beatAgeSec: number | null;
+      lastNotification: unknown;
+    };
+    expect(b.available).toBe(true);
+    expect(b.state).toBe('stopped');
+    expect(b).toHaveProperty('lastNotification');
+  });
 });
 
 describe('method / path mismatch → 404', () => {

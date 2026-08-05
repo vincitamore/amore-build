@@ -24,7 +24,7 @@ Three surfaces share one product name:
 |---------|------|
 | **Daemon** | Live org index on `127.0.0.1:3853` — recursive file watch, wikilink/backlink graph, fuzzy search (`/api/search`, index mode) |
 | **CLI** (`iris`) | Org verbs powered by `@amore/regula` (`task`, `inbox`, `reminder`, `knowledge`, plus `status`, `search`, `daemon`, …) and daemon-backed reads |
-| **Dash** (TUI) | OpenTUI interactive dashboard — Dashboard / Tasks / Inbox / Reminders / Knowledge / Files / Forge / Graph (hotkeys `1`–`8` in that order) |
+| **Dash** (TUI) | OpenTUI interactive dashboard — Dashboard / Tasks / Inbox / Reminders / Knowledge / Files / Forge / Lucerna / Graph (hotkeys `1`–`9` in that order) |
 
 Iris ships the full regula org-CRUD surface — every task / inbox / reminder /
 knowledge lifecycle verb, plus `lint`, `status`, `search`, `links`, and
@@ -45,7 +45,7 @@ changes from the house's own state surface:
 ![Dashboard tab](assets/iris/dashboard.png)
 
 **Tasks / Inbox / Reminders** — the org tree grouped by lifecycle, the same
-`1`–`8` hotkeys the tab bar shows:
+`1`–`9` hotkeys the tab bar shows:
 
 ![Tasks tab](assets/iris/tasks.png)
 
@@ -63,6 +63,11 @@ changes from the house's own state surface:
 
 ![Forge tab](assets/iris/forge.png)
 
+**Lucerna** — house steward ops: health, enablement, start/stop, notifications.
+Full contract: [`iris-lucerna.md`](iris-lucerna.md).
+
+![Lucerna tab](assets/iris/lucerna.png)
+
 **Graph** — the wikilink/backlink graph, force-laid, typed and legended:
 
 ![Graph tab](assets/iris/graph.png)
@@ -79,8 +84,14 @@ iris inbox list
 iris reminder list
 iris knowledge create --title "…"
 iris search "query"      # fuzzy index search via the daemon
+iris lucerna status      # house steward health (via daemon proxy)
+iris lucerna start       # detached start of Lucerna in the house
+iris dash --member Lucerna   # open the dash focused on Lucerna
 iris commands            # org-verb capability manifest
 ```
+
+Lucerna ops surface (start/stop, enablement, notifications, file contract):
+[`iris-lucerna.md`](iris-lucerna.md).
 
 Org root resolution: `$IRIS_ORG_ROOT` if set, else walk up from the cwd for
 an orientation file (`AGENTS.md` / `AGENT.md` / `CLAUDE.md`) beside a `tasks/`
