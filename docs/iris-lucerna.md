@@ -9,10 +9,14 @@ semantics, enablement flags, and the shared file contract. Package sources live
 under [`instruments/iris/`](../instruments/iris/) (proxy, routes, TUI, CLI) and
 [`instruments/lucerna/`](../instruments/lucerna/) (the steward process).
 
-Screenshot placeholders (captured after integration):
+The Lucerna tab, live against a running steward:
 
-- Lucerna tab: [`assets/iris/lucerna.png`](assets/iris/lucerna.png)
-- Dashboard Pulse with Lucerna row: re-shoot [`assets/iris/dashboard.png`](assets/iris/dashboard.png)
+![Lucerna tab](assets/iris/lucerna.png)
+
+The Dashboard Pulse carries a Lucerna row with the daemon state and its most
+recent outcome:
+
+![Dashboard with Lucerna pulse row](assets/iris/dashboard.png)
 
 ---
 
