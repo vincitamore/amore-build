@@ -19,6 +19,11 @@ import { type Palette } from '../theme';
 import { useHoverThrottle } from '../use-hover-throttle';
 import { Panel } from '../components/Panel';
 import { Stat } from '../components/Stat';
+import {
+  formatLucernaDisplayLine,
+  formatPulseSubLine,
+  pulsePanelInnerWidth,
+} from './lucerna-display';
 
 interface ServerStatus {
   server: { uptime: number; connectedClients: number; lastIndexed: string };
@@ -518,6 +523,9 @@ export function Dashboard({
 
   // — System Pulse — present-state vitals (Forge / Git / Daemon), the fourth dashboard zone
   //   (counts · what-needs-me · what-happened · live-vitals). Content-height box below Attention. —
+  // Pulse lives in the left column (agendaW) when wide, full width when stacked — never dims.width/3.
+  const pulseColW = wide ? agendaW : dims.width - 2;
+  const pulseInnerW = pulsePanelInnerWidth(pulseColW);
   const pulsePanel = (
     <Panel title="Pulse" flexShrink={0} marginTop={1}>
       <box flexDirection="row">
@@ -544,7 +552,14 @@ export function Dashboard({
         <box flexGrow={1} />
         <text fg={t.muted}>{status ? `up ${fmtUptime(status.server.uptime)} · ${status.documents.total} docs` : 'starting…'}</text>
       </box>
-      <box flexDirection="row">
+      {/* Lucerna pulse: fixed-height opaque rows so a shorter beat/notice fully clears the prior paint. */}
+      <box
+        flexDirection="row"
+        height={1}
+        flexShrink={0}
+        overflow="hidden"
+        backgroundColor={t.background}
+      >
         <text
           fg={
             lucernaPulse?.state === 'running'
@@ -553,34 +568,44 @@ export function Dashboard({
                 ? t.error
                 : t.muted
           }
+          wrapMode="none"
         >
           ●
         </text>
-        <text fg={t.foreground}> Lucerna</text>
-        <box flexGrow={1} />
-        <text fg={t.muted}>
-          {!lucernaPulse || !lucernaPulse.available
-            ? 'not installed'
-            : lucernaPulse.state === 'running'
-              ? `live · beat ${
-                  lucernaPulse.beatAgeSec === null || lucernaPulse.beatAgeSec === undefined
-                    ? '—'
-                    : lucernaPulse.beatAgeSec < 60
-                      ? `${Math.floor(lucernaPulse.beatAgeSec)}s`
-                      : `${Math.floor(lucernaPulse.beatAgeSec / 60)}m`
-                }`
-              : lucernaPulse.state === 'stale'
-                ? 'hung'
-                : 'stopped'}
+        <text fg={t.foreground} wrapMode="none">
+          {' Lucerna'}
+        </text>
+        <box flexGrow={1} backgroundColor={t.background} />
+        <text fg={t.muted} wrapMode="none">
+          {formatLucernaDisplayLine(
+            !lucernaPulse || !lucernaPulse.available
+              ? 'not installed'
+              : lucernaPulse.state === 'running'
+                ? `live · beat ${
+                    lucernaPulse.beatAgeSec === null || lucernaPulse.beatAgeSec === undefined
+                      ? '-'
+                      : lucernaPulse.beatAgeSec < 60
+                        ? `${Math.floor(lucernaPulse.beatAgeSec)}s`
+                        : `${Math.floor(lucernaPulse.beatAgeSec / 60)}m`
+                  }`
+                : lucernaPulse.state === 'stale'
+                  ? 'hung'
+                  : 'stopped',
+            Math.max(12, Math.min(28, Math.floor(dims.width / 4))),
+          )}
         </text>
       </box>
-      <text fg={t.muted}>
-        {`   ${
-          lucernaPulse?.lastNotification?.message
-            ? truncate(String(lucernaPulse.lastNotification.message), Math.max(12, Math.floor(dims.width / 3)))
-            : 'no notifications'
-        }`}
-      </text>
+      <box
+        height={1}
+        width={pulseInnerW}
+        flexShrink={0}
+        overflow="hidden"
+        backgroundColor={t.background}
+      >
+        <text fg={t.muted} wrapMode="none">
+          {formatPulseSubLine(lucernaPulse?.lastNotification?.message, pulseInnerW)}
+        </text>
+      </box>
     </Panel>
   );
 

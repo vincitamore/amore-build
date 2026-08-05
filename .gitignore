@@ -36,3 +36,6 @@ instruments/*/node_modules/
 # Compiled instrument binaries (build:compile output; release lanes build their own)
 instruments/*/dist/
 instruments/iris/packages/*/dist/
+
+# Bun compile intermediates
+*.bun-build

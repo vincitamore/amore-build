@@ -7,6 +7,14 @@ import { ConfirmModal } from '../components/Modal';
 import { useFlash } from '../components/use-flash';
 import { useStableDimensions } from '../use-stable-dimensions';
 import { tickRender } from '../debug';
+import { emptyDisplayRow, formatLucernaDisplayLine } from './lucerna-display';
+
+// Re-export display helpers for existing imports / tests.
+export {
+  formatLogCell,
+  formatLucernaDisplayLine,
+  collapseHomeInText,
+} from './lucerna-display';
 
 // Lucerna daemon-proxy response shapes (subset rendered here).
 
@@ -52,22 +60,33 @@ function truncate(s: string, n: number): string {
 }
 
 /**
- * ASCII-safe fixed-width cell for OpenTUI log rows.
- * Multi-byte glyphs mis-advance the Zig cell grid; truncate then pad so shorter
- * lines clear longer previous frames.
+ * One fixed-height, full-width list row with opaque background.
+ * Space glyphs alone do not clear prior OpenTUI cells; the background fill does.
  */
-export function formatLogCell(line: string, width: number): string {
-  if (width <= 0) return '';
-  const ascii = line
-    .replace(/\u2192/g, '->')
-    .replace(/\u2190/g, '<-')
-    .replace(/\u2014/g, '-')
-    .replace(/\u2013/g, '-')
-    .replace(/\u2026/g, '...')
-    .replace(/\u00a0/g, ' ')
-    .replace(/[^\t\r\n\x20-\x7e]/g, '?');
-  const t = truncate(ascii, width);
-  return t.length >= width ? t : t.padEnd(width, ' ');
+function FixedClearRow({
+  text,
+  width,
+  color,
+}: {
+  text: string;
+  width: number;
+  color: string;
+}) {
+  const t = usePalette();
+  const cell = text.length === width ? text : formatLucernaDisplayLine(text, width);
+  return (
+    <box
+      height={1}
+      width={width}
+      flexShrink={0}
+      overflow="hidden"
+      backgroundColor={t.background}
+    >
+      <text fg={color} wrapMode="none">
+        {cell}
+      </text>
+    </box>
+  );
 }
 
 function formatBeatAge(sec: number | null | undefined): string {
@@ -154,6 +173,8 @@ function deriveState(daemonUrl: string | null | undefined, health: Health | null
 
 const SCROLLBACK = 200;
 const NOTE_LIMIT = 8;
+/** Fixed notification slots so a shorter set still repaints every prior row. */
+const NOTE_SLOTS = 5;
 
 /**
  * Lucerna member — agency operations console. Honest at every state:
@@ -243,7 +264,8 @@ export function LucernaMember({
 
   const reserve = 16; // status cards + badges + notifications + footer + borders
   const visible = Math.max(3, dims.height - reserve);
-  const innerW = Math.max(16, dims.width - 6);
+  // Outer pad (2) + panel border (2) + panel pad (2) = 6. Exact so rows fill the panel.
+  const rowW = Math.max(16, dims.width - 6);
   const maxScroll = Math.max(0, logLines.length - visible);
   const clamped = Math.min(scroll, maxScroll);
   const startIdx = Math.max(0, logLines.length - visible - clamped);
@@ -420,25 +442,41 @@ export function LucernaMember({
   const showLog = uiState !== 'not-installed' && uiState !== 'daemon-down';
 
   return (
-    <box flexDirection="column" flexGrow={1} paddingLeft={1} paddingRight={1} paddingTop={1}>
+    <box flexDirection="column" flexGrow={1} paddingLeft={1} paddingRight={1} paddingTop={1} backgroundColor={t.background}>
       {statusSection}
 
-      {showLog && notes.length > 0 ? (
-        <Panel title="Notifications" flexShrink={0} marginTop={1} headerRight={`${notes.length} newest`}>
-          <box flexDirection="column">
-            {notes.slice(0, 5).map((n, i) => (
-              <text key={`n-${i}`} fg={n.level === 'error' ? t.error : n.level === 'warn' ? t.warning : t.muted}>
-                {formatLogCell(formatNotification(n), innerW)}
-              </text>
-            ))}
+      {showLog ? (
+        <Panel
+          title="Notifications"
+          flexShrink={0}
+          marginTop={1}
+          headerRight={notes.length > 0 ? `${Math.min(notes.length, NOTE_SLOTS)} newest` : 'empty'}
+        >
+          <box flexDirection="column" flexShrink={0}>
+            {Array.from({ length: NOTE_SLOTS }, (_, i) => {
+              const n = notes[i];
+              if (!n) {
+                return (
+                  <FixedClearRow
+                    key={`n-${i}`}
+                    width={rowW}
+                    color={t.muted}
+                    text={i === 0 && notes.length === 0 ? 'no notifications yet' : emptyDisplayRow(rowW)}
+                  />
+                );
+              }
+              const color = n.level === 'error' ? t.error : n.level === 'warn' ? t.warning : t.muted;
+              return (
+                <FixedClearRow
+                  key={`n-${i}`}
+                  width={rowW}
+                  color={color}
+                  text={formatLucernaDisplayLine(formatNotification(n), rowW)}
+                />
+              );
+            })}
           </box>
         </Panel>
-      ) : null}
-
-      {showLog && notes.length === 0 && uiState !== 'not-installed' ? (
-        <box flexShrink={0} marginTop={1}>
-          <text fg={t.muted}>Notifications: (none yet — house instruments/lucerna/notifications.jsonl)</text>
-        </box>
       ) : null}
 
       {showLog ? (
@@ -446,13 +484,26 @@ export function LucernaMember({
           title="Activity Log"
           headerRight={`${logLines.length} ln${clamped > 0 ? ` · ^${clamped}` : ' · live'} · up/dn`}
           flexGrow={1}
+          flexShrink={1}
+          minHeight={0}
           marginTop={1}
         >
-          <box flexDirection="column" flexGrow={1} onMouseScroll={onLogScroll}>
+          <box
+            flexDirection="column"
+            flexGrow={1}
+            flexShrink={1}
+            minHeight={0}
+            overflow="hidden"
+            onMouseScroll={onLogScroll}
+            backgroundColor={t.background}
+          >
             {Array.from({ length: visible }, (_, i) => (
-              <text key={`log-${i}`} fg={t.foreground}>
-                {shown[i] ? formatLogCell(shown[i], innerW) : ' '.repeat(Math.max(0, innerW))}
-              </text>
+              <FixedClearRow
+                key={`log-${i}`}
+                width={rowW}
+                color={t.foreground}
+                text={shown[i] ? formatLucernaDisplayLine(shown[i], rowW) : emptyDisplayRow(rowW)}
+              />
             ))}
           </box>
         </Panel>
@@ -460,13 +511,16 @@ export function LucernaMember({
         <box flexGrow={1} />
       )}
 
-      <box flexDirection="row" flexShrink={0}>
-        <text fg={flash ? t.success : t.muted}>
-          {flash
-            ? `${flash}   `
-            : uiState === 'not-installed' || uiState === 'daemon-down'
-              ? 'r start · k stop · h halt · w wake · s sleep · d dreams · a auto-commit'
-              : 'r start · k stop · h halt · w wake · s sleep · d dreams · a auto-commit · up/dn'}
+      <box flexDirection="row" flexShrink={0} height={1} overflow="hidden" backgroundColor={t.background}>
+        <text fg={flash ? t.success : t.muted} wrapMode="none">
+          {formatLucernaDisplayLine(
+            flash
+              ? flash
+              : uiState === 'not-installed' || uiState === 'daemon-down'
+                ? 'r start · k stop · h halt · w wake · s sleep · d dreams · a auto-commit'
+                : 'r start · k stop · h halt · w wake · s sleep · d dreams · a auto-commit · up/dn',
+            Math.max(16, dims.width - 2),
+          )}
         </text>
       </box>
 
