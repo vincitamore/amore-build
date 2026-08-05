@@ -62,6 +62,14 @@ export interface AutoCommitDraft {
   dryRun: boolean;
 }
 
+/** Cadence / dedup metadata for auto-commit drafting (not the draft body). */
+export interface AutoCommitMeta {
+  /** ISO timestamp of last draft attempt that invoked the driver. */
+  lastDraftAt: string | null;
+  /** Hash of the porcelain change-set last drafted (or skipped as unchanged). */
+  lastChangeHash: string | null;
+}
+
 export interface LucernaState {
   version: 1;
   lastSaved: string;
@@ -71,6 +79,7 @@ export interface LucernaState {
   queryEngine: "amore-headless";
   heartbeat?: { phase: string; intervalMs: number; bpm: number };
   autoCommitDraft?: AutoCommitDraft | null;
+  autoCommitMeta?: AutoCommitMeta;
 }
 
 function emptyState(): LucernaState {
@@ -98,6 +107,10 @@ function emptyState(): LucernaState {
     lastActionResults: [],
     queryEngine: "amore-headless",
     autoCommitDraft: null,
+    autoCommitMeta: {
+      lastDraftAt: null,
+      lastChangeHash: null,
+    },
   };
 }
 
@@ -155,6 +168,10 @@ export class StateManager {
           lastCycleOutcome: raw.dream?.lastCycleOutcome ?? null,
         },
         lastActionResults: Array.isArray(raw.lastActionResults) ? raw.lastActionResults : [],
+        autoCommitMeta: {
+          lastDraftAt: raw.autoCommitMeta?.lastDraftAt ?? null,
+          lastChangeHash: raw.autoCommitMeta?.lastChangeHash ?? null,
+        },
       };
     } catch {
       return emptyState();
@@ -204,6 +221,43 @@ export class StateManager {
 
   setAutoCommitDraft(draft: AutoCommitDraft | null): void {
     this.state.autoCommitDraft = draft;
+  }
+
+  getAutoCommitMeta(): AutoCommitMeta {
+    return (
+      this.state.autoCommitMeta ?? {
+        lastDraftAt: null,
+        lastChangeHash: null,
+      }
+    );
+  }
+
+  /**
+   * Record that a draft driver call completed for this change-set hash.
+   * Starts the auto-commit cooldown clock.
+   */
+  recordAutoCommitDraft(changeHash: string, now: Date = new Date()): void {
+    this.state.autoCommitMeta = {
+      lastDraftAt: now.toISOString(),
+      lastChangeHash: changeHash,
+    };
+  }
+
+  /** True when enough time has elapsed since the last draft driver call. */
+  isAutoCommitCooldownElapsed(
+    cooldownMs: number,
+    nowMs: number = Date.now(),
+  ): boolean {
+    const last = this.getAutoCommitMeta().lastDraftAt;
+    if (!last) return true;
+    const t = Date.parse(last);
+    if (Number.isNaN(t)) return true;
+    return nowMs - t >= cooldownMs;
+  }
+
+  isTokenCeilingReached(now: Date = new Date()): boolean {
+    const snap = this.budgetSnapshot(now);
+    return snap.tokenCeilingReached;
   }
 
   markDreamCycle(active: boolean): void {

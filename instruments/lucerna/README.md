@@ -10,7 +10,7 @@ Lucerna is the Amore house steward daemon. It keeps a light heartbeat over a hou
 - **Enablement flags** default both off: dreams and live auto-commit require an explicit flip.
 - **Light actions** (model-free): `survey-org`, `substrate-health`, `inbox-age-report`, `state-cleanup`.
 - **Light dreams** (opt-in planner): when `dreamsEnabled` is true, Lucerna may run one planner call per cycle and execute at most one light action.
-- **Auto-commit dry-run**: drafts a commit message via one headless call; never commits unless live mode is enabled (live mode is draft-only in this release).
+- **Auto-commit dry-run**: drafts a commit message via one headless call on its own schedule (default 30 minute cooldown, change-set dedup, token ceiling); never commits unless live mode is enabled (live mode is draft-only in this release).
 
 ## Install
 
@@ -41,6 +41,8 @@ Environment overrides (all optional):
 - `LUCERNA_AUTO_COMMIT_LIVE=1`  -  enable live auto-commit flag (OR with file)
 - `LUCERNA_MODEL` / `LUCERNA_AUTO_COMMIT_MODEL` / `LUCERNA_DREAM_MODEL`  -  model entry names
 - `LUCERNA_DAILY_ACTION_CAP`, `LUCERNA_WEEKLY_EXPENSIVE_CAP`, `LUCERNA_CYCLE_COOLDOWN_HOURS`, `LUCERNA_DAILY_TOKEN_CEILING`
+- `LUCERNA_AUTO_COMMIT_COOLDOWN_MINUTES`  -  minimum minutes between auto-commit draft attempts (default 30)
+- `LUCERNA_AUTO_COMMIT=0`  -  disable auto-commit entirely
 
 ## Enablement
 

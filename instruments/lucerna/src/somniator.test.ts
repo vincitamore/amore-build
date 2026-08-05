@@ -58,6 +58,7 @@ function makeConfig(house: string, dreamsEnabled: boolean): LucernaConfig {
     weeklyExpensiveCap: 6,
     cycleCooldownMs: 2 * 60 * 60 * 1000,
     dailyTokenCeiling: 200_000,
+    autoCommitCooldownMs: 30 * 60 * 1000,
   };
 }
 

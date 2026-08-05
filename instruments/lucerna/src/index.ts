@@ -8,6 +8,7 @@ export {
   loadConfig,
   packageVersion,
   formatVersionLine,
+  DEFAULT_AUTO_COMMIT_COOLDOWN_MS,
   type LucernaConfig,
 } from "./config.ts";
 export {
@@ -59,7 +60,12 @@ export {
   runInboxAgeReport,
   runStateCleanup,
 } from "./actions.ts";
-export { AutoCommitter, dryRunAgainstFixture } from "./auto-commit.ts";
+export {
+  AutoCommitter,
+  dryRunAgainstFixture,
+  hashChangeSet,
+  getPorcelainRaw,
+} from "./auto-commit.ts";
 export { DaemonLoop, consumeSentinel, runLifecycleSmoke } from "./daemon.ts";
 export { StateManager, type DreamCycleOutcome } from "./state.ts";
 export { Heartbeat } from "./heartbeat.ts";

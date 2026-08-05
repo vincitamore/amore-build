@@ -16,6 +16,9 @@ import { resolveAmoreBin } from "./engine/amore-headless.ts";
 // Embed package.json so `bun build --compile` ships the real version string.
 import packageJson from "../package.json";
 
+/** Default auto-commit draft cooldown (decoupled from heartbeat). */
+export const DEFAULT_AUTO_COMMIT_COOLDOWN_MS = 30 * 60 * 1000;
+
 /** Process name printed by CLI status and version lines. */
 export const PROCESS_NAME = "lucerna";
 
@@ -49,6 +52,11 @@ export interface LucernaConfig {
   weeklyExpensiveCap: number;
   cycleCooldownMs: number;
   dailyTokenCeiling: number;
+  /**
+   * Minimum interval between auto-commit draft attempts (model calls).
+   * Decoupled from the heartbeat tick; default 30 minutes.
+   */
+  autoCommitCooldownMs: number;
 }
 
 function getArg(args: string[], flag: string): string | undefined {
@@ -138,6 +146,10 @@ export function loadConfig(args: string[] = process.argv.slice(2)): LucernaConfi
     process.env.LUCERNA_DAILY_TOKEN_CEILING ?? String(DEFAULT_DAILY_TOKEN_CEILING),
     10,
   );
+  const autoCommitCooldownMin = parseFloat(
+    process.env.LUCERNA_AUTO_COMMIT_COOLDOWN_MINUTES ??
+      String(DEFAULT_AUTO_COMMIT_COOLDOWN_MS / 60_000),
+  );
 
   // Optional user config dir ensure
   const ucd = userConfigDir();
@@ -171,6 +183,9 @@ export function loadConfig(args: string[] = process.argv.slice(2)): LucernaConfi
     dailyTokenCeiling: Number.isFinite(dailyTokenCeiling)
       ? dailyTokenCeiling
       : DEFAULT_DAILY_TOKEN_CEILING,
+    autoCommitCooldownMs: Number.isFinite(autoCommitCooldownMin)
+      ? Math.max(60_000, autoCommitCooldownMin * 60_000)
+      : DEFAULT_AUTO_COMMIT_COOLDOWN_MS,
   };
 }
 

@@ -23,7 +23,7 @@ import { localTimestamp } from "./time.ts";
 import { RUNTIME_FILES, healthPath, logPath, sentinelPath } from "./paths.ts";
 import { executeLightAction, isAdmittedAction, actionBudgetTier, actionCooldownClass } from "./actions.ts";
 import { mergeGovernanceLists, loadUserGovernance } from "./governance.ts";
-import { AutoCommitter } from "./auto-commit.ts";
+import { AutoCommitter, type HeadlessCaller } from "./auto-commit.ts";
 import { runDreamCycle, type DreamCycleResult } from "./somniator.ts";
 
 const LOG_MAX_BYTES = 5 * 1024 * 1024;
@@ -104,6 +104,8 @@ export class DaemonLoop {
   private lists = mergeGovernanceLists();
   /** Set by wake sentinel: request one immediate dream cycle when dreams enabled. */
   private wakeDreamRequested = false;
+  /** Optional inject for tests (stub amore-headless for auto-commit). */
+  private autoCommitHeadless?: HeadlessCaller;
 
   constructor(private config: LucernaConfig) {
     this.stateManager = new StateManager(config.runtimeDir, {
@@ -121,6 +123,11 @@ export class DaemonLoop {
 
   getState(): StateManager {
     return this.stateManager;
+  }
+
+  /** Test / inject hook: replace the auto-commit headless driver. */
+  setAutoCommitHeadless(headless: HeadlessCaller | undefined): void {
+    this.autoCommitHeadless = headless;
   }
 
   async start(): Promise<void> {
@@ -188,17 +195,22 @@ export class DaemonLoop {
     const phase = this.heartbeat.current;
     if (
       this.config.autoCommitEnabled &&
-      (phase === "resting" || phase === "drowsy")
+      (phase === "resting" || phase === "drowsy" || phase === "dreaming")
     ) {
       try {
-        const ac = new AutoCommitter(this.config, undefined, this.stateManager);
+        const ac = new AutoCommitter(
+          this.config,
+          this.autoCommitHeadless,
+          this.stateManager,
+        );
         const result = await ac.run();
-        if (result.message || result.skippedReason) {
+        // Quiet skips: log only when a draft was composed (driver path taken).
+        if (result.composed && result.message) {
           appendLog(
             this.config.runtimeDir,
-            result.skippedReason
-              ? `auto-commit skip: ${result.skippedReason}`
-              : `auto-commit dry-run draft: ${result.message?.subject ?? "?"}`,
+            result.dryRun
+              ? `auto-commit dry-run draft: ${result.message.subject}`
+              : `auto-commit draft: ${result.message.subject}`,
           );
         }
       } catch (err) {

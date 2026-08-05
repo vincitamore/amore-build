@@ -2,14 +2,17 @@
  * Auto-commit dry-run: scan house git tree, draft a commit message via one
  * amore-headless call, write draft + file list to state. Never commits in dry-run.
  *
- * Live mode exists behind autoCommitLive but ships inert (no commit path executed)
- * until a later phase hardens it; tests prove dry-run never commits.
+ * Drafting is cadence-gated (cooldown decoupled from the heartbeat), deduped by
+ * porcelain change-set hash, and token-ceiling aware. Live mode behind
+ * autoCommitLive ships inert (draft only) until a later phase hardens it.
  */
 
+import { createHash } from "node:crypto";
 import { existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import type { LucernaConfig } from "./config.ts";
+import { DEFAULT_AUTO_COMMIT_COOLDOWN_MS } from "./config.ts";
 import {
   callAmoreHeadless,
   preferStructuredOutput,
@@ -20,6 +23,9 @@ import type { StateManager } from "./state.ts";
 
 const MAX_DIFFSTAT_CHARS = 12_000;
 const MAX_STATUS_LINES = 200;
+
+/** Re-export default cooldown for callers that import from this module. */
+export { DEFAULT_AUTO_COMMIT_COOLDOWN_MS };
 
 const DANGEROUS_PATTERNS = [
   /\.env$/,
@@ -70,6 +76,10 @@ export interface AutoCommitResult {
   message: CommitMessage | null;
   skippedReason?: string;
   liveInert?: boolean;
+  /** True when a draft was produced after a driver call this run. */
+  composed?: boolean;
+  /** True when the headless driver was invoked this run. */
+  driverInvoked?: boolean;
 }
 
 export type HeadlessCaller = (opts: {
@@ -104,6 +114,40 @@ export function parsePorcelainStatus(stdout: string): string[] {
 
 export function filterSafeFiles(files: string[]): string[] {
   return files.filter((f) => !isDangerousPath(f));
+}
+
+/**
+ * Paths excluded from auto-commit drafting and change-set hashing.
+ * House instrument runtime (state/log/health) must not re-dirty the set after a draft save.
+ */
+export function isIgnoredForAutoCommit(file: string): boolean {
+  const n = file.replace(/\\/g, "/").replace(/^\.\//, "");
+  if (n.startsWith("instruments/")) return true;
+  if (n.startsWith("node_modules/")) return true;
+  if (n === "node_modules" || n === "instruments") return true;
+  return false;
+}
+
+/** Safe house content only: drop secrets and instrument/runtime noise. */
+export function filterDraftFiles(files: string[]): string[] {
+  return filterSafeFiles(files).filter((f) => !isIgnoredForAutoCommit(f));
+}
+
+/**
+ * Keep porcelain lines whose path is draft-eligible. Used for hashing so
+ * runtime state writes cannot invalidate an otherwise-stable change-set.
+ */
+export function filterPorcelainForDraft(porcelainRaw: string): string {
+  const kept: string[] = [];
+  for (const line of porcelainRaw.replace(/\r\n/g, "\n").split("\n")) {
+    if (!line.trim()) continue;
+    const paths = parsePorcelainStatus(line + "\n");
+    if (paths.length === 0) continue;
+    const safe = filterDraftFiles(paths);
+    if (safe.length === 0) continue;
+    kept.push(line);
+  }
+  return kept.join("\n") + (kept.length ? "\n" : "");
 }
 
 export function parseCommitMessageResponse(raw: string): CommitMessage | null {
@@ -163,10 +207,25 @@ export function isGitBusy(houseRoot: string): boolean {
   return false;
 }
 
-export function getPorcelainChanges(houseRoot: string): string[] {
+/** Raw porcelain status text (normalized newlines) for hashing and parsing. */
+export function getPorcelainRaw(houseRoot: string): string {
   const r = git(["status", "--porcelain", "-uall"], houseRoot);
-  if (r.code !== 0) return [];
-  return parsePorcelainStatus(r.stdout).slice(0, MAX_STATUS_LINES);
+  if (r.code !== 0) return "";
+  return (r.stdout ?? "").replace(/\r\n/g, "\n");
+}
+
+export function getPorcelainChanges(houseRoot: string): string[] {
+  return parsePorcelainStatus(getPorcelainRaw(houseRoot)).slice(0, MAX_STATUS_LINES);
+}
+
+/**
+ * Stable hash of a porcelain change-set. Empty tree hashes to empty string.
+ * Used to skip re-drafting when the change-set is unchanged.
+ */
+export function hashChangeSet(porcelainRaw: string): string {
+  const normalized = porcelainRaw.replace(/\r\n/g, "\n").trim();
+  if (!normalized) return "";
+  return createHash("sha256").update(normalized).digest("hex");
 }
 
 export function getDiffstat(houseRoot: string, files: string[]): string {
@@ -213,14 +272,22 @@ export class AutoCommitter {
 
   constructor(
     private config: LucernaConfig,
-    headless: HeadlessCaller = callAmoreHeadless,
+    headless?: HeadlessCaller,
     private state?: StateManager,
   ) {
-    this.headless = headless;
+    this.headless = headless ?? callAmoreHeadless;
   }
 
-  async run(opts?: { force?: boolean }): Promise<AutoCommitResult> {
+  async run(opts?: {
+    /** Bypass draft cooldown only. Never bypasses token ceiling or enablement. */
+    force?: boolean;
+    /** Override "now" for cooldown tests. */
+    now?: Date;
+  }): Promise<AutoCommitResult> {
     const dryRun = this.config.autoCommitDryRun || this.config.dryRun;
+    const now = opts?.now ?? new Date();
+    const cooldownMs =
+      this.config.autoCommitCooldownMs ?? DEFAULT_AUTO_COMMIT_COOLDOWN_MS;
 
     if (!this.config.autoCommitEnabled && !opts?.force) {
       return {
@@ -229,6 +296,8 @@ export class AutoCommitter {
         files: [],
         message: null,
         skippedReason: "auto-commit disabled",
+        composed: false,
+        driverInvoked: false,
       };
     }
 
@@ -239,6 +308,8 @@ export class AutoCommitter {
         files: [],
         message: null,
         skippedReason: "not a git repository",
+        composed: false,
+        driverInvoked: false,
       };
     }
 
@@ -249,44 +320,110 @@ export class AutoCommitter {
         files: [],
         message: null,
         skippedReason: "git busy",
+        composed: false,
+        driverInvoked: false,
       };
     }
 
-    const changes = getPorcelainChanges(this.config.houseRoot);
-    const safe = filterSafeFiles(changes);
-    if (safe.length === 0) {
+    // Token ceiling: same soft halt as dream planner (always honored).
+    if (this.state?.isTokenCeilingReached(now)) {
       return {
         committed: false,
         dryRun,
         files: [],
         message: null,
-        skippedReason: changes.length === 0 ? "no changes" : "all files filtered (dangerous)",
+        skippedReason: "daily token ceiling reached",
+        composed: false,
+        driverInvoked: false,
       };
     }
 
-    // Live mode ships inert: draft only, never commit.
+    // Cadence: decoupled from heartbeat; one draft attempt per cooldown window.
+    if (
+      this.state &&
+      !opts?.force &&
+      !this.state.isAutoCommitCooldownElapsed(cooldownMs, now.getTime())
+    ) {
+      return {
+        committed: false,
+        dryRun,
+        files: [],
+        message: null,
+        skippedReason: "auto-commit cooldown",
+        composed: false,
+        driverInvoked: false,
+      };
+    }
+
+    const porcelainRaw = getPorcelainRaw(this.config.houseRoot);
+    const draftPorcelain = filterPorcelainForDraft(porcelainRaw);
+    const changeHash = hashChangeSet(draftPorcelain);
+    const changes = parsePorcelainStatus(porcelainRaw).slice(0, MAX_STATUS_LINES);
+    const safe = filterDraftFiles(changes).slice(0, MAX_STATUS_LINES);
+    if (safe.length === 0) {
+      const reason =
+        changes.length === 0
+          ? "no changes"
+          : filterSafeFiles(changes).length === 0
+            ? "all files filtered (dangerous)"
+            : "no draft-eligible changes";
+      return {
+        committed: false,
+        dryRun,
+        files: [],
+        message: null,
+        skippedReason: reason,
+        composed: false,
+        driverInvoked: false,
+      };
+    }
+
+    // Dedup: identical change-set since last draft → no driver call.
+    const prevHash = this.state?.getAutoCommitMeta().lastChangeHash ?? null;
+    if (this.state && prevHash && prevHash === changeHash && !opts?.force) {
+      return {
+        committed: false,
+        dryRun,
+        files: safe,
+        message: null,
+        skippedReason: "unchanged change-set",
+        composed: false,
+        driverInvoked: false,
+      };
+    }
+
+    const { message, driverInvoked } = await this.composeDraft(safe);
+
+    // Advance cadence + hash even when the driver fails, so a broken PATH
+    // cannot re-fire every heartbeat tick.
+    if (this.state) {
+      this.state.recordAutoCommitDraft(changeHash, now);
+      this.persistDraft(message, safe, dryRun);
+      this.state.save();
+    } else {
+      this.persistDraft(message, safe, dryRun);
+    }
+
     if (!dryRun) {
-      const draft = await this.composeDraft(safe);
-      this.persistDraft(draft, safe, true);
       return {
         committed: false,
         dryRun: false,
         files: safe,
-        message: draft,
+        message,
         liveInert: true,
         skippedReason: "live mode inert in this release (draft only)",
+        composed: true,
+        driverInvoked,
       };
     }
 
-    const message = await this.composeDraft(safe);
-    this.persistDraft(message, safe, true);
-
-    // Dry-run: never stage or commit
     return {
       committed: false,
       dryRun: true,
       files: safe,
       message,
+      composed: true,
+      driverInvoked,
     };
   }
 
@@ -304,13 +441,18 @@ export class AutoCommitter {
       dryRun,
     });
     this.state.setActivity("auto-commit-draft", message.subject);
-    this.state.save();
   }
 
-  private async composeDraft(files: string[]): Promise<CommitMessage | null> {
+  private async composeDraft(
+    files: string[],
+  ): Promise<{ message: CommitMessage | null; driverInvoked: boolean }> {
     const status = files.map((f, i) => `${i + 1}\t${f}`).join("\n");
     const diffstat = getDiffstat(this.config.houseRoot, files);
     const prompt = buildDraftPrompt(status, diffstat);
+    const fallback = (): CommitMessage => ({
+      subject: `Update ${files.length} file${files.length === 1 ? "" : "s"}`,
+      body: files.slice(0, 12).map((f) => `- ${f}`).join("\n"),
+    });
     try {
       const result = await this.headless({
         cwd: this.config.houseRoot,
@@ -322,6 +464,7 @@ export class AutoCommitter {
         wallMs: 120_000,
         model: this.config.autoCommitModel || undefined,
       });
+      // Meter tokens like planner calls (planning included in daily ceiling).
       if (this.state && result.usage) {
         this.state.recordTokens(result.usage);
       }
@@ -337,22 +480,21 @@ export class AutoCommitter {
         const v = preferred.value as { subject?: string; body?: string };
         if (typeof v.subject === "string" && v.subject.trim()) {
           return {
-            subject: v.subject.trim().slice(0, 120),
-            body: typeof v.body === "string" ? v.body : "",
+            message: {
+              subject: v.subject.trim().slice(0, 120),
+              body: typeof v.body === "string" ? v.body : "",
+            },
+            driverInvoked: true,
           };
         }
       }
-      return (
-        parseCommitMessageResponse(result.text) ?? {
-          subject: `Update ${files.length} file${files.length === 1 ? "" : "s"}`,
-          body: files.slice(0, 12).map((f) => `- ${f}`).join("\n"),
-        }
-      );
-    } catch {
       return {
-        subject: `Update ${files.length} file${files.length === 1 ? "" : "s"}`,
-        body: files.slice(0, 12).map((f) => `- ${f}`).join("\n"),
+        message: parseCommitMessageResponse(result.text) ?? fallback(),
+        driverInvoked: true,
       };
+    } catch {
+      // Driver missing or failed: still count as an attempted draft for cadence.
+      return { message: fallback(), driverInvoked: true };
     }
   }
 }
