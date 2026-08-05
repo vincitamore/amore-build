@@ -49,7 +49,17 @@ Also used for maintenance agentic spawns:
 
 ## Model path
 
-Binary resolution only: `LUCERNA_AMORE_BIN` env, else `amore` on PATH.
+Binary resolution order (same helper for planner and agentic spawns):
+
+1. Explicit override (tests / multi-install pin)
+2. `LUCERNA_AMORE_BIN` (lucerna-specific)
+3. `AMORE_BIN` (shared with iris / vinculum and other house tools)
+4. `amore` on PATH
+
 No provider SDKs, no API keys, no hardcoded model wire ids in this package.
 Optional `--model <entry>` forwards a harness config entry name when the
 operator sets one.
+
+Pre-spawn failures (missing binary, ENOENT) do not charge per-action cooldown
+or daily/weekly action counters. Those budgets apply once the child process
+has started.

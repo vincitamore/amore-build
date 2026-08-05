@@ -3,7 +3,11 @@
  *
  * Spawns the `amore` binary with --prompt-file / --output-format json.
  * Model-agnostic: no provider SDKs, no API keys, no hardcoded model ids.
- * Binary resolution: LUCERNA_AMORE_BIN env override, else `amore` on PATH.
+ * Binary resolution order:
+ *   1. explicit override argument (tests / multi-install)
+ *   2. LUCERNA_AMORE_BIN (lucerna-specific)
+ *   3. AMORE_BIN (shared with iris / vinculum and other house tools)
+ *   4. `amore` on PATH
  */
 
 import { spawn } from "node:child_process";
@@ -70,13 +74,42 @@ export interface AmoreHeadlessResult {
 
 const DEFAULT_WALL_MS = 240_000;
 
-/** Resolve the amore binary: LUCERNA_AMORE_BIN, then `amore`. */
+/**
+ * Resolve the amore binary.
+ * Order: explicit override → LUCERNA_AMORE_BIN → AMORE_BIN → `amore` on PATH.
+ */
 export function resolveAmoreBin(override?: string): string {
   return (
     override?.trim() ||
     process.env.LUCERNA_AMORE_BIN?.trim() ||
+    process.env.AMORE_BIN?.trim() ||
     "amore"
   );
+}
+
+/** True when the error means the child process never started (e.g. ENOENT). */
+export function isPreSpawnFailure(err: unknown): boolean {
+  if (err && typeof err === "object" && "spawnStarted" in err) {
+    return (err as { spawnStarted: boolean }).spawnStarted === false;
+  }
+  const msg = err instanceof Error ? err.message : String(err ?? "");
+  if (/wall timeout/i.test(msg)) return false;
+  const code =
+    err && typeof err === "object" && "code" in err
+      ? String((err as { code: unknown }).code)
+      : "";
+  if (code === "ENOENT") return true;
+  if (/ENOENT|cannot find|not recognized as|spawn .*ENOENT/i.test(msg)) {
+    return true;
+  }
+  return false;
+}
+
+function tagSpawnError(err: unknown, spawnStarted: boolean): Error {
+  const base =
+    err instanceof Error ? err : new Error(typeof err === "string" ? err : String(err));
+  (base as Error & { spawnStarted: boolean }).spawnStarted = spawnStarted;
+  return base;
 }
 
 /**
@@ -220,11 +253,23 @@ export function runAmoreProcess(
     let stdout = "";
     let stderr = "";
     let settled = false;
+    // Spawn returned a ChildProcess handle; process may still fail to launch (ENOENT).
+    let processLaunched = false;
+    const markLaunched = () => {
+      processLaunched = true;
+    };
+    child.stdout?.once("data", markLaunched);
+    child.stderr?.once("data", markLaunched);
+    // pid present is the usual signal that the OS accepted the spawn
+    if (typeof child.pid === "number" && child.pid > 0) {
+      processLaunched = true;
+    }
+
     const timer = setTimeout(() => {
       if (settled) return;
       settled = true;
       killProcessTree(child, spawnImpl);
-      reject(new Error(`amore wall timeout after ${wallMs}ms`));
+      reject(tagSpawnError(new Error(`amore wall timeout after ${wallMs}ms`), true));
     }, wallMs);
 
     child.stdout?.on("data", (d: Buffer) => {
@@ -237,7 +282,8 @@ export function runAmoreProcess(
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      reject(err);
+      // error before any pid/output = pre-spawn (ENOENT, bad path)
+      reject(tagSpawnError(err, processLaunched));
     });
     child.on("close", (code) => {
       if (settled) return;

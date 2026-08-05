@@ -168,7 +168,8 @@ export function loadConfig(args: string[] = process.argv.slice(2)): LucernaConfi
     dreamsEnabled: flags.dreamsEnabled,
     autoCommitEnabled,
     autoCommitDryRun: !flags.autoCommitLive,
-    amoreBin: resolveAmoreBin(process.env.LUCERNA_AMORE_BIN),
+    // Full chain: LUCERNA_AMORE_BIN → AMORE_BIN → amore on PATH
+    amoreBin: resolveAmoreBin(),
     processName: PROCESS_NAME,
     version: VERSION,
     autoCommitModel,

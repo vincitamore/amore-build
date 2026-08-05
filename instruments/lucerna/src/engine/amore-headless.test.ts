@@ -7,6 +7,7 @@ import {
   composePrompt,
   runAmoreProcess,
   resolveAmoreBin,
+  isPreSpawnFailure,
   killProcessTree,
 } from "./amore-headless.ts";
 
@@ -136,18 +137,41 @@ describe("parseJsonEnvelope + usage", () => {
 });
 
 describe("resolveAmoreBin", () => {
-  test("override wins, else env, else amore", () => {
+  test("three-tier env order: override, LUCERNA_AMORE_BIN, AMORE_BIN, PATH default", () => {
     expect(resolveAmoreBin("/custom/amore")).toBe("/custom/amore");
-    const prev = process.env.LUCERNA_AMORE_BIN;
+    const prevL = process.env.LUCERNA_AMORE_BIN;
+    const prevA = process.env.AMORE_BIN;
     try {
-      process.env.LUCERNA_AMORE_BIN = "C:/bins/amore.exe";
-      expect(resolveAmoreBin()).toBe("C:/bins/amore.exe");
       delete process.env.LUCERNA_AMORE_BIN;
+      delete process.env.AMORE_BIN;
       expect(resolveAmoreBin()).toBe("amore");
+
+      process.env.AMORE_BIN = "C:/shared/amore.exe";
+      expect(resolveAmoreBin()).toBe("C:/shared/amore.exe");
+
+      process.env.LUCERNA_AMORE_BIN = "C:/lucerna/amore.exe";
+      expect(resolveAmoreBin()).toBe("C:/lucerna/amore.exe");
+      // explicit override still wins over both env vars
+      expect(resolveAmoreBin("/pin/amore")).toBe("/pin/amore");
     } finally {
-      if (prev === undefined) delete process.env.LUCERNA_AMORE_BIN;
-      else process.env.LUCERNA_AMORE_BIN = prev;
+      if (prevL === undefined) delete process.env.LUCERNA_AMORE_BIN;
+      else process.env.LUCERNA_AMORE_BIN = prevL;
+      if (prevA === undefined) delete process.env.AMORE_BIN;
+      else process.env.AMORE_BIN = prevA;
     }
+  });
+
+  test("isPreSpawnFailure tags ENOENT and wall-timeout", () => {
+    expect(isPreSpawnFailure(Object.assign(new Error("spawn ENOENT"), { code: "ENOENT" }))).toBe(
+      true,
+    );
+    expect(isPreSpawnFailure(Object.assign(new Error("x"), { spawnStarted: false }))).toBe(
+      true,
+    );
+    expect(isPreSpawnFailure(new Error("amore wall timeout after 50ms"))).toBe(false);
+    expect(isPreSpawnFailure(Object.assign(new Error("x"), { spawnStarted: true }))).toBe(
+      false,
+    );
   });
 });
 

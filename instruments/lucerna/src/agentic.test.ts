@@ -337,6 +337,127 @@ describe("runAgenticAction with stub amore", () => {
   });
 });
 
+describe("pre-spawn failure refunds cooldown and counters", () => {
+  test("ENOENT agentic failure leaves recentActions and counters untouched", async () => {
+    const house = syntheticHouse();
+    try {
+      const config = makeConfig(house, true);
+      const sm = new StateManager(config.runtimeDir, {
+        dailyCap: 12,
+        weeklyCap: 6,
+        cooldownMs: 0,
+        tokenCeiling: 200_000,
+      });
+      const beforeToday = sm.get().dream.actionsToday;
+      const beforeWeek = sm.get().dream.actionsThisWeek;
+
+      const headless: HeadlessCaller = async () => {
+        const err = Object.assign(new Error("spawn amore ENOENT"), {
+          code: "ENOENT",
+          spawnStarted: false,
+        });
+        throw err;
+      };
+
+      const r = await runDreamCycle(config, {
+        headless,
+        force: true,
+        forceAction: "self-orient",
+        stateManager: sm,
+      });
+      expect(r.status).toBe("failed");
+      expect(r.reason).toMatch(/spawn|ENOENT/i);
+      // budget refund: no cooldown stamp, no daily/weekly increment
+      expect(sm.get().dream.recentActions?.["self-orient"]).toBeUndefined();
+      expect(sm.get().dream.actionsToday).toBe(beforeToday);
+      expect(sm.get().dream.actionsThisWeek).toBe(beforeWeek);
+      // honest failure still writes cycle history + can notify
+      expect(r.manifestPath || sm.dreamCycleHistory()[0]?.status === "failed").toBeTruthy();
+
+      // Immediate retry is not refused for cooldown
+      const r2 = await runDreamCycle(config, {
+        headless: async (opts) => {
+          if (opts.jsonSchema) {
+            return {
+              text: JSON.stringify({ action: "self-orient", reason: "x" }),
+              structuredOutput: { action: "self-orient", reason: "x" },
+              raw: {},
+              code: 0,
+              stderr: "",
+              usage: { total_tokens: 1 },
+            };
+          }
+          const user =
+            typeof opts.prompt === "string" ? opts.prompt : opts.prompt.user;
+          const m = user.match(/Dream report path: (\S+)/);
+          const rel = m?.[1] ?? "forge/dreams/x-self-orient.md";
+          mkdirSync(join(house, "forge", "dreams"), { recursive: true });
+          writeFileSync(join(house, rel), "# ok\n", "utf-8");
+          return {
+            text: "done",
+            raw: {},
+            code: 0,
+            stderr: "",
+            usage: { total_tokens: 5 },
+          };
+        },
+        force: true,
+        forceAction: "self-orient",
+        stateManager: sm,
+      });
+      expect(r2.status).not.toBe("refused");
+      expect(r2.reason).not.toMatch(/cooldown/i);
+      // post-spawn success charges budget
+      expect(sm.get().dream.recentActions?.["self-orient"]).toBeDefined();
+      expect(sm.get().dream.actionsThisWeek).toBe(beforeWeek + 1);
+    } finally {
+      rmSync(house, { recursive: true, force: true });
+    }
+  });
+
+  test("post-spawn agentic failure still records cooldown", async () => {
+    const house = syntheticHouse();
+    try {
+      const config = makeConfig(house, true);
+      const sm = new StateManager(config.runtimeDir, {
+        dailyCap: 12,
+        weeklyCap: 6,
+        cooldownMs: 0,
+        tokenCeiling: 200_000,
+      });
+      const headless: HeadlessCaller = async (opts) => {
+        // Simulate child that started then failed (non-zero / error after launch)
+        const user =
+          typeof opts.prompt === "string" ? opts.prompt : opts.prompt.user;
+        const m = user.match(/Dream report path: (\S+)/);
+        const rel = m?.[1] ?? "forge/dreams/x-self-orient.md";
+        mkdirSync(join(house, "forge", "dreams"), { recursive: true });
+        writeFileSync(join(house, rel), "# partial\n", "utf-8");
+        return {
+          text: "model error mid-run",
+          raw: {},
+          code: 1,
+          stderr: "boom",
+          usage: { total_tokens: 20 },
+        };
+      };
+
+      const r = await runDreamCycle(config, {
+        headless,
+        force: true,
+        forceAction: "self-orient",
+        stateManager: sm,
+      });
+      expect(r.status).toBe("failed");
+      expect(sm.get().dream.recentActions?.["self-orient"]).toBeDefined();
+      expect(sm.get().dream.actionsToday).toBe(1);
+      expect(sm.get().dream.actionsThisWeek).toBe(1);
+    } finally {
+      rmSync(house, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("dream-cycle agentic enablement + force action", () => {
   test("disabled dreams never invoke agentic stub", async () => {
     const house = syntheticHouse();

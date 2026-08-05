@@ -17,6 +17,7 @@ import { dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import {
   callAmoreHeadless,
+  isPreSpawnFailure,
   type AmoreHeadlessResult,
   type CallAmoreHeadlessOptions,
 } from "./engine/amore-headless.ts";
@@ -629,6 +630,11 @@ export interface AgenticActionResult {
   proposalPaths?: string[];
   breaches?: GovernanceBreach[];
   usageTokens?: number;
+  /**
+   * False when the amore child never started (ENOENT / missing binary).
+   * Callers must not charge per-action cooldown or daily/weekly action budgets.
+   */
+  spawnStarted: boolean;
 }
 
 export interface RunAgenticActionOptions {
@@ -697,6 +703,7 @@ export async function runAgenticAction(
     });
   } catch (err) {
     const detail = `agentic spawn failed: ${err instanceof Error ? err.message : String(err)}`;
+    const spawnStarted = !isPreSpawnFailure(err);
     const man = writeDreamManifest(config.houseRoot, {
       actionKey,
       goal: `${actionKey}: failed`,
@@ -711,6 +718,7 @@ export async function runAgenticAction(
       ok: false,
       detail,
       manifestPath: man.absPath,
+      spawnStarted,
     };
   }
 
@@ -806,6 +814,7 @@ export async function runAgenticAction(
     proposalPaths: mat.written,
     breaches: breaches.length ? breaches : undefined,
     usageTokens,
+    spawnStarted: true,
   };
 }
 

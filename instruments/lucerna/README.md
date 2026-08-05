@@ -37,7 +37,8 @@ Optional global-style bin wiring is provided as `lucerna` in `package.json`.
 Environment overrides (all optional):
 
 - `LUCERNA_HOUSE_ROOT`  -  house root
-- `LUCERNA_AMORE_BIN`  -  path to the `amore` binary (default: `amore` on PATH)
+- `LUCERNA_AMORE_BIN`  -  path to the `amore` binary (wins over `AMORE_BIN`)
+- `AMORE_BIN`  -  shared path to the `amore` binary (same as iris / vinculum; used when `LUCERNA_AMORE_BIN` is unset; else `amore` on PATH)
 - `LUCERNA_DREAMS_ENABLED=1`  -  enable autonomous dreams (OR with file)
 - `LUCERNA_AUTO_COMMIT_LIVE=1`  -  enable live auto-commit flag (OR with file)
 - `LUCERNA_MODEL` / `LUCERNA_AUTO_COMMIT_MODEL` / `LUCERNA_DREAM_MODEL`  -  model entry names

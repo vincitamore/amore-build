@@ -47,6 +47,7 @@ export {
   buildAmoreHeadlessArgv,
   parseJsonEnvelope,
   resolveAmoreBin,
+  isPreSpawnFailure,
   runAmoreProcess,
   killProcessTree,
   type AmoreHeadlessResult,

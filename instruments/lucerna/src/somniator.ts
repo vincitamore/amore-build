@@ -444,7 +444,11 @@ export async function runDreamCycle(
       state.recordTokens({ total_tokens: agentic.usageTokens });
     }
 
-    state.recordDreamAction(pick.action, new Date(), tier);
+    // Pre-spawn failures (ENOENT / missing binary) must not consume cooldown
+    // or daily/weekly action budgets — those bound model spend after launch.
+    if (agentic.spawnStarted) {
+      state.recordDreamAction(pick.action, new Date(), tier);
+    }
     state.pushActionResult(pick.action, agentic.ok, agentic.detail);
 
     let ref: string | undefined;
