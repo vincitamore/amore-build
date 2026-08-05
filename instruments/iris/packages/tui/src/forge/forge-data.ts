@@ -1,9 +1,18 @@
 import type { ForgeListItem } from '@amore/regula';
+import {
+  artifactBelongsToManifest,
+  dreamStemFromPath,
+  type DreamLinkFields,
+} from '@amore/regula';
 
 // Pipeline reconstruction — forge has no "list pipelines" shape on disk; a pipeline is
 // rebuilt from many files (manifest + handle/output pairs) sharing a `pipeline` key. Ported
 // from the Tauri ForgeView's buildForgeData, enriched with the manifest SHAPE fields
 // (depth/width/totalAgents) so a collapsed pipeline card shows its shape without the lazy load.
+//
+// Agentic dreams also produce forge/dreams/ reports and forge/proposals/ entries that share
+// a `pipeline:` key (or legacy action+date stamp). Those join the dream pipeline as
+// linkedArtifacts so the Dreams view does not drop them into a generic Other bucket.
 
 export interface AgentPair {
   concern: string;
@@ -26,10 +35,18 @@ export interface Pipeline {
   totalAgents?: number;
   started?: string;
   completed?: string;
-  /** Whether real handle/output artifacts exist on disk (set by the browser from forgePipelineDirs). */
+  /**
+   * Whether real products exist: handle/output dirs on disk, loaded layers, or
+   * frontmatter-joined dream reports / proposals. Set by the browser and/or buildForgeData.
+   */
   hasArtifacts?: boolean;
   /** Populated only after the heavy handles/outputs are lazy-loaded for this pipeline. */
   layers: Map<number, AgentPair[]>;
+  /**
+   * Dream reports (forge/dreams/) and proposals joined by pipeline: match (or
+   * legacy stamp fallback). Not handle/output agent pairs.
+   */
+  linkedArtifacts?: ForgeListItem[];
 }
 
 /**
@@ -58,6 +75,53 @@ export function inferPipelineFromPath(path: string): string | null {
   return null;
 }
 
+function forgeItemToLink(item: ForgeListItem, kind: DreamLinkFields['kind']): DreamLinkFields {
+  return {
+    id: dreamStemFromPath(item.path),
+    path: item.path,
+    pipeline: item.pipeline,
+    created: item.created,
+    dreamAction: item.dreamAction,
+    tags: item.tags,
+    kind,
+  };
+}
+
+/** Manifest-side link fields for a reconstructed pipeline. */
+export function pipelineToManifestLink(p: Pipeline): DreamLinkFields {
+  const manPath = p.manifest?.path;
+  return {
+    id: manPath ? dreamStemFromPath(manPath) : p.name,
+    path: manPath ?? `forge/dreams/sessions/${p.name}.manifest.md`,
+    pipeline: p.name,
+    created: p.created ?? p.manifest?.created,
+    dreamAction: p.manifest?.dreamAction,
+    tags: p.manifest?.tags,
+    kind: 'manifest',
+  };
+}
+
+/**
+ * Whether a light report or proposal should hang under this pipeline.
+ * Prefer frontmatter `pipeline:`; fall back to shared stamp helpers.
+ */
+export function artifactJoinsPipeline(item: ForgeListItem, p: Pipeline): boolean {
+  if (item.pipeline && item.pipeline === p.name) return true;
+  const kind: DreamLinkFields['kind'] = item.path.startsWith('forge/proposals/')
+    ? 'proposal'
+    : 'light';
+  return artifactBelongsToManifest(forgeItemToLink(item, kind), pipelineToManifestLink(p));
+}
+
+/** True when the pipeline has products by either convention (dirs/layers or linked). */
+export function pipelineHasProducts(p: Pipeline): boolean {
+  return (
+    p.layers.size > 0 ||
+    (p.linkedArtifacts?.length ?? 0) > 0 ||
+    p.hasArtifacts === true
+  );
+}
+
 export function buildForgeData(items: ForgeListItem[]): ForgeData {
   const pipelineMap = new Map<string, Pipeline>();
   const dreams: ForgeListItem[] = [];
@@ -80,7 +144,8 @@ export function buildForgeData(items: ForgeListItem[]): ForgeData {
     // ALL proposals, incl. the terminal subfolders (applied/rejected/stale) — the Proposals
     // section buckets them by frontmatter status. (The Tauri version excluded the subfolders,
     // which made its Applied/Rejected/Stale groups dead code: an applied proposal moved into
-    // applied/ vanished from the UI. Here those groups actually populate.)
+    // applied/ vanished from the UI. Here those groups actually populate.) Linked-to-pipeline
+    // proposals are peeled off after the pipeline map is built.
     if (item.path.startsWith('forge/proposals/')) {
       proposals.push(item);
       continue;
@@ -141,6 +206,57 @@ export function buildForgeData(items: ForgeListItem[]): ForgeData {
     if (item.role) pair.role = item.role;
   }
 
+  // Join forge/dreams reports + forge/proposals onto matching pipelines (frontmatter
+  // pipeline: first, then legacy action+date). Standalone leftovers keep their buckets.
+  const remainingDreams: ForgeListItem[] = [];
+  for (const d of dreams) {
+    let joined = false;
+    // Prefer exact pipeline name hit when present.
+    const byName = d.pipeline ? pipelineMap.get(d.pipeline) : undefined;
+    const candidates = byName
+      ? [byName]
+      : Array.from(pipelineMap.values()).filter(
+          (p) => p.triggeredBy === 'dream' || p.name.startsWith('dream-'),
+        );
+    for (const p of candidates) {
+      if (!artifactJoinsPipeline(d, p)) continue;
+      if (!p.linkedArtifacts) p.linkedArtifacts = [];
+      p.linkedArtifacts.push(d);
+      joined = true;
+      break;
+    }
+    if (!joined) remainingDreams.push(d);
+  }
+
+  const remainingProposals: ForgeListItem[] = [];
+  for (const prop of proposals) {
+    let joined = false;
+    const byName = prop.pipeline ? pipelineMap.get(prop.pipeline) : undefined;
+    if (byName) {
+      if (!byName.linkedArtifacts) byName.linkedArtifacts = [];
+      byName.linkedArtifacts.push(prop);
+      joined = true;
+    } else {
+      // Legacy: proposals without pipeline: may still match a dream stamp.
+      for (const p of pipelineMap.values()) {
+        if (p.triggeredBy !== 'dream' && !p.name.startsWith('dream-')) continue;
+        if (!artifactJoinsPipeline(prop, p)) continue;
+        if (!p.linkedArtifacts) p.linkedArtifacts = [];
+        p.linkedArtifacts.push(prop);
+        joined = true;
+        break;
+      }
+    }
+    if (!joined) remainingProposals.push(prop);
+  }
+
+  // Annotate hasArtifacts from joined products (browser also ORs handle/output dirs).
+  for (const p of pipelineMap.values()) {
+    if ((p.linkedArtifacts?.length ?? 0) > 0 || p.layers.size > 0) {
+      p.hasArtifacts = true;
+    }
+  }
+
   const all = Array.from(pipelineMap.values());
   const dreamPipelines = all.filter((p) => p.triggeredBy === 'dream');
   const pipelines = all.filter((p) => p.triggeredBy !== 'dream');
@@ -153,9 +269,16 @@ export function buildForgeData(items: ForgeListItem[]): ForgeData {
   };
   pipelines.sort(byDate);
   dreamPipelines.sort(byDate);
-  dreams.sort((a, b) => String(b.created || '').localeCompare(String(a.created || '')));
+  remainingDreams.sort((a, b) => String(b.created || '').localeCompare(String(a.created || '')));
 
-  return { pipelines, dreamPipelines, dreams, recipes, proposals, other };
+  return {
+    pipelines,
+    dreamPipelines,
+    dreams: remainingDreams,
+    recipes,
+    proposals: remainingProposals,
+    other,
+  };
 }
 
 /** Layer count — loaded detail if present, else the manifest's `depth`. */

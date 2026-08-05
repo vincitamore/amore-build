@@ -9,6 +9,7 @@ export * from './knowledge';
 export * from './inbox';
 export * from './reminder';
 export * from './forge';
+export * from './dream-link';
 export * from './lint';
 export * from './status';
 export * from './root-trust';

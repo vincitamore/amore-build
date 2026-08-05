@@ -19,7 +19,25 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { basename, dirname, join, relative, sep } from 'node:path';
+import {
+  artifactBelongsToManifest,
+  dreamStemFromPath,
+  parseManifestStamp,
+  type DreamLinkFields,
+} from '@amore/regula';
 import { isInstalled, readEnablement, type LucernaEnablement } from './lucerna.ts';
+
+// Re-export shared match helpers so existing lucerna-review tests/import sites keep working.
+export { parseManifestStamp, artifactBelongsToManifest };
+export function lightBelongsToManifest(
+  light: DreamLinkFields & { kind?: string },
+  man: DreamLinkFields & { kind?: string },
+): boolean {
+  return artifactBelongsToManifest(
+    { ...light, kind: light.kind === 'proposal' ? 'proposal' : 'light' },
+    { ...man, kind: 'manifest' },
+  );
+}
 
 // ── shared shapes ─────────────────────────────────────────────────────────────
 
@@ -416,111 +434,33 @@ function sortDreams(items: DreamItem[]): DreamItem[] {
 }
 
 /**
- * Parse session manifest id stamp: `YYYYMMDD-HHmmss-<action>` (protocol) or
- * looser `YYYYMMDD-<action>`.
- */
-export function parseManifestStamp(
-  id: string,
-): { ymd: string; hms?: string; action: string } | null {
-  const full = id.match(/^(\d{8})-(\d{6})-(.+)$/);
-  if (full) return { ymd: full[1], hms: full[2], action: full[3] };
-  const loose = id.match(/^(\d{8})-(.+)$/);
-  if (loose && !/^\d{6}$/.test(loose[2].slice(0, 6))) {
-    return { ymd: loose[1], action: loose[2] };
-  }
-  return null;
-}
-
-function ymdDashed(ymd: string): string {
-  return `${ymd.slice(0, 4)}-${ymd.slice(4, 6)}-${ymd.slice(6, 8)}`;
-}
-
-function sameCalendarDay(created: string | undefined, ymd: string): boolean {
-  if (!created) return false;
-  const compact = created.replace(/-/g, '').slice(0, 8);
-  return compact === ymd;
-}
-
-/**
- * Whether a forge/dreams report belongs to a session manifest (one agentic
- * dream → one review row). Primary: shared `pipeline`. Fallback for older
- * artifacts: same basename id, or action+date from the session stamp vs
- * report filename / dream-action / created.
- */
-export function lightBelongsToManifest(light: DreamItem, man: DreamItem): boolean {
-  if (light.kind !== 'light' || man.kind !== 'manifest') return false;
-
-  // 1. pipeline linkage (preferred — writer may stamp the same pipeline on both)
-  if (light.pipeline && man.pipeline && light.pipeline === man.pipeline) return true;
-  if (light.pipeline && man.id && light.pipeline === man.id) return true;
-  if (man.pipeline && light.id && man.pipeline === light.id) return true;
-  if (man.pipeline && light.pipeline) {
-    const a = man.pipeline.replace(/^dream-/, '');
-    const b = light.pipeline.replace(/^dream-/, '');
-    if (a && a === b) return true;
-  }
-
-  // 2. identical basename id
-  if (light.id === man.id) return true;
-
-  // 3. legacy: action + date from session stamp vs report fields/filename
-  const stamp = parseManifestStamp(man.id);
-  if (!stamp) return false;
-  const action = stamp.action.toLowerCase();
-  const idL = light.id.toLowerCase();
-
-  if (idL === man.id.toLowerCase()) return true;
-  // filename carries both compact date and action (common legacy naming)
-  if (idL.includes(action) && idL.includes(stamp.ymd)) return true;
-
-  if (light.dreamAction?.toLowerCase() === action && sameCalendarDay(light.created, stamp.ymd)) {
-    return true;
-  }
-
-  // pipeline on either side encodes dream-<action> with matching created day
-  const pipeAction = (light.pipeline ?? man.pipeline ?? '')
-    .replace(/^dream-/, '')
-    .toLowerCase();
-  if (pipeAction && pipeAction === action) {
-    if (sameCalendarDay(light.created, stamp.ymd) || sameCalendarDay(man.created, stamp.ymd)) {
-      if (light.pipeline || light.dreamAction?.toLowerCase() === action || idL.includes(action)) {
-        return true;
-      }
-    }
-  }
-
-  // light created day matches man created day AND action appears in light id/tags
-  if (
-    man.created &&
-    light.created &&
-    man.created.slice(0, 10) === light.created.slice(0, 10) &&
-    (idL.includes(action) ||
-      light.dreamAction?.toLowerCase() === action ||
-      light.tags.some((t) => t.toLowerCase() === action))
-  ) {
-    return true;
-  }
-
-  // light filename uses dashed date + action (e.g. tag-regen-2026-08-05)
-  if (idL.includes(action) && idL.includes(ymdDashed(stamp.ymd))) return true;
-
-  return false;
-}
-
-/**
  * Fold agentic report artifacts under their session manifest. Standalone light
  * dreams (no matching manifest) remain as their own rows.
  */
 export function dedupeDreamItems(manifests: DreamItem[], lights: DreamItem[]): DreamItem[] {
   const usedLight = new Set<string>();
   const outManifests = manifests.map((man) => {
-    const linked = lights.find((l) => !usedLight.has(l.path) && lightBelongsToManifest(l, man));
+    const linked = lights.find(
+      (l) => !usedLight.has(l.path) && lightBelongsToManifest(dreamItemToLink(l), dreamItemToLink(man)),
+    );
     if (!linked) return man;
     usedLight.add(linked.path);
     return { ...man, reportPath: linked.path };
   });
   const standalone = lights.filter((l) => !usedLight.has(l.path));
   return [...outManifests, ...standalone];
+}
+
+function dreamItemToLink(d: DreamItem): DreamLinkFields {
+  return {
+    id: d.id || dreamStemFromPath(d.path),
+    path: d.path,
+    pipeline: d.pipeline,
+    created: d.created,
+    dreamAction: d.dreamAction,
+    tags: d.tags,
+    kind: d.kind === 'manifest' ? 'manifest' : 'light',
+  };
 }
 
 function sortProposals(items: ProposalItem[]): ProposalItem[] {
@@ -620,7 +560,7 @@ export function findLinkedReportPath(orgRoot: string, man: DreamItem): string | 
   if (man.reportPath) return man.reportPath;
   if (man.kind !== 'manifest') return undefined;
   const lights = collectLightReports(orgRoot);
-  const hit = lights.find((l) => lightBelongsToManifest(l, man));
+  const hit = lights.find((l) => lightBelongsToManifest(dreamItemToLink(l), dreamItemToLink(man)));
   return hit?.path;
 }
 

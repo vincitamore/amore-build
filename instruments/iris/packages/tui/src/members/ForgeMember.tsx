@@ -225,7 +225,11 @@ export function ForgeMember({
   const sortedData = useMemo(() => {
     const sortPipes = (arr: Pipeline[]) => {
       const c = arr.map((p) => {
-        p.hasArtifacts = artifactDirs.has(p.name) || p.layers.size > 0;
+        p.hasArtifacts =
+          artifactDirs.has(p.name) ||
+          p.layers.size > 0 ||
+          (p.linkedArtifacts?.length ?? 0) > 0 ||
+          p.hasArtifacts === true;
         return p;
       });
       switch (sortMode) {

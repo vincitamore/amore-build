@@ -60,14 +60,26 @@ export function flattenForge(section: ForgeSection, data: ForgeData, view: Forge
     if (!expanded) return;
     if (p.manifest) rows.push({ kind: 'manifest', path: p.manifest.path, depth: depth + 1 });
     const layers = Array.from(p.layers.entries()).sort(([a], [b]) => a - b);
-    // Detail is loaded synchronously on expand, so an empty layer set here means the pipeline
-    // genuinely has no handle/output artifacts on disk (manifest-only) — say so, don't look broken.
-    if (layers.length === 0) rows.push({ kind: 'note', text: '(manifest only — no handle/output artifacts on disk)', depth: depth + 1 });
+    const linked = p.linkedArtifacts ?? [];
+    // "Manifest only" only when NEITHER handle/output layers NOR frontmatter-joined
+    // reports/proposals are present (agentic dreams produce the latter without dirs).
+    if (layers.length === 0 && linked.length === 0) {
+      rows.push({
+        kind: 'note',
+        text: '(manifest only — no handle/output artifacts on disk)',
+        depth: depth + 1,
+      });
+    }
     for (const [idx, agents] of layers) {
       rows.push({ kind: 'layer', label: `Layer ${idx} — ${roleLabel(idx, agents)}`, depth: depth + 1 });
       agents.forEach((agent, i) =>
         rows.push({ kind: 'agent', agent, last: i === agents.length - 1, depth: depth + 2 }),
       );
+    }
+    // Linked dream reports / proposals (joined by pipeline: or legacy stamp).
+    for (const item of linked) {
+      const icon = item.path.startsWith('forge/proposals/') ? PROPOSAL_ICON : DREAM_ICON;
+      rows.push({ kind: 'artifact', item, icon, depth: depth + 1 });
     }
   };
 
