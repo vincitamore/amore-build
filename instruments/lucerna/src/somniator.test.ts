@@ -117,7 +117,16 @@ describe("parseDreamPick", () => {
   });
 
   test("malformed unknown action", () => {
-    expect(parseDreamPick({ action: "agentic-housekeeping", reason: "nope" })).toBeNull();
+    expect(parseDreamPick({ action: "not-a-real-key", reason: "nope" })).toBeNull();
+  });
+
+  test("agentic keys are valid picks", () => {
+    expect(parseDreamPick({ action: "self-orient", reason: "drift" })!.action).toBe(
+      "self-orient",
+    );
+    expect(
+      parseDreamPick({ action: "agentic-housekeeping", reason: "tidy" })!.action,
+    ).toBe("agentic-housekeeping");
   });
 
   test("malformed non-object", () => {

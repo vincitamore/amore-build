@@ -22,6 +22,7 @@ import { StateManager } from "./state.ts";
 import { localTimestamp } from "./time.ts";
 import { RUNTIME_FILES, healthPath, logPath, sentinelPath } from "./paths.ts";
 import { executeLightAction, isAdmittedAction, actionBudgetTier, actionCooldownClass } from "./actions.ts";
+import { isFullAgenticKey } from "./agentic.ts";
 import { mergeGovernanceLists, loadUserGovernance } from "./governance.ts";
 import { AutoCommitter, type HeadlessCaller } from "./auto-commit.ts";
 import { runDreamCycle, type DreamCycleResult } from "./somniator.ts";
@@ -262,15 +263,22 @@ export class DaemonLoop {
    * Run one planner-driven dream cycle (CLI dream-cycle path).
    * --force overrides schedule only; enablement is always honored.
    */
-  async runDreamCycleNow(opts?: { force?: boolean }): Promise<DreamCycleResult> {
+  async runDreamCycleNow(opts?: {
+    force?: boolean;
+    forceAction?: string;
+  }): Promise<DreamCycleResult> {
     return runDreamCycle(this.config, {
       stateManager: this.stateManager,
       force: opts?.force === true,
+      forceAction: opts?.forceAction,
     });
   }
 
   /**
-   * Run one admitted light action (CLI dream <action> path).
+   * Run one admitted action (CLI dream <action> path).
+   * Full agentic keys go through a dream-cycle force-action path when dreams
+   * are enabled; otherwise light/shell runners only (agentic refused without
+   * enablement for unsupervised multi-turn cost).
    */
   async runAction(
     key: string,
@@ -287,6 +295,27 @@ export class DaemonLoop {
         return { ok: false, detail: gate.reason };
       }
     }
+
+    // Full agentic: require dreams enablement; use cycle force-action path
+    if (isFullAgenticKey(key)) {
+      if (!this.config.dreamsEnabled) {
+        return {
+          ok: false,
+          detail: "agentic actions require dreamsEnabled (use dream-cycle --action with dreams on)",
+        };
+      }
+      const cycle = await runDreamCycle(this.config, {
+        stateManager: this.stateManager,
+        force: true,
+        forceAction: key,
+      });
+      return {
+        ok: cycle.status === "ran",
+        detail: cycle.reason,
+        artifactPath: cycle.artifactPath ?? cycle.manifestPath,
+      };
+    }
+
     const result = executeLightAction(key, this.config.houseRoot, this.lists);
     if (!result) {
       return { ok: false, detail: `no runner for ${key}` };

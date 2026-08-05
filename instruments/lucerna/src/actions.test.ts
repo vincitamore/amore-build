@@ -17,10 +17,13 @@ import {
   runSubstrateHealth,
   runInboxAgeReport,
   runStateCleanup,
+  runEdgesUpdate,
+  runEdgesDensify,
   extractWikilinks,
   parseFrontmatter,
 } from "./actions.ts";
 import { canWrite } from "./governance.ts";
+import type { SpawnSyncReturns } from "node:child_process";
 
 function syntheticHouse(): string {
   const house = mkdtempSync(join(tmpdir(), "lucerna-house-"));
@@ -57,17 +60,35 @@ function syntheticHouse(): string {
 }
 
 describe("action catalog", () => {
-  test("exactly four admitted phase-1 actions", () => {
+  test("admitted catalog: light daily + agentic weekly", () => {
     expect(ADMITTED_ACTION_KEYS).toEqual([
       "survey-org",
       "substrate-health",
       "inbox-age-report",
       "state-cleanup",
+      "edges-update",
+      "self-orient",
+      "agentic-housekeeping",
+      "edges-densify",
     ]);
     for (const e of ACTION_CATALOG) {
       expect(e.parity === "admit" || e.parity === "defer" || e.parity === "refuse").toBe(true);
+    }
+    const light = ACTION_CATALOG.filter((e) => e.class === "light");
+    for (const e of light) {
       expect(e.budgetTier).toBe("daily");
       expect(e.cooldownClass).toBe("light");
+    }
+    const agentic = ACTION_CATALOG.filter(
+      (e) => e.class === "agentic" || e.class === "recipe-map",
+    );
+    expect(agentic.map((e) => e.key).sort()).toEqual(
+      ["agentic-housekeeping", "edges-densify", "self-orient"].sort(),
+    );
+    for (const e of agentic) {
+      expect(e.budgetTier).toBe("weekly");
+      expect(e.cooldownClass).toBe("recipe");
+      expect(e.admitted).toBe(true);
     }
   });
 });
@@ -143,14 +164,23 @@ describe("light actions against synthetic house", () => {
     }
   });
 
-  test("executeLightAction dispatches all admitted keys", () => {
+  test("executeLightAction dispatches light and shell keys", () => {
     const house = syntheticHouse();
     try {
-      for (const key of ADMITTED_ACTION_KEYS) {
+      const lightKeys = [
+        "survey-org",
+        "substrate-health",
+        "inbox-age-report",
+        "state-cleanup",
+      ];
+      for (const key of lightKeys) {
         const r = executeLightAction(key, house);
         expect(r).not.toBeNull();
         expect(r!.ok).toBe(true);
       }
+      // Full agentic keys have no light runner
+      expect(executeLightAction("self-orient", house)).toBeNull();
+      expect(executeLightAction("agentic-housekeeping", house)).toBeNull();
       expect(executeLightAction("not-a-real-action", house)).toBeNull();
     } finally {
       rmSync(house, { recursive: true, force: true });
@@ -165,6 +195,106 @@ describe("light actions against synthetic house", () => {
       executeLightAction("substrate-health", house);
       const after = readdirSync(join(house, "knowledge")).sort();
       expect(after).toEqual(before);
+    } finally {
+      rmSync(house, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("edges-update / edges-densify against stub iris", () => {
+  test("edges-update argv is iris edges update --tier 0 --json", () => {
+    const house = syntheticHouse();
+    try {
+      let capturedArgv: string[] = [];
+      const spawnSyncImpl = ((_bin: string, argv: readonly string[]) => {
+        capturedArgv = [...argv];
+        return {
+          status: 0,
+          stdout: JSON.stringify({ added: 0, updated: 0 }),
+          stderr: "",
+          pid: 1,
+          output: [],
+          signal: null,
+        } as unknown as SpawnSyncReturns<string>;
+      }) as unknown as typeof import("node:child_process").spawnSync;
+
+      const r = runEdgesUpdate(house, { spawnSyncImpl });
+      expect(r.ok).toBe(true);
+      expect(capturedArgv).toEqual(["edges", "update", "--tier", "0", "--json"]);
+      expect(r.artifactPath!.replace(/\\/g, "/")).toContain("forge/dreams/");
+    } finally {
+      rmSync(house, { recursive: true, force: true });
+    }
+  });
+
+  test("edges-densify argv is --tier 2", () => {
+    const house = syntheticHouse();
+    try {
+      let capturedArgv: string[] = [];
+      const spawnSyncImpl = ((_bin: string, argv: readonly string[]) => {
+        capturedArgv = [...argv];
+        return {
+          status: 0,
+          stdout: "{}",
+          stderr: "",
+          pid: 1,
+          output: [],
+          signal: null,
+        } as unknown as SpawnSyncReturns<string>;
+      }) as unknown as typeof import("node:child_process").spawnSync;
+
+      const r = runEdgesDensify(house, { spawnSyncImpl });
+      expect(r.ok).toBe(true);
+      expect(capturedArgv).toEqual(["edges", "update", "--tier", "2", "--json"]);
+    } finally {
+      rmSync(house, { recursive: true, force: true });
+    }
+  });
+
+  test("missing iris is honest failure not crash", () => {
+    const house = syntheticHouse();
+    try {
+      const spawnSyncImpl = (() => {
+        return {
+          status: null,
+          stdout: "",
+          stderr: "",
+          error: Object.assign(new Error("spawn iris ENOENT"), { code: "ENOENT" }),
+          pid: 0,
+          output: [],
+          signal: null,
+        } as unknown as SpawnSyncReturns<string>;
+      }) as unknown as typeof import("node:child_process").spawnSync;
+
+      const r = runEdgesUpdate(house, { spawnSyncImpl });
+      expect(r.ok).toBe(false);
+      expect(r.detail).toMatch(/iris|spawn|ENOENT|unavailable/i);
+      expect(r.artifactPath).toBeDefined();
+    } finally {
+      rmSync(house, { recursive: true, force: true });
+    }
+  });
+
+  test("nonzero iris exit is action failure", () => {
+    const house = syntheticHouse();
+    try {
+      const spawnSyncImpl = (() => {
+        return {
+          status: 2,
+          stdout: "",
+          stderr: "validity gate",
+          pid: 1,
+          output: [],
+          signal: null,
+        } as unknown as SpawnSyncReturns<string>;
+      }) as unknown as typeof import("node:child_process").spawnSync;
+
+      const r = executeLightAction("edges-update", house, undefined, {
+        spawnSyncImpl,
+      });
+      expect(r).not.toBeNull();
+      expect(r!.ok).toBe(false);
+      expect(r!.detail).toMatch(/exited 2/);
     } finally {
       rmSync(house, { recursive: true, force: true });
     }

@@ -110,6 +110,7 @@ fork to a new directory name to customize without losing edits):
 | Skill | Purpose |
 |-------|---------|
 | `forge-master` | Dynamic pipeline orchestration — topology, dual-write, manifests |
+| `somniator` | Lucerna dream review - manifests, proposals, agentic dream contracts |
 | `auriga` | Budget-aware campaigns over large enumerated action spaces |
 | `oeconomia` | Delegation economy — explicit model/tier choices, priced dispatches |
 | `prokope` | Goal-loop engineering for long-horizon, multi-session campaigns |

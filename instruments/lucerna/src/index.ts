@@ -48,17 +48,22 @@ export {
   parseJsonEnvelope,
   resolveAmoreBin,
   runAmoreProcess,
+  killProcessTree,
   type AmoreHeadlessResult,
   type AmoreJsonEnvelope,
 } from "./engine/amore-headless.ts";
 export {
   ACTION_CATALOG,
   ADMITTED_ACTION_KEYS,
+  AGENTIC_ACTION_KEYS,
+  LIGHT_ACTION_KEYS,
   executeLightAction,
   runSurveyOrg,
   runSubstrateHealth,
   runInboxAgeReport,
   runStateCleanup,
+  runEdgesUpdate,
+  runEdgesDensify,
 } from "./actions.ts";
 export {
   AutoCommitter,
@@ -89,3 +94,19 @@ export {
   notificationsPath,
   type LucernaNotification,
 } from "./notifications.ts";
+export {
+  runAgenticAction,
+  writeDreamManifest,
+  parseProposals,
+  materializeProposals,
+  checkGovernanceBreaches,
+  inventoryHousePaths,
+  MAINTENANCE_DISALLOWED_TOOLS,
+  DEFAULT_AGENTIC_WALL_MS,
+  FULL_AGENTIC_KEYS,
+  isFullAgenticKey,
+  buildManifestFrontmatter,
+  buildProposalFrontmatter,
+  dreamManifestRelPath,
+  type GovernanceBreach,
+} from "./agentic.ts";

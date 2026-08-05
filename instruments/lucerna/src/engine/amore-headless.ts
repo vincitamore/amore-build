@@ -42,6 +42,15 @@ export interface CallAmoreHeadlessOptions {
   model?: string;
   /** Override binary (tests / multi-install). */
   amoreBin?: string;
+  /**
+   * Comma-separated tools to remove via --disallowed-tools.
+   * Maintenance dreams pass web_search,web_fetch (see dispatch-contract.md).
+   */
+  disallowedTools?: string;
+  /** Optional --tools allow-list (comma-separated). */
+  tools?: string;
+  /** Optional --resume <sessionId> for multi-leg agentic runs. */
+  resumeSession?: string;
   /** Inject spawn for unit tests. */
   spawnImpl?: typeof spawn;
 }
@@ -84,6 +93,9 @@ export function buildAmoreHeadlessArgv(opts: {
   alwaysApprove?: boolean;
   noSubagents?: boolean;
   model?: string;
+  disallowedTools?: string;
+  tools?: string;
+  resumeSession?: string;
 }): string[] {
   const argv = [
     "--prompt-file",
@@ -100,6 +112,15 @@ export function buildAmoreHeadlessArgv(opts: {
   if (opts.permissionMode) argv.push("--permission-mode", opts.permissionMode);
   if (opts.alwaysApprove) argv.push("--always-approve");
   if (opts.model) argv.push("--model", opts.model);
+  if (opts.disallowedTools?.trim()) {
+    argv.push("--disallowed-tools", opts.disallowedTools.trim());
+  }
+  if (opts.tools?.trim()) {
+    argv.push("--tools", opts.tools.trim());
+  }
+  if (opts.resumeSession?.trim()) {
+    argv.push("--resume", opts.resumeSession.trim());
+  }
   return argv;
 }
 
@@ -258,6 +279,9 @@ export async function callAmoreHeadless(
       alwaysApprove: opts.alwaysApprove,
       noSubagents: opts.noSubagents,
       model: opts.model?.trim() || undefined,
+      disallowedTools: opts.disallowedTools,
+      tools: opts.tools,
+      resumeSession: opts.resumeSession,
     });
 
     if (argv.includes("--single") && argv.includes("--prompt-file")) {

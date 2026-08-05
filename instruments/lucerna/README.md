@@ -8,8 +8,9 @@ Lucerna is the Amore house steward daemon. It keeps a light heartbeat over a hou
 - **Two-list governance**: protected house identity surfaces are default-deny; only `inbox/captures/`, `forge/`, and lucerna's own runtime state may be written autonomously.
 - **Tiered budgets**: 12 actions per day, 6 expensive actions per week, 2 hour cycle cooldown, per-action cooldowns, and a soft daily token ceiling fed from driver usage envelopes.
 - **Enablement flags** default both off: dreams and live auto-commit require an explicit flip.
-- **Light actions** (model-free): `survey-org`, `substrate-health`, `inbox-age-report`, `state-cleanup`.
-- **Light dreams** (opt-in planner): when `dreamsEnabled` is true, Lucerna may run one planner call per cycle and execute at most one light action.
+- **Light actions** (model-free or thin shell): `survey-org`, `substrate-health`, `inbox-age-report`, `state-cleanup`, `edges-update`.
+- **Agentic actions** (multi-turn amore, weekly budget): `self-orient`, `agentic-housekeeping`, plus shell densify `edges-densify`.
+- **Dreams** (opt-in planner): when `dreamsEnabled` is true, Lucerna may run one planner call per cycle and execute at most one admitted action (light or agentic).
 - **Auto-commit dry-run**: drafts a commit message via one headless call on its own schedule (default 30 minute cooldown, change-set dedup, token ceiling); never commits unless live mode is enabled (live mode is draft-only in this release).
 
 ## Install
@@ -64,13 +65,13 @@ Absent file: both false. Malformed JSON: both false, with a log line. CLI flags 
 
 ## Light dreams
 
-A light dream is one autonomous maintenance cycle: Lucerna gathers a compact house snapshot (org counts, budget counters, recent action history), then makes a single `amore` headless call with a JSON schema that constrains the pick to the admitted light action keys or `skip`. At most one light action runs per cycle. A `skip` pick writes no report and spends only the planning call.
+A light dream is one autonomous maintenance cycle: Lucerna gathers a compact house snapshot (org counts, budget counters, recent action history), then makes a single `amore` headless call with a JSON schema that constrains the pick to the admitted action keys or `skip`. At most one action runs per cycle. A `skip` pick writes no report and spends only the planning call.
 
 Dreams stay **off by default**. Autonomous cycles run only when `dreamsEnabled` is true in `lucerna.enable.json` (or an equivalent start-time OR of that file with env/CLI). Absent or malformed enablement keeps dreams off. The `wake` sentinel can request an immediate cycle when dreams are already enabled; `sleep` still forces the dreaming heartbeat phase; `halt` stops the daemon as usual.
 
 Budgets apply end to end: 12 actions per day, 6 expensive actions per week, per-action cooldowns, a 2 hour cycle cooldown, and a soft daily token ceiling that includes the planning call. A refused cycle records its reason in `state.json` and the log. `lucerna dream-cycle --force` may override the cycle schedule, but it never overrides enablement.
 
-Executed actions write dated reports under `<house>/forge/dreams/` with frontmatter that includes `triggered-by: dream`. Outcomes worth operator attention (action executed, token ceiling, repeated planner failures) append to `<house>/instruments/lucerna/notifications.jsonl` for local surfaces to read.
+Executed light actions write dated reports under `<house>/forge/dreams/` with frontmatter that includes `triggered-by: dream`. Outcomes worth operator attention (action executed, token ceiling, repeated planner failures) append to `<house>/instruments/lucerna/notifications.jsonl` for local surfaces to read.
 
 The only model path is the operator's own `amore` configuration. Lucerna does not embed provider SDKs, API keys, or hardcoded model identifiers.
 
@@ -79,6 +80,46 @@ lucerna dream-cycle --house ~/my-house          # one cycle if enabled + budgets
 lucerna dream-cycle --house ~/my-house --force  # ignore schedule only
 lucerna dreams -n 10 --house ~/my-house         # recent cycle history from state
 lucerna status --house ~/my-house               # includes dream scheduling fields
+```
+
+## Agentic dreams
+
+An agentic dream runs a multi-turn `amore` loop so the spawned agent can read the house, use tools, and write dream artifacts. It is not a hardcoded light scan. Agentic actions are **expensive-tier** (weekly budget of 6 by default) and respect every shipped budget, cooldown, and enablement gate.
+
+| Action | Role |
+|--------|------|
+| `self-orient` | Read orientation surfaces and open state; write a grounded orientation report; propose protected-file updates only |
+| `agentic-housekeeping` | Bounded tidy survey (stale refs, unresolved items, doc drift); report-and-propose only |
+| `edges-densify` | Shell `iris edges update --tier 2 --json` under dreams budgets (model-judged densify; not a multi-turn loop) |
+
+### What agentic dreams may and may not touch
+
+**May write:** `forge/` (reports, session manifests, proposals), `inbox/captures/`, and Lucerna runtime residual under `instruments/lucerna/`.
+
+**Must not write:** `AGENTS.md`, `CLAUDE.md`, `context/`, `knowledge/`, `tasks/`, `reminders/`, `tags/`, `graph/`, `projects/`, `archive/`, `scripts/`, `.amore/`, `.grok/`, `.claude/`, or instrument package source. The dream prompt states this boundary. After each agentic cycle Lucerna diffs the house (git porcelain when available, else a file inventory of protected roots). On any out-of-bounds write it logs the breach, appends a `governance-breach` notification, and leaves the dream manifest at `review-status: pending` with the breach named in the body. Lucerna does not auto-revert.
+
+### Enablement, budgets, wall-timeout, web-off
+
+- **Enablement default: OFF.** Agentic cycles run only when `dreamsEnabled` is true. `--force` never flips enablement.
+- **Budgets:** same daily action cap and soft token ceiling as light dreams; agentic keys also consume the weekly expensive budget and the 12 hour recipe cooldown.
+- **Wall-timeout:** every agentic spawn has a configurable wall (default 20 minutes via `LUCERNA_AGENTIC_WALL_MS`). On expiry the driver kills the entire process tree (Windows `taskkill /T /F`, Unix process-group kill).
+- **Web access off:** maintenance agentic dreams pass `--disallowed-tools web_search,web_fetch` to the amore CLI (verified against the pager flag surface; see `src/engine/dispatch-contract.md`).
+- **Model path:** only the operator's own `amore` configuration. No provider SDKs, API keys, or hardcoded model ids inside Lucerna.
+
+### Manifests and proposals
+
+| Artifact | Path | Notes |
+|----------|------|-------|
+| Dream manifest | `forge/dreams/sessions/<YYYYMMDD-HHmmss>-<action>.manifest.md` | Frontmatter includes `type: forge`, `pipeline: dream-<action>`, `recipe: dream`, `triggered-by: dream`, `review-status: pending` |
+| Light / agentic report | `forge/dreams/<ts>-<action>.md` | Same light-dream report shape with `triggered-by: dream` |
+| Proposal | `forge/proposals/<slug>.md` | `type: proposal`, `status: pending`, `triggered-by: dream`; never auto-applied |
+
+A resident agent reviews manifests (`review-status: pending` → `reviewed`) and applies or closes proposals (`status: pending` → `applied` or `closed`). House skill: `.amore/skills/somniator/SKILL.md` in the house template.
+
+```bash
+lucerna dream-cycle --house ~/my-house --action self-orient --force
+lucerna dreams -n 10 --house ~/my-house
+lucerna status --house ~/my-house   # agentic keys, wall, web-off posture
 ```
 
 ## File-based control surface

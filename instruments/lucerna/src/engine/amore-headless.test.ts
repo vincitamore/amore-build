@@ -59,6 +59,24 @@ describe("buildAmoreHeadlessArgv", () => {
     expect(argv).toContain("--output-format");
     expect(argv[argv.indexOf("--output-format") + 1]).toBe("json");
   });
+
+  test("disallowed-tools, always-approve, resume forwarded for agentic", () => {
+    const argv = buildAmoreHeadlessArgv({
+      promptFile: "p.md",
+      cwd: "C:/house",
+      maxTurns: 32,
+      alwaysApprove: true,
+      noSubagents: true,
+      disallowedTools: "web_search,web_fetch",
+      resumeSession: "sess-abc",
+    });
+    expect(argv).toContain("--always-approve");
+    expect(argv).toContain("--disallowed-tools");
+    expect(argv[argv.indexOf("--disallowed-tools") + 1]).toBe("web_search,web_fetch");
+    expect(argv).toContain("--resume");
+    expect(argv[argv.indexOf("--resume") + 1]).toBe("sess-abc");
+    expect(argv[argv.indexOf("--max-turns") + 1]).toBe("32");
+  });
 });
 
 describe("parseJsonEnvelope + usage", () => {

@@ -1,6 +1,7 @@
 /**
- * Light action catalog and implementations.
- * Phase 1 ships four model-free actions. Writes go only through the shared write guard.
+ * Action catalog and light / shell action implementations.
+ * Agentic loops live in agentic.ts; edges shell to iris when present.
+ * Writes go only through the shared write guard.
  */
 
 import {
@@ -12,6 +13,7 @@ import {
   mkdirSync,
 } from "node:fs";
 import { join, relative } from "node:path";
+import { spawnSync, type SpawnSyncOptions } from "node:child_process";
 import { localFileTimestamp, localTimestamp } from "./time.ts";
 import type { BudgetTier } from "./budget.ts";
 import { writeGuarded, type GovernanceLists, defaultLists } from "./governance.ts";
@@ -36,7 +38,7 @@ export function budgetTierForClass(cls: ActionClass): BudgetTier {
 }
 
 /**
- * Phase 1 action catalog. Exact set is anti-accretion pinned in tests.
+ * Admitted action catalog (light + agentic). Exact set is anti-accretion pinned in tests.
  */
 export const ACTION_CATALOG: readonly ActionCatalogEntry[] = [
   {
@@ -75,9 +77,55 @@ export const ACTION_CATALOG: readonly ActionCatalogEntry[] = [
     cooldownClass: "light",
     description: "Prune lucerna aged runtime artifacts (rotated logs, tmp files)",
   },
+  {
+    key: "edges-update",
+    class: "light",
+    parity: "admit",
+    admitted: true,
+    budgetTier: "daily",
+    cooldownClass: "light",
+    description: "Shell iris edges update --tier 0 --json (structural re-derive, no model)",
+  },
+  {
+    key: "self-orient",
+    class: "agentic",
+    parity: "admit",
+    admitted: true,
+    budgetTier: "weekly",
+    cooldownClass: "recipe",
+    description:
+      "Agentic orientation report: read house surfaces, propose protected-file updates only",
+  },
+  {
+    key: "agentic-housekeeping",
+    class: "agentic",
+    parity: "admit",
+    admitted: true,
+    budgetTier: "weekly",
+    cooldownClass: "recipe",
+    description:
+      "Bounded agentic tidy survey: stale refs, unresolved items, doc drift (report-and-propose)",
+  },
+  {
+    key: "edges-densify",
+    class: "agentic",
+    parity: "admit",
+    admitted: true,
+    budgetTier: "weekly",
+    cooldownClass: "recipe",
+    description: "Shell iris edges update --tier 2 --json under dreams budgets (model-judged densify)",
+  },
 ] as const;
 
 export const ADMITTED_ACTION_KEYS = ACTION_CATALOG.filter((e) => e.admitted).map((e) => e.key);
+
+export const LIGHT_ACTION_KEYS = ACTION_CATALOG.filter(
+  (e) => e.admitted && e.class === "light",
+).map((e) => e.key);
+
+export const AGENTIC_ACTION_KEYS = ACTION_CATALOG.filter(
+  (e) => e.admitted && (e.class === "agentic" || e.class === "recipe-map"),
+).map((e) => e.key);
 
 export function catalogEntry(key: string): ActionCatalogEntry | undefined {
   return ACTION_CATALOG.find((e) => e.key === key);
@@ -85,6 +133,16 @@ export function catalogEntry(key: string): ActionCatalogEntry | undefined {
 
 export function isAdmittedAction(key: string): boolean {
   return catalogEntry(key)?.admitted === true;
+}
+
+export function isAgenticCatalogAction(key: string): boolean {
+  const e = catalogEntry(key);
+  return e?.admitted === true && (e.class === "agentic" || e.class === "recipe-map");
+}
+
+export function isLightCatalogAction(key: string): boolean {
+  const e = catalogEntry(key);
+  return e?.admitted === true && e.class === "light";
 }
 
 export function actionBudgetTier(key: string): BudgetTier {
@@ -469,10 +527,152 @@ export function runStateCleanup(
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+/** Resolve iris binary: LUCERNA_IRIS_BIN, IRIS_BIN, else `iris` on PATH. */
+export function resolveIrisBin(override?: string): string {
+  return (
+    override?.trim() ||
+    process.env.LUCERNA_IRIS_BIN?.trim() ||
+    process.env.IRIS_BIN?.trim() ||
+    "iris"
+  );
+}
+
+export interface IrisEdgesUpdateOptions {
+  houseRoot: string;
+  tier: 0 | 2;
+  irisBin?: string;
+  /** Inject for tests: replace spawnSync. */
+  spawnSyncImpl?: typeof spawnSync;
+  lists?: GovernanceLists;
+  actionKey?: string;
+}
+
+/**
+ * Shell exactly: iris edges update --tier <0|2> --json
+ * Nonzero exit or missing iris is an action failure (never a crash).
+ */
+export function runIrisEdgesUpdate(opts: IrisEdgesUpdateOptions): ActionResult {
+  const lists = opts.lists ?? defaultLists();
+  const actionKey = opts.actionKey ?? (opts.tier === 0 ? "edges-update" : "edges-densify");
+  const bin = resolveIrisBin(opts.irisBin);
+  const argv = ["edges", "update", "--tier", String(opts.tier), "--json"];
+  const spawnFn = opts.spawnSyncImpl ?? spawnSync;
+  const spawnOpts: SpawnSyncOptions = {
+    cwd: opts.houseRoot,
+    encoding: "utf-8",
+    windowsHide: true,
+    timeout: 120_000,
+  };
+
+  let status: number | null = null;
+  let stdout = "";
+  let stderr = "";
+  let spawnError: string | undefined;
+
+  try {
+    const r = spawnFn(bin, argv, spawnOpts);
+    status = r.status;
+    stdout = typeof r.stdout === "string" ? r.stdout : (r.stdout?.toString() ?? "");
+    stderr = typeof r.stderr === "string" ? r.stderr : (r.stderr?.toString() ?? "");
+    if (r.error) {
+      spawnError = r.error.message;
+    }
+  } catch (err) {
+    spawnError = err instanceof Error ? err.message : String(err);
+  }
+
+  const ts = localFileTimestamp();
+  const ok = spawnError === undefined && status === 0;
+  const lines = [
+    `# ${actionKey} ${ts}`,
+    "",
+    `Command: ${bin} ${argv.join(" ")}`,
+    `Exit: ${status === null ? "null" : status}`,
+    spawnError ? `Spawn error: ${spawnError}` : "",
+    "",
+    "## stdout",
+    "",
+    "```",
+    stdout.trim().slice(0, 4000) || "(empty)",
+    "```",
+    "",
+    "## stderr",
+    "",
+    "```",
+    stderr.trim().slice(0, 2000) || "(empty)",
+    "```",
+    "",
+    `Generated at ${localTimestamp()} by lucerna ${actionKey}.`,
+  ].filter((l, i, a) => !(l === "" && a[i - 1] === ""));
+
+  const report = writeReport(
+    opts.houseRoot,
+    `${ts}-${actionKey}.md`,
+    lines.join("\n"),
+    actionKey,
+    lists,
+  );
+
+  if (!ok) {
+    return {
+      ok: false,
+      artifactPath: report.artifactPath,
+      detail: spawnError
+        ? `iris unavailable or failed to spawn: ${spawnError}`
+        : `iris edges update --tier ${opts.tier} exited ${status}`,
+    };
+  }
+  return {
+    ok: true,
+    artifactPath: report.artifactPath,
+    detail: `iris edges update --tier ${opts.tier} ok`,
+  };
+}
+
+export function runEdgesUpdate(
+  houseRoot: string,
+  opts?: {
+    lists?: GovernanceLists;
+    irisBin?: string;
+    spawnSyncImpl?: typeof spawnSync;
+  },
+): ActionResult {
+  return runIrisEdgesUpdate({
+    houseRoot,
+    tier: 0,
+    actionKey: "edges-update",
+    lists: opts?.lists,
+    irisBin: opts?.irisBin,
+    spawnSyncImpl: opts?.spawnSyncImpl,
+  });
+}
+
+export function runEdgesDensify(
+  houseRoot: string,
+  opts?: {
+    lists?: GovernanceLists;
+    irisBin?: string;
+    spawnSyncImpl?: typeof spawnSync;
+  },
+): ActionResult {
+  return runIrisEdgesUpdate({
+    houseRoot,
+    tier: 2,
+    actionKey: "edges-densify",
+    lists: opts?.lists,
+    irisBin: opts?.irisBin,
+    spawnSyncImpl: opts?.spawnSyncImpl,
+  });
+}
+
 export function executeLightAction(
   key: string,
   houseRoot: string,
   lists: GovernanceLists = defaultLists(),
+  shellOpts?: {
+    irisBin?: string;
+    spawnSyncImpl?: typeof spawnSync;
+  },
 ): ActionResult | null {
   switch (key) {
     case "survey-org":
@@ -483,6 +683,10 @@ export function executeLightAction(
       return runInboxAgeReport(houseRoot, lists);
     case "state-cleanup":
       return runStateCleanup(houseRoot, { lists });
+    case "edges-update":
+      return runEdgesUpdate(houseRoot, { lists, ...shellOpts });
+    case "edges-densify":
+      return runEdgesDensify(houseRoot, { lists, ...shellOpts });
     default:
       return null;
   }

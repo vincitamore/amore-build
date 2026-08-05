@@ -24,7 +24,12 @@ import {
 } from "./daemon.ts";
 import { healthPath, logPath, sentinelPath, RUNTIME_FILES } from "./paths.ts";
 import { StateManager } from "./state.ts";
-import { ADMITTED_ACTION_KEYS, ACTION_CATALOG } from "./actions.ts";
+import {
+  ADMITTED_ACTION_KEYS,
+  ACTION_CATALOG,
+  AGENTIC_ACTION_KEYS,
+  LIGHT_ACTION_KEYS,
+} from "./actions.ts";
 import { readEnablementFile } from "./enablement.ts";
 import {
   buildAmoreHeadlessArgv,
@@ -38,6 +43,11 @@ import {
 } from "./budget.ts";
 import { PROTECTED_PATTERNS, WRITABLE_PATTERNS } from "./governance.ts";
 import { DREAM_PICK_SCHEMA } from "./somniator.ts";
+import {
+  DEFAULT_AGENTIC_WALL_MS,
+  MAINTENANCE_DISALLOWED_TOOLS,
+  FULL_AGENTIC_KEYS,
+} from "./agentic.ts";
 
 const HELP = `lucerna  -  house steward daemon
 
@@ -46,17 +56,22 @@ Usage:
   lucerna start       [--house PATH] [--dreams-enabled] [--auto-commit-live] [--dry-run]
   lucerna stop        [--house PATH]
   lucerna dream       <action> [--house PATH] [--respect-gates]
-  lucerna dream-cycle [--house PATH] [--force]
+  lucerna dream-cycle [--house PATH] [--force] [--action KEY]
   lucerna dreams      [-n N] [--house PATH]
   lucerna log         [-n N] [--house PATH]
   lucerna smoke       [--house PATH]
   lucerna version | --version
 
-Light actions:
+Admitted actions:
   ${ADMITTED_ACTION_KEYS.join(", ")}
 
-dream-cycle runs one planner pick (at most one light action). --force overrides
-the cycle schedule only; it never enables dreams when dreamsEnabled is false.
+dream-cycle runs one planner pick (at most one action), or --action KEY to run
+a named action without the planner. --force overrides the cycle schedule only;
+it never enables dreams when dreamsEnabled is false.
+
+Agentic actions (self-orient, agentic-housekeeping) spawn a multi-turn amore
+loop under wall-timeout, web tools off, and governance after-check. They count
+against the weekly expensive budget.
 
 Defaults:
   dreams OFF, auto-commit dry-run, daily actions ${DAILY_ACTION_BUDGET},
@@ -64,7 +79,7 @@ Defaults:
 
 Env:
   LUCERNA_HOUSE_ROOT, LUCERNA_AMORE_BIN, LUCERNA_DREAMS_ENABLED,
-  LUCERNA_AUTO_COMMIT_LIVE, LUCERNA_MODEL
+  LUCERNA_AUTO_COMMIT_LIVE, LUCERNA_MODEL, LUCERNA_AGENTIC_WALL_MS
 `;
 
 function getArg(args: string[], flag: string): string | undefined {
@@ -169,6 +184,14 @@ async function cmdStatus(args: string[]): Promise<number> {
     dreamsAutonomousDefault: false,
     autoCommitDefault: "dry-run",
     admittedActions: ADMITTED_ACTION_KEYS,
+    lightActions: LIGHT_ACTION_KEYS,
+    agenticActions: AGENTIC_ACTION_KEYS,
+    fullAgenticActions: [...FULL_AGENTIC_KEYS],
+    agentic: {
+      defaultWallMs: DEFAULT_AGENTIC_WALL_MS,
+      maintenanceDisallowedTools: MAINTENANCE_DISALLOWED_TOOLS,
+      enablementDefault: false,
+    },
   };
   console.log(JSON.stringify(out, null, 2));
   return 0;
@@ -239,8 +262,9 @@ async function cmdDream(args: string[]): Promise<number> {
 async function cmdDreamCycle(args: string[]): Promise<number> {
   const config = loadConfig(args);
   const force = args.includes("--force");
+  const forceAction = getArg(args, "--action");
   const loop = new DaemonLoop(config);
-  const result = await loop.runDreamCycleNow({ force });
+  const result = await loop.runDreamCycleNow({ force, forceAction });
   console.log(JSON.stringify(result, null, 2));
   // refused for enablement is a clean non-zero; schedule refuse is non-zero too
   if (result.status === "ran" || result.status === "skipped") return 0;
@@ -260,6 +284,11 @@ async function cmdDreams(args: string[]): Promise<number> {
   const history = sm.dreamCycleHistory(Number.isFinite(n) ? Math.max(1, n) : 20);
   const snap = sm.budgetSnapshot();
   const gate = sm.canStartCycle();
+  const lastAgentic = history.find(
+    (h) =>
+      h.action &&
+      (FULL_AGENTIC_KEYS as readonly string[]).includes(h.action),
+  );
   console.log(
     JSON.stringify(
       {
@@ -270,6 +299,19 @@ async function cmdDreams(args: string[]): Promise<number> {
           allowedToStartCycle: gate.allowed,
           reason: gate.reason,
           cycleCooldownRemainingMs: snap.cycleCooldownRemainingMs,
+        },
+        budgets: {
+          remainingDaily: snap.remainingDaily,
+          remainingWeeklyExpensive: snap.remainingWeekly,
+          tokensToday: snap.tokensToday,
+          dailyTokenCeiling: snap.dailyTokenCeiling,
+        },
+        agentic: {
+          keys: AGENTIC_ACTION_KEYS,
+          fullLoopKeys: [...FULL_AGENTIC_KEYS],
+          lastAgenticOutcome: lastAgentic ?? null,
+          defaultWallMs: DEFAULT_AGENTIC_WALL_MS,
+          webToolsDisallowed: MAINTENANCE_DISALLOWED_TOOLS,
         },
         history,
       },
@@ -379,7 +421,7 @@ async function cmdSmoke(args: string[]): Promise<number> {
   // 5. Catalog
   results.push({
     check: "action-catalog",
-    ok: ACTION_CATALOG.filter((a) => a.admitted).length === 4,
+    ok: ACTION_CATALOG.filter((a) => a.admitted).length === 8,
     detail: ADMITTED_ACTION_KEYS.join(","),
   });
 
