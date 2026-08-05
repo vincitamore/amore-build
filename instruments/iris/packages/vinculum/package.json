@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Typed structural edge derivation for the house graph store (graph/edges.jsonl). Tier-0 emitters only; the iris daemon serves the file.",
+  "description": "Typed edge derivation for the house graph store (graph/edges.jsonl). Structural tier-0 plus agentic gen/judge/ingest; the iris daemon serves the file.",
   "main": "src/index.ts",
   "scripts": {
     "test": "bun test"

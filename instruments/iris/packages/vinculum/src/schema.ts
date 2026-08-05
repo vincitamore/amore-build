@@ -167,6 +167,12 @@ export const VOLUME_WARD_PER_NODE = 12;
 /** Marker written on every tier-0 structural edge; reconcile only rewrites these. */
 export const STRUCTURAL_ASSERTED_BY = 'structural-v0';
 
+/** Deriving mechanism on provenance — structural emitters vs model-judged. */
+export const MECHANISMS = ['structural', 'judged'] as const;
+export type Mechanism = (typeof MECHANISMS)[number];
+export const MECHANISM_STRUCTURAL: Mechanism = 'structural';
+export const MECHANISM_JUDGED: Mechanism = 'judged';
+
 export interface EdgeEvidence {
   quote: string;
   /** Org-relative path, optionally `:line` or `:field`. */
@@ -179,8 +185,13 @@ export interface EdgeProvenance {
   model?: string;
   ts: string;
   judge_confidence?: number;
-  /** Structural derivation tier label (tier-0 writes `structural`). */
+  /**
+   * Derivation ladder tier label.
+   * Tier-0 structural writes `structural`; model-judged live edges write `2`.
+   */
   tier?: string;
+  /** How the edge was derived: field-backed structural vs model-judged. */
+  mechanism?: Mechanism;
   /** Org-relative source file that exhibited the fact. */
   source_file?: string;
   /** Frontmatter field name, when the exhibit is a field. */
@@ -372,6 +383,11 @@ export function validateEdge(raw: unknown): ValidationResult {
     if (p.line !== undefined && (typeof p.line !== 'number' || !Number.isInteger(p.line) || p.line < 1)) {
       errors.push('provenance.line must be a positive integer when present');
     }
+    if (p.mechanism !== undefined) {
+      if (!nonEmptyString(p.mechanism) || !(MECHANISMS as readonly string[]).includes(p.mechanism)) {
+        errors.push(`invalid provenance.mechanism: ${JSON.stringify(p.mechanism)} (expected structural|judged)`);
+      }
+    }
     provenance = {
       signal: p.signal as Signal,
       asserted_by: p.asserted_by as string,
@@ -379,6 +395,9 @@ export function validateEdge(raw: unknown): ValidationResult {
       ...(nonEmptyString(p.model) ? { model: p.model } : {}),
       ...(typeof p.judge_confidence === 'number' ? { judge_confidence: p.judge_confidence } : {}),
       ...(nonEmptyString(p.tier) ? { tier: p.tier } : {}),
+      ...(nonEmptyString(p.mechanism) && (MECHANISMS as readonly string[]).includes(p.mechanism)
+        ? { mechanism: p.mechanism as Mechanism }
+        : {}),
       ...(nonEmptyString(p.source_file) ? { source_file: p.source_file } : {}),
       ...(nonEmptyString(p.field) ? { field: p.field } : {}),
       ...(typeof p.line === 'number' ? { line: p.line } : {}),

@@ -14,6 +14,7 @@ import {
   type EdgeType,
   EDGE_TYPES,
   isEdgeType,
+  MECHANISM_STRUCTURAL,
   STRUCTURAL_ASSERTED_BY,
   edgeKey,
 } from './schema';
@@ -53,6 +54,7 @@ function buildStructuralEdge(orgRoot: string, d: DerivedEdgeInput, now: string):
       asserted_by: STRUCTURAL_ASSERTED_BY,
       ts: now,
       tier: 'structural',
+      mechanism: MECHANISM_STRUCTURAL,
       source_file: d.sourceFile,
       ...(d.field ? { field: d.field } : {}),
       ...(d.line !== undefined ? { line: d.line } : {}),

@@ -202,7 +202,7 @@ describe('edge id', () => {
   test('edgeIdOf is stable and resolveEdgeId finds by full id', () => {
     const e = edge({ source: 'tasks/a.md', target: 'tasks/b.md', type: 'depends-on' });
     const id1 = edgeIdOf(e);
-    const id2 = edgeIdOf({ ...e, note: 'x' });
+    const id2 = edgeIdOf({ source: e.source, target: e.target, type: e.type });
     expect(id1).toBe(id2);
     expect(id1).toHaveLength(12);
     const r = resolveEdgeId([e], id1);

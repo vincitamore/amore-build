@@ -72,25 +72,71 @@ export function ensureStore(orgRoot: string): void {
 
 export interface EdgeFilter {
   type?: string;
+  /** Confidence tier (asserted|inferred|candidate). */
+  confidence?: string;
+  /**
+   * Derivation ladder tier on provenance.tier (`structural` | `2` | …).
+   * Also accepts `--tier` CLI alias for derivation tier.
+   */
   tier?: string;
+  /** structural | judged — missing mechanism treated as structural when asserted_by is structural-v0. */
+  mechanism?: string;
   node?: string;
   signal?: string;
   source?: string;
   target?: string;
   assertedBy?: string;
+  model?: string;
+  /** Keep only the N most recent edges by provenance.ts (desc). Applied after other filters. */
+  recent?: number;
+  /** ISO timestamp lower bound on provenance.ts (inclusive). */
+  since?: string;
+}
+
+function edgeMechanism(e: Edge): string {
+  if (e.provenance.mechanism) return e.provenance.mechanism;
+  if (e.provenance.asserted_by === 'structural-v0' || e.provenance.tier === 'structural') {
+    return 'structural';
+  }
+  return 'judged';
 }
 
 export function filterEdges(edges: Edge[], f: EdgeFilter): Edge[] {
-  return edges.filter(
-    (e) =>
-      (!f.type || e.type === f.type) &&
-      (!f.tier || e.confidence === f.tier) &&
-      (!f.node || e.source === f.node || e.target === f.node) &&
-      (!f.signal || e.provenance.signal === f.signal) &&
-      (!f.source || e.source === f.source) &&
-      (!f.target || e.target === f.target) &&
-      (!f.assertedBy || e.provenance.asserted_by === f.assertedBy),
-  );
+  let out = edges.filter((e) => {
+    if (f.type && e.type !== f.type) return false;
+    if (f.confidence && e.confidence !== f.confidence) return false;
+    if (f.tier) {
+      const pt = e.provenance.tier ?? '';
+      const want = f.tier;
+      const match =
+        pt === want ||
+        (want === '0' && (pt === 'structural' || pt === '0')) ||
+        (want === 'structural' && (pt === 'structural' || pt === '0'));
+      if (!match) return false;
+    }
+    if (f.mechanism && edgeMechanism(e) !== f.mechanism) return false;
+    if (f.node && e.source !== f.node && e.target !== f.node) return false;
+    if (f.signal && e.provenance.signal !== f.signal) return false;
+    if (f.source && e.source !== f.source) return false;
+    if (f.target && e.target !== f.target) return false;
+    if (f.assertedBy && e.provenance.asserted_by !== f.assertedBy) return false;
+    if (f.model && e.provenance.model !== f.model) return false;
+    if (f.since) {
+      const t = Date.parse(e.provenance.ts);
+      const since = Date.parse(f.since);
+      if (Number.isNaN(t) || Number.isNaN(since) || t < since) return false;
+    }
+    return true;
+  });
+  if (f.recent !== undefined && f.recent >= 0) {
+    out = [...out].sort((a, b) => {
+      const ta = Date.parse(a.provenance.ts);
+      const tb = Date.parse(b.provenance.ts);
+      return (Number.isNaN(tb) ? 0 : tb) - (Number.isNaN(ta) ? 0 : ta);
+    });
+    out = out.slice(0, f.recent);
+  }
+  return out;
 }
 
 export interface StoreStats {

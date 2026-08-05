@@ -2,57 +2,78 @@
 
 Typed edge store for the house knowledge graph.
 
-## Model
+## Trust model
 
-Structural derivation writes straight into the served store. There is no approval
-gate and no candidates queue for tier-0 edges. After edges land, review, edit,
-and remove are after-the-fact stewardship verbs. Removing or annotating an edge
-is durable across the next `iris edges derive`: suppressions keep removed edges
-from returning, and overrides re-apply user notes and labels on top of deriver
-output (user fields win).
+Derived edges land **live** in `edges.jsonl` with tier and provenance. There is
+no approval queue. Review, edit, and remove are after-the-fact stewardship:
+suppressions keep removed edges from returning, and overrides re-apply user
+notes and labels (user fields win).
+
+For model-judged edges, a mechanical **quote gate** requires the supporting
+quote to appear verbatim in the named source file before ingest. That is
+validity, not approval.
 
 ## Files
 
 | File | Role |
 |------|------|
 | `edges.jsonl` | Canonical served edges — one JSON object per line. The iris daemon merges this into `/api/graph?edges=semantic` or `edges=both`. |
-| `suppressions.jsonl` | Durable remove records. Each line is a suppressed `(type, source, target)` so structural re-derive will not re-create that edge. |
-| `overrides.jsonl` | Durable edit records for user-adjustable fields (`note`, `label`). On re-derive the deriver edge is kept and these fields are merged in. |
+| `suppressions.jsonl` | Durable remove records. Each line is a suppressed `(type, source, target)` so re-derive and re-ingest will not re-create that edge. |
+| `overrides.jsonl` | Durable edit records for user-adjustable fields (`note`, `label`). |
 
 ## Populate
 
-Run structural derivation after authoring lifecycle fields and self-labels:
+### Tier 0 — structural (default, no model)
 
 ```
 iris edges derive
+iris edges update --tier 0
 ```
 
-Tier-0 derive reads deterministic facts from the house tree:
+Reads deterministic facts from the house tree:
 
 - task `blocked-by:` paths / wikilinks → `depends-on`
 - inbox `resolution:` wikilinks → `resolved-by`
 - body self-labels `[[target]] (type)` for the served type set
 - frontmatter `supersedes:` / `superseded-by:`
 
-Edges write straight into `edges.jsonl` (asserted). Re-running derive is safe:
-new facts are added, vanished structural facts are dropped, hand-authored edges
-are left alone, suppressions stay suppressed, and overrides re-apply.
+### Tier 1 — candidate inventory (no model, no land)
+
+```
+iris edges update --tier 1 --json
+```
+
+Reports co-link, rare-tag, and unlabeled-wikilink candidates that tier 2 would
+judge. Does not write edges.
+
+### Tier 2 — model-assisted (explicit only)
+
+```
+iris edges update --tier 2
+iris edges update --tier 2 --json
+```
+
+Runs gen → judge → quote-gated live ingest. Requires a working `amore` binary
+(`AMORE_BIN` or on `PATH`). The model is whatever the user's amore configuration
+selects; vinculum does not pin a provider or model id. Default tier when
+`--tier` is omitted is **0** so ordinary runs never call a model.
 
 ## Edge identity
 
 Each edge has a stable short id: the first twelve hex characters of
 `sha256(type|source|target)` after undirected normalization. List and show print
 that id; remove and edit accept the full id or a unique prefix of at least six
-hex characters. The id is derived, not stored as a separate field on the edge
-line, so it stays stable when the store is rewritten.
+hex characters.
 
 ## Review verbs
 
 ```
 iris edges list
 iris edges list --type depends-on
-iris edges list --source tasks/blocked.md
-iris edges list --target tasks/blocker.md
+iris edges list --mechanism judged
+iris edges list --tier 2
+iris edges list --recent 20
+iris edges list --since 2026-08-01T00:00:00.000Z
 iris edges list --asserted-by structural-v0
 iris edges list --json
 iris edges show <id>
@@ -64,28 +85,27 @@ iris edges stats
 iris edges validate
 ```
 
-`list` and `show` print a compact table or detail block by default. Pass `--json`
-for the structured envelope every other iris verb uses.
+`--recent <n>` keeps the N newest edges by provenance timestamp after other
+filters. Judged edges show `mechanism: judged` and the model id from the amore
+envelope when present.
 
 ### Remove
 
-`iris edges remove <id>` deletes the edge from `edges.jsonl` (atomic rewrite) and
-appends a suppression record with the edge key, id, and timestamp. On the next
-derive, a structural edge with the same key is not re-written.
+`iris edges remove <id>` deletes the edge from `edges.jsonl` and records a
+suppression. On the next derive or tier-2 ingest, that key will not re-land.
 
 ### Edit
 
-`iris edges edit <id>` adjusts user-adjustable fields only: `note` and `label`.
-The change is written into the served edge and into `overrides.jsonl`. On
-re-derive the structural body may refresh from the house tree, then the override
-is merged so the annotation remains.
+`iris edges edit <id>` adjusts `note` and `label` only. The change is written
+into the served edge and into `overrides.jsonl`.
 
 ### Merge rule
 
-1. Derive structural edges from the house tree.
+1. Derive structural edges from the house tree (tier 0).
 2. Drop any edge whose `(type, source, target)` is in `suppressions.jsonl`.
 3. Leave non-structural edges untouched by structural reconcile.
 4. Apply `overrides.jsonl` note/label onto matching keys (override wins).
+5. Judged edges from tier 2 merge by the same key; suppressions still win.
 
 ## Graph view
 
