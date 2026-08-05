@@ -55,15 +55,21 @@ test('tranche-2 write/read classification (athanor run is write; athanor reads a
 test('edges verbs resolve and classify write/read correctly', () => {
   expect(resolveOk(['edges', 'derive']).name).toBe('edges derive');
   expect(resolveOk(['edges', 'list']).name).toBe('edges list');
-  expect(resolveOk(['edges', 'remove', 'a.md', 'b.md', 'depends-on']).name).toBe('edges remove');
+  expect(resolveOk(['edges', 'show', 'abc123']).name).toBe('edges show');
+  expect(resolveOk(['edges', 'remove', 'abc123']).name).toBe('edges remove');
+  expect(resolveOk(['edges', 'edit', 'abc123', '--note', 'x']).name).toBe('edges edit');
   expect(resolveOk(['edges', 'validate']).name).toBe('edges validate');
   expect(resolveOk(['edges', 'stats']).name).toBe('edges stats');
   const byName = Object.fromEntries(COMMANDS.map((c) => [c.name, c]));
   expect(byName['edges derive'].isWrite).toBe(true);
   expect(byName['edges remove'].isWrite).toBe(true);
+  expect(byName['edges edit'].isWrite).toBe(true);
   expect(byName['edges list'].isWrite).toBe(false);
+  expect(byName['edges show'].isWrite).toBe(false);
   expect(byName['edges validate'].isWrite).toBe(false);
   expect(byName['edges stats'].isWrite).toBe(false);
+  expect(typeof byName['edges list'].human).toBe('function');
+  expect(typeof byName['edges show'].human).toBe('function');
 });
 
 test('inbox promote requires --to task|knowledge before touching regula', () => {
@@ -119,15 +125,23 @@ test('lucerna verbs resolve to the right spec', () => {
   expect(resolveOk(['lucerna', 'halt']).name).toBe('lucerna halt');
   expect(resolveOk(['lucerna', 'wake']).name).toBe('lucerna wake');
   expect(resolveOk(['lucerna', 'sleep']).name).toBe('lucerna sleep');
+  expect(resolveOk(['lucerna', 'start']).name).toBe('lucerna start');
+  expect(resolveOk(['lucerna', 'stop']).name).toBe('lucerna stop');
+  expect(resolveOk(['lucerna', 'enable', 'dreams', 'on']).name).toBe('lucerna enable');
+  expect(resolveOk(['lucerna', 'notifications']).name).toBe('lucerna notifications');
 });
 
 test('lucerna write/read classification', () => {
   const byName = Object.fromEntries(COMMANDS.map((c) => [c.name, c]));
   expect(byName['lucerna status'].isWrite).toBe(false);
   expect(byName['lucerna log'].isWrite).toBe(false);
+  expect(byName['lucerna notifications'].isWrite).toBe(false);
   expect(byName['lucerna halt'].isWrite).toBe(true);
   expect(byName['lucerna wake'].isWrite).toBe(true);
   expect(byName['lucerna sleep'].isWrite).toBe(true);
+  expect(byName['lucerna start'].isWrite).toBe(true);
+  expect(byName['lucerna stop'].isWrite).toBe(true);
+  expect(byName['lucerna enable'].isWrite).toBe(true);
 });
 
 test('lucerna log rejects invalid --n before any daemon call', () => {
@@ -138,6 +152,16 @@ test('lucerna log rejects invalid --n before any daemon call', () => {
   expect(
     spec.run({ orgRoot: '/nonexistent', args: { positional: [], flags: { n: 'x' } } }),
   ).rejects.toThrow(/--n/);
+});
+
+test('lucerna enable requires flag and on|off', () => {
+  const spec = COMMANDS.find((c) => c.name === 'lucerna enable')!;
+  expect(() =>
+    spec.run({ orgRoot: '/nonexistent', args: { positional: [], flags: {} } }),
+  ).toThrow(/enable/);
+  expect(() =>
+    spec.run({ orgRoot: '/nonexistent', args: { positional: ['dreams'], flags: {} } }),
+  ).toThrow(/enable/);
 });
 
 test('lucernaWriteExit maps ok:false to ACTIONABLE', () => {
@@ -159,11 +183,14 @@ test('inbox move requires a target type (second positional or --to) before touch
   );
 });
 
-test('status carries a human formatter; every other command does not (JSON-always default preserved)', () => {
+test('human formatters are opt-in on orientation/review verbs only', () => {
   const byName = Object.fromEntries(COMMANDS.map((c) => [c.name, c]));
   expect(byName['status'].human).toBeDefined();
+  expect(byName['edges list'].human).toBeDefined();
+  expect(byName['edges show'].human).toBeDefined();
+  const humanOk = new Set(['status', 'edges list', 'edges show']);
   for (const c of COMMANDS) {
-    if (c.name === 'status') continue;
+    if (humanOk.has(c.name)) continue;
     expect(c.human).toBeUndefined();
   }
 });

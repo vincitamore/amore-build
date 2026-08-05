@@ -868,8 +868,70 @@ export const COMMANDS: CommandSpec[] = [
     run: () => lucerna.lucernaSleep(),
     exit: lucerna.lucernaWriteExit,
   },
+  {
+    name: 'lucerna start',
+    summary:
+      'Start the Lucerna daemon as a detached child in the house (resolves IRIS_LUCERNA_BIN, PATH, then instruments/lucerna)',
+    isWrite: true,
+    booleanFlags: [],
+    flags: {},
+    run: () => lucerna.lucernaStart(),
+    exit: lucerna.lucernaWriteExit,
+  },
+  {
+    name: 'lucerna stop',
+    summary:
+      'Stop Lucerna: write halt sentinel, wait bounded; escalate to pid kill only if still alive and pid is lucerna',
+    isWrite: true,
+    booleanFlags: [],
+    flags: {},
+    run: () => lucerna.lucernaStop(),
+    exit: lucerna.lucernaWriteExit,
+  },
+  {
+    name: 'lucerna enable',
+    summary:
+      'Set durable enablement: iris lucerna enable dreams on|off | auto-commit-live on|off (defaults both off)',
+    isWrite: true,
+    booleanFlags: [],
+    flags: {},
+    run: ({ args }) => {
+      const flag = args.positional[0];
+      const value = args.positional[1];
+      if (!flag || !value) {
+        throw new regula.RegulaError(
+          'USAGE',
+          'lucerna enable requires <dreams|auto-commit-live> <on|off>',
+        );
+      }
+      try {
+        return lucerna.lucernaEnable(flag, value);
+      } catch (e) {
+        throw new regula.RegulaError('USAGE', e instanceof Error ? e.message : String(e));
+      }
+    },
+    exit: lucerna.lucernaWriteExit,
+  },
+  {
+    name: 'lucerna notifications',
+    summary: 'Newest Lucerna house notifications (notifications.jsonl); empty when the file is absent',
+    isWrite: false,
+    booleanFlags: [],
+    flags: { n: 'entries (default 20)' },
+    run: async ({ args }) => {
+      const nStr = str(args.flags, 'n');
+      let n = 20;
+      if (nStr !== undefined) {
+        n = Number(nStr);
+        if (!Number.isInteger(n) || n <= 0) {
+          throw new regula.RegulaError('USAGE', `Invalid --n '${nStr}' (expected a positive integer)`);
+        }
+      }
+      return lucerna.lucernaNotifications(n);
+    },
+  },
 
-  // ── edges (vinculum tier-0 — structural typed edges into graph/edges.jsonl) ──
+  // ── edges (vinculum — structural typed edges into graph/edges.jsonl) ──
   {
     name: 'edges derive',
     summary:
@@ -883,24 +945,51 @@ export const COMMANDS: CommandSpec[] = [
   },
   {
     name: 'edges list',
-    summary: 'List served edges from graph/edges.jsonl',
+    summary: 'List served edges from graph/edges.jsonl (table by default; --json for structured)',
     isWrite: false,
     booleanFlags: [],
     flags: {
       type: 'filter by edge type (e.g. depends-on)',
+      source: 'filter by source node id',
+      target: 'filter by target node id',
+      'asserted-by': 'filter by provenance.asserted_by (e.g. structural-v0)',
       house: 'house root override',
     },
     run: ({ orgRoot, args }) => edges.runEdgesList(orgRoot, args),
+    human: edges.edgesListHuman,
+  },
+  {
+    name: 'edges show',
+    summary: 'Show one edge by stable id with full provenance',
+    isWrite: false,
+    booleanFlags: [],
+    flags: {
+      house: 'house root override',
+    },
+    run: ({ orgRoot, args }) => edges.runEdgesShow(orgRoot, args),
+    human: edges.edgesShowHuman,
   },
   {
     name: 'edges remove',
-    summary: 'Remove one edge by source target type (after-the-fact review)',
+    summary: 'Remove one edge by stable id; durable across re-derive via graph/suppressions.jsonl',
     isWrite: true,
     booleanFlags: [],
     flags: {
       house: 'house root override',
     },
     run: ({ orgRoot, args }) => edges.runEdgesRemove(orgRoot, args),
+  },
+  {
+    name: 'edges edit',
+    summary: 'Edit note/label on an edge by stable id; preserved across re-derive via graph/overrides.jsonl',
+    isWrite: true,
+    booleanFlags: ['clear-note', 'clear-label'],
+    flags: {
+      note: 'set annotation note (user-adjustable)',
+      label: 'set short display label (user-adjustable)',
+      house: 'house root override',
+    },
+    run: ({ orgRoot, args }) => edges.runEdgesEdit(orgRoot, args),
   },
   {
     name: 'edges validate',

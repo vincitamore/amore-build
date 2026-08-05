@@ -86,9 +86,14 @@ export const ENDPOINTS: Endpoint[] = [
   { method: 'GET', path: '/api/lucerna/health', pathParams: [], queryParams: [], consumers: ['tui', 'cli'], tier: 'excluded', reason: 'proxy', note: 'lucerna runtime health.json' },
   { method: 'GET', path: '/api/lucerna/status', pathParams: [], queryParams: [], consumers: ['tui', 'cli'], tier: 'excluded', reason: 'proxy', note: 'lucerna state + enablement' },
   { method: 'GET', path: '/api/lucerna/log', pathParams: [], queryParams: ['n'], consumers: ['tui', 'cli'], tier: 'excluded', reason: 'proxy' },
+  { method: 'GET', path: '/api/lucerna/notifications', pathParams: [], queryParams: ['n'], consumers: ['tui', 'cli'], tier: 'excluded', reason: 'proxy', note: 'house notifications.jsonl' },
+  { method: 'GET', path: '/api/lucerna/pulse', pathParams: [], queryParams: [], consumers: ['tui'], tier: 'excluded', reason: 'proxy', note: 'dashboard compact pulse row' },
   { method: 'POST', path: '/api/lucerna/halt', pathParams: [], queryParams: [], consumers: ['tui', 'cli'], tier: 'excluded', reason: 'proxy' },
   { method: 'POST', path: '/api/lucerna/wake', pathParams: [], queryParams: [], consumers: ['tui', 'cli'], tier: 'excluded', reason: 'proxy' },
   { method: 'POST', path: '/api/lucerna/sleep', pathParams: [], queryParams: [], consumers: ['tui', 'cli'], tier: 'excluded', reason: 'proxy' },
+  { method: 'POST', path: '/api/lucerna/start', pathParams: [], queryParams: [], consumers: ['tui', 'cli'], tier: 'excluded', reason: 'proxy', note: 'detached spawn + health poll' },
+  { method: 'POST', path: '/api/lucerna/stop', pathParams: [], queryParams: [], consumers: ['tui', 'cli'], tier: 'excluded', reason: 'proxy', note: 'halt then optional pid kill' },
+  { method: 'POST', path: '/api/lucerna/enable', pathParams: [], queryParams: [], consumers: ['tui', 'cli'], tier: 'excluded', reason: 'proxy', note: 'atomic lucerna.enable.json write' },
 
   // ── EXCLUDED: auth — identity / signing ────────────────────────────────────
   { method: 'GET', path: '/api/identity', pathParams: [], queryParams: [], consumers: ['client'], tier: 'excluded', reason: 'auth' },
