@@ -8,6 +8,12 @@ work it describes.
 
 ## Unreleased
 
+- **The system prompt introduces the harness by its right name.** The
+  compiled-in prompt templates lagged one commit behind their plaintext
+  sources, so the resident model's system prompt carried a stale product
+  name and docs path. They are regenerated, the regeneration script the
+  staleness test names (`scripts/encrypt_templates.py`) now actually ships
+  in-tree, and the test guards the pair again.
 - **Linux releases run on Ubuntu 22.04 and Debian 12 again.** The linux-x64
   and linux-arm64 release lanes now build on the oldest supported LTS
   runners, so the shipped binaries' glibc floor is 2.35 (Ubuntu 22.04+,

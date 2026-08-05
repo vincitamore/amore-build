@@ -1,6 +1,11 @@
 [
   {
     "category": "fixes",
+    "description": "**The system prompt introduces the harness by its right name** — the compiled-in prompt templates lagged their plaintext sources by one commit, leaving a stale product name and docs path in the resident model's system prompt; regenerated, with the regeneration script now shipping in-tree.",
+    "breaking_change": false
+  },
+  {
+    "category": "fixes",
     "description": "**Linux glibc floor lowered to 2.35** — release lanes build on Ubuntu 22.04 runners so binaries run on Ubuntu 22.04+/Debian 12+; the installers now smoke-test the installed binary (must run and print a version) and restore the rollback copy on failure.",
     "breaking_change": false
   },
