@@ -189,7 +189,7 @@ name = "GLM-5.2 (OpenRouter)"
 env_key = "OPENROUTER_API_KEY"
 system_prompt_label = "Amore Build"
 context_window = 1048576
-max_completion_tokens = 128000
+max_completion_tokens = 262144
 ```
 
 **Verify:** `amore -m glm-openrouter -p "Reply with exactly: AMORE-OR-OK"`.
@@ -295,7 +295,7 @@ model_provider = "openrouter"
 name = "GLM-5.2 (OpenRouter)"
 system_prompt_label = "Amore Build"
 context_window = 1048576
-max_completion_tokens = 128000
+max_completion_tokens = 262144
 ```
 
 | TOML field | Maps to | Evidence |
