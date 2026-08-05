@@ -55,8 +55,96 @@ interface Notification {
   ref?: string;
 }
 
+/** Unified list row for dreams (manifest/light) + proposals. */
+interface ReviewRow {
+  kind: 'dream' | 'proposal';
+  dreamKind?: 'manifest' | 'light';
+  id: string;
+  path: string;
+  title: string;
+  pending: boolean;
+  statusLabel: string;
+  created?: string;
+}
+
+interface DreamListItem {
+  id: string;
+  kind: 'manifest' | 'light';
+  path: string;
+  title?: string;
+  goal?: string;
+  reviewStatus?: string;
+  status?: string;
+  created?: string;
+}
+
+interface ProposalListItem {
+  id: string;
+  path: string;
+  title?: string;
+  status?: string;
+  created?: string;
+  target?: string;
+}
+
 function truncate(s: string, n: number): string {
   return s.length <= n ? s : `${s.slice(0, Math.max(1, n - 1))}.`;
+}
+
+function dreamPending(d: DreamListItem): boolean {
+  if (d.kind === 'manifest') return d.reviewStatus === 'pending' || d.reviewStatus === undefined;
+  return d.status === 'pending' || d.status === undefined;
+}
+
+function proposalPending(p: ProposalListItem): boolean {
+  return p.status === 'pending' || p.status === undefined;
+}
+
+function toReviewRows(dreams: DreamListItem[], proposals: ProposalListItem[]): ReviewRow[] {
+  const rows: ReviewRow[] = [];
+  for (const d of dreams) {
+    const pending = dreamPending(d);
+    const statusLabel =
+      d.kind === 'manifest'
+        ? d.reviewStatus ?? 'pending'
+        : d.status ?? 'pending';
+    rows.push({
+      kind: 'dream',
+      dreamKind: d.kind,
+      id: d.id,
+      path: d.path,
+      title: d.title || d.goal || d.id,
+      pending,
+      statusLabel,
+      created: d.created,
+    });
+  }
+  for (const p of proposals) {
+    const pending = proposalPending(p);
+    rows.push({
+      kind: 'proposal',
+      id: p.id,
+      path: p.path,
+      title: p.title || p.id,
+      pending,
+      statusLabel: p.status ?? 'pending',
+      created: p.created,
+    });
+  }
+  rows.sort((a, b) => {
+    if (a.pending !== b.pending) return a.pending ? -1 : 1;
+    const ca = a.created ?? '';
+    const cb = b.created ?? '';
+    if (ca !== cb) return cb.localeCompare(ca);
+    return b.path.localeCompare(a.path);
+  });
+  return rows;
+}
+
+function formatReviewRow(row: ReviewRow): string {
+  const glyph = row.kind === 'dream' ? 'D' : 'P';
+  const tag = row.pending ? 'pend' : row.statusLabel.slice(0, 6);
+  return `${glyph} [${tag}] ${row.title}`;
 }
 
 /**
@@ -175,11 +263,16 @@ const SCROLLBACK = 200;
 const NOTE_LIMIT = 8;
 /** Fixed notification slots so a shorter set still repaints every prior row. */
 const NOTE_SLOTS = 5;
+/** Fixed review list slots for opaque clear-on-repaint. */
+const REVIEW_SLOTS = 6;
+
+type PanelFocus = 'log' | 'review';
+type ReviewView = 'list' | 'detail';
 
 /**
  * Lucerna member — agency operations console. Honest at every state:
  * iris-daemon-down, not-installed, stopped, running, stale/hung.
- * Ops: r start · k stop · h halt · w wake · s sleep · d dreams · a auto-commit.
+ * Ops: r start · k stop · h halt · w wake · s sleep · d dreams enable · a auto-commit · p review.
  */
 export function LucernaMember({
   inputActive,
@@ -197,6 +290,13 @@ export function LucernaMember({
   const [status, setStatus] = useState<Status | null>(null);
   const [logLines, setLogLines] = useState<string[]>([]);
   const [notes, setNotes] = useState<Notification[]>([]);
+  const [dreamItems, setDreamItems] = useState<DreamListItem[]>([]);
+  const [proposalItems, setProposalItems] = useState<ProposalListItem[]>([]);
+  const [dreamsEnabledFlag, setDreamsEnabledFlag] = useState(false);
+  const [reviewCursor, setReviewCursor] = useState(0);
+  const [panelFocus, setPanelFocus] = useState<PanelFocus>('log');
+  const [reviewView, setReviewView] = useState<ReviewView>('list');
+  const [detailBody, setDetailBody] = useState<string>('');
   const [scroll, setScroll] = useState(0);
   const [flash, setFlash] = useFlash();
   const [confirm, setConfirm] = useState<{ msg: string; run: () => void } | null>(null);
@@ -242,6 +342,28 @@ export function LucernaMember({
     } catch {
       /* ignore */
     }
+    try {
+      const r = await fetch(`${url}/api/lucerna/dreams`);
+      if (r.ok && alive()) {
+        const body = (await r.json()) as {
+          items?: DreamListItem[];
+          dreamsEnabled?: boolean;
+        };
+        setDreamItems(body.items ?? []);
+        if (typeof body.dreamsEnabled === 'boolean') setDreamsEnabledFlag(body.dreamsEnabled);
+      }
+    } catch {
+      /* ignore */
+    }
+    try {
+      const r = await fetch(`${url}/api/lucerna/proposals`);
+      if (r.ok && alive()) {
+        const body = (await r.json()) as { items?: ProposalListItem[] };
+        setProposalItems(body.items ?? []);
+      }
+    } catch {
+      /* ignore */
+    }
   };
 
   // HTTP poll against the iris daemon's Lucerna proxy while this tab is active.
@@ -260,9 +382,19 @@ export function LucernaMember({
   tickRender('LucernaMember');
 
   const uiState = deriveState(daemonUrl, health, status);
-  const enablement: Enablement = status?.enablement ?? { dreamsEnabled: false, autoCommitLive: false };
+  const enablement: Enablement = status?.enablement ?? {
+    dreamsEnabled: dreamsEnabledFlag,
+    autoCommitLive: false,
+  };
 
-  const reserve = 16; // status cards + badges + notifications + footer + borders
+  const reviewRows = useMemo(
+    () => toReviewRows(dreamItems, proposalItems),
+    [dreamItems, proposalItems],
+  );
+  const pendingReview = reviewRows.filter((r) => r.pending).length;
+  const selectedRow = reviewRows[Math.min(reviewCursor, Math.max(0, reviewRows.length - 1))] ?? null;
+
+  const reserve = 20; // status + notifications + review + footer
   const visible = Math.max(3, dims.height - reserve);
   // Outer pad (2) + panel border (2) + panel pad (2) = 6. Exact so rows fill the panel.
   const rowW = Math.max(16, dims.width - 6);
@@ -279,6 +411,10 @@ export function LucernaMember({
     if (delta > 0) setScroll((s) => (s > 0 ? Math.min(s + delta, Math.max(0, len - visible)) : 0));
   }, [logLines.length, visible]);
 
+  useEffect(() => {
+    if (reviewCursor >= reviewRows.length) setReviewCursor(Math.max(0, reviewRows.length - 1));
+  }, [reviewRows.length, reviewCursor]);
+
   const post = async (path: string, label: string, body?: Record<string, unknown>) => {
     if (!daemonUrl) return setFlash('Iris daemon down — cannot reach Lucerna proxy');
     setBusy(true);
@@ -292,6 +428,7 @@ export function LucernaMember({
         ok?: boolean;
         available?: boolean;
         reason?: string;
+        message?: string;
         outcome?: string;
         enablement?: Enablement;
         graceful?: boolean;
@@ -314,10 +451,27 @@ export function LucernaMember({
           // Force status re-read so TUI always shows file truth after write
           if (daemonUrl) await refresh(daemonUrl, () => true);
         }
+      } else if (
+        path === 'dreams/review' ||
+        path === 'proposals/apply' ||
+        path === 'proposals/close'
+      ) {
+        if (j.ok === false) setFlash(`${label}: ${j.reason ?? j.message ?? 'failed'}`);
+        else setFlash(label);
+        if (daemonUrl) await refresh(daemonUrl, () => true);
+        setReviewView('list');
       } else {
         setFlash(j.ok === false ? `${label} failed` : label);
       }
-      if (daemonUrl && path !== 'enable') await refresh(daemonUrl, () => true);
+      if (
+        daemonUrl &&
+        path !== 'enable' &&
+        path !== 'dreams/review' &&
+        path !== 'proposals/apply' &&
+        path !== 'proposals/close'
+      ) {
+        await refresh(daemonUrl, () => true);
+      }
     } catch {
       setFlash(`${label} failed`);
     } finally {
@@ -325,15 +479,121 @@ export function LucernaMember({
     }
   };
 
+  const openDetail = async (row: ReviewRow) => {
+    if (!daemonUrl) return setFlash('Iris daemon down — cannot reach Lucerna proxy');
+    try {
+      const path =
+        row.kind === 'dream'
+          ? `${daemonUrl}/api/lucerna/dream?id=${encodeURIComponent(row.id)}`
+          : `${daemonUrl}/api/lucerna/proposal?id=${encodeURIComponent(row.id)}`;
+      const r = await fetch(path);
+      if (!r.ok) return setFlash('detail load failed');
+      const j = (await r.json()) as { found?: boolean; body?: string; raw?: string };
+      if (!j.found) return setFlash('not found');
+      setDetailBody((j.body ?? j.raw ?? '').trim() || '(empty body)');
+      setReviewView('detail');
+      setPanelFocus('review');
+    } catch {
+      setFlash('detail load failed');
+    }
+  };
+
   useKeyboard((key: { name?: string }) => {
     if (!inputActive || confirm || busy) return;
     const n = (key.name ?? '').toLowerCase().replace('arrow', '');
-    if (n === 'up') return setScroll((s) => Math.min(s + 1, maxScroll));
-    if (n === 'down') return setScroll((s) => Math.max(s - 1, 0));
-    if (n === 'pageup') return setScroll((s) => Math.min(s + visible, maxScroll));
-    if (n === 'pagedown') return setScroll((s) => Math.max(s - visible, 0));
-    if (n === 'home') return setScroll(maxScroll);
-    if (n === 'end') return setScroll(0);
+
+    // Escape: detail → list, or review focus → log
+    if (n === 'escape') {
+      if (reviewView === 'detail') {
+        setReviewView('list');
+        return;
+      }
+      if (panelFocus === 'review') {
+        setPanelFocus('log');
+        return;
+      }
+    }
+
+    // Review panel navigation when focused
+    if (panelFocus === 'review') {
+      if (reviewView === 'list') {
+        if (n === 'up') {
+          return setReviewCursor((c) => Math.max(0, c - 1));
+        }
+        if (n === 'down') {
+          return setReviewCursor((c) => Math.min(Math.max(0, reviewRows.length - 1), c + 1));
+        }
+        if (n === 'return' || n === 'enter') {
+          if (selectedRow) return void openDetail(selectedRow);
+        }
+        if (n === 'v' && selectedRow?.pending) {
+          if (selectedRow.kind === 'dream') {
+            return setConfirm({
+              msg: `Mark dream ${selectedRow.id} reviewed?`,
+              run: () => void post('dreams/review', `reviewed ${selectedRow.id}`, { id: selectedRow.id }),
+            });
+          }
+          return setConfirm({
+            msg: `Mark proposal ${selectedRow.id} applied (status only — content not executed)?`,
+            run: () =>
+              void post('proposals/apply', `applied ${selectedRow.id} (status only)`, {
+                id: selectedRow.id,
+              }),
+          });
+        }
+        if (n === 'x' && selectedRow?.pending && selectedRow.kind === 'proposal') {
+          return setConfirm({
+            msg: `Close proposal ${selectedRow.id} (status only)?`,
+            run: () =>
+              void post('proposals/close', `closed ${selectedRow.id} (status only)`, {
+                id: selectedRow.id,
+              }),
+          });
+        }
+      } else if (reviewView === 'detail') {
+        if (n === 'v' && selectedRow?.pending) {
+          if (selectedRow.kind === 'dream') {
+            return setConfirm({
+              msg: `Mark dream ${selectedRow.id} reviewed?`,
+              run: () => void post('dreams/review', `reviewed ${selectedRow.id}`, { id: selectedRow.id }),
+            });
+          }
+          return setConfirm({
+            msg: `Mark proposal ${selectedRow.id} applied (status only)?`,
+            run: () =>
+              void post('proposals/apply', `applied ${selectedRow.id} (status only)`, {
+                id: selectedRow.id,
+              }),
+          });
+        }
+        if (n === 'x' && selectedRow?.pending && selectedRow.kind === 'proposal') {
+          return setConfirm({
+            msg: `Close proposal ${selectedRow.id}?`,
+            run: () =>
+              void post('proposals/close', `closed ${selectedRow.id}`, { id: selectedRow.id }),
+          });
+        }
+        if (n === 'return' || n === 'enter' || n === 'backspace') {
+          setReviewView('list');
+          return;
+        }
+      }
+    }
+
+    // Global ops (also when review focused, except arrows which navigate review)
+    if (panelFocus === 'log') {
+      if (n === 'up') return setScroll((s) => Math.min(s + 1, maxScroll));
+      if (n === 'down') return setScroll((s) => Math.max(s - 1, 0));
+      if (n === 'pageup') return setScroll((s) => Math.min(s + visible, maxScroll));
+      if (n === 'pagedown') return setScroll((s) => Math.max(s - visible, 0));
+      if (n === 'home') return setScroll(maxScroll);
+      if (n === 'end') return setScroll(0);
+    }
+    if (n === 'p') {
+      setPanelFocus((f) => (f === 'review' ? 'log' : 'review'));
+      setReviewView('list');
+      return;
+    }
     if (n === 'r') return void post('start', 'start');
     if (n === 'k') {
       return setConfirm({
@@ -419,8 +679,18 @@ export function LucernaMember({
           <Stat
             value={enablement.dreamsEnabled ? 'On' : 'Off'}
             label="Dreams"
-            sub={commitBadge}
-            color={enablement.dreamsEnabled ? t.warning : t.muted}
+            sub={
+              pendingReview > 0
+                ? `${pendingReview} pending review`
+                : commitBadge
+            }
+            color={
+              pendingReview > 0
+                ? t.warning
+                : enablement.dreamsEnabled
+                  ? t.warning
+                  : t.muted
+            }
           />
         </box>
         <box flexDirection="row" flexShrink={0} marginTop={1}>
@@ -437,9 +707,32 @@ export function LucernaMember({
         </box>
       </>
     );
-  }, [uiState, health, status, enablement, dims.width, t]);
+  }, [uiState, health, status, enablement, dims.width, t, pendingReview]);
 
   const showLog = uiState !== 'not-installed' && uiState !== 'daemon-down';
+  // Review panel is reachable whenever the iris daemon is up (forge artifacts live on the house,
+  // independent of the Lucerna process). When daemon is down, keep the honest empty notice.
+  const showReview = uiState !== 'daemon-down';
+
+  const reviewEmptyMessage = (): string => {
+    if (uiState === 'not-installed') return 'lucerna not installed — forge review still lists house artifacts when present';
+    if (!enablement.dreamsEnabled && reviewRows.length === 0) return 'no dreams yet · dreams disabled (d to enable)';
+    if (reviewRows.length === 0) return 'no dreams or proposals yet';
+    return '';
+  };
+
+  const reviewListStart = Math.max(0, Math.min(reviewCursor, Math.max(0, reviewRows.length - REVIEW_SLOTS)));
+  const reviewSlice = reviewRows.slice(reviewListStart, reviewListStart + REVIEW_SLOTS);
+
+  const footerHint = flash
+    ? flash
+    : panelFocus === 'review'
+      ? reviewView === 'detail'
+        ? 'esc/enter back · v review/apply · x close proposal'
+        : 'up/dn · enter detail · v review/apply · x close · p log · esc'
+      : uiState === 'not-installed' || uiState === 'daemon-down'
+        ? 'r start · k stop · h halt · w wake · s sleep · d dreams · a auto-commit · p review'
+        : 'r start · k stop · h halt · w wake · s sleep · d dreams · a auto-commit · p review · up/dn';
 
   return (
     <box flexDirection="column" flexGrow={1} paddingLeft={1} paddingRight={1} paddingTop={1} backgroundColor={t.background}>
@@ -479,9 +772,96 @@ export function LucernaMember({
         </Panel>
       ) : null}
 
+      {showReview ? (
+        <Panel
+          title={panelFocus === 'review' ? 'Review *' : 'Review'}
+          flexShrink={0}
+          marginTop={1}
+          headerRight={
+            pendingReview > 0
+              ? `${pendingReview} pending · ${reviewRows.length} total`
+              : reviewRows.length > 0
+                ? `${reviewRows.length} total`
+                : 'empty'
+          }
+        >
+          <box flexDirection="column" flexShrink={0}>
+            {reviewView === 'detail' && selectedRow ? (
+              <>
+                <FixedClearRow
+                  width={rowW}
+                  color={t.info}
+                  text={formatLucernaDisplayLine(
+                    `${selectedRow.kind} ${selectedRow.id} · ${selectedRow.statusLabel}`,
+                    rowW,
+                  )}
+                />
+                {detailBody.split(/\r?\n/).slice(0, REVIEW_SLOTS - 1).map((line, i) => (
+                  <FixedClearRow
+                    key={`d-${i}`}
+                    width={rowW}
+                    color={t.foreground}
+                    text={formatLucernaDisplayLine(line || ' ', rowW)}
+                  />
+                ))}
+                {Array.from(
+                  { length: Math.max(0, REVIEW_SLOTS - 1 - Math.min(REVIEW_SLOTS - 1, detailBody.split(/\r?\n/).length)) },
+                  (_, i) => (
+                    <FixedClearRow
+                      key={`de-${i}`}
+                      width={rowW}
+                      color={t.muted}
+                      text={emptyDisplayRow(rowW)}
+                    />
+                  ),
+                )}
+              </>
+            ) : (
+              Array.from({ length: REVIEW_SLOTS }, (_, i) => {
+                const row = reviewSlice[i];
+                if (!row) {
+                  const empty =
+                    i === 0 && reviewRows.length === 0
+                      ? reviewEmptyMessage()
+                      : emptyDisplayRow(rowW);
+                  return (
+                    <FixedClearRow
+                      key={`r-${i}`}
+                      width={rowW}
+                      color={t.muted}
+                      text={
+                        typeof empty === 'string' && empty.length === rowW
+                          ? empty
+                          : formatLucernaDisplayLine(empty, rowW)
+                      }
+                    />
+                  );
+                }
+                const absIdx = reviewListStart + i;
+                const selected = panelFocus === 'review' && absIdx === reviewCursor;
+                const color = selected
+                  ? t.info
+                  : row.pending
+                    ? t.warning
+                    : t.muted;
+                const prefix = selected ? '>' : ' ';
+                return (
+                  <FixedClearRow
+                    key={`r-${i}`}
+                    width={rowW}
+                    color={color}
+                    text={formatLucernaDisplayLine(`${prefix}${formatReviewRow(row)}`, rowW)}
+                  />
+                );
+              })
+            )}
+          </box>
+        </Panel>
+      ) : null}
+
       {showLog ? (
         <Panel
-          title="Activity Log"
+          title={panelFocus === 'log' ? 'Activity Log *' : 'Activity Log'}
           headerRight={`${logLines.length} ln${clamped > 0 ? ` · ^${clamped}` : ' · live'} · up/dn`}
           flexGrow={1}
           flexShrink={1}
@@ -513,14 +893,7 @@ export function LucernaMember({
 
       <box flexDirection="row" flexShrink={0} height={1} overflow="hidden" backgroundColor={t.background}>
         <text fg={flash ? t.success : t.muted} wrapMode="none">
-          {formatLucernaDisplayLine(
-            flash
-              ? flash
-              : uiState === 'not-installed' || uiState === 'daemon-down'
-                ? 'r start · k stop · h halt · w wake · s sleep · d dreams · a auto-commit'
-                : 'r start · k stop · h halt · w wake · s sleep · d dreams · a auto-commit · up/dn',
-            Math.max(16, dims.width - 2),
-          )}
+          {formatLucernaDisplayLine(footerHint, Math.max(16, dims.width - 2))}
         </text>
       </box>
 

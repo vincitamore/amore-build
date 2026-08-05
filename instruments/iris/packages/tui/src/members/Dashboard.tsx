@@ -386,6 +386,7 @@ export function Dashboard({
     state: string;
     beatAgeSec: number | null;
     lastNotification: { message?: string; kind?: string; level?: string } | null;
+    pendingReview?: { dreams: number; proposals: number; total: number };
   } | null>(null);
   // LIVE poll while active — /api/status (docs/uptime) + lucerna pulse. Every 3s while the
   // Dashboard is shown; paused when hidden (no work behind other screens).
@@ -408,6 +409,7 @@ export function Dashboard({
               state: string;
               beatAgeSec: number | null;
               lastNotification: { message?: string; kind?: string; level?: string } | null;
+              pendingReview?: { dreams: number; proposals: number; total: number };
             },
           );
         }
@@ -578,19 +580,24 @@ export function Dashboard({
         <box flexGrow={1} backgroundColor={t.background} />
         <text fg={t.muted} wrapMode="none">
           {formatLucernaDisplayLine(
-            !lucernaPulse || !lucernaPulse.available
-              ? 'not installed'
-              : lucernaPulse.state === 'running'
-                ? `live · beat ${
-                    lucernaPulse.beatAgeSec === null || lucernaPulse.beatAgeSec === undefined
-                      ? '-'
-                      : lucernaPulse.beatAgeSec < 60
-                        ? `${Math.floor(lucernaPulse.beatAgeSec)}s`
-                        : `${Math.floor(lucernaPulse.beatAgeSec / 60)}m`
-                  }`
-                : lucernaPulse.state === 'stale'
-                  ? 'hung'
-                  : 'stopped',
+            (() => {
+              const pend =
+                lucernaPulse?.pendingReview && lucernaPulse.pendingReview.total > 0
+                  ? ` · ${lucernaPulse.pendingReview.total} rev`
+                  : '';
+              if (!lucernaPulse || !lucernaPulse.available) return `not installed${pend}`;
+              if (lucernaPulse.state === 'running') {
+                const beat =
+                  lucernaPulse.beatAgeSec === null || lucernaPulse.beatAgeSec === undefined
+                    ? '-'
+                    : lucernaPulse.beatAgeSec < 60
+                      ? `${Math.floor(lucernaPulse.beatAgeSec)}s`
+                      : `${Math.floor(lucernaPulse.beatAgeSec / 60)}m`;
+                return `live · beat ${beat}${pend}`;
+              }
+              if (lucernaPulse.state === 'stale') return `hung${pend}`;
+              return `stopped${pend}`;
+            })(),
             Math.max(12, Math.min(28, Math.floor(dims.width / 4))),
           )}
         </text>

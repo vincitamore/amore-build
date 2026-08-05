@@ -442,6 +442,8 @@ export interface LucernaPulse {
   lastNotification: LucernaNotification | null;
   pid?: number;
   version?: string;
+  /** Pending dream manifests/light dreams + proposals awaiting operator review. */
+  pendingReview?: { dreams: number; proposals: number; total: number };
 }
 
 /** Derive a compact pulse shape from health + optional newest notification. */

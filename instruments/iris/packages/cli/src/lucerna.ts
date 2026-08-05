@@ -89,3 +89,37 @@ export function lucernaEnable(
   }
   throw new Error(`enable flag must be dreams|auto-commit-live (got '${flag}')`);
 }
+
+// ── dreams + proposals review (house forge artifacts via daemon proxy) ────────
+
+export async function lucernaDreamsList(pendingOnly = false): Promise<Record<string, unknown>> {
+  const q = pendingOnly ? '?pending=1' : '';
+  return daemonGet(`/api/lucerna/dreams${q}`) as Promise<Record<string, unknown>>;
+}
+
+export async function lucernaDreamShow(id: string): Promise<Record<string, unknown>> {
+  const q = new URLSearchParams({ id });
+  return daemonGet(`/api/lucerna/dream?${q}`) as Promise<Record<string, unknown>>;
+}
+
+export function lucernaDreamReview(id: string): Promise<Record<string, unknown>> {
+  return daemonPost('/api/lucerna/dreams/review', { id }) as Promise<Record<string, unknown>>;
+}
+
+export async function lucernaProposalsList(pendingOnly = false): Promise<Record<string, unknown>> {
+  const q = pendingOnly ? '?pending=1' : '';
+  return daemonGet(`/api/lucerna/proposals${q}`) as Promise<Record<string, unknown>>;
+}
+
+export async function lucernaProposalShow(id: string): Promise<Record<string, unknown>> {
+  const q = new URLSearchParams({ id });
+  return daemonGet(`/api/lucerna/proposal?${q}`) as Promise<Record<string, unknown>>;
+}
+
+export function lucernaProposalApply(id: string): Promise<Record<string, unknown>> {
+  return daemonPost('/api/lucerna/proposals/apply', { id }) as Promise<Record<string, unknown>>;
+}
+
+export function lucernaProposalClose(id: string): Promise<Record<string, unknown>> {
+  return daemonPost('/api/lucerna/proposals/close', { id }) as Promise<Record<string, unknown>>;
+}
