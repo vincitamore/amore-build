@@ -95,7 +95,22 @@ for f in LICENSE NOTICE; do
 done
 
 echo
-"$install_dir/$bin" --version
+# Smoke-gate: the binary must run AND print a version. Exit code alone is not
+# enough — a glibc-floor mismatch has been observed to print loader errors and
+# still exit 0 with no output.
+if ! smoke="$("$install_dir/$bin" --version)" || [ -z "$smoke" ]; then
+  echo "error: the installed binary failed to run on this host." >&2
+  echo "  On Linux this usually means the host's glibc is older than the" >&2
+  echo "  release floor (releases target Ubuntu 22.04+ / Debian 12+)." >&2
+  if [ -f "$install_dir/$bin.prev" ]; then
+    mv -f "$install_dir/$bin.prev" "$install_dir/$bin"
+    echo "  The previous binary was restored from rollback." >&2
+  else
+    rm -f "$install_dir/$bin"
+  fi
+  exit 1
+fi
+printf '%s\n' "$smoke"
 echo "Installed to $install_dir/$bin"
 
 case ":$PATH:" in

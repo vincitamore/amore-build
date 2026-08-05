@@ -1,5 +1,10 @@
 [
   {
+    "category": "fixes",
+    "description": "**Linux glibc floor lowered to 2.35** — release lanes build on Ubuntu 22.04 runners so binaries run on Ubuntu 22.04+/Debian 12+; the installers now smoke-test the installed binary (must run and print a version) and restore the rollback copy on failure.",
+    "breaking_change": false
+  },
+  {
     "category": "features",
     "description": "**The crowned heart** — the welcome mark is now a gold three-point crown resting on a rose heart, taken from the site's own art and rasterized in braille; both tiers regenerate from `scripts/gen_amore.py`, same shine sweep.",
     "breaking_change": false

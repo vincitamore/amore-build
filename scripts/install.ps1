@@ -56,7 +56,20 @@ try {
     }
 
     Write-Host ''
-    & $target --version
+    # Smoke-gate: the binary must run AND print a version (exit code alone has
+    # been observed insufficient on loader failures).
+    $smoke = (& $target --version 2>&1 | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($smoke)) {
+        Write-Host 'error: the installed binary failed to run on this host.' -ForegroundColor Red
+        if (Test-Path "$target.prev") {
+            Move-Item -Force "$target.prev" $target
+            Write-Host 'The previous binary was restored from rollback.'
+        } else {
+            Remove-Item -Force $target -ErrorAction SilentlyContinue
+        }
+        throw 'install smoke test failed'
+    }
+    Write-Host $smoke
     Write-Host "Installed to $target"
 
     $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')

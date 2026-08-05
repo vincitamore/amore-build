@@ -8,6 +8,13 @@ work it describes.
 
 ## Unreleased
 
+- **Linux releases run on Ubuntu 22.04 and Debian 12 again.** The linux-x64
+  and linux-arm64 release lanes now build on the oldest supported LTS
+  runners, so the shipped binaries' glibc floor is 2.35 (Ubuntu 22.04+,
+  Debian 12+) instead of 2.39. The installers also gained a real smoke gate:
+  the installed binary must run and print its version, and a failure
+  restores the previous copy from rollback instead of leaving a broken
+  install behind.
 - **The crowned heart.** The welcome mark is now Amore Build's own: a gold
   three-point crown resting on a rose heart, taken from the site's block art
   and rasterized in braille. Two hue zones — the crown in gold, the heart in

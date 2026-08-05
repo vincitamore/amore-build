@@ -36,8 +36,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: ubuntu-latest,    artifact: amore-linux-x64,    bin: amore,     }
-          - { os: ubuntu-24.04-arm, artifact: amore-linux-arm64,  bin: amore,     }
+          # Linux lanes are pinned to the OLDEST supported LTS runner on
+          # purpose: a glibc-linked binary inherits the build host's glibc as
+          # its floor. ubuntu-latest (24.04, glibc 2.39) produced binaries
+          # that could not load on Ubuntu 22.04 / Debian 12; 22.04 runners
+          # give a 2.35 floor. Do not bump these to -latest.
+          - { os: ubuntu-22.04,     artifact: amore-linux-x64,    bin: amore,     }
+          - { os: ubuntu-22.04-arm, artifact: amore-linux-arm64,  bin: amore,     }
           - { os: windows-latest,   artifact: amore-windows-x64,  bin: amore.exe, }
           - { os: macos-15,         artifact: amore-darwin-arm64, bin: amore,     }
           - { os: macos-15-intel,   artifact: amore-darwin-x64,   bin: amore,     }
