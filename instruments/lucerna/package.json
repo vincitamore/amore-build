@@ -1,0 +1,23 @@
+{
+  "name": "@amore/lucerna",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Lucerna  -  house steward daemon: heartbeat, budgets, default-deny writes, opt-in dreams via amore headless",
+  "bin": {
+    "lucerna": "./src/cli.ts"
+  },
+  "main": "src/index.ts",
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "cli": "bun run src/cli.ts",
+    "start": "bun run src/cli.ts start",
+    "smoke": "bun run src/cli.ts smoke"
+  },
+  "devDependencies": {
+    "@types/node": "latest",
+    "bun-types": "latest",
+    "typescript": "^5.7.0"
+  }
+}
