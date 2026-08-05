@@ -29,3 +29,6 @@ sweep-*.log
 # Python bytecode from the asset generators
 __pycache__/
 *.pyc
+
+# Instrument dependencies and local state
+instruments/*/node_modules/

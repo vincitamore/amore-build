@@ -56,6 +56,7 @@ ARGV0_MARKER = '"amore" | "amore-build" | "grok" | "agent"'
 ARGV0_FILE = "crates/codegen/xai-grok-pager/src/app/cli.rs"
 INIT_OWNERSHIP_TEST = "crates/codegen/xai-grok-pager/tests/init_ownership.rs"
 BOUNDARY_SCRIPT = "scripts/check_grok_boundary.py"
+HYGIENE_SCRIPT = "scripts/check_source_hygiene.py"
 
 # User-visible branding deltas live in upstream pager files the boundary
 # script cannot see (it scans only the fork-owned surface outside crates/).
@@ -316,6 +317,16 @@ def cmd_verify(dry_run: bool) -> int:
             problems.append("fork-surface grok boundary check failed:\n" + r.stdout)
     else:
         print("  --  check_grok_boundary.py absent; boundary check skipped")
+
+    # 6a. public source-hygiene: process language out of instruments/ + templates/
+    if (REPO / HYGIENE_SCRIPT).exists():
+        r = run(["python", HYGIENE_SCRIPT, "--check"])
+        if r.returncode == 0:
+            print("  ok  source-hygiene clean (check_source_hygiene.py)")
+        else:
+            problems.append("source-hygiene check failed:\n" + r.stdout)
+    else:
+        print("  --  check_source_hygiene.py absent; hygiene check skipped")
 
     # 6b. user-visible branding deltas still channel through the single
     #     resolved_bin_name() source of truth (see constants above).
