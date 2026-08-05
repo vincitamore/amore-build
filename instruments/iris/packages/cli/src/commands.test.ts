@@ -60,16 +60,24 @@ test('edges verbs resolve and classify write/read correctly', () => {
   expect(resolveOk(['edges', 'edit', 'abc123', '--note', 'x']).name).toBe('edges edit');
   expect(resolveOk(['edges', 'validate']).name).toBe('edges validate');
   expect(resolveOk(['edges', 'stats']).name).toBe('edges stats');
+  expect(resolveOk(['edges', 'update']).name).toBe('edges update');
+  expect(resolveOk(['edges', 'update', '--tier', '2']).name).toBe('edges update');
   const byName = Object.fromEntries(COMMANDS.map((c) => [c.name, c]));
   expect(byName['edges derive'].isWrite).toBe(true);
   expect(byName['edges remove'].isWrite).toBe(true);
   expect(byName['edges edit'].isWrite).toBe(true);
+  expect(byName['edges update'].isWrite).toBe(true);
   expect(byName['edges list'].isWrite).toBe(false);
   expect(byName['edges show'].isWrite).toBe(false);
   expect(byName['edges validate'].isWrite).toBe(false);
   expect(byName['edges stats'].isWrite).toBe(false);
   expect(typeof byName['edges list'].human).toBe('function');
   expect(typeof byName['edges show'].human).toBe('function');
+  expect(typeof byName['edges update'].human).toBe('function');
+  expect(byName['edges list'].flags.tier).toBeDefined();
+  expect(byName['edges list'].flags.mechanism).toBeDefined();
+  expect(byName['edges list'].flags.recent).toBeDefined();
+  expect(byName['edges update'].flags.tier).toContain('0|1|2');
 });
 
 test('inbox promote requires --to task|knowledge before touching regula', () => {
@@ -129,6 +137,12 @@ test('lucerna verbs resolve to the right spec', () => {
   expect(resolveOk(['lucerna', 'stop']).name).toBe('lucerna stop');
   expect(resolveOk(['lucerna', 'enable', 'dreams', 'on']).name).toBe('lucerna enable');
   expect(resolveOk(['lucerna', 'notifications']).name).toBe('lucerna notifications');
+  expect(resolveOk(['lucerna', 'dreams']).name).toBe('lucerna dreams');
+  expect(resolveOk(['lucerna', 'dreams', 'show', 'x']).name).toBe('lucerna dreams');
+  expect(resolveOk(['lucerna', 'dreams', 'review', 'x']).name).toBe('lucerna dreams');
+  expect(resolveOk(['lucerna', 'proposals']).name).toBe('lucerna proposals');
+  expect(resolveOk(['lucerna', 'proposals', 'apply', 'x']).name).toBe('lucerna proposals');
+  expect(resolveOk(['lucerna', 'proposals', 'close', 'x']).name).toBe('lucerna proposals');
 });
 
 test('lucerna write/read classification', () => {
@@ -136,6 +150,8 @@ test('lucerna write/read classification', () => {
   expect(byName['lucerna status'].isWrite).toBe(false);
   expect(byName['lucerna log'].isWrite).toBe(false);
   expect(byName['lucerna notifications'].isWrite).toBe(false);
+  expect(byName['lucerna dreams'].isWrite).toBe(false);
+  expect(byName['lucerna proposals'].isWrite).toBe(false);
   expect(byName['lucerna halt'].isWrite).toBe(true);
   expect(byName['lucerna wake'].isWrite).toBe(true);
   expect(byName['lucerna sleep'].isWrite).toBe(true);
@@ -164,6 +180,27 @@ test('lucerna enable requires flag and on|off', () => {
   ).toThrow(/enable/);
 });
 
+test('lucerna dreams / proposals subcommand usage before daemon call', () => {
+  const dreams = COMMANDS.find((c) => c.name === 'lucerna dreams')!;
+  expect(
+    dreams.run({ orgRoot: '/nonexistent', args: { positional: ['show'], flags: {} } }),
+  ).rejects.toThrow(/show requires/);
+  expect(
+    dreams.run({ orgRoot: '/nonexistent', args: { positional: ['review'], flags: {} } }),
+  ).rejects.toThrow(/review requires/);
+  expect(
+    dreams.run({ orgRoot: '/nonexistent', args: { positional: ['bogus'], flags: {} } }),
+  ).rejects.toThrow(/expects/);
+
+  const props = COMMANDS.find((c) => c.name === 'lucerna proposals')!;
+  expect(
+    props.run({ orgRoot: '/nonexistent', args: { positional: ['apply'], flags: {} } }),
+  ).rejects.toThrow(/apply requires/);
+  expect(
+    props.run({ orgRoot: '/nonexistent', args: { positional: ['close'], flags: {} } }),
+  ).rejects.toThrow(/close requires/);
+});
+
 test('lucernaWriteExit maps ok:false to ACTIONABLE', () => {
   expect(lucernaWriteExit({ ok: true })).toBe(0);
   expect(lucernaWriteExit({ ok: false })).toBe(1);
@@ -188,7 +225,8 @@ test('human formatters are opt-in on orientation/review verbs only', () => {
   expect(byName['status'].human).toBeDefined();
   expect(byName['edges list'].human).toBeDefined();
   expect(byName['edges show'].human).toBeDefined();
-  const humanOk = new Set(['status', 'edges list', 'edges show']);
+  expect(byName['edges update'].human).toBeDefined();
+  const humanOk = new Set(['status', 'edges list', 'edges show', 'edges update']);
   for (const c of COMMANDS) {
     if (humanOk.has(c.name)) continue;
     expect(c.human).toBeUndefined();

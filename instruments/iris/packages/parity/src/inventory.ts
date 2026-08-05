@@ -94,6 +94,13 @@ export const ENDPOINTS: Endpoint[] = [
   { method: 'POST', path: '/api/lucerna/start', pathParams: [], queryParams: [], consumers: ['tui', 'cli'], tier: 'excluded', reason: 'proxy', note: 'detached spawn + health poll' },
   { method: 'POST', path: '/api/lucerna/stop', pathParams: [], queryParams: [], consumers: ['tui', 'cli'], tier: 'excluded', reason: 'proxy', note: 'halt then optional pid kill' },
   { method: 'POST', path: '/api/lucerna/enable', pathParams: [], queryParams: [], consumers: ['tui', 'cli'], tier: 'excluded', reason: 'proxy', note: 'atomic lucerna.enable.json write' },
+  { method: 'GET', path: '/api/lucerna/dreams', pathParams: [], queryParams: ['pending'], consumers: ['tui', 'cli'], tier: 'excluded', reason: 'proxy', note: 'session manifests + light dream reports' },
+  { method: 'GET', path: '/api/lucerna/dream', pathParams: [], queryParams: ['id', 'path'], consumers: ['tui', 'cli'], tier: 'excluded', reason: 'proxy', note: 'single dream show' },
+  { method: 'POST', path: '/api/lucerna/dreams/review', pathParams: [], queryParams: [], consumers: ['tui', 'cli'], tier: 'excluded', reason: 'proxy', note: 'flip review-status pending→reviewed' },
+  { method: 'GET', path: '/api/lucerna/proposals', pathParams: [], queryParams: ['pending'], consumers: ['tui', 'cli'], tier: 'excluded', reason: 'proxy', note: 'forge/proposals list' },
+  { method: 'GET', path: '/api/lucerna/proposal', pathParams: [], queryParams: ['id', 'path'], consumers: ['tui', 'cli'], tier: 'excluded', reason: 'proxy', note: 'single proposal show' },
+  { method: 'POST', path: '/api/lucerna/proposals/apply', pathParams: [], queryParams: [], consumers: ['tui', 'cli'], tier: 'excluded', reason: 'proxy', note: 'status pending→applied only' },
+  { method: 'POST', path: '/api/lucerna/proposals/close', pathParams: [], queryParams: [], consumers: ['tui', 'cli'], tier: 'excluded', reason: 'proxy', note: 'status pending→closed only' },
 
   // ── EXCLUDED: auth — identity / signing ────────────────────────────────────
   { method: 'GET', path: '/api/identity', pathParams: [], queryParams: [], consumers: ['client'], tier: 'excluded', reason: 'auth' },

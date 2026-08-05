@@ -930,6 +930,98 @@ export const COMMANDS: CommandSpec[] = [
       return lucerna.lucernaNotifications(n);
     },
   },
+  {
+    name: 'lucerna dreams',
+    summary:
+      'List or review Lucerna dream artifacts (session manifests + light reports). Subcommands: [list] | show <id> | review <id>. Status flip only — never executes content',
+    isWrite: false, // list/show are reads; review is handled via write when subcommand is review
+    booleanFlags: ['pending'],
+    flags: { pending: 'only pending items' },
+    run: async ({ args }) => {
+      const sub = args.positional[0];
+      if (!sub || sub === 'list') {
+        return lucerna.lucernaDreamsList(args.flags.pending === true);
+      }
+      if (sub === 'show') {
+        const id = args.positional[1];
+        if (!id) {
+          throw new regula.RegulaError('USAGE', 'lucerna dreams show requires <id>');
+        }
+        return lucerna.lucernaDreamShow(id);
+      }
+      if (sub === 'review') {
+        const id = args.positional[1];
+        if (!id) {
+          throw new regula.RegulaError('USAGE', 'lucerna dreams review requires <id>');
+        }
+        // Status field flip only (pending → reviewed / light pending → acted).
+        return lucerna.lucernaDreamReview(id);
+      }
+      throw new regula.RegulaError(
+        'USAGE',
+        "lucerna dreams expects [list] | show <id> | review <id> (got '" + sub + "')",
+      );
+    },
+    exit: (p) => {
+      // review returns ok; list/show do not use ok:false for empty
+      if (typeof p.ok === 'boolean') return lucerna.lucernaWriteExit(p);
+      if (p.found === false) return EXIT.ACTIONABLE;
+      return EXIT.OK;
+    },
+  },
+  {
+    name: 'lucerna proposals',
+    summary:
+      'List or resolve Lucerna proposals. Subcommands: [list] | show <id> | apply <id> | close <id>. Flips status only — applying proposal CONTENT is the resident/operator job',
+    isWrite: false,
+    booleanFlags: ['pending'],
+    flags: { pending: 'only pending items' },
+    run: async ({ args }) => {
+      const sub = args.positional[0];
+      if (!sub || sub === 'list') {
+        return lucerna.lucernaProposalsList(args.flags.pending === true);
+      }
+      if (sub === 'show') {
+        const id = args.positional[1];
+        if (!id) {
+          throw new regula.RegulaError('USAGE', 'lucerna proposals show requires <id>');
+        }
+        return lucerna.lucernaProposalShow(id);
+      }
+      if (sub === 'apply') {
+        const id = args.positional[1];
+        if (!id) {
+          throw new regula.RegulaError('USAGE', 'lucerna proposals apply requires <id>');
+        }
+        // Status flip only. Content is never auto-applied.
+        const result = await lucerna.lucernaProposalApply(id);
+        return {
+          ...result,
+          note: 'status flipped to applied only — applying proposal CONTENT is the resident/operator job',
+        };
+      }
+      if (sub === 'close') {
+        const id = args.positional[1];
+        if (!id) {
+          throw new regula.RegulaError('USAGE', 'lucerna proposals close requires <id>');
+        }
+        const result = await lucerna.lucernaProposalClose(id);
+        return {
+          ...result,
+          note: 'status flipped to closed only — proposal content was not executed',
+        };
+      }
+      throw new regula.RegulaError(
+        'USAGE',
+        "lucerna proposals expects [list] | show <id> | apply <id> | close <id> (got '" + sub + "')",
+      );
+    },
+    exit: (p) => {
+      if (typeof p.ok === 'boolean') return lucerna.lucernaWriteExit(p);
+      if (p.found === false) return EXIT.ACTIONABLE;
+      return EXIT.OK;
+    },
+  },
 
   // ── edges (vinculum — structural typed edges into graph/edges.jsonl) ──
   {
@@ -953,6 +1045,12 @@ export const COMMANDS: CommandSpec[] = [
       source: 'filter by source node id',
       target: 'filter by target node id',
       'asserted-by': 'filter by provenance.asserted_by (e.g. structural-v0)',
+      tier: 'filter by derivation tier on provenance (structural|0|2)',
+      mechanism: 'filter by mechanism (structural|judged)',
+      confidence: 'filter by confidence tier (asserted|inferred|candidate)',
+      model: 'filter by provenance.model id',
+      recent: 'keep only the N most recent edges by provenance.ts',
+      since: 'ISO timestamp lower bound on provenance.ts',
       house: 'house root override',
     },
     run: ({ orgRoot, args }) => edges.runEdgesList(orgRoot, args),
@@ -1010,6 +1108,20 @@ export const COMMANDS: CommandSpec[] = [
       house: 'house root override',
     },
     run: ({ orgRoot, args }) => edges.runEdgesStats(orgRoot, args),
+  },
+  {
+    name: 'edges update',
+    summary:
+      'Agentic graph refresh: --tier 0 structural re-derive (default), --tier 1 candidate inventory, --tier 2 gen→judge→live ingest (requires amore)',
+    isWrite: true,
+    booleanFlags: [],
+    flags: {
+      tier: 'derivation tier 0|1|2 (default 0; only 2 calls a model)',
+      house: 'house root override',
+    },
+    run: ({ orgRoot, args }) => edges.runEdgesUpdateCmd(orgRoot, args),
+    human: edges.edgesUpdateHuman,
+    exit: edges.edgesUpdateExit,
   },
 ];
 
