@@ -187,6 +187,17 @@ jobs:
       #
       # Tracked, not forgotten; the exclusion is declared here rather than by
       # editing upstream tests into silence.
+      # The hooks dispatcher tests spawn their fixture hooks via `sh -c`. The
+      # windows-latest image ships Git for Windows but does not put its `bin`
+      # (where sh.exe lives) on PATH, so every fixture spawn fails and
+      # fail-open hooks read as Allow — the suite then fails asserting Deny.
+      # A real Windows host with Git installed resolves sh fine (the full
+      # dispatcher suite passes there); putting the runner's copy on PATH
+      # makes the lane test that reality instead of a PATH accident.
+      - name: Put Git for Windows sh on PATH (hooks dispatcher fixtures)
+        if: matrix.os == 'windows-latest'
+        run: Add-Content -Path $env:GITHUB_PATH -Value 'C:\Program Files\Git\bin'
+
       - name: Test crate suites (windows — agent crate + managed_text excluded)
         if: matrix.os == 'windows-latest'
         run: >-
