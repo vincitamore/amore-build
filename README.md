@@ -1,20 +1,26 @@
 # Amore Build
 
-**a terminal coding agent that plants a house in your repo**
+**a terminal coding agent that works from a house, not a checkout**
 
 Amore Build (`amore`) is a terminal AI coding agent: a full-screen TUI that
 understands your codebase, edits files, runs shell commands, searches the web,
 and drives long-running multi-agent work — interactively, headlessly for
 scripting/CI, or embedded in editors via ACP.
 
-What sets it apart is the **cooperation harness**: `amore init` plants a
-*house* — a working tree built for long-horizon collaboration with an agent,
-with orientation surfaces read at session start, org schemas for tasks /
-captures / knowledge / reminders, a pack of orchestration skills, and session
-hooks including a stop gate — and the **iris** companion keeps the house's
-live index with a loopback-only daemon, org CLI verbs, and an eight-tab dash.
-Any OpenAI-compatible model drives it: every model is one `[model.*]` config
-block, and the harness identity survives the swap.
+What sets it apart is the **house**. The usual way to run a coding agent is
+to launch it inside each project, where context lives and dies with the
+checkout. With Amore Build you create a house once (`amore init`) and launch
+from it always: one working tree the agent inhabits — orientation surfaces
+read at session start, org schemas for tasks / captures / knowledge /
+reminders, cross-project doctrine, orchestration skills, and session hooks
+including a stop gate — while your project repos live around it, each
+keeping its own history. The house accretes for months: every session
+starts where the last one stopped, and lessons banked in one project apply
+to the next. The **iris** companion keeps the house's live index with a
+loopback-only daemon, org CLI verbs, and an eight-tab dash. Any
+OpenAI-compatible model drives it: every model is one `[model.*]` config
+block, and the harness identity survives the swap. The working method:
+[docs/the-house.md](docs/the-house.md).
 
 It is a **permanent engineered fork** of xAI's open-source
 [`grok-build`](https://github.com/xai-org/grok-build) (Apache-2.0). **Not an

@@ -2,8 +2,11 @@
 
 `amore init` **creates a house** — a directory carrying orientation surfaces,
 folder schemas, hooks, skills, the iris companion, and an install manifest
-that records ownership. This page answers: **what got installed, what Amore
-owns vs what you own, and what happens on `--refresh`.**
+that records ownership. The house is the place you launch from for all your
+work, not per-repo config — the working method is explained in
+[the-house.md](the-house.md). This page answers the mechanics: **what got
+installed, what Amore owns vs what you own, and what happens on
+`--refresh`.**
 
 Binary spelling: **`amore`** (argv0 also tolerates `amore-build`).
 
