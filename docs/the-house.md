@@ -37,6 +37,12 @@ leave off."
   session-init hook that surfaces due reminders on arrival, and a stop gate
   that asks the agent whether it left the tree in order before ending a
   turn.
+- **Companions that keep it live**: [iris](iris.md) indexes the tree as it
+  changes and gives it search worth having (fuzzy, content, and semantic,
+  set up automatically), org verbs, and a dash. Opt-in,
+  [lucerna](autonomy.md) stewards the house between sessions: governed,
+  budgeted maintenance that writes reviewable reports and proposals, off
+  by default until you enable it.
 
 ## What the house keeps
 
@@ -82,6 +88,8 @@ task, and pivots into whatever project the work needs. On the way out:
 lessons get banked to `knowledge/`, state gets written to current-state,
 and the stop gate asks whether the tree is in order before the session
 ends. The next session, tomorrow or in a month, starts where this one
-stopped.
+stopped. And if the steward is enabled, the house does not sit idle
+between sessions: it surveys its own state, keeps its indexes fresh, and
+leaves its findings as pending artifacts for the next session to review.
 
 Continuity lives in the architecture, not in anyone's memory.

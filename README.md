@@ -17,7 +17,10 @@ including a stop gate) while your project repos live around it, each
 keeping its own history. The point of the house is time: every session
 starts where the last one stopped, and lessons banked in one project apply
 to the next. The **iris** companion keeps the house's live index with a
-loopback-only daemon, org CLI verbs, and an eight-tab dash. Any
+loopback-only daemon, org CLI verbs, managed semantic search that sets
+itself up, and a nine-tab dash. Opt-in companions extend the house:
+**lucerna**, an autonomous house steward (off by default, governed and
+budgeted), and **speculum**, a session-corpus mirror. Any
 OpenAI-compatible model drives it: every model is one `[model.*]` config
 block, and the harness identity survives the swap. The working method:
 [docs/the-house.md](docs/the-house.md).
@@ -66,8 +69,9 @@ companion arrive in step 3, not with the installer:
 2. **`amore setup`**: the guided wizard writes model credentials and config
    under `~/.amore`.
 3. **`amore init`**: run it in the directory that will become your house: it
-   plants the house tree and installs the [iris companion](docs/iris.md)
-   binaries onto `PATH` beside `amore`.
+   plants the house tree, installs the [iris companion](docs/iris.md)
+   binaries onto `PATH` beside `amore`, and sets up managed semantic search
+   for the house (`--no-qmd` skips that step).
 4. **Launch `amore` from the house.** Every session after this one starts
    where the last one stopped.
 
@@ -78,8 +82,11 @@ The footprint is enumerable, and removing it is three deletes:
 - **Binaries**: remove the install dir (`~/.local/bin/amore*` on unix,
   `%USERPROFILE%\amore\bin` on Windows). The iris binaries `amore init`
   linked onto `PATH` live beside `amore`, so they go with it.
-- **State**: remove `~/.amore` (config + credentials) and `~/.iris`
-  (iris's root-trust allow list and logs).
+- **State**: remove `~/.amore`. It holds config + credentials plus
+  instrument state under `~/.amore/instruments/` (the iris home and the
+  managed search runtime, models, and indexes). Older installs may also
+  have a legacy `~/.iris`; after the automatic home migration it keeps its
+  old contents plus a `MOVED.md` pointer, and removing it is safe.
 - **Houses**: any house you created is an ordinary directory that belongs
   to you (usually its own git repo). Keep it or delete it; nothing else
   references it.
@@ -91,11 +98,13 @@ rendered in-product on the welcome screen and by `/release-notes`).
 > **PATH note:** `amore doctor` (and `amore doctor --json`, field
 > `pathCollision`) detects when another `amore` binary on `PATH` would shadow
 > Amore Build. Doctor also reports companion instruments (iris, lucerna,
-> speculum): install presence and version, iris daemon home (`~/.iris`), and —
-> when lucerna is installed and a house enablement file is reachable from the
-> current directory — lucerna dreams / auto-commit enablement. Opt-in
-> companions that are absent are informational only; doctor never starts
-> daemons or flips enablement.
+> speculum): install presence and version, the iris daemon home
+> (`~/.amore/instruments/iris/`, or a legacy `~/.iris` not yet migrated),
+> the managed search rows (qmd runtime, models, house index, js runtime),
+> and, when lucerna is installed and a house enablement file is reachable
+> from the current directory, lucerna dreams / auto-commit enablement.
+> Opt-in companions that are absent are informational only; doctor never
+> starts daemons or flips enablement.
 
 ### Build from source
 
@@ -176,7 +185,7 @@ per-model already, so the model name is never the thing missing.
 | **GLM-5.2** (OpenRouter / Z.ai direct) | `z-ai/glm-5.2` / `glm-5.2` | OpenRouter / `https://api.z.ai/api/paas/v4` | `OPENROUTER_API_KEY` / `ZAI_API_KEY` |
 | **Any OpenAI-compatible host** | host-specific | your `/v1` base | host token env |
 
-Minimal sketch (the wizard writes exactly this):
+Minimal sketch (the shape the wizard writes):
 
 ```toml
 [models]
@@ -189,7 +198,7 @@ name = "DeepSeek V4 Flash (OpenRouter)"
 env_key = "OPENROUTER_API_KEY"
 system_prompt_label = "Amore Build"
 context_window = 1048576
-# Reasoning tokens draw from this too — it is the provider's reported
+# Reasoning tokens draw from this too: it is the provider's reported
 # ceiling, not a target; a lower cap truncates the reasoning pass invisibly.
 max_completion_tokens = 65536
 ```
@@ -237,10 +246,14 @@ collaboration with the agent: root `AGENTS.md`, folder schemas (`context/`,
 orchestration pack, session hooks, the iris companion, and
 `.amore/house-install.json` recording ownership. **Lattice is default-on**
 (`--no-lattice` opt-out); skills and hooks default-on (`--no-skills` /
-`--no-hooks`); iris default-on (`--no-iris` opts out and makes init fully
-offline). Ownership-aware: never silently overwrites user edits; `--refresh`
-only rewrites files whose on-disk hash still matches the manifest; `--force`
-overwrites (confirm, or `--yes`).
+`--no-hooks`); iris default-on (`--no-iris` opts out), and after iris lands
+init runs `iris qmd setup` so the house has semantic search from day one
+(`--no-qmd` skips it; `--no-iris` with no companions requested makes init
+fully offline). Opt-in companions ride the same release channel:
+`--with-lucerna` (the house steward) and `--with-speculum` (the session
+mirror), both off by default. Ownership-aware: never silently overwrites
+user edits; `--refresh` only rewrites files whose on-disk hash still
+matches the manifest; `--force` overwrites (confirm, or `--yes`).
 
 What got installed and what you own: [`docs/onboarding.md`](docs/onboarding.md).
 
@@ -251,16 +264,48 @@ What got installed and what you own: [`docs/onboarding.md`](docs/onboarding.md).
 **Iris** is the house's knowledge/org instrument: a live file index daemon,
 org CRUD verbs (`task` / `inbox` / `reminder` / `knowledge`), and an
 interactive dash over the tree `amore init` plants: Dashboard, Tasks,
-Inbox, Reminders, Knowledge, Files, Forge, and Graph tabs. `amore init`
-installs it into the house by default and links it beside the `amore`
-binary, so it is on `PATH` with no manual step; it is never required to run
-Amore Build itself. Every write goes through its **regula** core (schemas,
-legal lifecycle transitions, placement, lint), and the planted `AGENTS.md`
-wires the resident agent to the same verbs. Local-first: the daemon binds loopback only, and there is no
-telemetry. Full story (with a screenshot of every tab):
-[`docs/iris.md`](docs/iris.md).
+Inbox, Reminders, Knowledge, Files, Forge, Lucerna, and Graph tabs.
+`amore init` installs it into the house by default and links it beside the
+`amore` binary, so it is on `PATH` with no manual step; it is never
+required to run Amore Build itself. Every write goes through its **regula**
+core (schemas, legal lifecycle transitions, placement, lint), and the
+planted `AGENTS.md` wires the resident agent to the same verbs.
+
+Search comes in three modes: fuzzy over the live index, BM25 content
+search, and full hybrid semantic search, powered by a managed
+[qmd](https://github.com/tobi/qmd) install that `amore init` sets up
+automatically and the daemon keeps fresh as the tree changes. Iris also
+carries the house's typed-edge graph (`iris edges derive / list / update`)
+alongside the wikilink graph the dash renders. Local-first: the daemon
+binds loopback only, and there is no telemetry. Full story (with a
+screenshot of every tab): [`docs/iris.md`](docs/iris.md).
 
 ![Iris dash, the Dashboard tab](docs/assets/iris/dashboard.png)
+
+---
+
+## House steward (Lucerna)
+
+**Lucerna** is the opt-in autonomous steward: a daemon that keeps a light
+heartbeat over the house and, when the operator enables dreams, runs
+governed maintenance between sessions: surveying org state, refreshing the
+typed-edge graph and the search index, and writing reports and proposals
+the operator reviews from the iris dash or CLI. The safety posture leads:
+**not installed unless you ask** (`amore init --with-lucerna`), **dreams
+off by default**, auto-commit dry-run by default, default-deny writes with
+a protected-path list, hard action budgets and cooldowns, a wall-clock
+kill on every model spawn, and no network listener; model calls go only
+through your own `amore` configuration. Every autonomous artifact lands as
+a reviewable file, pending until a human flips it. Defaults and governance:
+[`docs/autonomy.md`](docs/autonomy.md); the review loop and ops surface:
+[`docs/iris-lucerna.md`](docs/iris-lucerna.md); wire receipts:
+[`docs/egress.md`](docs/egress.md).
+
+**Speculum** is the second opt-in companion (`--with-speculum`): a
+session-corpus mirror that ingests the harness's own session logs into a
+local sqlite store and runs programmatic probes over them. Ingest and
+probes are local-only; the only model path is an explicitly invoked lens,
+which spawns your own `amore` configuration.
 
 ---
 
@@ -272,9 +317,11 @@ telemetry. Full story (with a screenshot of every tab):
 | [`docs/setup-models.md`](docs/setup-models.md) | BYOK model recipes (DeepSeek / GLM / any OpenAI-compatible host) |
 | [`docs/authentication.md`](docs/authentication.md) | OAuth + BYOK dual rail, `auth.json` anti-copy rule |
 | [`docs/onboarding.md`](docs/onboarding.md) | `amore init` house tree, ownership, refresh |
-| [`docs/iris.md`](docs/iris.md) | Iris companion |
+| [`docs/iris.md`](docs/iris.md) | Iris companion: daemon, org verbs, dash, search modes, typed edges |
+| [`docs/iris-lucerna.md`](docs/iris-lucerna.md) | Lucerna ops from iris: dash tab, CLI verbs, review loop, file contract |
 | [`docs/autonomy.md`](docs/autonomy.md) | Lucerna enablement defaults, governance, kill paths |
 | [`docs/egress.md`](docs/egress.md) | Egress receipts, capture scripts, instrument inventory |
+| [`docs/ports.md`](docs/ports.md) | Loopback port register |
 | [`UPSTREAM.md`](UPSTREAM.md) | Fork provenance and sync policy |
 | [`examples/config.multi-provider.toml`](examples/config.multi-provider.toml) | Multi-provider config sample |
 

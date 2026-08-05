@@ -22,7 +22,7 @@ recent outcome:
 
 ## Dash tab
 
-The Lucerna tab is the ninth member in the iris dash (hotkey `8` in the
+The Lucerna tab is the eighth member in the iris dash (hotkey `8` in the
 Dashboard … Lucerna … Graph order; bar shows `1`–`9`). It is honest at every
 state:
 
@@ -56,6 +56,8 @@ Detail opens a centered overlay (most of the screen, scrollable with ↑↓ /
 PgUp / PgDn). Markdown is rendered lightly (headings, lists, code). An agentic
 session manifest that has a linked `forge/dreams/` report shows **one** list
 row; the overlay includes the report under a “Linked report” heading.
+
+![Reading overlay on a dream manifest](assets/iris/lucerna-overlay.png)
 
 Enablement toggles always re-read the file after write so the badges show the
 on-disk truth, not a local guess.
@@ -124,7 +126,7 @@ newest `created` first. Partial or older frontmatter degrades field-by-field
 (missing fields show as absent; non-`.md` files are skipped). Review verbs flip
 **exactly one** frontmatter field with an atomic temp+rename write and refuse
 when the current value is not the expected pre-state. Proposal `apply` / `close`
-change status only — applying the **content** of a proposal remains the
+change status only; applying the **content** of a proposal remains the
 resident or operator's work (the CLI says so in its output).
 
 Honest empty states:
@@ -135,7 +137,7 @@ Honest empty states:
 | Dreams disabled | Enablement badge off; empty copy notes dreams are disabled |
 | Lucerna not installed | Ops cards explain install; Review still lists house forge files when present |
 
-Screenshot placeholder (orchestrator captures after integration):
+The Review panel focused, with pending artifacts listed:
 
 ![Lucerna Review panel](assets/iris/lucerna-review.png)
 

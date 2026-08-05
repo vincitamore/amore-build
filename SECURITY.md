@@ -63,8 +63,8 @@ Instrument network inventory (when each touchpoint fires, and how to verify):
 
 **Lucerna** is the house steward daemon. It heartbeats over a house tree,
 enforces default-deny writes and action budgets, and may run opt-in
-maintenance (light dreams today; agentic maintenance dreams when enabled in
-the same release). Control is **file-based only**. Lucerna opens **no
+maintenance (light dreams and agentic maintenance dreams, both behind the
+same operator enablement). Control is **file-based only**. Lucerna opens **no
 network listener**. Iris on loopback (`127.0.0.1:3853`) can proxy the same
 files; that is a local control path, not a WAN surface.
 

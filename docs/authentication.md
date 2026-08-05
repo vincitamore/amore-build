@@ -1,12 +1,12 @@
 # Authentication
 
-Amore Build has **two independent credential rails**. Pick one per model path —
+Amore Build has **two independent credential rails**. Pick one per model path;
 they do not require each other.
 
 | Rail | What it covers | How you enroll |
 |------|----------------|----------------|
 | **OAuth session** (`amore login`) | First-party model catalog + native grok subagent freight | Interactive browser (PKCE) or device-code |
-| **BYOK** (bring your own key) | Any `[model.*]` with its own key — every recommended model path | Env / TOML — **never** needs OAuth |
+| **BYOK** (bring your own key) | Any `[model.*]` with its own key (every recommended model path) | Env / TOML; **never** needs OAuth |
 
 For model setup (OpenRouter / vendor-direct / any OpenAI-compatible host), see
 [setup-models.md](setup-models.md). For what `amore init` installs, see
@@ -61,7 +61,7 @@ workspaces:read, workspaces:write
 catalog models **and** native subagent freight that ride the same session.
 Third-party / BYOK models never consume that session JWT (see dual-rail below).
 
-### `~/.amore/auth.json` (shape only — never print contents)
+### `~/.amore/auth.json` (shape only; never print contents)
 
 Home defaults to **`~/.amore`** (override with `$AMORE_HOME` / legacy
 `$GROK_HOME`). Credentials live at `{home}/auth.json` unless
@@ -137,7 +137,7 @@ out of the file. Full examples: [setup-models.md](setup-models.md).
 model = "deepseek/deepseek-v4-flash-0731"
 base_url = "https://openrouter.ai/api/v1"
 env_key = "OPENROUTER_API_KEY"
-# The harness and the role — never the model. See setup-models.md.
+# The harness and the role, never the model. See setup-models.md.
 system_prompt_label = "Amore Build"
 ```
 
@@ -181,8 +181,8 @@ this repo.
 What that means in practice:
 
 - The native rail requires **an xAI account** that can complete `amore login`
-  and authorize the CLI scopes listed above — do not assume "any free
-  account" or "a paid plan required"; neither is encoded here.
+  and authorize the CLI scopes listed above; do not assume "any free
+  account" or "a paid plan required", neither is encoded here.
 - For **plan-independent** use, configure **BYOK** models (any
   [setup-models.md](setup-models.md) path, or `XAI_API_KEY` / per-model
   keys). BYOK never depends on xAI plan policy.
@@ -198,13 +198,13 @@ Do **not** invent a subscription claim in marketing copy from this doc alone.
 | Only third-party BYOK models (OpenRouter / vendor-direct / host) via `env_key` | **No** |
 | Only `XAI_API_KEY` (or per-model xAI key) for first-party models | **No** (session optional) |
 | Native catalog + subagent freight on the session grant | **Yes** (or API key rail above) |
-| Mix: BYOK primary + grok freight | BYOK key **and** (login **or** `XAI_API_KEY`) — two meters, two credentials |
+| Mix: BYOK primary + grok freight | BYOK key **and** (login **or** `XAI_API_KEY`): two meters, two credentials |
 
 Credential precedence always prefers a model's **own** key over the session
-(`resolve_credentials`) — a third-party block that sets `env_key` or
+(`resolve_credentials`): a third-party block that sets `env_key` or
 `api_key` never receives the session JWT. That is the contract to rely on:
 **always give third-party blocks their own credential.** A third-party block
-*without* one is a misconfiguration, not a supported mode — resolution falls
+*without* one is a misconfiguration, not a supported mode: resolution falls
 through to whatever credential exists (session, `XAI_API_KEY`), or to no
 Authorization header at all.
 
@@ -216,7 +216,7 @@ Authorization header at all.
 |---------|-------------|
 | Auth / 401 loops after copying a home dir | **Do not recopy `auth.json`.** `amore logout` then `amore login` on that machine |
 | Headless host, no browser | `amore login --device-auth` |
-| CI / automation | `XAI_API_KEY` or per-model `env_key` — skip OAuth |
+| CI / automation | `XAI_API_KEY` or per-model `env_key`; skip OAuth |
 | “Model has env_key configured but none … are set” | Export the env named in TOML (see [setup-models.md](setup-models.md)) |
 | Want a clean slate | `amore logout` then login or set keys again |
 
@@ -224,6 +224,6 @@ Authorization header at all.
 
 ## Related
 
-- [setup-models.md](setup-models.md) — BYOK model paths and multi-provider TOML
-- [onboarding.md](onboarding.md) — `amore init` house pack (not credentials)
+- [setup-models.md](setup-models.md): BYOK model paths and multi-provider TOML
+- [onboarding.md](onboarding.md): `amore init` house pack (not credentials)
 - Upstream user guide (vendor-shaped detail): `crates/codegen/xai-grok-pager/docs/user-guide/02-authentication.md`

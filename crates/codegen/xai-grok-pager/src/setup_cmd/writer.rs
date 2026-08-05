@@ -244,7 +244,7 @@ pub fn write_iris_pointer(
     let path = home.join(IRIS_POINTER_NAME);
     let asset = iris_asset_shape();
     let mut body = String::from(
-        "# Iris companion pointer — written by `amore setup` / first-run wizard.\n\
+        "# Iris companion pointer, written by `amore setup` / first-run wizard.\n\
          # `amore init` installs iris; this file only records the asset it expects.\n\
          # Release asset for this platform:\n",
     );

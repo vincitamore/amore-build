@@ -2,17 +2,17 @@
 
 Amore Build is **model-agnostic by design**: every model is a `[model.*]`
 config entry pointed at an OpenAI-compatible endpoint, and the identity the
-model is given never names a model — so entries can be added, swapped, and
+model is given never names a model, so entries can be added, swapped, and
 compared without the harness caring which one is behind them. The wizard
 ships verified recipes as a convenience, not as a binding.
 
 | Product role | Model path |
 |--------------|------------|
-| **Recommended default** | DeepSeek V4 Flash via OpenRouter — the maintainer's daily driver |
+| **Recommended default** | DeepSeek V4 Flash via OpenRouter (the maintainer's daily driver) |
 | **Also verified** | GLM-5.2 (OpenRouter or Z.ai direct), DeepSeek direct |
 | **Bring anything** | Any OpenAI-compatible host serving any model |
 | **Native freight (second rail)** | xAI grok via `amore login` or `XAI_API_KEY` |
-| **Technical fallback only** | Baked catalog `grok-4.5` — never market this as the product default |
+| **Technical fallback only** | Baked catalog `grok-4.5`; never market this as the product default |
 
 Config lives at **`~/.amore/config.toml`** (override with `$AMORE_HOME`;
 legacy `$GROK_HOME` still works). Prefer **`env_key`** over a literal
@@ -24,12 +24,12 @@ legacy `$GROK_HOME` still works). Prefer **`env_key`** over a literal
 > (`resolve_system_prompt_label`,
 > `crates/codegen/xai-grok-shell/src/util/config/resolve/system_prompt.rs`).
 >
-> The label must name **the harness and the role — never the model or its
+> The label must name **the harness and the role, never the model or its
 > lab.** Upstream renders it literally as `You are <label>…`
 > (`crates/codegen/xai-grok-agent/src/prompt/context.rs`, doc comment on
 > `PromptContext.system_prompt_label`). A label naming the model is false the
 > moment that entry is pointed at a different model, and the block it sits in
-> is already per-model — the model name is never the thing missing from a
+> is already per-model; the model name is never the thing missing from a
 > `[model.<name>]` table, so a label that repeats it adds nothing and rots
 > the first time the entry is repointed.
 >
@@ -50,17 +50,17 @@ legacy `$GROK_HOME` still works). Prefer **`env_key`** over a literal
 
 Most recipes below are reasoning models: reasoning tokens are billed and
 budgeted as completion tokens, out of the same pool `max_completion_tokens`
-caps. Set that field to the **provider's reported ceiling for the model** —
+caps. Set that field to the **provider's reported ceiling for the model**:
 it is a ceiling, not a target, and raising it costs nothing on turns that do
 not need the room. A cap below the ceiling truncates the reasoning pass
 before the visible answer begins, and nothing in the output tells you it
-happened — you get a shorter, worse answer that looks like the model's best
+happened: you get a shorter, worse answer that looks like the model's best
 work. If you want to bound spend, bound it deliberately somewhere you will
 see it, rather than by quietly clipping how far the model is allowed to
 think.
 
 Ceilings differ per route (the same model behind two hosts can report two
-different ceilings) — take the number from the route you configure, not from
+different ceilings): take the number from the route you configure, not from
 the model card.
 
 ---
@@ -98,7 +98,7 @@ env_key = "OPENROUTER_API_KEY"
 system_prompt_label = "Amore Build"
 context_window = 1048576
 # Reasoning tokens count against this cap. This is the OpenRouter-reported
-# provider ceiling for this model (as of 2026-08-04) — a ceiling, not a
+# provider ceiling for this model (as of 2026-08-04): a ceiling, not a
 # target; a lower cap truncates the reasoning pass invisibly.
 max_completion_tokens = 65536
 # Optional ranking headers (OpenRouter docs):
@@ -146,7 +146,7 @@ The model's own API surface (OpenAI-compatible).
 | Auth env | `DEEPSEEK_API_KEY` |
 | Context | 1M tokens |
 | Max output (vendor-reported) | 384K tokens |
-| List price (vendor pricing page) | $0.14 input (cache miss) / $0.0028 input (cache hit) / $0.28 output, per 1M tokens *(as of 2026-08-04; re-verify — the vendor has announced peak/off-peak pricing)* |
+| List price (vendor pricing page) | $0.14 input (cache miss) / $0.0028 input (cache hit) / $0.28 output, per 1M tokens *(as of 2026-08-04; re-verify, the vendor has announced peak/off-peak pricing)* |
 | Keys | https://platform.deepseek.com/api_keys |
 | Docs | https://api-docs.deepseek.com |
 
@@ -177,8 +177,8 @@ max_completion_tokens = 393216
 | Base URL | `https://openrouter.ai/api/v1` |
 | Auth env | `OPENROUTER_API_KEY` |
 | Context | 1,048,576 tokens |
-| Provider completion ceiling (OpenRouter-reported) | 262,144 *(moved from 128,000 since the last stamp — this number tracks OpenRouter's current top provider and drifts)* |
-| List price | $0.76 input / $2.42 output / $0.14 cached input, per 1M tokens *(as of 2026-08-04; re-verify — down from $1.12/$3.52/$0.208 at the 2026-07-31 stamp)* |
+| Provider completion ceiling (OpenRouter-reported) | 262,144 *(moved from 128,000 since the last stamp; this number tracks OpenRouter's current top provider and drifts)* |
+| List price | $0.76 input / $2.42 output / $0.14 cached input, per 1M tokens *(as of 2026-08-04; re-verify, down from $1.12/$3.52/$0.208 at the 2026-07-31 stamp)* |
 | Model card | https://openrouter.ai/z-ai/glm-5.2 |
 
 ```toml
@@ -228,7 +228,7 @@ max_completion_tokens = 128000
 
 ## 5. Any other OpenAI-compatible host
 
-Use this tier for any host the recipes above do not cover — a hyperscaler
+Use this tier for any host the recipes above do not cover: a hyperscaler
 endpoint, a self-hosted vLLM/SGLang deployment, or a different model
 entirely served over an OpenAI-compatible Chat Completions API. The config
 table key is yours to pick; `openweight` below is a placeholder name, not a
@@ -249,7 +249,7 @@ context_window = 1048576
 max_completion_tokens = 128000             # set to YOUR host's reported ceiling
 ```
 
-`env_key` names the environment variable Amore reads for the bearer token —
+`env_key` names the environment variable Amore reads for the bearer token;
 rename it to match your host's own convention; the TOML value is only the
 **name** of the variable, never the secret.
 
@@ -266,7 +266,7 @@ APIs (xAI, DeepSeek, Z.ai, self-hosted vLLM/SGLang) send
 (`#[serde(alias = "reasoning")]` on `ChatChunkDelta.reasoning_content`,
 `crates/codegen/xai-grok-sampling-types/src/types.rs`), so traces render on
 either route. If thinking blocks are missing on some custom host, check
-`[ui] show_thinking_blocks` first, then the wire field name — not the
+`[ui] show_thinking_blocks` first, then the wire field name, not the
 model's reasoning effort.
 
 ---
@@ -319,7 +319,7 @@ as technical fallback):
 | Headless / CI | `export XAI_API_KEY="xai-..."` from https://console.x.ai |
 
 ```toml
-# Optional explicit pin (usually unnecessary — baked catalog already has grok-4.5)
+# Optional explicit pin (usually unnecessary; baked catalog already has grok-4.5)
 [model.grok-native]
 model = "grok-4.5"
 name = "Grok 4.5 (xAI)"
@@ -329,7 +329,7 @@ system_prompt_label = "Amore Build"
 context_window = 500000
 ```
 
-The label here is still `"Amore Build"`, not `"Grok 4.5"` — the model name
+The label here is still `"Amore Build"`, not `"Grok 4.5"`: the model name
 already lives in `model` and `name`. The identity rule above does not carve
 out an exception for the native rail: `[model.grok-native]` is exactly as
 per-model as any BYOK block, so the same rule applies.
@@ -350,7 +350,7 @@ a single global base URL for both.
 For each model, Amore resolves keys in this order
 (`resolve_credentials` in the shell agent config):
 
-1. Per-model `api_key` (literal — avoid in shared configs)
+1. Per-model `api_key` (literal; avoid in shared configs)
 2. Per-model `env_key` (first set, non-empty env among names)
 3. Named `auth_provider` helper token
 4. Session token from `amore login`
@@ -358,14 +358,14 @@ For each model, Amore resolves keys in this order
 
 A model's **own** credential always wins: a third-party block that sets
 `env_key` (or `api_key`) never receives the session JWT or `XAI_API_KEY`.
-That is why third-party blocks **must** set one — omitting it is a
+That is why third-party blocks **must** set one: omitting it is a
 misconfiguration that falls through to credentials that were never meant for
 that host (or to no Authorization header at all when nothing is set). Do not
 rely on the fallthrough; set `env_key`.
 
 ---
 
-## Appendix A — Anthropic workaround (workaround-tier)
+## Appendix A: Anthropic workaround (workaround-tier)
 
 Anthropic's **native** Messages API is **not** a drop-in OpenAI `base_url`
 swap. Amore supports it via `api_backend = "messages"` plus required
@@ -393,7 +393,7 @@ env_http_headers = { "x-api-key" = "ANTHROPIC_API_KEY" }
 | `api_backend` | `ConfigModelOverride.api_backend` (`messages` / `chat_completions` / `responses`) | `crates/codegen/xai-grok-shell/src/agent/config.rs` |
 | `extra_headers` | `ConfigModelOverride.extra_headers` | same |
 | `env_http_headers` | `ConfigModelOverride.env_http_headers` | same |
-| *(gap)* `auth_scheme` | **not** on `ConfigModelOverride` — runtime `ModelInfo` only | do not invent in TOML |
+| *(gap)* `auth_scheme` | **not** on `ConfigModelOverride`; runtime `ModelInfo` only | do not invent in TOML |
 
 **Verify:** `export ANTHROPIC_API_KEY=…` then
 `amore -m claude-workaround -p "Reply with exactly: CLAUDE-OK"`.
@@ -404,14 +404,14 @@ surface.
 
 ---
 
-## Appendix B — Cost and ops tips
+## Appendix B: Cost and ops tips
 
 - **Output tokens dominate cost** on a reasoning model, because the
   reasoning pass itself draws from completion budget before the visible
   answer does. Set `max_completion_tokens` to the provider ceiling and bound
   spend somewhere you can see it.
 - Keep long **stable prefixes** (AGENTS.md, project doctrine) so that any
-  provider-side prompt-caching discount applies where the host offers one —
+  provider-side prompt-caching discount applies where the host offers one;
   both recommended recipes price cached input well below cache-miss input
   (see the pricing rows above).
 - Leave `stream_tool_calls` unset/`false` on third-party hosts unless you
@@ -427,12 +427,12 @@ surface.
 
 ## What not to do
 
-- Do **not** expect a private preset beyond what is shown here — BYOK config
+- Do **not** expect a private preset beyond what is shown here: BYOK config
   is the product surface.
 - Do **not** omit `system_prompt_label` on any custom model.
-- Do **not** name the model, or its lab, inside `system_prompt_label` — name
+- Do **not** name the model, or its lab, inside `system_prompt_label`; name
   the harness and the role instead. Run the read-it-back test from the
   identity rule above before shipping a label.
 - Do **not** put API keys in git-tracked TOML; use `env_key`.
-- Do **not** market baked `grok-4.5` as the default cooperation model — it is
+- Do **not** market baked `grok-4.5` as the default cooperation model; it is
   technical fallback and freight only.

@@ -1,9 +1,9 @@
 # Onboarding: what `amore init` installs
 
-`amore init` **creates a house** — a directory carrying orientation surfaces,
+`amore init` **creates a house**: a directory carrying orientation surfaces,
 folder schemas, hooks, skills, the iris companion, and an install manifest
 that records ownership. The house is the place you launch from for all your
-work, not per-repo config — the working method is explained in
+work, not per-repo config; the working method is explained in
 [the-house.md](the-house.md). This page answers the mechanics: **what got
 installed, what Amore owns vs what you own, and what happens on
 `--refresh`.**
@@ -155,21 +155,21 @@ content belongs to and how to customize it safely.
 
 | Class | Paths | Owner / customize |
 |-------|-------|-------------------|
-| House identity | `AGENTS.md` | Yours. Init expands `{{HOUSE_NAME}}`; edit orientation freely — edits preserved on `--refresh`. |
+| House identity | `AGENTS.md` | Yours. Init expands `{{HOUSE_NAME}}`; edit orientation freely, edits preserved on `--refresh`. |
 | Context surfaces | `context/current-state.md`, `context/previous-state.md` | Yours to keep current: rewrite `current-state` freely each session; migrate aged sections to `previous-state` verbatim, never edit it in place. Never `--force` just to "upgrade" these. |
 | Lattice | `context/principle-lattice.md`, `.amore/rules/principle-lattice.md` | Yours to edit; tool ships the default. Omit both with `--no-lattice`. |
 | Org scaffolds | `inbox/ tasks/ knowledge/ reminders/ forge/` READMEs + `.gitkeep` skeletons | Scaffold is tool-managed; **everything you add under them is yours** and never touched by init. Leave READMEs until you intentionally fork the schema docs. |
 | House/projects boundary | `.gitignore`, `projects/README.md`, `instruments/README.md` | Tool-managed while untouched. The boundary keeps project repos out of the house repo (`projects/*` ignored, READMEs tracked). |
 | Hooks pack | `.amore/hooks/**` (registrations, `bin/`, `fixtures/`) | Tool-managed pack; yours after you edit. Prefer config tweaks over forking scripts; `--no-hooks` drops the pack + registry line. |
-| Skills pack | `.amore/skills/**` (6 skills + README) | Tool-managed pack; edit `SKILL.md` + support files freely — skill-local changes preserved on `--refresh`. `--no-skills` drops the tree. |
-| House scripts | `scripts/README.md`, `scripts/sync_orientation_rules.py` | Tool-managed utilities; extend freely. (The pack's `scripts/tests/` fixtures are **not** installed — they exist for the template's own CI.) |
+| Skills pack | `.amore/skills/**` (6 skills + README) | Tool-managed pack; edit `SKILL.md` + support files freely, skill-local changes preserved on `--refresh`. `--no-skills` drops the tree. |
+| House scripts | `scripts/README.md`, `scripts/sync_orientation_rules.py` | Tool-managed utilities; extend freely. (The pack's `scripts/tests/` fixtures are **not** installed; they exist for the template's own CI.) |
 | Root index | `README.md` | Tool-managed while untouched; yours after you edit. |
 
 ### Init-produced (not in the embed / dry-run would-write list)
 
 | Path | What | Notes |
 |------|------|-------|
-| `.amore/house-install.json` | Install manifest (`version` + `files` → sha256) | **Tool-managed** — refresh uses it as the source of truth for "untouched". Do not hand-edit hashes. |
+| `.amore/house-install.json` | Install manifest (`version` + `files` → sha256) | **Tool-managed**: refresh uses it as the source of truth for "untouched". Do not hand-edit hashes. |
 | `~/.amore/hooks-paths` (global) | Always-trusted hooks directory registry | Re-run init (hooks enabled) re-registers if missing. Remove the project line to drop global trust. |
 | `instruments/iris/` | The iris companion binaries | Fetched from the matching release, then linked beside the `amore` binary onto `PATH`; `--no-iris` skips (offline switch). |
 | `~/.amore/instruments/qmd/` (global) | Managed semantic search runtime, models, and per-house indexes | Created by `iris qmd setup` (default during init). `--no-qmd` skips; finish later with `iris qmd setup`. |
@@ -182,7 +182,7 @@ All flags are long-options on `amore init` (see `amore init --help`).
 
 | Flag | Default | Effect |
 |------|---------|--------|
-| `--no-lattice` | lattice **on** | Omit every path equal to `context/principle-lattice.md` or ending in `/principle-lattice.md` (includes `.amore/rules/principle-lattice.md`). The shipped `AGENTS.md` template marks lattice-only orientation with HTML-comment markers so the lattice vs no-lattice reading is explicit in-source. Init drops lattice **files**; it does not rewrite the AGENTS body — the markers document which paragraphs belong to lattice mode. |
+| `--no-lattice` | lattice **on** | Omit every path equal to `context/principle-lattice.md` or ending in `/principle-lattice.md` (includes `.amore/rules/principle-lattice.md`). The shipped `AGENTS.md` template marks lattice-only orientation with HTML-comment markers so the lattice vs no-lattice reading is explicit in-source. Init drops lattice **files**; it does not rewrite the AGENTS body; the markers document which paragraphs belong to lattice mode. |
 | `--no-skills` | skills **on** | Omit all of `.amore/skills/**`. Explicit `--skills` is a no-op when already default-on. |
 | `--no-hooks` | hooks **on** | Do **not** write `.amore/hooks/**` (paths still appear in the plan as skipped) and skip global `hooks-paths` registration. Explicit `--hooks` is a no-op when already default-on. |
 | `--no-iris` | iris **on** | Skip the companion install (and implies `--no-qmd`). This is the offline switch when no optional companions are requested. |
@@ -204,7 +204,7 @@ registers that directory in `~/.amore/hooks-paths`.
 
 - **Event:** `Stop` (only `reason == "end_turn"` is gated; session-end observes release).
 - **Job:** maintenance vigilance **once per operator turn** (state under
-  `~/.amore/state/stop-gate/<sessionId>.json`, keyed by `promptId` — not the
+  `~/.amore/state/stop-gate/<sessionId>.json`, keyed by `promptId`, not the
   aggregate `stopHookActive` flag).
 - **Block:** stdout `{"decision":"block","reason":"…"}` with the house checklist
   (`[HOUSE STOP GATE — native Stop hook]`).
@@ -246,7 +246,7 @@ registers that directory in `~/.amore/hooks-paths`.
 Project hooks live **in the house** under `.amore/hooks/`, but init also
 **registers them globally** by appending the absolute hooks directory to
 `~/.amore/hooks-paths`. That registry is the always-trusted path list the
-runner consults — so the pack runs for this house after init without a
+runner consults, so the pack runs for this house after init without a
 separate per-path trust dance. Cloning the house to a new machine requires
 running `amore init` (or `--refresh` with hooks enabled) again so the new
 absolute path is registered.
@@ -262,7 +262,8 @@ Exact effect of each `--no-*` opt-out on the default tree:
 | `--no-lattice` | `context/principle-lattice.md`; `.amore/rules/principle-lattice.md` (any path ending in `/principle-lattice.md`) | Everything else, including `AGENTS.md` (markers retained as comments) |
 | `--no-skills` | Entire `.amore/skills/**` tree (all 6 skills + support files) | Hooks, lattice, scaffolds, scripts, AGENTS |
 | `--no-hooks` | Write of `.amore/hooks/**` (plan shows them **skipped**) **and** `hooks-paths` registration | Skills, lattice, scaffolds, scripts, AGENTS |
-| `--no-iris` | The `instruments/iris/` companion download; no network request at all | Default tree otherwise unchanged |
+| `--no-iris` | The `instruments/iris/` companion download (and, implied, the qmd setup step); no network request at all when no optional companions are requested | Default tree otherwise unchanged |
+| `--no-qmd` | The automatic `iris qmd setup` step (package install, house index, model downloads) | Iris itself still installs; finish search later with `iris qmd setup` |
 
 Combining flags is supported (e.g. `amore init --no-skills --no-hooks --no-lattice --yes`).
 
@@ -271,7 +272,7 @@ Combining flags is supported (e.g. `amore init --no-skills --no-hooks --no-latti
 ## Quick verification
 
 ```sh
-# Plan only — must list the content files and hooks-registry would-register
+# Plan only: must list the content files and hooks-registry would-register
 amore init --dry-run --yes
 
 # After a real install

@@ -2,7 +2,7 @@
 
 **Iris** is a first-class companion of Amore Build: the knowledge and
 organization instrument for a house tree. It is **never required** to run
-Amore Build itself — sessions, models, and the agent loop work without it.
+Amore Build itself: sessions, models, and the agent loop work without it.
 It is what gives a house a live file index, org CRUD verbs, and an
 interactive dash over the same scaffold `amore init` plants.
 
@@ -22,11 +22,11 @@ Three surfaces share one product name:
 
 | Surface | Role |
 |---------|------|
-| **Daemon** | Live org index on `127.0.0.1:3853` — recursive file watch, wikilink/backlink graph, multi-mode search (`/api/search`) |
+| **Daemon** | Live org index on `127.0.0.1:3853`: recursive file watch, wikilink/backlink graph, multi-mode search (`/api/search`) |
 | **CLI** (`iris`) | Org verbs powered by `@amore/regula` (`task`, `inbox`, `reminder`, `knowledge`, plus `status`, `search`, `qmd`, `daemon`, …) and daemon-backed reads |
-| **Dash** (TUI) | OpenTUI interactive dashboard — Dashboard / Tasks / Inbox / Reminders / Knowledge / Files / Forge / Lucerna / Graph (hotkeys `1`–`9` in that order) |
+| **Dash** (TUI) | OpenTUI interactive dashboard: Dashboard / Tasks / Inbox / Reminders / Knowledge / Files / Forge / Lucerna / Graph (hotkeys `1`–`9` in that order) |
 
-Iris ships the full regula org-CRUD surface — every task / inbox / reminder /
+Iris ships the full regula org-CRUD surface: every task / inbox / reminder /
 knowledge lifecycle verb, plus `lint`, `status`, `search`, `links`, and
 `graph`. (`regula`'s forge-review verbs are not yet routed as CLI verbs; the
 dash's Forge tab is the forge surface.) `iris commands` prints the
@@ -36,15 +36,15 @@ capability manifest for the org-verb surface; `daemon`, `dash`, and
 ### The dash
 
 Every frame below is a capture of the real dash over a real house tree
-(`scripts/capture_frame.py` + `scripts/render_frame.py` in this repo — a
+(`scripts/capture_frame.py` + `scripts/render_frame.py` in this repo: a
 pty, a VT emulator, and a font-verified renderer; never a mockup).
 
-**Dashboard** — orientation at a glance: status tiles, the agenda, recent
+**Dashboard**, orientation at a glance: status tiles, the agenda, recent
 changes from the house's own state surface:
 
 ![Dashboard tab](assets/iris/dashboard.png)
 
-**Tasks / Inbox / Reminders** — the org tree grouped by lifecycle, the same
+**Tasks / Inbox / Reminders**, the org tree grouped by lifecycle, the same
 `1`–`9` hotkeys the tab bar shows:
 
 ![Tasks tab](assets/iris/tasks.png)
@@ -53,23 +53,23 @@ changes from the house's own state surface:
 
 ![Reminders tab](assets/iris/reminders.png)
 
-**Knowledge / Files** — the distilled-notes index and the raw tree:
+**Knowledge / Files**, the distilled-notes index and the raw tree:
 
 ![Knowledge tab](assets/iris/knowledge.png)
 
 ![Files tab](assets/iris/files.png)
 
-**Forge** — pipeline artifacts, expanded to their layer → agent tree:
+**Forge**, pipeline artifacts expanded to their layer → agent tree:
 
 ![Forge tab](assets/iris/forge.png)
 
-**Lucerna** — house steward ops: health, enablement, start/stop, notifications.
+**Lucerna**, house steward ops (health, enablement, start/stop, notifications).
 Full contract: [`iris-lucerna.md`](iris-lucerna.md). Autonomy defaults and
 egress inventory: [`autonomy.md`](autonomy.md), [`egress.md`](egress.md).
 
 ![Lucerna tab](assets/iris/lucerna.png)
 
-**Graph** — the wikilink/backlink graph, force-laid, typed and legended:
+**Graph**, the wikilink/backlink graph, force-laid, typed and legended:
 
 ![Graph tab](assets/iris/graph.png)
 
@@ -126,15 +126,50 @@ use any Amore chat model configuration; qmd loads local GGUF models only.
 
 The dash search palette (`/`) cycles modes with Tab: fuzzy, content,
 semantic. A status line reports backend unavailability and indexing state
-when the companion is refreshing.
+when the companion is refreshing. Semantic results rank by meaning, not
+keyword overlap:
+
+![Search overlay in semantic mode](assets/iris/search-overlay.png)
 
 While the daemon runs, it debounce-batches org-tree markdown changes into
 quiet `qmd update` (and embed when models already exist) so the content
 index stays current without a manual refresh habit. Setup owns model
 downloads; automatic refresh never pulls new models from the network.
 
+The managed install needs a JS runtime on `PATH`: Node 22+ preferred, Bun
+accepted. `iris qmd status` and `amore doctor` both report which one
+resolved.
+
 Egress for the companion (npm registry at setup; huggingface.co model
 pulls at setup) is listed in [`egress.md`](egress.md).
+
+### Typed edges (the house graph)
+
+Alongside the wikilink/backlink graph the dash renders, iris maintains a
+**typed-edge store** at `graph/edges.jsonl` in the house: explicit,
+provenance-stamped relations between house documents (for example
+`depends-on`, `supersedes`). Every edge carries its derivation tier and
+provenance; edges land live, and stewardship is after the fact: list,
+inspect, annotate, or remove, with removals durable across re-derives via
+`graph/suppressions.jsonl` and edits preserved via `graph/overrides.jsonl`.
+
+```sh
+iris edges derive            # tier-0 structural derive from frontmatter + self-labels
+iris edges update            # graph refresh (--tier 0 default)
+iris edges update --tier 2   # gen -> judge -> live ingest (spawns your amore config)
+iris edges list [--type … --tier … --since …]
+iris edges show <id>         # one edge, full provenance
+iris edges edit <id> --note "…"   # annotations preserved across re-derive
+iris edges remove <id>       # durable suppression
+iris edges validate          # schema-check every stored edge
+iris edges stats             # counts by type / tier / provenance
+```
+
+Tier semantics: **0** is structural (no model), **1** inventories
+candidates, **2** generates and judges edges through a headless `amore`
+spawn using your own configuration, with a quote-validity gate before any
+edge lands. Only tier 2 calls a model; the egress rows are in
+[`egress.md`](egress.md).
 
 Lucerna ops surface (start/stop, enablement, notifications, file contract):
 [`iris-lucerna.md`](iris-lucerna.md).
@@ -146,26 +181,26 @@ wins). Callers refuse a silent cwd fallback when no root resolves.
 
 ### The regula core
 
-Every write — CLI verb or dash action — goes through **`@amore/regula`**,
+Every write (CLI verb or dash action) goes through **`@amore/regula`**,
 the org write authority. It owns the document schemas (frontmatter shapes
 per type), the **legal lifecycle transitions** (a task moves
 `active → review → complete`, not arbitrarily; terminal inbox items get a
 `resolution` and move to `resolved/`), **folder placement** (status decides
 the directory, and the verbs move files when status changes), and the
-**lint** (`iris regula lint` — errors fail, warnings are the open
+**lint** (`iris regula lint`: errors fail, warnings are the open
 data-quality queue). The point of routing writes through one core: a verb
 cannot produce a file the house schema would call malformed, and two
 surfaces (CLI, dash) cannot drift apart on what "complete" means.
 
 The house is wired to it natively: the `AGENTS.md` that `amore init` plants
 teaches the resident agent to prefer the iris verbs for org CRUD and to run
-`iris regula lint` before ending a session — so the agent, the CLI, and the
+`iris regula lint` before ending a session, so the agent, the CLI, and the
 dash all write through the same authority. When iris is absent, direct file
 edits against the schemas remain fully legitimate; the files are the source
 of truth either way.
 
 The **dash** auto-spawns the daemon when nothing answers on the port. Plain
-CLI verbs that need the index do not auto-spawn — they fail with a one-line
+CLI verbs that need the index do not auto-spawn; they fail with a one-line
 hint to start it.
 
 ---
@@ -177,14 +212,14 @@ hint to start it.
 **`amore init` installs iris for you.** Creating a house downloads the
 release archive for your platform, verifies its published checksum, and
 unpacks both binaries into `instruments/iris/` inside the house. This is the
-only part of `init` that touches the network — `--no-iris` skips it and
+only part of `init` that touches the network; `--no-iris` skips it and
 makes `init` fully offline.
 
 A failed download never fails the house: the tree is already written, the
 summary names what happened, and `amore init --refresh` finishes the job
 later.
 
-Init also puts iris **on your `PATH`** — by linking the binaries (multi-tool
+Init also puts iris **on your `PATH`**, by linking the binaries (multi-tool
 and dash) into the directory the running `amore` executable lives in. If
 `amore` resolves on `PATH`, `iris` now does too; no shell-config or registry
 surgery, same behavior on every platform. The init summary names the
@@ -244,7 +279,7 @@ Iris is optional at every layer. Absence is quiet.
 
 ### `amore init`
 
-Installs the companion into the house by default (`--no-iris` opts out) —
+Installs the companion into the house by default (`--no-iris` opts out);
 see Install §A above.
 
 ### `amore setup`
@@ -258,7 +293,7 @@ on `PATH` and can plant a pointer file under the amore home:
 ```
 
 That file is a **pointer, not an install**. It records whether `iris` was
-found on `PATH` (and the expected asset name for this host when it was not) —
+found on `PATH` (and the expected asset name for this host when it was not);
 `amore init` does the installing. Headless `amore setup` prints the step
 only and does not plant unless you re-run interactively (or write the file
 yourself).
@@ -267,7 +302,7 @@ yourself).
 
 When iris is installed and detected, the Amore Build TUI surfaces a
 shortcuts-bar hint that launches **`iris dash` in a new terminal**. The
-action is **Ctrl+Shift+G** (label `dash`) — mnemonic for the "glass", and
+action is **Ctrl+Shift+G** (label `dash`), mnemonic for the "glass", and
 deliberately not Ctrl+Shift+D, which Windows Terminal binds to `duplicatePane`
 by default and swallows before the TUI sees it. The in-product shortcuts
 cheatsheet is the source of truth if the binding ever moves.
@@ -301,7 +336,7 @@ Tiered foreign-root trust (current product model):
 
 | Operation | Policy |
 |-----------|--------|
-| **Reads** (daemon index, search, graph, dash viewing) | Unguarded on any resolved org root — no house-marker requirement |
+| **Reads** (daemon index, search, graph, dash viewing) | Unguarded on any resolved org root; no house-marker requirement |
 | **Mutations** (regula CRUD / lifecycle: create, complete, archive, …) | Require a **house root** (orientation doc + `tasks/`) **or** explicit opt-in |
 
 House markers (same walk-up idea as org-root resolution): `AGENTS.md` or
@@ -318,7 +353,7 @@ CLI calls `ensureMutationTrust` on write verbs before mutating.
 
 **Honest current state:** org-root resolution via `IRIS_ORG_ROOT` and the
 CLI mutation trust seam are live today. Do not assume a richer dash-side trust
-UX or automatic wiring beyond what the CLI/daemon already enforce — further
+UX or automatic wiring beyond what the CLI/daemon already enforce; further
 dash trust presentation is a follow-on, not a promised surface.
 
 ### Instrument home and upgrade migration
@@ -357,14 +392,14 @@ when those override the default home).
 | Fact | Detail |
 |------|--------|
 | Who writes it | `amore setup` interactive step 3 (opt-out with skip) |
-| What it is | Companion **pointer** config — PATH detection / expected asset name |
+| What it is | Companion **pointer** config: PATH detection / expected asset name |
 | What it is not | An installer, a download cache, or a runtime dependency of Amore Build (`amore init` does the installing) |
 | Without iris | Amore Build runs normally; optional UI hint stays hidden |
 
 Example shape (fields depend on PATH detection):
 
 ```toml
-# Iris companion pointer — written by `amore setup` / first-run wizard.
+# Iris companion pointer, written by `amore setup` / first-run wizard.
 # Iris is optional; this file is not an install.
 
 [iris]
@@ -376,8 +411,8 @@ expected_asset = "iris-linux-x64"
 
 ## See also
 
-- [onboarding.md](onboarding.md) — what `amore init` installs; `--no-iris`
-- [setup-models.md](setup-models.md) — model recipes (setup wizard step 1)
-- [authentication.md](authentication.md) — OAuth vs BYOK rails (setup wizard step 2)
-- [`instruments/iris/README.md`](../instruments/iris/README.md) — layout, env list, run recipes
-- [`UPSTREAM.md`](../UPSTREAM.md) — fork delta summary (iris called out as companion)
+- [onboarding.md](onboarding.md): what `amore init` installs; `--no-iris`
+- [setup-models.md](setup-models.md): model recipes (setup wizard step 1)
+- [authentication.md](authentication.md): OAuth vs BYOK rails (setup wizard step 2)
+- [`instruments/iris/README.md`](../instruments/iris/README.md): layout, env list, run recipes
+- [`UPSTREAM.md`](../UPSTREAM.md): fork delta summary (iris called out as companion)
