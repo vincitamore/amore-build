@@ -1,12 +1,12 @@
 # Upstream relationship
 
 Definitive statement of how **Amore Build** relates to its upstream source.
-Provenance and policy surface — not marketing.
+Provenance and policy surface, not marketing.
 
 ## 1. What this is
 
 **Amore Build** is a perpetual friendly fork of xAI's open-sourced Grok Build
-harness (`xai-org/grok-build`, Apache License 2.0) — by way of the sibling
+harness (`xai-org/grok-build`, Apache License 2.0), by way of the sibling
 fork Selene Build, and briefly named Arcus Build before ever being announced.
 
 | | |
@@ -14,7 +14,7 @@ fork Selene Build, and briefly named Arcus Build before ever being announced.
 | **Product / repo** | Amore Build (`amore-build`) |
 | **Primary binary** | `amore` (argv0 also tolerates `amore-build`, `grok`, `agent`) |
 | **Upstream** | [xai-org/grok-build](https://github.com/xai-org/grok-build) |
-| **License** | Apache-2.0 — see [`LICENSE`](LICENSE) |
+| **License** | Apache-2.0; see [`LICENSE`](LICENSE) |
 | **Crates** | Upstream names kept (`xai-grok-*` and related `xai-*`). Product rename is binary/docs/config-surface only, not the crate graph. |
 
 The fork exists so cooperation-harness content, identity, and config semantics
@@ -56,8 +56,8 @@ X Corp.**
 
 [`SOURCE_REV`](SOURCE_REV) at the repo root names the upstream baseline this
 tree is rebased on (or last synced from). **The pin stores the public
-sync-bundle SHA** — the newest "Synced from monorepo" commit on
-`xai-org/grok-build` that has been merged — not upstream's *internal*
+sync-bundle SHA**: the newest "Synced from monorepo" commit on
+`xai-org/grok-build` that has been merged, not upstream's *internal*
 monorepo SHA (the `Source-Revision:` trailer), which is not a fetchable git
 object.
 
@@ -65,7 +65,7 @@ object.
 
 1. Open `SOURCE_REV` at the repository root.
 2. Skip the `#`-prefixed header comment; the payload is the single
-   non-comment line — a 40-character hexadecimal Git SHA.
+   non-comment line: a 40-character hexadecimal Git SHA.
 3. That SHA is the upstream baseline, resolvable on `xai-org/grok-build`.
    Fork-only commits sit above the history that includes that sync; they are
    not part of the upstream tree.
@@ -127,7 +127,7 @@ use). Must not trap headless or CI paths.
 **Iris.** Companion instrument in-tree at `instruments/iris/`. `amore init`
 installs its release binaries into a house by default (`--no-iris` opts out;
 a failed download never fails the house); `amore setup` records PATH
-detection. Never required to run Amore Build — absence is quiet.
+detection. Never required to run Amore Build; absence is quiet.
 
 **Auto-update hard-off.** Compile-time policy in `xai-grok-update`
 (`FORK_AUTO_UPDATE_HARD_OFF`): auto-update is forced ineffective so the fork cannot
@@ -139,7 +139,7 @@ installer; it keeps an `amore.prev` rollback of the previous copy.
 against unix hosts: a substantial set of tests assert unix path shapes, unix
 process/env behaviour, or terminal-brand detection, and fail on Windows in
 stock upstream as much as here. The fork does not "fix" those by forking test
-logic — where a test is unix-only, it is `cfg`-gated to match upstream's own
+logic: where a test is unix-only, it is `cfg`-gated to match upstream's own
 gating, and nothing more. Consequence for CI: **the pager suite is gated on
 Linux; Windows is gated on building the binary, smoking it (`--version`,
 `doctor --json`), and the crate suites that are clean there.** Windows is a
@@ -152,7 +152,7 @@ logic, and the bulk of `crates/`.
 
 The mechanics below are automated by [`scripts/sync_upstream.py`](scripts/sync_upstream.py)
 (stdlib Python; `py scripts/sync_upstream.py --help` on Windows, `python3`
-elsewhere). Upstream publishes **sync-bundle commits** — bot-authored commits
+elsewhere). Upstream publishes **sync-bundle commits**: bot-authored commits
 titled "Synced from monorepo" with a `Source-Revision:` trailer naming the
 internal monorepo SHA. Those bundles are the intake unit (§4); never
 cherry-pick unrelated upstream commits.
@@ -168,15 +168,15 @@ git commit -m "sync: merge upstream <sha>"
 python scripts/sync_upstream.py --update-pin # SOURCE_REV -> upstream/main
 ```
 
-`--apply` refuses a dirty working tree and never commits — the merge is left
-for human review. `--verify` checks the fork surfaces mechanically — eight
+`--apply` refuses a dirty working tree and never commits; the merge is left
+for human review. `--verify` checks the fork surfaces mechanically, nine of them
 check groups as of 2026-08-04: `.amore`/`.grok` precedence, `~/.amore`
 default home, identity/binary naming (argv0 aliases), auto-update hard-off
 (`FORK_AUTO_UPDATE_HARD_OFF`), the embed + `init` ownership tests, the
 brand-boundary gate, the `resolved_bin_name()` branding call-site pins
 (resume-hint / titles / completions), the doctor-namespace migration
 pins, and the egress pins (telemetry mode defaults to `Disabled`; no
-`GROK_TELEMETRY_BUILD_*` reporting token referenced in any workflow) —
+`GROK_TELEMETRY_BUILD_*` reporting token referenced in any workflow), and
 then builds and smokes `amore` on the host. The egress pins re-verify the
 shipped posture at every sync, so the public egress statement is
 re-checked mechanically rather than trusted to memory. The script is the
@@ -192,10 +192,10 @@ what it can and cannot run rather than faking a green.
 2. Rebase or merge the **entire sync bundle** (`--apply`), then re-apply/re-
    verify the thin fork delta once.
 3. Refresh [`SOURCE_REV`](SOURCE_REV) when the upstream baseline moves
-   (`--update-pin`). **The pin stores the public sync-bundle SHA** — the last
-   one merged — not upstream's internal monorepo SHA (`Source-Revision:`),
+   (`--update-pin`). **The pin stores the public sync-bundle SHA**: the last
+   one merged, not upstream's internal monorepo SHA (`Source-Revision:`),
    which is not a fetchable git object.
-4. After every rebase, re-check the fork surfaces — `--verify` does
+4. After every rebase, re-check the fork surfaces; `--verify` does
    this; keep the checklist in sync with the script when it grows.
 5. Fast-follow security fixes; batch ordinary drift into the next sync rebase.
 
@@ -208,12 +208,12 @@ channel:
 - **Rebase-rarely:** no micro-rebase stream from upstream; intake is
   bundle-shaped (§4).
 - The fork-surface grok boundary is enforced by
-  [`scripts/check_grok_boundary.py`](scripts/check_grok_boundary.py) —
+  [`scripts/check_grok_boundary.py`](scripts/check_grok_boundary.py):
   `--scan` to survey, `--check` to gate. It encodes which `grok` mentions are
   ours to change (fork-owned surface) versus upstream substrate (crate ids,
   paths, env, model name, provenance) that must stay untouched for merge
   economics. Add reviewed exceptions there, not by editing around the check.
-- The mechanical rebase checklist **is** `sync_upstream.py --verify` — its
+- The mechanical rebase checklist **is** `sync_upstream.py --verify`; its
   check groups are the published, executable form. §4–§5 plus thin-diff /
   rebase-rarely are the binding written policy around it.
 

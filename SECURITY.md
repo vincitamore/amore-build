@@ -10,7 +10,7 @@ advisories** on this repository:
 Please do not file public issues for security reports, and do not post details
 in discussions, PRs, or any other public channel, until a fix is public.
 
-**There is no security email alias** — private advisories are the single
+**There is no security email alias**: private advisories are the single
 reporting channel, so reports stay attached to the repository and get a
 private working thread by construction.
 
@@ -18,7 +18,7 @@ private working thread by construction.
 
 - Affected version / commit (`amore --version` prints the build commit).
 - Reproduction steps or a proof-of-concept, and the impact you see.
-- Whether the issue reproduces in **upstream** `xai-org/grok-build` — if it
+- Whether the issue reproduces in **upstream** `xai-org/grok-build`: if it
   does, it is an upstream bug and should be reported there as well; this fork
   tracks upstream and will pull their fix. Issues in fork-specific surfaces
   (identity/branding layer, `.amore` config-dir handling, `amore init` /
@@ -29,7 +29,7 @@ private working thread by construction.
 
 This is a personal-scale open project maintained in the open, not a staffed
 security org: response is **best-effort, no SLA**. Reasonable-coordination
-disclosure is appreciated — we aim to acknowledge useful reports and will
+disclosure is appreciated; we aim to acknowledge useful reports and will
 credit reporters in release notes unless you ask otherwise.
 
 ### Egress posture
@@ -40,7 +40,7 @@ client constructed while disabled, no reporting token baked into any
 release build). Receipts and the capture method: `docs/egress.md` +
 `scripts/egress_capture.sh`; the posture is re-pinned mechanically at every
 upstream sync by `scripts/sync_upstream.py --verify`. Traffic that
-contradicts this is a vulnerability — report it.
+contradicts this is a vulnerability: report it.
 
 ### Scope guidance
 
@@ -48,5 +48,5 @@ contradicts this is a vulnerability — report it.
   (`~/.amore/auth.json` must never be committed or logged; `AMORE_*` env
   vars take precedence over `GROK_*` aliases).
 - `amore init` / `amore setup` write templates and config under your user
-  home and project tree — report anything that writes outside those roots or
+  home and project tree; report anything that writes outside those roots or
   follows input-controlled paths unsafely.

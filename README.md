@@ -4,16 +4,16 @@
 
 Amore Build (`amore`) is a terminal AI coding agent: a full-screen TUI that
 understands your codebase, edits files, runs shell commands, searches the web,
-and drives long-running multi-agent work — interactively, headlessly for
+and drives long-running multi-agent work: interactively, headlessly for
 scripting/CI, or embedded in editors via ACP.
 
 What sets it apart is the **house**. The usual way to run a coding agent is
 to launch it inside each project, where context lives and dies with the
 checkout. With Amore Build you create a house once (`amore init`) and launch
-from it always: one working tree the agent inhabits — orientation surfaces
+from it always: one working tree the agent inhabits (orientation surfaces
 read at session start, org schemas for tasks / captures / knowledge /
 reminders, cross-project doctrine, orchestration skills, and session hooks
-including a stop gate — while your project repos live around it, each
+including a stop gate) while your project repos live around it, each
 keeping its own history. The point of the house is time: every session
 starts where the last one stopped, and lessons banked in one project apply
 to the next. The **iris** companion keeps the house's live index with a
@@ -27,7 +27,7 @@ It is a **permanent engineered fork** of xAI's open-source
 xAI product, and not affiliated with any model vendor.** Upstream provenance
 and sync cadence: [`UPSTREAM.md`](UPSTREAM.md).
 
-![Amore Build — the welcome screen](docs/assets/welcome-shimmer.gif)
+![Amore Build, the welcome screen](docs/assets/welcome-shimmer.gif)
 
 ---
 
@@ -45,7 +45,7 @@ amore --version
 
 The installers fetch the newest [GitHub Release](https://github.com/vincitamore/amore-build/releases)
 asset for your platform, verify its published sha256, and install the binary
-(`~/.local/bin` on unix, `%USERPROFILE%\amore\bin` on Windows — override with
+(`~/.local/bin` on unix, `%USERPROFILE%\amore\bin` on Windows; override with
 `AMORE_INSTALL_DIR`, pin a tag with `AMORE_VERSION`). Linux binaries target
 glibc 2.35+ (Ubuntu 22.04 or newer, Debian 12 or newer). They are
 [`scripts/install.sh`](scripts/install.sh) and
@@ -59,13 +59,13 @@ path.)
 
 ### First session
 
-The one-liner installs the `amore` binary only — the house and the iris
+The one-liner installs the `amore` binary only; the house and the iris
 companion arrive in step 3, not with the installer:
 
 1. **Install** (above), then `amore --version`.
-2. **`amore setup`** — the guided wizard writes model credentials and config
+2. **`amore setup`**: the guided wizard writes model credentials and config
    under `~/.amore`.
-3. **`amore init`** — run it in the directory that will become your house: it
+3. **`amore init`**: run it in the directory that will become your house: it
    plants the house tree and installs the [iris companion](docs/iris.md)
    binaries onto `PATH` beside `amore`.
 4. **Launch `amore` from the house.** Every session after this one starts
@@ -75,12 +75,12 @@ companion arrive in step 3, not with the installer:
 
 The footprint is enumerable, and removing it is three deletes:
 
-- **Binaries** — remove the install dir (`~/.local/bin/amore*` on unix,
+- **Binaries**: remove the install dir (`~/.local/bin/amore*` on unix,
   `%USERPROFILE%\amore\bin` on Windows). The iris binaries `amore init`
   linked onto `PATH` live beside `amore`, so they go with it.
-- **State** — remove `~/.amore` (config + credentials) and `~/.iris`
+- **State**: remove `~/.amore` (config + credentials) and `~/.iris`
   (iris's root-trust allow list and logs).
-- **Houses** — any house you created is an ordinary directory that belongs
+- **Houses**: any house you created is an ordinary directory that belongs
   to you (usually its own git repo). Keep it or delete it; nothing else
   references it.
 
@@ -96,13 +96,13 @@ rendered in-product on the welcome screen and by `/release-notes`).
 
 Requirements:
 
-- **Rust** — pinned by [`rust-toolchain.toml`](rust-toolchain.toml); `rustup`
+- **Rust**: pinned by [`rust-toolchain.toml`](rust-toolchain.toml); `rustup`
   installs it on first build.
-- **protoc** — on your `PATH`, or pointed at by `$PROTOC`. Any recent release
+- **protoc**: on your `PATH`, or pointed at by `$PROTOC`. Any recent release
   works; this is what CI uses on every platform.
 
 Optionally, [DotSlash](https://dotslash-cli.com) can run the pinned tool under
-[`bin/`](bin/) instead. It is not required, and not available on Windows — the
+[`bin/`](bin/) instead. It is not required, and not available on Windows; the
 build falls back to `protoc` on `PATH` by design.
 
 ```sh
@@ -128,7 +128,7 @@ is kept as a legacy fallback; `.amore` wins when both exist).
 
 Amore Build is **model-agnostic by design**: every model is a config entry
 pointed at an OpenAI-compatible endpoint, and the identity the model is given
-does not name a model at all (see below) — so entries can be swapped and
+does not name a model at all (see below), so entries can be swapped and
 compared without the harness caring which one is behind them. The wizard's
 recommended default is **DeepSeek V4 Flash** over OpenRouter (the
 maintainer's daily driver); GLM-5.2 recipes ship alongside, and any
@@ -155,13 +155,13 @@ done/skipped under `~/.amore`. Team managed config is a separate path:
 ### Manual paths (condensed)
 
 Config: `~/.amore/config.toml`. Prefer `env_key` over a literal `api_key`.
-**Every** custom `[model.*]` block **must** set `system_prompt_label` —
+**Every** custom `[model.*]` block **must** set `system_prompt_label`:
 an unlabeled model falls through the resolver chain to a default and will
 confidently answer to the wrong name.
 
 Give that label the **harness and the role, not the model**. Upstream renders
 it as `You are <label>`, so a label naming the model becomes false the moment
-you point the entry at a different one — and the block it lives in is
+you point the entry at a different one, and the block it lives in is
 per-model already, so the model name is never the thing missing.
 
 | Path | Model id (wire) | Base URL | Env |
@@ -226,7 +226,7 @@ amore init --dry-run    # plan only
 amore init --refresh    # rewrite files still matching the install manifest
 ```
 
-`amore init` **creates a house** — a working tree for long-horizon
+`amore init` **creates a house**: a working tree for long-horizon
 collaboration with the agent: root `AGENTS.md`, folder schemas (`context/`,
 `inbox/`, `tasks/`, `knowledge/`, `reminders/`, `forge/`), a 6-skill
 orchestration pack, session hooks, the iris companion, and
@@ -245,17 +245,17 @@ What got installed and what you own: [`docs/onboarding.md`](docs/onboarding.md).
 
 **Iris** is the house's knowledge/org instrument: a live file index daemon,
 org CRUD verbs (`task` / `inbox` / `reminder` / `knowledge`), and an
-interactive dash over the tree `amore init` plants — Dashboard, Tasks,
+interactive dash over the tree `amore init` plants: Dashboard, Tasks,
 Inbox, Reminders, Knowledge, Files, Forge, and Graph tabs. `amore init`
 installs it into the house by default and links it beside the `amore`
 binary, so it is on `PATH` with no manual step; it is never required to run
-Amore Build itself. Every write goes through its **regula** core — schemas,
-legal lifecycle transitions, placement, lint — and the planted `AGENTS.md`
+Amore Build itself. Every write goes through its **regula** core (schemas,
+legal lifecycle transitions, placement, lint), and the planted `AGENTS.md`
 wires the resident agent to the same verbs. Local-first: the daemon binds loopback only, and there is no
 telemetry. Full story (with a screenshot of every tab):
 [`docs/iris.md`](docs/iris.md).
 
-![Iris dash — the Dashboard tab](docs/assets/iris/dashboard.png)
+![Iris dash, the Dashboard tab](docs/assets/iris/dashboard.png)
 
 ---
 
@@ -263,7 +263,7 @@ telemetry. Full story (with a screenshot of every tab):
 
 | Doc | What |
 |-----|------|
-| [`docs/the-house.md`](docs/the-house.md) | **The house** — the one-launch-point working method the fork is built around |
+| [`docs/the-house.md`](docs/the-house.md) | **The house**: the one-launch-point working method the fork is built around |
 | [`docs/setup-models.md`](docs/setup-models.md) | BYOK model recipes (DeepSeek / GLM / any OpenAI-compatible host) |
 | [`docs/authentication.md`](docs/authentication.md) | OAuth + BYOK dual rail, `auth.json` anti-copy rule |
 | [`docs/onboarding.md`](docs/onboarding.md) | `amore init` house tree, ownership, refresh |
@@ -281,7 +281,7 @@ Product env surface: **`AMORE_*` primary** with silent `GROK_*` legacy
 aliases (`AMORE_HOME`, `AMORE_DEFAULT_MODEL`, `AMORE_SYSTEM_PROMPT_LABEL`,
 `AMORE_AUTH_*`, …). Provider keys (`XAI_API_KEY`, other vendor keys) stay
 unaliased. Auto-update is hard-off in this fork (no in-app xAI reinstall
-hints); to upgrade, re-run the installer — it keeps an `amore.prev` rollback.
+hints); to upgrade, re-run the installer; it keeps an `amore.prev` rollback.
 
 ---
 
@@ -300,7 +300,7 @@ are in [`docs/egress.md`](docs/egress.md).
 
 ## License
 
-First-party code is **Apache License 2.0** — see [`LICENSE`](LICENSE) and
+First-party code is **Apache License 2.0**: see [`LICENSE`](LICENSE) and
 [`NOTICE`](NOTICE). Third-party and vendored code remains under its original
 licenses; start at [`THIRD-PARTY-NOTICES`](THIRD-PARTY-NOTICES) and
 [`third_party/NOTICE`](third_party/NOTICE).

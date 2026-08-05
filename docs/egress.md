@@ -14,9 +14,9 @@ the configured host, DNS, local plumbing, or UNKNOWN (non-zero exit).
 Syscall tracing is per-process ground truth: a binary cannot opt out of the
 tracer the way it could ignore an HTTPS proxy.
 
-## Receipts — v0.2.121 (`amore 0.2.121 (bfeb3fe)`, linux-x64, 2026-08-05)
+## Receipts: v0.2.121 (`amore 0.2.121 (bfeb3fe)`, linux-x64, 2026-08-05)
 
-**Rail 1 — BYOK (DeepSeek V4 Flash over OpenRouter), one completed prompt:**
+**Rail 1: BYOK (DeepSeek V4 Flash over OpenRouter), one completed prompt:**
 
 | Endpoint | Attribution |
 |---|---|
@@ -26,7 +26,7 @@ tracer the way it could ignore an HTTPS proxy.
 Nothing else. `PASS: every touched endpoint is the configured host, DNS, or
 local plumbing.`
 
-**Rail 2 — native Grok (OAuth device-auth, fresh scratch login), one
+**Rail 2: native Grok (OAuth device-auth, fresh scratch login), one
 completed prompt:**
 
 | Endpoint | Attribution |
@@ -49,7 +49,7 @@ The device-auth login flow itself (captured separately, same method) touched
 - **Tools do what you invoke**: `web_search` / `web_fetch` and the shell
   commands a session runs reach whatever they are asked to reach. The claim
   covers the harness's own traffic, not your workload's.
-- **Telemetry**: the subsystem inherited from upstream ships inert — mode
+- **Telemetry**: the subsystem inherited from upstream ships inert: mode
   defaults to `Disabled`, no client is constructed while disabled, and no
   release workflow bakes in a reporting token. `scripts/sync_upstream.py
   --verify` re-pins both facts at every upstream sync, so this posture is
@@ -68,5 +68,5 @@ AMORE_HOME=/tmp/scratch strace -f -e trace=network -o rail2.strace \
 ```
 
 Attribution of the strace output is the last stage of the capture script;
-run it against your own log, or read the addresses yourself — that is the
+run it against your own log, or read the addresses yourself; that is the
 point of the method.
