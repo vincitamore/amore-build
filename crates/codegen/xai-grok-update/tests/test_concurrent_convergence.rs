@@ -38,6 +38,14 @@ use std::path::Path;
 use serial_test::serial;
 
 use common::artifact_server::ArtifactServer;
+
+/// Fork: these scenarios assert auto-update convergence, which
+/// FORK_AUTO_UPDATE_HARD_OFF compiles out (ensure_latest / run_update
+/// return no-op outcomes by policy). Skipped under the fork; flip the
+/// constant in a working tree to exercise them.
+fn fork_update_hard_off() -> bool {
+    xai_grok_update::auto_update::fork_auto_update_hard_off()
+}
 use common::{
     FakeBinGuard, can_exec_shell_scripts, host_platform, make_update_config, reset_home,
     set_test_version, small_good_artifact, test_home,
@@ -160,6 +168,10 @@ async fn ensure_latest_downloads_once_then_converges_without_redownload() {
         eprintln!("skipping: shell scripts cannot execute in this sandbox");
         return;
     }
+    if fork_update_hard_off() {
+        eprintln!("skipping: auto-update is hard-off in this fork");
+        return;
+    }
     let g = setup_gh_release("0.2.5");
     g.set_stable_only_stdout("v0.2.7\n");
     let cfg = make_update_config("stable");
@@ -197,6 +209,10 @@ async fn run_update_skips_download_when_disk_already_current() {
         eprintln!("skipping: shell scripts cannot execute in this sandbox");
         return;
     }
+    if fork_update_hard_off() {
+        eprintln!("skipping: auto-update is hard-off in this fork");
+        return;
+    }
     let g = setup_gh_release("0.2.5");
     g.set_stable_only_stdout("v0.2.7\n");
     // Another process (TUI background download) already installed 0.2.7.
@@ -223,6 +239,10 @@ async fn run_update_skips_download_when_disk_already_current() {
 async fn run_update_force_still_redownloads_when_disk_current() {
     if !can_exec_shell_scripts() {
         eprintln!("skipping: shell scripts cannot execute in this sandbox");
+        return;
+    }
+    if fork_update_hard_off() {
+        eprintln!("skipping: auto-update is hard-off in this fork");
         return;
     }
     let g = setup_gh_release("0.2.7");
@@ -265,6 +285,10 @@ async fn npm_update_not_suppressed_by_leftover_newer_internal_symlink() {
         eprintln!("skipping: shell scripts cannot execute in this sandbox");
         return;
     }
+    if fork_update_hard_off() {
+        eprintln!("skipping: auto-update is hard-off in this fork");
+        return;
+    }
     let g = setup_npm("0.2.5");
     g.set_stdout("\"0.2.7\"\n");
     // Leftover symlink from a previous internal install, claiming to be
@@ -292,6 +316,10 @@ async fn npm_update_not_suppressed_by_leftover_newer_internal_symlink() {
 async fn ensure_latest_npm_ignores_leftover_internal_symlink() {
     if !can_exec_shell_scripts() {
         eprintln!("skipping: shell scripts cannot execute in this sandbox");
+        return;
+    }
+    if fork_update_hard_off() {
+        eprintln!("skipping: auto-update is hard-off in this fork");
         return;
     }
     let g = setup_npm("0.2.5");
@@ -362,6 +390,10 @@ async fn disk_probe_rejects_dangling_symlink() {
 async fn ensure_latest_repairs_dangling_symlink_by_downloading() {
     if !can_exec_shell_scripts() {
         eprintln!("skipping: shell scripts cannot execute in this sandbox");
+        return;
+    }
+    if fork_update_hard_off() {
+        eprintln!("skipping: auto-update is hard-off in this fork");
         return;
     }
     // Dangling symlink + stale running process: the probe returns None, so

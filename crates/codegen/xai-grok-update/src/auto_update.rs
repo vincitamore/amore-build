@@ -34,6 +34,14 @@ const MSG_RUN_UPDATE_MANUAL: &str = "This build does not auto-update. Download a
 /// effective read is forced false (see [`effective_auto_update`]).
 const FORK_AUTO_UPDATE_HARD_OFF: bool = true;
 
+/// Fork: the hard-off policy, exposed so integration tests can skip the
+/// upstream convergence scenarios this fork compiles out (ensure_latest /
+/// run_update return no-op outcomes by policy — see
+/// tests/test_concurrent_convergence.rs).
+pub fn fork_auto_update_hard_off() -> bool {
+    FORK_AUTO_UPDATE_HARD_OFF
+}
+
 /// Effective auto-update flag for this fork: always `false`.
 ///
 /// Keeps config-file parsing/compat for `cli.auto_update` while ensuring the
