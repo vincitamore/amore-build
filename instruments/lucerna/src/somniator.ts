@@ -123,7 +123,7 @@ ${ADMITTED_ACTION_KEYS.join("\n")}
 skip
 
 Classes:
-- Light (daily budget, model-free or thin shell): survey-org, substrate-health, inbox-age-report, state-cleanup, edges-update
+- Light (daily budget, model-free or thin shell): survey-org, substrate-health, inbox-age-report, state-cleanup, edges-update, qmd-refresh
 - Expensive agentic (weekly budget, multi-turn model): self-orient, agentic-housekeeping, edges-densify
 
 Rules:

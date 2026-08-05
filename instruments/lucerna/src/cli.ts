@@ -421,7 +421,7 @@ async function cmdSmoke(args: string[]): Promise<number> {
   // 5. Catalog
   results.push({
     check: "action-catalog",
-    ok: ACTION_CATALOG.filter((a) => a.admitted).length === 8,
+    ok: ACTION_CATALOG.filter((a) => a.admitted).length === 9,
     detail: ADMITTED_ACTION_KEYS.join(","),
   });
 

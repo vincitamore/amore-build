@@ -8,7 +8,7 @@ Lucerna is the Amore house steward daemon. It keeps a light heartbeat over a hou
 - **Two-list governance**: protected house identity surfaces are default-deny; only `inbox/captures/`, `forge/`, and lucerna's own runtime state may be written autonomously.
 - **Tiered budgets**: 12 actions per day, 6 expensive actions per week, 2 hour cycle cooldown, per-action cooldowns, and a soft daily token ceiling fed from driver usage envelopes.
 - **Enablement flags** default both off: dreams and live auto-commit require an explicit flip.
-- **Light actions** (model-free or thin shell): `survey-org`, `substrate-health`, `inbox-age-report`, `state-cleanup`, `edges-update`.
+- **Light actions** (model-free or thin shell): `survey-org`, `substrate-health`, `inbox-age-report`, `state-cleanup`, `edges-update`, `qmd-refresh`.
 - **Agentic actions** (multi-turn amore, weekly budget): `self-orient`, `agentic-housekeeping`, plus shell densify `edges-densify`.
 - **Dreams** (opt-in planner): when `dreamsEnabled` is true, Lucerna may run one planner call per cycle and execute at most one admitted action (light or agentic).
 - **Auto-commit dry-run**: drafts a commit message via one headless call on its own schedule (default 30 minute cooldown, change-set dedup, token ceiling); never commits unless live mode is enabled (live mode is draft-only in this release).
@@ -91,6 +91,7 @@ An agentic dream runs a multi-turn `amore` loop so the spawned agent can read th
 | `self-orient` | Read orientation surfaces and open state; write a grounded orientation report; propose protected-file updates only |
 | `agentic-housekeeping` | Bounded tidy survey (stale refs, unresolved items, doc drift); report-and-propose only |
 | `edges-densify` | Shell `iris edges update --tier 2 --json` under dreams budgets (model-judged densify; not a multi-turn loop) |
+| `qmd-refresh` | Shell `iris qmd update --embed --json` so the house search index stays current and clears any ingestion backlog (light, daily) |
 
 ### What agentic dreams may and may not touch
 

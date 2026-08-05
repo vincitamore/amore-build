@@ -87,6 +87,16 @@ export const ACTION_CATALOG: readonly ActionCatalogEntry[] = [
     description: "Shell iris edges update --tier 0 --json (structural re-derive, no model)",
   },
   {
+    key: "qmd-refresh",
+    class: "light",
+    parity: "admit",
+    admitted: true,
+    budgetTier: "daily",
+    cooldownClass: "light",
+    description:
+      "Shell iris qmd update --embed --json so the house search index stays current and clears any ingestion backlog",
+  },
+  {
     key: "self-orient",
     class: "agentic",
     parity: "admit",
@@ -665,6 +675,121 @@ export function runEdgesDensify(
   });
 }
 
+export interface IrisQmdRefreshOptions {
+  houseRoot: string;
+  irisBin?: string;
+  /** Inject for tests: replace spawnSync. */
+  spawnSyncImpl?: typeof spawnSync;
+  lists?: GovernanceLists;
+}
+
+/**
+ * Shell exactly: iris qmd update --embed --json
+ * Missing binary, missing qmd runtime, or nonzero exit is an action failure
+ * (never a crash). Resolves iris the same way as edges-update.
+ */
+export function runQmdRefresh(
+  houseRoot: string,
+  opts?: {
+    lists?: GovernanceLists;
+    irisBin?: string;
+    spawnSyncImpl?: typeof spawnSync;
+  },
+): ActionResult {
+  const lists = opts?.lists ?? defaultLists();
+  const actionKey = "qmd-refresh";
+  const bin = resolveIrisBin(opts?.irisBin);
+  const argv = ["qmd", "update", "--embed", "--json"];
+  const spawnFn = opts?.spawnSyncImpl ?? spawnSync;
+  const spawnOpts: SpawnSyncOptions = {
+    cwd: houseRoot,
+    encoding: "utf-8",
+    windowsHide: true,
+    timeout: 300_000,
+  };
+
+  let status: number | null = null;
+  let stdout = "";
+  let stderr = "";
+  let spawnError: string | undefined;
+
+  try {
+    const r = spawnFn(bin, argv, spawnOpts);
+    status = r.status;
+    stdout = typeof r.stdout === "string" ? r.stdout : (r.stdout?.toString() ?? "");
+    stderr = typeof r.stderr === "string" ? r.stderr : (r.stderr?.toString() ?? "");
+    if (r.error) {
+      spawnError = r.error.message;
+    }
+  } catch (err) {
+    spawnError = err instanceof Error ? err.message : String(err);
+  }
+
+  const ts = localFileTimestamp();
+  const ok = spawnError === undefined && status === 0;
+  const combined = `${stdout}\n${stderr}`.toLowerCase();
+  const missingRuntime =
+    !ok &&
+    (combined.includes("qmd") &&
+      (combined.includes("not found") ||
+        combined.includes("not installed") ||
+        combined.includes("no such") ||
+        combined.includes("missing") ||
+        combined.includes("unavailable")));
+
+  const lines = [
+    `# ${actionKey} ${ts}`,
+    "",
+    `Command: ${bin} ${argv.join(" ")}`,
+    `Exit: ${status === null ? "null" : status}`,
+    spawnError ? `Spawn error: ${spawnError}` : "",
+    missingRuntime ? "Note: qmd runtime appears missing or unavailable." : "",
+    "",
+    "## stdout",
+    "",
+    "```",
+    stdout.trim().slice(0, 4000) || "(empty)",
+    "```",
+    "",
+    "## stderr",
+    "",
+    "```",
+    stderr.trim().slice(0, 2000) || "(empty)",
+    "```",
+    "",
+    `Generated at ${localTimestamp()} by lucerna ${actionKey}.`,
+  ].filter((l, i, a) => !(l === "" && a[i - 1] === ""));
+
+  const report = writeReport(
+    houseRoot,
+    `${ts}-${actionKey}.md`,
+    lines.join("\n"),
+    actionKey,
+    lists,
+  );
+
+  if (!ok) {
+    let detail: string;
+    if (spawnError) {
+      detail = `iris unavailable or failed to spawn: ${spawnError}`;
+    } else if (missingRuntime) {
+      detail = `iris qmd runtime missing or unavailable (exit ${status})`;
+    } else {
+      detail = `iris qmd update --embed exited ${status}`;
+    }
+    return {
+      ok: false,
+      artifactPath: report.artifactPath,
+      detail,
+    };
+  }
+  return {
+    ok: true,
+    artifactPath: report.artifactPath,
+    detail: "iris qmd update --embed ok",
+  };
+}
+
 export function executeLightAction(
   key: string,
   houseRoot: string,
@@ -685,6 +810,8 @@ export function executeLightAction(
       return runStateCleanup(houseRoot, { lists });
     case "edges-update":
       return runEdgesUpdate(houseRoot, { lists, ...shellOpts });
+    case "qmd-refresh":
+      return runQmdRefresh(houseRoot, { lists, ...shellOpts });
     case "edges-densify":
       return runEdgesDensify(houseRoot, { lists, ...shellOpts });
     default:

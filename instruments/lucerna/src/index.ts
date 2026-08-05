@@ -64,6 +64,7 @@ export {
   runStateCleanup,
   runEdgesUpdate,
   runEdgesDensify,
+  runQmdRefresh,
 } from "./actions.ts";
 export {
   AutoCommitter,

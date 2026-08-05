@@ -6,6 +6,7 @@ import {
   mkdirSync,
   existsSync,
   readdirSync,
+  utimesSync,
 } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -19,6 +20,7 @@ import {
   runStateCleanup,
   runEdgesUpdate,
   runEdgesDensify,
+  runQmdRefresh,
   extractWikilinks,
   parseFrontmatter,
 } from "./actions.ts";
@@ -67,6 +69,7 @@ describe("action catalog", () => {
       "inbox-age-report",
       "state-cleanup",
       "edges-update",
+      "qmd-refresh",
       "self-orient",
       "agentic-housekeeping",
       "edges-densify",
@@ -151,14 +154,23 @@ describe("light actions against synthetic house", () => {
   test("state-cleanup prunes aged runtime artifacts and reports", () => {
     const house = syntheticHouse();
     try {
-      const r = runStateCleanup(house, { maxAgeMs: 0 });
+      const runtime = join(house, "instruments", "lucerna");
+      // Deterministic age: backdate fixtures so prune does not race FS clock
+      // resolution (Linux mtimeMs can equal or slightly lead Date.now()).
+      const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
+      utimesSync(join(runtime, "log.1"), twoHoursAgo, twoHoursAgo);
+      utimesSync(join(runtime, "draft-old.bak"), twoHoursAgo, twoHoursAgo);
+      // tmp prune uses a fixed 1h floor; include a backdated .tmp candidate.
+      writeFileSync(join(runtime, "scratch.tmp"), "tmp\n", "utf-8");
+      utimesSync(join(runtime, "scratch.tmp"), twoHoursAgo, twoHoursAgo);
+
+      const r = runStateCleanup(house, { maxAgeMs: 60 * 60 * 1000 });
       expect(r.ok).toBe(true);
       expect(existsSync(r.artifactPath!)).toBe(true);
-      // log.1 and draft-old.bak should be candidates
-      const runtime = join(house, "instruments", "lucerna");
       const remaining = readdirSync(runtime);
       expect(remaining.includes("log.1")).toBe(false);
       expect(remaining.includes("draft-old.bak")).toBe(false);
+      expect(remaining.includes("scratch.tmp")).toBe(false);
     } finally {
       rmSync(house, { recursive: true, force: true });
     }
@@ -298,5 +310,113 @@ describe("edges-update / edges-densify against stub iris", () => {
     } finally {
       rmSync(house, { recursive: true, force: true });
     }
+  });
+});
+
+describe("qmd-refresh against stub iris", () => {
+  test("argv is iris qmd update --embed --json", () => {
+    const house = syntheticHouse();
+    try {
+      let capturedArgv: string[] = [];
+      const spawnSyncImpl = ((_bin: string, argv: readonly string[]) => {
+        capturedArgv = [...argv];
+        return {
+          status: 0,
+          stdout: JSON.stringify({ updated: 3, backlog: 0 }),
+          stderr: "",
+          pid: 1,
+          output: [],
+          signal: null,
+        } as unknown as SpawnSyncReturns<string>;
+      }) as unknown as typeof import("node:child_process").spawnSync;
+
+      const r = runQmdRefresh(house, { spawnSyncImpl });
+      expect(r.ok).toBe(true);
+      expect(capturedArgv).toEqual(["qmd", "update", "--embed", "--json"]);
+      expect(r.artifactPath!.replace(/\\/g, "/")).toContain("forge/dreams/");
+      expect(r.detail).toMatch(/ok/i);
+    } finally {
+      rmSync(house, { recursive: true, force: true });
+    }
+  });
+
+  test("missing iris is honest failure not crash", () => {
+    const house = syntheticHouse();
+    try {
+      const spawnSyncImpl = (() => {
+        return {
+          status: null,
+          stdout: "",
+          stderr: "",
+          error: Object.assign(new Error("spawn iris ENOENT"), { code: "ENOENT" }),
+          pid: 0,
+          output: [],
+          signal: null,
+        } as unknown as SpawnSyncReturns<string>;
+      }) as unknown as typeof import("node:child_process").spawnSync;
+
+      const r = runQmdRefresh(house, { spawnSyncImpl });
+      expect(r.ok).toBe(false);
+      expect(r.detail).toMatch(/iris|spawn|ENOENT|unavailable/i);
+      expect(r.artifactPath).toBeDefined();
+    } finally {
+      rmSync(house, { recursive: true, force: true });
+    }
+  });
+
+  test("missing qmd runtime is honest failure", () => {
+    const house = syntheticHouse();
+    try {
+      const spawnSyncImpl = (() => {
+        return {
+          status: 1,
+          stdout: "",
+          stderr: "qmd runtime not found; install qmd or enable the house search index",
+          pid: 1,
+          output: [],
+          signal: null,
+        } as unknown as SpawnSyncReturns<string>;
+      }) as unknown as typeof import("node:child_process").spawnSync;
+
+      const r = executeLightAction("qmd-refresh", house, undefined, {
+        spawnSyncImpl,
+      });
+      expect(r).not.toBeNull();
+      expect(r!.ok).toBe(false);
+      expect(r!.detail).toMatch(/qmd runtime missing|unavailable/i);
+    } finally {
+      rmSync(house, { recursive: true, force: true });
+    }
+  });
+
+  test("nonzero iris exit is action failure", () => {
+    const house = syntheticHouse();
+    try {
+      const spawnSyncImpl = (() => {
+        return {
+          status: 3,
+          stdout: "",
+          stderr: "embed failed",
+          pid: 1,
+          output: [],
+          signal: null,
+        } as unknown as SpawnSyncReturns<string>;
+      }) as unknown as typeof import("node:child_process").spawnSync;
+
+      const r = runQmdRefresh(house, { spawnSyncImpl });
+      expect(r.ok).toBe(false);
+      expect(r.detail).toMatch(/exited 3/);
+    } finally {
+      rmSync(house, { recursive: true, force: true });
+    }
+  });
+
+  test("catalog entry is light daily with light cooldown", () => {
+    const e = ACTION_CATALOG.find((x) => x.key === "qmd-refresh");
+    expect(e).toBeDefined();
+    expect(e!.class).toBe("light");
+    expect(e!.budgetTier).toBe("daily");
+    expect(e!.cooldownClass).toBe("light");
+    expect(e!.admitted).toBe(true);
   });
 });
