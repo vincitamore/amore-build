@@ -1,0 +1,19 @@
+{
+  "name": "@amore/speculum",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Session mirror over local Amore Build agent sessions — probes and usage accounting, fully local.",
+  "bin": {
+    "speculum": "src/cli.ts"
+  },
+  "scripts": {
+    "start": "bun run src/cli.ts",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.8.0"
+  }
+}
