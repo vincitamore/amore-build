@@ -47,10 +47,15 @@ state:
 | `a` | Toggle auto-commit live vs dry-run (confirm) |
 | `p` | Focus the Review panel (dreams + proposals) |
 | arrows / PgUp / PgDn | Scroll the activity log (or navigate Review when focused) |
-| Enter (Review) | Open detail body for the selected item |
-| `v` (Review) | Confirm: mark dream reviewed / proposal applied (status only) |
-| `x` (Review) | Confirm: close a pending proposal (status only) |
-| Esc | Leave detail, or leave Review focus |
+| Enter (Review) | Open the detail **overlay** (list stays in the panel) |
+| `v` (Review / overlay) | Confirm: mark dream reviewed / proposal applied (status only) |
+| `x` (Review / overlay) | Confirm: close a pending proposal (status only) |
+| Esc | Close overlay, or leave Review focus |
+
+Detail opens a centered overlay (most of the screen, scrollable with ↑↓ /
+PgUp / PgDn). Markdown is rendered lightly (headings, lists, code). An agentic
+session manifest that has a linked `forge/dreams/` report shows **one** list
+row; the overlay includes the report under a “Linked report” heading.
 
 Enablement toggles always re-read the file after write so the badges show the
 on-disk truth, not a local guess.

@@ -8,14 +8,18 @@ import { join } from 'node:path';
 import {
   applyProposal,
   closeProposal,
+  dedupeDreamItems,
   flipFrontmatterField,
+  lightBelongsToManifest,
   listDreams,
   listProposals,
   parseFrontmatterLenient,
+  parseManifestStamp,
   pendingReviewCounts,
   reviewDream,
   showDream,
   showProposal,
+  type DreamItem,
 } from './lucerna-review.ts';
 
 let org: string;
@@ -411,5 +415,135 @@ describe('pendingReviewCounts', () => {
     expect(c.proposals).toBe(1);
     expect(c.total).toBe(2);
     expect(c.dreamsEnabled).toBe(true);
+  });
+});
+
+describe('agentic dream single-row dedupe', () => {
+  test('pipeline match folds report under manifest', () => {
+    ensureLucerna(true);
+    seedManifest('20260805-120000-tag-regen.manifest.md', {
+      type: 'forge',
+      pipeline: 'dream-tag-regen',
+      recipe: 'dream',
+      goal: '"tag regen"',
+      created: "'2026-08-05'",
+      'triggered-by': 'dream',
+      'review-status': 'pending',
+      tags: ['dream', 'tag-regen'],
+    });
+    seedLight('tag-regen-report.md', {
+      type: 'forge',
+      pipeline: 'dream-tag-regen',
+      status: 'pending',
+      created: "'2026-08-05'",
+      'triggered-by': 'dream',
+      'dream-action': 'tag-regen',
+    }, '## Report\n\nDid the work.\n');
+    // standalone light (different pipeline)
+    seedLight('inbox-age.md', {
+      type: 'forge',
+      'dream-action': 'inbox-age',
+      status: 'pending',
+      created: "'2026-08-04'",
+    });
+
+    const list = listDreams(org);
+    const kinds = list.items.map((i) => i.kind);
+    expect(kinds.filter((k) => k === 'manifest')).toHaveLength(1);
+    expect(kinds.filter((k) => k === 'light')).toHaveLength(1);
+    expect(list.items).toHaveLength(2);
+    expect(list.pendingCount).toBe(2);
+
+    const man = list.items.find((i) => i.kind === 'manifest')!;
+    expect(man.reportPath).toBe('forge/dreams/tag-regen-report.md');
+    expect(list.items.some((i) => i.path === 'forge/dreams/tag-regen-report.md')).toBe(false);
+
+    const shown = showDream(org, man.id);
+    expect(shown.found).toBe(true);
+    expect(shown.reportPath).toBe('forge/dreams/tag-regen-report.md');
+    expect(shown.displayBody).toContain('Linked report');
+    expect(shown.displayBody).toContain('Did the work.');
+  });
+
+  test('legacy action+date fallback folds without pipeline on report', () => {
+    ensureLucerna(true);
+    seedManifest('20260805-091500-substrate-health.manifest.md', {
+      type: 'forge',
+      pipeline: 'dream-substrate-health',
+      goal: '"health"',
+      created: "'2026-08-05'",
+      'triggered-by': 'dream',
+      'review-status': 'pending',
+      tags: ['dream', 'substrate-health'],
+    });
+    // Pre-linkage artifact: no pipeline field; filename + action + date
+    seedLight('20260805-091500-substrate-health.md', {
+      type: 'forge',
+      status: 'pending',
+      created: "'2026-08-05'",
+      'dream-action': 'substrate-health',
+    }, 'Legacy body.\n');
+
+    const list = listDreams(org);
+    expect(list.items).toHaveLength(1);
+    expect(list.items[0].kind).toBe('manifest');
+    expect(list.items[0].reportPath).toContain('substrate-health');
+    expect(list.pendingCount).toBe(1);
+  });
+
+  test('legacy dream-action + created day match', () => {
+    ensureLucerna(true);
+    seedManifest('20260803-220000-distill.manifest.md', {
+      type: 'forge',
+      pipeline: 'dream-distill',
+      created: "'2026-08-03'",
+      'review-status': 'pending',
+    });
+    seedLight('nightly-distill-notes.md', {
+      type: 'forge',
+      status: 'pending',
+      created: "'2026-08-03'",
+      'dream-action': 'distill',
+    });
+    const list = listDreams(org);
+    expect(list.items).toHaveLength(1);
+    expect(list.items[0].kind).toBe('manifest');
+    expect(list.items[0].reportPath).toBe('forge/dreams/nightly-distill-notes.md');
+  });
+
+  test('lightBelongsToManifest + parseManifestStamp unit', () => {
+    expect(parseManifestStamp('20260805-120000-tag-regen')).toEqual({
+      ymd: '20260805',
+      hms: '120000',
+      action: 'tag-regen',
+    });
+    const man: DreamItem = {
+      id: '20260805-120000-tag-regen',
+      kind: 'manifest',
+      path: 'forge/dreams/sessions/20260805-120000-tag-regen.manifest.md',
+      pipeline: 'dream-tag-regen',
+      tags: [],
+    };
+    const light: DreamItem = {
+      id: 'tag-regen-report',
+      kind: 'light',
+      path: 'forge/dreams/tag-regen-report.md',
+      pipeline: 'dream-tag-regen',
+      tags: [],
+    };
+    expect(lightBelongsToManifest(light, man)).toBe(true);
+    const other: DreamItem = {
+      id: 'other',
+      kind: 'light',
+      path: 'forge/dreams/other.md',
+      dreamAction: 'other',
+      created: '2026-08-01',
+      tags: [],
+    };
+    expect(lightBelongsToManifest(other, man)).toBe(false);
+
+    const folded = dedupeDreamItems([man], [light, other]);
+    expect(folded).toHaveLength(2);
+    expect(folded.find((x) => x.kind === 'manifest')?.reportPath).toBe(light.path);
   });
 });

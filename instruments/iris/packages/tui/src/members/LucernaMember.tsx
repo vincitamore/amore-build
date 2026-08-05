@@ -8,6 +8,10 @@ import { useFlash } from '../components/use-flash';
 import { useStableDimensions } from '../use-stable-dimensions';
 import { tickRender } from '../debug';
 import { emptyDisplayRow, formatLucernaDisplayLine } from './lucerna-display';
+import {
+  LucernaReviewOverlay,
+  type ReviewOverlayModel,
+} from './LucernaReviewOverlay';
 
 // Re-export display helpers for existing imports / tests.
 export {
@@ -65,6 +69,7 @@ interface ReviewRow {
   pending: boolean;
   statusLabel: string;
   created?: string;
+  reportPath?: string;
 }
 
 interface DreamListItem {
@@ -76,6 +81,7 @@ interface DreamListItem {
   reviewStatus?: string;
   status?: string;
   created?: string;
+  reportPath?: string;
 }
 
 interface ProposalListItem {
@@ -117,6 +123,7 @@ function toReviewRows(dreams: DreamListItem[], proposals: ProposalListItem[]): R
       pending,
       statusLabel,
       created: d.created,
+      reportPath: d.reportPath,
     });
   }
   for (const p of proposals) {
@@ -267,12 +274,12 @@ const NOTE_SLOTS = 5;
 const REVIEW_SLOTS = 6;
 
 type PanelFocus = 'log' | 'review';
-type ReviewView = 'list' | 'detail';
 
 /**
  * Lucerna member — agency operations console. Honest at every state:
  * iris-daemon-down, not-installed, stopped, running, stale/hung.
  * Ops: r start · k stop · h halt · w wake · s sleep · d dreams enable · a auto-commit · p review.
+ * Review detail opens a centered overlay (list stays in the panel).
  */
 export function LucernaMember({
   inputActive,
@@ -295,20 +302,21 @@ export function LucernaMember({
   const [dreamsEnabledFlag, setDreamsEnabledFlag] = useState(false);
   const [reviewCursor, setReviewCursor] = useState(0);
   const [panelFocus, setPanelFocus] = useState<PanelFocus>('log');
-  const [reviewView, setReviewView] = useState<ReviewView>('list');
-  const [detailBody, setDetailBody] = useState<string>('');
+  const [overlay, setOverlay] = useState<ReviewOverlayModel | null>(null);
   const [scroll, setScroll] = useState(0);
   const [flash, setFlash] = useFlash();
   const [confirm, setConfirm] = useState<{ msg: string; run: () => void } | null>(null);
   const [busy, setBusy] = useState(false);
+
+  const overlayOpen = !!overlay;
 
   useEffect(() => {
     if (!inputActive && confirm) setConfirm(null);
   }, [inputActive, confirm]);
 
   useEffect(() => {
-    onCapture?.(!!confirm);
-  }, [confirm, onCapture]);
+    onCapture?.(!!confirm || overlayOpen);
+  }, [confirm, overlayOpen, onCapture]);
   useEffect(() => () => onCapture?.(false), [onCapture]);
 
   const refresh = async (url: string, alive: () => boolean) => {
@@ -459,7 +467,7 @@ export function LucernaMember({
         if (j.ok === false) setFlash(`${label}: ${j.reason ?? j.message ?? 'failed'}`);
         else setFlash(label);
         if (daemonUrl) await refresh(daemonUrl, () => true);
-        setReviewView('list');
+        setOverlay(null);
       } else {
         setFlash(j.ok === false ? `${label} failed` : label);
       }
@@ -488,10 +496,28 @@ export function LucernaMember({
           : `${daemonUrl}/api/lucerna/proposal?id=${encodeURIComponent(row.id)}`;
       const r = await fetch(path);
       if (!r.ok) return setFlash('detail load failed');
-      const j = (await r.json()) as { found?: boolean; body?: string; raw?: string };
+      const j = (await r.json()) as {
+        found?: boolean;
+        body?: string;
+        raw?: string;
+        displayBody?: string;
+        reportPath?: string;
+        reportBody?: string;
+        item?: { title?: string; goal?: string; reportPath?: string };
+      };
       if (!j.found) return setFlash('not found');
-      setDetailBody((j.body ?? j.raw ?? '').trim() || '(empty body)');
-      setReviewView('detail');
+      const body =
+        (j.displayBody ?? j.body ?? j.raw ?? '').trim() || '(empty body)';
+      setOverlay({
+        kind: row.kind,
+        id: row.id,
+        title: j.item?.title || j.item?.goal || row.title,
+        statusLabel: row.statusLabel,
+        path: row.path,
+        body,
+        pending: row.pending,
+        reportPath: j.reportPath ?? j.item?.reportPath ?? row.reportPath,
+      });
       setPanelFocus('review');
     } catch {
       setFlash('detail load failed');
@@ -499,84 +525,52 @@ export function LucernaMember({
   };
 
   useKeyboard((key: { name?: string }) => {
-    if (!inputActive || confirm || busy) return;
+    // Overlay owns keys while open (except confirm modal).
+    if (!inputActive || confirm || busy || overlayOpen) return;
     const n = (key.name ?? '').toLowerCase().replace('arrow', '');
 
-    // Escape: detail → list, or review focus → log
+    // Escape: leave review focus → log
     if (n === 'escape') {
-      if (reviewView === 'detail') {
-        setReviewView('list');
-        return;
-      }
       if (panelFocus === 'review') {
         setPanelFocus('log');
         return;
       }
     }
 
-    // Review panel navigation when focused
+    // Review panel navigation when focused (list only — detail is the overlay)
     if (panelFocus === 'review') {
-      if (reviewView === 'list') {
-        if (n === 'up') {
-          return setReviewCursor((c) => Math.max(0, c - 1));
-        }
-        if (n === 'down') {
-          return setReviewCursor((c) => Math.min(Math.max(0, reviewRows.length - 1), c + 1));
-        }
-        if (n === 'return' || n === 'enter') {
-          if (selectedRow) return void openDetail(selectedRow);
-        }
-        if (n === 'v' && selectedRow?.pending) {
-          if (selectedRow.kind === 'dream') {
-            return setConfirm({
-              msg: `Mark dream ${selectedRow.id} reviewed?`,
-              run: () => void post('dreams/review', `reviewed ${selectedRow.id}`, { id: selectedRow.id }),
-            });
-          }
+      if (n === 'up') {
+        return setReviewCursor((c) => Math.max(0, c - 1));
+      }
+      if (n === 'down') {
+        return setReviewCursor((c) => Math.min(Math.max(0, reviewRows.length - 1), c + 1));
+      }
+      if (n === 'return' || n === 'enter') {
+        if (selectedRow) return void openDetail(selectedRow);
+      }
+      if (n === 'v' && selectedRow?.pending) {
+        if (selectedRow.kind === 'dream') {
           return setConfirm({
-            msg: `Mark proposal ${selectedRow.id} applied (status only — content not executed)?`,
-            run: () =>
-              void post('proposals/apply', `applied ${selectedRow.id} (status only)`, {
-                id: selectedRow.id,
-              }),
+            msg: `Mark dream ${selectedRow.id} reviewed?`,
+            run: () => void post('dreams/review', `reviewed ${selectedRow.id}`, { id: selectedRow.id }),
           });
         }
-        if (n === 'x' && selectedRow?.pending && selectedRow.kind === 'proposal') {
-          return setConfirm({
-            msg: `Close proposal ${selectedRow.id} (status only)?`,
-            run: () =>
-              void post('proposals/close', `closed ${selectedRow.id} (status only)`, {
-                id: selectedRow.id,
-              }),
-          });
-        }
-      } else if (reviewView === 'detail') {
-        if (n === 'v' && selectedRow?.pending) {
-          if (selectedRow.kind === 'dream') {
-            return setConfirm({
-              msg: `Mark dream ${selectedRow.id} reviewed?`,
-              run: () => void post('dreams/review', `reviewed ${selectedRow.id}`, { id: selectedRow.id }),
-            });
-          }
-          return setConfirm({
-            msg: `Mark proposal ${selectedRow.id} applied (status only)?`,
-            run: () =>
-              void post('proposals/apply', `applied ${selectedRow.id} (status only)`, {
-                id: selectedRow.id,
-              }),
-          });
-        }
-        if (n === 'x' && selectedRow?.pending && selectedRow.kind === 'proposal') {
-          return setConfirm({
-            msg: `Close proposal ${selectedRow.id}?`,
-            run: () =>
-              void post('proposals/close', `closed ${selectedRow.id}`, { id: selectedRow.id }),
-          });
-        }
-        if (n === 'return' || n === 'enter' || n === 'backspace') {
-          setReviewView('list');
-          return;
-        }
+        return setConfirm({
+          msg: `Mark proposal ${selectedRow.id} applied (status only — content not executed)?`,
+          run: () =>
+            void post('proposals/apply', `applied ${selectedRow.id} (status only)`, {
+              id: selectedRow.id,
+            }),
+        });
+      }
+      if (n === 'x' && selectedRow?.pending && selectedRow.kind === 'proposal') {
+        return setConfirm({
+          msg: `Close proposal ${selectedRow.id} (status only)?`,
+          run: () =>
+            void post('proposals/close', `closed ${selectedRow.id} (status only)`, {
+              id: selectedRow.id,
+            }),
+        });
       }
     }
 
@@ -591,7 +585,6 @@ export function LucernaMember({
     }
     if (n === 'p') {
       setPanelFocus((f) => (f === 'review' ? 'log' : 'review'));
-      setReviewView('list');
       return;
     }
     if (n === 'r') return void post('start', 'start');
@@ -727,9 +720,7 @@ export function LucernaMember({
   const footerHint = flash
     ? flash
     : panelFocus === 'review'
-      ? reviewView === 'detail'
-        ? 'esc/enter back · v review/apply · x close proposal'
-        : 'up/dn · enter detail · v review/apply · x close · p log · esc'
+      ? 'up/dn · enter open · v review/apply · x close · p log · esc'
       : uiState === 'not-installed' || uiState === 'daemon-down'
         ? 'r start · k stop · h halt · w wake · s sleep · d dreams · a auto-commit · p review'
         : 'r start · k stop · h halt · w wake · s sleep · d dreams · a auto-commit · p review · up/dn';
@@ -786,75 +777,39 @@ export function LucernaMember({
           }
         >
           <box flexDirection="column" flexShrink={0}>
-            {reviewView === 'detail' && selectedRow ? (
-              <>
-                <FixedClearRow
-                  width={rowW}
-                  color={t.info}
-                  text={formatLucernaDisplayLine(
-                    `${selectedRow.kind} ${selectedRow.id} · ${selectedRow.statusLabel}`,
-                    rowW,
-                  )}
-                />
-                {detailBody.split(/\r?\n/).slice(0, REVIEW_SLOTS - 1).map((line, i) => (
-                  <FixedClearRow
-                    key={`d-${i}`}
-                    width={rowW}
-                    color={t.foreground}
-                    text={formatLucernaDisplayLine(line || ' ', rowW)}
-                  />
-                ))}
-                {Array.from(
-                  { length: Math.max(0, REVIEW_SLOTS - 1 - Math.min(REVIEW_SLOTS - 1, detailBody.split(/\r?\n/).length)) },
-                  (_, i) => (
-                    <FixedClearRow
-                      key={`de-${i}`}
-                      width={rowW}
-                      color={t.muted}
-                      text={emptyDisplayRow(rowW)}
-                    />
-                  ),
-                )}
-              </>
-            ) : (
-              Array.from({ length: REVIEW_SLOTS }, (_, i) => {
-                const row = reviewSlice[i];
-                if (!row) {
-                  const empty =
-                    i === 0 && reviewRows.length === 0
-                      ? reviewEmptyMessage()
-                      : emptyDisplayRow(rowW);
-                  return (
-                    <FixedClearRow
-                      key={`r-${i}`}
-                      width={rowW}
-                      color={t.muted}
-                      text={
-                        typeof empty === 'string' && empty.length === rowW
-                          ? empty
-                          : formatLucernaDisplayLine(empty, rowW)
-                      }
-                    />
-                  );
-                }
-                const absIdx = reviewListStart + i;
-                const selected = panelFocus === 'review' && absIdx === reviewCursor;
-                const color = selected
-                  ? t.info
-                  : row.pending
-                    ? t.warning
-                    : t.muted;
-                const prefix = selected ? '>' : ' ';
+            {Array.from({ length: REVIEW_SLOTS }, (_, i) => {
+              const row = reviewSlice[i];
+              if (!row) {
+                const empty =
+                  i === 0 && reviewRows.length === 0
+                    ? reviewEmptyMessage()
+                    : emptyDisplayRow(rowW);
                 return (
                   <FixedClearRow
                     key={`r-${i}`}
                     width={rowW}
-                    color={color}
-                    text={formatLucernaDisplayLine(`${prefix}${formatReviewRow(row)}`, rowW)}
+                    color={t.muted}
+                    text={
+                      typeof empty === 'string' && empty.length === rowW
+                        ? empty
+                        : formatLucernaDisplayLine(empty, rowW)
+                    }
                   />
                 );
-              })
-            )}
+              }
+              const absIdx = reviewListStart + i;
+              const selected = panelFocus === 'review' && absIdx === reviewCursor;
+              const color = selected ? t.info : row.pending ? t.warning : t.muted;
+              const prefix = selected ? '>' : ' ';
+              return (
+                <FixedClearRow
+                  key={`r-${i}`}
+                  width={rowW}
+                  color={color}
+                  text={formatLucernaDisplayLine(`${prefix}${formatReviewRow(row)}`, rowW)}
+                />
+              );
+            })}
           </box>
         </Panel>
       ) : null}
@@ -896,6 +851,39 @@ export function LucernaMember({
           {formatLucernaDisplayLine(footerHint, Math.max(16, dims.width - 2))}
         </text>
       </box>
+
+      <LucernaReviewOverlay
+        active={overlayOpen && inputActive && !confirm}
+        model={overlay}
+        onClose={() => setOverlay(null)}
+        onReview={() => {
+          if (!overlay || overlay.kind !== 'dream') return;
+          setConfirm({
+            msg: `Mark dream ${overlay.id} reviewed?`,
+            run: () => void post('dreams/review', `reviewed ${overlay.id}`, { id: overlay.id }),
+          });
+        }}
+        onApply={() => {
+          if (!overlay || overlay.kind !== 'proposal') return;
+          setConfirm({
+            msg: `Mark proposal ${overlay.id} applied (status only — content not executed)?`,
+            run: () =>
+              void post('proposals/apply', `applied ${overlay.id} (status only)`, {
+                id: overlay.id,
+              }),
+          });
+        }}
+        onCloseProposal={() => {
+          if (!overlay || overlay.kind !== 'proposal') return;
+          setConfirm({
+            msg: `Close proposal ${overlay.id} (status only)?`,
+            run: () =>
+              void post('proposals/close', `closed ${overlay.id} (status only)`, {
+                id: overlay.id,
+              }),
+          });
+        }}
+      />
 
       <ConfirmModal
         active={!!confirm && inputActive}

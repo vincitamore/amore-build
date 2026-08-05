@@ -42,6 +42,11 @@ export interface DreamItem {
   status?: string;
   tags: string[];
   dreamAction?: string;
+  /**
+   * When kind=manifest and a sibling report under forge/dreams/ was folded into
+   * this row, the org-relative path of that report (for detail overlay).
+   */
+  reportPath?: string;
 }
 
 export interface ProposalItem {
@@ -73,6 +78,14 @@ export interface DreamShowWire {
   /** Full file text when found (frontmatter + body). */
   raw?: string;
   body?: string;
+  /** Linked agentic report body (when a forge/dreams report was folded under a manifest). */
+  reportBody?: string;
+  reportPath?: string;
+  /**
+   * Ready-to-render markdown for the detail overlay: manifest body, then the
+   * linked report under a heading when present.
+   */
+  displayBody?: string;
 }
 
 export interface ProposalsListWire {
@@ -402,6 +415,114 @@ function sortDreams(items: DreamItem[]): DreamItem[] {
   });
 }
 
+/**
+ * Parse session manifest id stamp: `YYYYMMDD-HHmmss-<action>` (protocol) or
+ * looser `YYYYMMDD-<action>`.
+ */
+export function parseManifestStamp(
+  id: string,
+): { ymd: string; hms?: string; action: string } | null {
+  const full = id.match(/^(\d{8})-(\d{6})-(.+)$/);
+  if (full) return { ymd: full[1], hms: full[2], action: full[3] };
+  const loose = id.match(/^(\d{8})-(.+)$/);
+  if (loose && !/^\d{6}$/.test(loose[2].slice(0, 6))) {
+    return { ymd: loose[1], action: loose[2] };
+  }
+  return null;
+}
+
+function ymdDashed(ymd: string): string {
+  return `${ymd.slice(0, 4)}-${ymd.slice(4, 6)}-${ymd.slice(6, 8)}`;
+}
+
+function sameCalendarDay(created: string | undefined, ymd: string): boolean {
+  if (!created) return false;
+  const compact = created.replace(/-/g, '').slice(0, 8);
+  return compact === ymd;
+}
+
+/**
+ * Whether a forge/dreams report belongs to a session manifest (one agentic
+ * dream → one review row). Primary: shared `pipeline`. Fallback for older
+ * artifacts: same basename id, or action+date from the session stamp vs
+ * report filename / dream-action / created.
+ */
+export function lightBelongsToManifest(light: DreamItem, man: DreamItem): boolean {
+  if (light.kind !== 'light' || man.kind !== 'manifest') return false;
+
+  // 1. pipeline linkage (preferred — writer may stamp the same pipeline on both)
+  if (light.pipeline && man.pipeline && light.pipeline === man.pipeline) return true;
+  if (light.pipeline && man.id && light.pipeline === man.id) return true;
+  if (man.pipeline && light.id && man.pipeline === light.id) return true;
+  if (man.pipeline && light.pipeline) {
+    const a = man.pipeline.replace(/^dream-/, '');
+    const b = light.pipeline.replace(/^dream-/, '');
+    if (a && a === b) return true;
+  }
+
+  // 2. identical basename id
+  if (light.id === man.id) return true;
+
+  // 3. legacy: action + date from session stamp vs report fields/filename
+  const stamp = parseManifestStamp(man.id);
+  if (!stamp) return false;
+  const action = stamp.action.toLowerCase();
+  const idL = light.id.toLowerCase();
+
+  if (idL === man.id.toLowerCase()) return true;
+  // filename carries both compact date and action (common legacy naming)
+  if (idL.includes(action) && idL.includes(stamp.ymd)) return true;
+
+  if (light.dreamAction?.toLowerCase() === action && sameCalendarDay(light.created, stamp.ymd)) {
+    return true;
+  }
+
+  // pipeline on either side encodes dream-<action> with matching created day
+  const pipeAction = (light.pipeline ?? man.pipeline ?? '')
+    .replace(/^dream-/, '')
+    .toLowerCase();
+  if (pipeAction && pipeAction === action) {
+    if (sameCalendarDay(light.created, stamp.ymd) || sameCalendarDay(man.created, stamp.ymd)) {
+      if (light.pipeline || light.dreamAction?.toLowerCase() === action || idL.includes(action)) {
+        return true;
+      }
+    }
+  }
+
+  // light created day matches man created day AND action appears in light id/tags
+  if (
+    man.created &&
+    light.created &&
+    man.created.slice(0, 10) === light.created.slice(0, 10) &&
+    (idL.includes(action) ||
+      light.dreamAction?.toLowerCase() === action ||
+      light.tags.some((t) => t.toLowerCase() === action))
+  ) {
+    return true;
+  }
+
+  // light filename uses dashed date + action (e.g. tag-regen-2026-08-05)
+  if (idL.includes(action) && idL.includes(ymdDashed(stamp.ymd))) return true;
+
+  return false;
+}
+
+/**
+ * Fold agentic report artifacts under their session manifest. Standalone light
+ * dreams (no matching manifest) remain as their own rows.
+ */
+export function dedupeDreamItems(manifests: DreamItem[], lights: DreamItem[]): DreamItem[] {
+  const usedLight = new Set<string>();
+  const outManifests = manifests.map((man) => {
+    const linked = lights.find((l) => !usedLight.has(l.path) && lightBelongsToManifest(l, man));
+    if (!linked) return man;
+    usedLight.add(linked.path);
+    return { ...man, reportPath: linked.path };
+  });
+  const standalone = lights.filter((l) => !usedLight.has(l.path));
+  return [...outManifests, ...standalone];
+}
+
 function sortProposals(items: ProposalItem[]): ProposalItem[] {
   const rank = (p: ProposalItem): number => (p.status === 'pending' || !p.status ? 0 : 1);
   return [...items].sort((a, b) => {
@@ -428,13 +549,16 @@ function isProposalPending(p: ProposalItem): boolean {
 /**
  * List session manifests + light-dream reports under forge/dreams/.
  * Skips non-.md files. Partial frontmatter degrades field-by-field.
+ * Agentic pairs (session manifest + forge/dreams report) collapse to ONE
+ * manifest row; standalone light reports keep their own row.
  */
 export function listDreams(orgRoot: string, opts: { pendingOnly?: boolean } = {}): DreamsListWire {
   const ctx = enablementContext(orgRoot);
   const sessionsDir = join(orgRoot, 'forge', 'dreams', 'sessions');
   const dreamsDir = join(orgRoot, 'forge', 'dreams');
 
-  const items: DreamItem[] = [];
+  const manifests: DreamItem[] = [];
+  const lights: DreamItem[] = [];
 
   // Session manifests
   for (const abs of walkMdFiles(sessionsDir, false)) {
@@ -442,7 +566,7 @@ export function listDreams(orgRoot: string, opts: { pendingOnly?: boolean } = {}
     // Prefer *.manifest.md; also accept plain .md under sessions/
     if (!base.endsWith('.md')) continue;
     const item = projectDream(orgRoot, abs, 'manifest');
-    if (item) items.push(item);
+    if (item) manifests.push(item);
   }
 
   // Light dreams: forge/dreams/*.md only (not sessions/, not nested)
@@ -452,13 +576,14 @@ export function listDreams(orgRoot: string, opts: { pendingOnly?: boolean } = {}
         if (!e.isFile() || !e.name.endsWith('.md')) continue;
         const abs = join(dreamsDir, e.name);
         const item = projectDream(orgRoot, abs, 'light');
-        if (item) items.push(item);
+        if (item) lights.push(item);
       }
     } catch {
       /* unreadable dreams dir */
     }
   }
 
+  const items = dedupeDreamItems(manifests, lights);
   const sorted = sortDreams(items);
   const filtered = opts.pendingOnly ? sorted.filter(isDreamPending) : sorted;
   const pendingCount = sorted.filter(isDreamPending).length;
@@ -471,6 +596,32 @@ export function listDreams(orgRoot: string, opts: { pendingOnly?: boolean } = {}
     pendingCount,
     total: filtered.length,
   };
+}
+
+/** Collect raw light reports under forge/dreams/ (no dedupe). */
+function collectLightReports(orgRoot: string): DreamItem[] {
+  const dreamsDir = join(orgRoot, 'forge', 'dreams');
+  const lights: DreamItem[] = [];
+  if (!existsSync(dreamsDir)) return lights;
+  try {
+    for (const e of readdirSync(dreamsDir, { withFileTypes: true })) {
+      if (!e.isFile() || !e.name.endsWith('.md')) continue;
+      const item = projectDream(orgRoot, join(dreamsDir, e.name), 'light');
+      if (item) lights.push(item);
+    }
+  } catch {
+    /* ignore */
+  }
+  return lights;
+}
+
+/** Resolve linked report path for a manifest (pipeline / stamp fallback). */
+export function findLinkedReportPath(orgRoot: string, man: DreamItem): string | undefined {
+  if (man.reportPath) return man.reportPath;
+  if (man.kind !== 'manifest') return undefined;
+  const lights = collectLightReports(orgRoot);
+  const hit = lights.find((l) => lightBelongsToManifest(l, man));
+  return hit?.path;
 }
 
 /** Resolve a dream by id, relative path, pipeline name, or basename. */
@@ -507,14 +658,46 @@ export function showDream(orgRoot: string, idOrPath: string): DreamShowWire {
     return { available: true, found: false, reason: 'not-found' };
   }
   const kind: DreamKind = rel.includes('/sessions/') ? 'manifest' : 'light';
-  const item = projectDream(orgRoot, abs, kind);
+  let item = projectDream(orgRoot, abs, kind);
   const { body } = parseFrontmatterLenient(raw);
+
+  let reportBody: string | undefined;
+  let reportPath: string | undefined;
+  if (item && kind === 'manifest') {
+    reportPath = findLinkedReportPath(orgRoot, item);
+    if (reportPath) {
+      item = { ...item, reportPath };
+      try {
+        const reportRaw = readFileSync(join(orgRoot, reportPath), 'utf8');
+        reportBody = parseFrontmatterLenient(reportRaw).body;
+      } catch {
+        reportBody = undefined;
+      }
+    }
+  }
+
+  const manBody = (body ?? '').trimEnd();
+  const repBody = (reportBody ?? '').trimEnd();
+  let displayBody = manBody;
+  if (kind === 'manifest' && repBody) {
+    displayBody =
+      (manBody ? `${manBody}\n\n` : '') +
+      `## Linked report\n\n` +
+      (reportPath ? `_${reportPath}_\n\n` : '') +
+      repBody;
+  } else if (!displayBody && repBody) {
+    displayBody = repBody;
+  }
+
   return {
     available: true,
     found: true,
     item: item ?? undefined,
     raw,
     body,
+    reportBody,
+    reportPath,
+    displayBody: displayBody || '(empty body)',
   };
 }
 
