@@ -14,8 +14,11 @@ not an upstream contribution queue and not an xAI project. See
 
 1. **Thin diff over upstream.** New files and additive seams beat edits to
    upstream files. Crate names stay `xai-grok-*` — renaming crates is
-   explicitly out of bounds (diff-hygiene ruling). If a change can be an
-   upstream PR, propose it upstream instead.
+   explicitly out of bounds (diff-hygiene ruling). Note that upstream accepts
+   no external contributions, so a change that is really an upstream fix
+   still lands here — but write it as the smallest possible delta in the
+   upstream file, marked with a fork comment, so the next sync merge carries
+   or supersedes it cleanly.
 2. **`.amore` config-dir semantics.** Every repo-level config surface is
    `.amore/` first, with `.grok/` scanned as the legacy fallback (`.amore`
    wins when both exist). Home is `~/.amore`; env surface is `AMORE_*`
