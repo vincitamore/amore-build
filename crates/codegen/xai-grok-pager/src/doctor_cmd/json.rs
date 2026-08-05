@@ -2,8 +2,9 @@ use serde::Serialize;
 
 use crate::clipboard::{ClipboardDelivery, NativeClipboardPreflight, Osc52Capability};
 use crate::diagnostics::{
-    DataControlFact, DiagnosticFinding, DiagnosticReport, FindingDisposition, NewlineFact,
-    ProbeNote, ProbeStatus, RuntimeFact, VoiceFacts,
+    CompanionInstall, DataControlFact, DiagnosticFinding, DiagnosticReport, FindingDisposition,
+    InstrumentsFacts, IrisDaemonHome, LucernaEnablementFact, NewlineFact, ProbeNote, ProbeStatus,
+    RuntimeFact, VoiceFacts,
 };
 use crate::host::HostOs;
 use crate::terminal::{ByobuBackend, ModifierFate, MultiplexerKind, TerminalName};
@@ -86,6 +87,7 @@ struct JsonFacts<'a> {
     clipboard: JsonClipboardFacts<'a>,
     #[serde(skip_serializing_if = "Option::is_none")]
     voice: Option<JsonVoiceFacts<'a>>,
+    instruments: JsonInstrumentsFacts<'a>,
 }
 
 impl<'a> From<&'a DiagnosticReport> for JsonFacts<'a> {
@@ -119,6 +121,142 @@ impl<'a> From<&'a DiagnosticReport> for JsonFacts<'a> {
             newline: facts.newline.as_ref().map(JsonNewlineFact::from),
             clipboard: JsonClipboardFacts::from(&facts.clipboard),
             voice: facts.voice.as_ref().map(JsonVoiceFacts::from),
+            instruments: JsonInstrumentsFacts::from(&facts.instruments),
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct JsonInstrumentsFacts<'a> {
+    iris: JsonCompanionInstall<'a>,
+    iris_daemon_home: JsonIrisDaemonHome<'a>,
+    lucerna: JsonCompanionInstall<'a>,
+    lucerna_enablement: JsonLucernaEnablement<'a>,
+    speculum: JsonCompanionInstall<'a>,
+}
+
+impl<'a> From<&'a InstrumentsFacts> for JsonInstrumentsFacts<'a> {
+    fn from(facts: &'a InstrumentsFacts) -> Self {
+        Self {
+            iris: JsonCompanionInstall::from(&facts.iris),
+            iris_daemon_home: JsonIrisDaemonHome::from(&facts.iris_daemon_home),
+            lucerna: JsonCompanionInstall::from(&facts.lucerna),
+            lucerna_enablement: JsonLucernaEnablement::from(&facts.lucerna_enablement),
+            speculum: JsonCompanionInstall::from(&facts.speculum),
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct JsonCompanionInstall<'a> {
+    status: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    path: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    version: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<&'a str>,
+}
+
+impl<'a> From<&'a CompanionInstall> for JsonCompanionInstall<'a> {
+    fn from(install: &'a CompanionInstall) -> Self {
+        match install {
+            CompanionInstall::Installed { path, version } => Self {
+                status: "installed",
+                path: path.to_str(),
+                version: version.as_deref(),
+                error: None,
+            },
+            CompanionInstall::NotInstalled => Self {
+                status: "not_installed",
+                path: None,
+                version: None,
+                error: None,
+            },
+            CompanionInstall::ProbeFailed { path, error } => Self {
+                status: "probe_failed",
+                path: path.to_str(),
+                version: None,
+                error: Some(error.as_str()),
+            },
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct JsonIrisDaemonHome<'a> {
+    status: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    path: Option<&'a str>,
+}
+
+impl<'a> From<&'a IrisDaemonHome> for JsonIrisDaemonHome<'a> {
+    fn from(home: &'a IrisDaemonHome) -> Self {
+        match home {
+            IrisDaemonHome::Present { path } => Self {
+                status: "present",
+                path: path.to_str(),
+            },
+            IrisDaemonHome::Absent { path } => Self {
+                status: "absent",
+                path: path.to_str(),
+            },
+            IrisDaemonHome::HomeUnavailable => Self {
+                status: "home_unavailable",
+                path: None,
+            },
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct JsonLucernaEnablement<'a> {
+    status: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    path: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    dreams_enabled: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    auto_commit_live: Option<bool>,
+    /// When live, auto-commit mode is "live"; otherwise "dry-run" or absent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    auto_commit_mode: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<&'a str>,
+}
+
+impl<'a> From<&'a LucernaEnablementFact> for JsonLucernaEnablement<'a> {
+    fn from(fact: &'a LucernaEnablementFact) -> Self {
+        match fact {
+            LucernaEnablementFact::NotObserved => Self {
+                status: "not_observed",
+                path: None,
+                dreams_enabled: None,
+                auto_commit_live: None,
+                auto_commit_mode: None,
+                error: None,
+            },
+            LucernaEnablementFact::Observed {
+                path,
+                dreams_enabled,
+                auto_commit_live,
+                error,
+            } => Self {
+                status: if error.is_some() {
+                    "malformed"
+                } else {
+                    "observed"
+                },
+                path: path.to_str(),
+                dreams_enabled: Some(*dreams_enabled),
+                auto_commit_live: Some(*auto_commit_live),
+                auto_commit_mode: Some(if *auto_commit_live { "live" } else { "dry-run" }),
+                error: error.as_deref(),
+            },
         }
     }
 }

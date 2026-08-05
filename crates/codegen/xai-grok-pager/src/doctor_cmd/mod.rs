@@ -64,6 +64,7 @@ pub fn collect_report() -> DiagnosticReport {
     let terminal = crate::terminal::standalone_terminal_context();
     let mut report = collect_report_with(crate::diagnostics::probes::collect_standalone(&terminal));
     path_collision::apply_path_collision_probe(&mut report);
+    crate::diagnostics::apply_instruments_probe(&mut report);
     configured_report_for_terminal(report, &terminal)
 }
 

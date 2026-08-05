@@ -135,8 +135,58 @@ pub fn format_doctor(report: &DiagnosticReport) -> String {
         }
     }
 
+    out.push_str("\nInstruments\n");
+    format_instruments_section(&facts.instruments, &mut out);
+
     format_findings(report, &mut out);
     out
+}
+
+fn format_instruments_section(
+    instruments: &super::InstrumentsFacts,
+    out: &mut String,
+) {
+    use super::instruments as inst;
+    use super::{CompanionInstall, IrisDaemonHome};
+
+    out.push_str(&format!(
+        "  iris         {}\n",
+        match &instruments.iris {
+            CompanionInstall::NotInstalled => "not installed".to_owned(),
+            other => inst::format_install_line(other),
+        }
+    ));
+    match &instruments.iris_daemon_home {
+        IrisDaemonHome::Present { path } => {
+            out.push_str(&format!("  iris home    present ({})\n", path.display()));
+        }
+        IrisDaemonHome::Absent { path } => {
+            out.push_str(&format!("  iris home    absent ({})\n", path.display()));
+        }
+        IrisDaemonHome::HomeUnavailable => {
+            out.push_str("  iris home    unavailable\n");
+        }
+    }
+    out.push_str(&format!(
+        "  lucerna      {}\n",
+        match &instruments.lucerna {
+            CompanionInstall::NotInstalled => "not installed (opt-in)".to_owned(),
+            other => inst::format_install_line(other),
+        }
+    ));
+    if instruments.lucerna.is_installed() {
+        let (dreams, auto_commit) =
+            inst::format_lucerna_enablement(&instruments.lucerna_enablement);
+        out.push_str(&format!("  dreams       {dreams}\n"));
+        out.push_str(&format!("  auto-commit  {auto_commit}\n"));
+    }
+    out.push_str(&format!(
+        "  speculum     {}\n",
+        match &instruments.speculum {
+            CompanionInstall::NotInstalled => "not installed (opt-in)".to_owned(),
+            other => inst::format_install_line(other),
+        }
+    ));
 }
 
 fn format_findings(report: &DiagnosticReport, out: &mut String) {

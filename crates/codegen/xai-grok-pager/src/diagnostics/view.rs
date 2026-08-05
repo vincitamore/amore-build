@@ -248,6 +248,8 @@ fn facts(
             newline,
             clipboard,
             voice: None,
+            // Filled by `apply_instruments_probe` on doctor entry points.
+            instruments: super::InstrumentsFacts::default(),
         },
         clipboard_recovery,
     )

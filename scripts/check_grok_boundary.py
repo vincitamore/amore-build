@@ -56,6 +56,8 @@ SUBSTRATE_DIRS = ("crates", "third_party", "prod")
 # The fork-owned surface: everything else. Scanned for stray mentions.
 SCAN_EXCLUDES = {
     ".git", "target", "node_modules", ".sweep-scratch", "__pycache__", "dist",
+    # Ephemeral orchestrator staging (untracked briefs/envelopes); not product surface.
+    ".dispatch",
 }
 # Scripts whose whole job is describing the grok boundary or scanning source
 # for name drift. They mention the word in self-documenting prose (docstrings,

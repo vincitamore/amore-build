@@ -97,6 +97,9 @@ pub struct DiagnosticFacts {
     /// Passive mic enumeration when voice capture is available. `None` omits the
     /// Voice section (no-audio builds, or TUI when voice mode is off).
     pub voice: Option<VoiceFacts>,
+    /// Companion instrument presence (iris / lucerna / speculum). Always filled
+    /// by the instruments probe on standalone and TUI doctor paths.
+    pub instruments: InstrumentsFacts,
 }
 
 /// Result of a passive input-device lookup (does not open a capture stream).
@@ -106,6 +109,116 @@ pub enum VoiceFacts {
     Device { name: String, detail: String },
     /// Audio is compiled in but no default input / recorder exists.
     Missing { error: String },
+}
+
+/// Companion binary presence for doctor facts.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum CompanionInstall {
+    /// Binary found; version string when `--version` succeeded.
+    Installed {
+        path: std::path::PathBuf,
+        version: Option<String>,
+    },
+    /// No binary beside `amore` and none on PATH.
+    NotInstalled,
+    /// Binary path known but the version probe failed.
+    ProbeFailed {
+        path: std::path::PathBuf,
+        error: String,
+    },
+}
+
+impl CompanionInstall {
+    pub fn status_label(&self) -> &'static str {
+        match self {
+            Self::Installed { .. } => "installed",
+            Self::NotInstalled => "not_installed",
+            Self::ProbeFailed { .. } => "probe_failed",
+        }
+    }
+
+    pub fn path(&self) -> Option<&std::path::Path> {
+        match self {
+            Self::Installed { path, .. } | Self::ProbeFailed { path, .. } => Some(path.as_path()),
+            Self::NotInstalled => None,
+        }
+    }
+
+    pub fn version(&self) -> Option<&str> {
+        match self {
+            Self::Installed { version, .. } => version.as_deref(),
+            Self::NotInstalled | Self::ProbeFailed { .. } => None,
+        }
+    }
+
+    pub fn is_installed(&self) -> bool {
+        matches!(self, Self::Installed { .. } | Self::ProbeFailed { .. })
+    }
+}
+
+/// Iris daemon state directory (`~/.iris`).
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum IrisDaemonHome {
+    Present { path: std::path::PathBuf },
+    Absent { path: std::path::PathBuf },
+    HomeUnavailable,
+}
+
+impl IrisDaemonHome {
+    pub fn status_label(&self) -> &'static str {
+        match self {
+            Self::Present { .. } => "present",
+            Self::Absent { .. } => "absent",
+            Self::HomeUnavailable => "home_unavailable",
+        }
+    }
+}
+
+/// Lucerna durable enablement from `lucerna.enable.json` (house runtime).
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum LucernaEnablementFact {
+    /// File found and parsed (malformed → both flags false, same as lucerna).
+    Observed {
+        path: std::path::PathBuf,
+        dreams_enabled: bool,
+        auto_commit_live: bool,
+        /// Parse/read issue; flags still default off.
+        error: Option<String>,
+    },
+    /// No house enablement file under the current directory ancestry.
+    NotObserved,
+}
+
+impl LucernaEnablementFact {
+    pub fn status_label(&self) -> &'static str {
+        match self {
+            Self::Observed { error: Some(_), .. } => "malformed",
+            Self::Observed { .. } => "observed",
+            Self::NotObserved => "not_observed",
+        }
+    }
+}
+
+/// Full instruments section for doctor facts (human + JSON).
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct InstrumentsFacts {
+    pub iris: CompanionInstall,
+    pub iris_daemon_home: IrisDaemonHome,
+    pub lucerna: CompanionInstall,
+    pub lucerna_enablement: LucernaEnablementFact,
+    pub speculum: CompanionInstall,
+}
+
+impl Default for InstrumentsFacts {
+    fn default() -> Self {
+        Self {
+            iris: CompanionInstall::NotInstalled,
+            iris_daemon_home: IrisDaemonHome::HomeUnavailable,
+            lucerna: CompanionInstall::NotInstalled,
+            lucerna_enablement: LucernaEnablementFact::NotObserved,
+            speculum: CompanionInstall::NotInstalled,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

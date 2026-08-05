@@ -79,6 +79,21 @@ DOCTOR_FIX_FILE = "crates/codegen/xai-grok-pager/src/diagnostics/fix.rs"
 MANAGED_TEXT_MOD = "crates/codegen/xai-grok-config/src/managed_text/mod.rs"
 MANAGED_TEXT_FORMAT = "crates/codegen/xai-grok-config/src/managed_text/format.rs"
 
+# Instrument companions (iris default-on; lucerna/speculum opt-in): init flags,
+# shared fetch/release-asset contract, doctor registration, and CI/release
+# lanes. An upstream merge that drops these silently reverts companion install
+# and doctor coverage — pin the re-apply surface here.
+INIT_CMD_FILE = "crates/codegen/xai-grok-pager/src/init_cmd/mod.rs"
+INSTRUMENT_FETCH_FILE = "crates/codegen/xai-grok-pager/src/init_cmd/instrument_fetch.rs"
+INSTRUMENTS_DIAG_FILE = "crates/codegen/xai-grok-pager/src/diagnostics/instruments.rs"
+INSTRUMENTS_DIAG_MOD = "crates/codegen/xai-grok-pager/src/diagnostics/mod.rs"
+DOCTOR_CMD_FILE = "crates/codegen/xai-grok-pager/src/doctor_cmd/mod.rs"
+RELEASE_WORKFLOW = ".github/workflows/release.yml"
+INSTRUMENTS_CI_WORKFLOW = ".github/workflows/instruments-ci.yml"
+RELEASE_BASE_NEEDLE = (
+    'RELEASE_BASE: &str = "https://github.com/vincitamore/amore-build/releases/download"'
+)
+
 
 def run(cmd: list[str], **kw) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, cwd=REPO, capture_output=True, text=True, **kw)
@@ -387,6 +402,61 @@ def cmd_verify(dry_run: bool) -> int:
         problems.append(f"telemetry build token referenced in workflows: {tainted}")
     else:
         print("  ok  no GROK_TELEMETRY_BUILD_* token in any workflow")
+
+    # 6e. instrument companions — init flags, fetch/release-asset contract,
+    #     doctor registration, and companion lanes in release + instruments-ci.
+    #     Re-apply these if an upstream merge drops them.
+    _check_file_contains(
+        INIT_CMD_FILE, 'long = "with-lucerna"',
+        "init exposes --with-lucerna opt-in companion flag", problems)
+    _check_file_contains(
+        INIT_CMD_FILE, 'long = "with-speculum"',
+        "init exposes --with-speculum opt-in companion flag", problems)
+    _check_file_contains(
+        INSTRUMENT_FETCH_FILE, RELEASE_BASE_NEEDLE,
+        "instrument_fetch RELEASE_BASE names the fork release repo", problems)
+    _check_file_contains(
+        INSTRUMENT_FETCH_FILE, "format!(\"{name}-{suffix}.exe.zip\")",
+        "instrument_fetch Windows asset naming <name>-<suffix>.exe.zip", problems)
+    _check_file_contains(
+        INSTRUMENT_FETCH_FILE, "format!(\"{name}-{suffix}.tar.gz\")",
+        "instrument_fetch unix asset naming <name>-<suffix>.tar.gz", problems)
+    _check_file_contains(
+        INSTRUMENT_FETCH_FILE, 'name: "lucerna"',
+        "instrument_fetch registers lucerna InstrumentSpec", problems)
+    _check_file_contains(
+        INSTRUMENT_FETCH_FILE, 'name: "speculum"',
+        "instrument_fetch registers speculum InstrumentSpec", problems)
+    _check_file_contains(
+        INSTRUMENTS_DIAG_FILE, "pub fn apply_instruments_probe",
+        "doctor instruments probe module present (apply_instruments_probe)", problems)
+    _check_file_contains(
+        INSTRUMENTS_DIAG_MOD, "pub mod instruments",
+        "diagnostics mod registers instruments submodule", problems)
+    _check_file_contains(
+        INSTRUMENTS_DIAG_MOD, "apply_instruments_probe",
+        "diagnostics re-exports apply_instruments_probe", problems)
+    _check_file_contains(
+        DOCTOR_CMD_FILE, "apply_instruments_probe",
+        "standalone doctor collect_report applies instruments probe", problems)
+    _check_file_contains(
+        RELEASE_WORKFLOW, "lucerna:",
+        "release.yml has lucerna companion lane", problems)
+    _check_file_contains(
+        RELEASE_WORKFLOW, "speculum:",
+        "release.yml has speculum companion lane", problems)
+    _check_file_contains(
+        RELEASE_WORKFLOW, "needs: [amore, iris, lucerna, speculum]",
+        "release job waits on iris/lucerna/speculum companion lanes", problems)
+    _check_file_contains(
+        INSTRUMENTS_CI_WORKFLOW, "instrument: [lucerna, speculum]",
+        "instruments-ci.yml matrices lucerna + speculum", problems)
+    _check_file_contains(
+        INSTRUMENTS_CI_WORKFLOW, "instruments/lucerna/**",
+        "instruments-ci.yml path-scoped to instruments/lucerna", problems)
+    _check_file_contains(
+        INSTRUMENTS_CI_WORKFLOW, "instruments/speculum/**",
+        "instruments-ci.yml path-scoped to instruments/speculum", problems)
 
     # 7. build + smoke (this host). Build is the long pole; allow skipping.
     #    The full Linux pager suite remains CI-owned (UPSTREAM.md §5).

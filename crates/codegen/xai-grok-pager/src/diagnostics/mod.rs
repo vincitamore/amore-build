@@ -12,6 +12,8 @@ use crate::theme::color_support::ColorLevel;
 
 mod doctor_format;
 mod fix;
+/// Companion instrument presence probes for doctor (fork surface).
+pub mod instruments;
 mod model;
 pub mod probes;
 mod view;
@@ -37,9 +39,11 @@ pub(crate) use model::{
     NOTIFICATION_PROTOCOL_FALLBACK_ID, SANDBOX_PROFILE_CONFLICT_ID, VOICE_NO_INPUT_DEVICE_ID,
     VSCODE_SSH_NON_ASCII_ID,
 };
+pub use instruments::{apply_instruments_probe, IRIS_MISSING_ID};
 pub use model::{
-    ClipboardFacts, ColorFacts, DataControlFact, DiagnosticFacts, DiagnosticFinding, DiagnosticId,
-    DiagnosticReport, FindingDisposition, KeyboardFact, ManualRemediation, NewlineFact, ProbeNote,
+    ClipboardFacts, ColorFacts, CompanionInstall, DataControlFact, DiagnosticFacts,
+    DiagnosticFinding, DiagnosticId, DiagnosticReport, FindingDisposition, InstrumentsFacts,
+    IrisDaemonHome, KeyboardFact, LucernaEnablementFact, ManualRemediation, NewlineFact, ProbeNote,
     ProbeStatus, RuntimeFact, TmuxColorPassthrough, TmuxFacts, TmuxOptionFact, TmuxSupportFact,
     VoiceFacts,
 };

@@ -138,6 +138,9 @@ pub(super) fn format(report: &DiagnosticReport) -> String {
         }
     }
 
+    out.push_str("\nInstruments\n");
+    format_instruments(&mut out, &facts.instruments);
+
     if !report.findings.is_empty() {
         out.push_str("\nFindings\n");
         for finding in &report.findings {
@@ -224,6 +227,57 @@ fn format_finding(out: &mut String, finding: &DiagnosticFinding) {
     if let Some(note) = &finding.note {
         out.push_str(&format!("      {note}\n"));
     }
+}
+
+fn format_instruments(out: &mut String, instruments: &crate::diagnostics::InstrumentsFacts) {
+    use crate::diagnostics::{
+        CompanionInstall, IrisDaemonHome, instruments as inst,
+    };
+
+    let iris_line = match &instruments.iris {
+        CompanionInstall::NotInstalled => {
+            "not installed (default companion; see recommendation)".to_owned()
+        }
+        other => inst::format_install_line(other),
+    };
+    fact(out, "iris", &iris_line);
+
+    match &instruments.iris_daemon_home {
+        IrisDaemonHome::Present { path } => {
+            fact(out, "iris daemon home", &format!("present ({})", path.display()));
+        }
+        IrisDaemonHome::Absent { path } => {
+            fact(out, "iris daemon home", &format!("absent ({})", path.display()));
+        }
+        IrisDaemonHome::HomeUnavailable => {
+            unavailable(out, "iris daemon home", "home unavailable");
+        }
+    }
+
+    let lucerna_line = match &instruments.lucerna {
+        CompanionInstall::NotInstalled => {
+            let bin = crate::app::cli::resolved_bin_name();
+            format!("not installed (opt-in: {bin} init --with-lucerna)")
+        }
+        other => inst::format_install_line(other),
+    };
+    fact(out, "lucerna", &lucerna_line);
+
+    if instruments.lucerna.is_installed() {
+        let (dreams, auto_commit) =
+            inst::format_lucerna_enablement(&instruments.lucerna_enablement);
+        fact(out, "lucerna dreams", &dreams);
+        fact(out, "lucerna auto-commit", &auto_commit);
+    }
+
+    let speculum_line = match &instruments.speculum {
+        CompanionInstall::NotInstalled => {
+            let bin = crate::app::cli::resolved_bin_name();
+            format!("not installed (opt-in: {bin} init --with-speculum)")
+        }
+        other => inst::format_install_line(other),
+    };
+    fact(out, "speculum", &speculum_line);
 }
 
 fn format_newline(newline: &NewlineFact) -> String {

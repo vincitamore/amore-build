@@ -41,6 +41,7 @@ pub(super) fn report() -> DiagnosticReport {
                 fix: None,
             },
             voice: None,
+            instruments: crate::diagnostics::InstrumentsFacts::default(),
         },
         findings: Vec::new(),
         probe_notes: Vec::new(),

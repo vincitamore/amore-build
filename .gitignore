@@ -39,3 +39,6 @@ instruments/iris/packages/*/dist/
 
 # Bun compile intermediates
 *.bun-build
+
+# Orchestrator dispatch staging (local scratch, never shipped)
+.dispatch/
