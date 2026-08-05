@@ -15,9 +15,9 @@
 // Rust `BTreeMap` order (all keys are ASCII → plain byte order). Confirmed against
 // the live daemon, including `triggeredBy` sorting between `title` and `type`.
 // Regime B alphabetizes NESTED object keys too (`to_value` maps every object to a
-// BTreeMap) — so `signature`'s keys are deep-sorted here (live-confirmed:
-// forge/output/opus-manifest-pre-strip.md serves algorithm, content-hash, sig,
-// signer, timestamp — not the raw-file order).
+// BTreeMap) — so `signature`'s keys are deep-sorted here (live-confirmed: a
+// signed manifest serves algorithm, content-hash, sig, signer, timestamp —
+// not the raw-file order).
 // ─────────────────────────────────────────────────────────────────────────────
 
 import type { IndexedDoc, ResolvedBacklink, ResolvedOutbound, WireDoc } from '../contract';

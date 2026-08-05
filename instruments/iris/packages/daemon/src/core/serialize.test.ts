@@ -113,8 +113,8 @@ test('arrays keep their element order (only keys are alphabetized)', () => {
 });
 
 test('signature object keys are deep-sorted alphabetically (Regime B nests too)', () => {
-  // Mirror of forge/output/opus-manifest-pre-strip.md: raw-file order is
-  // algorithm, signer, timestamp, content-hash, sig — live serves alphabetical.
+  // Live-confirmed against a signed manifest: raw-file order is
+  // algorithm, signer, timestamp, content-hash, sig — the wire serves alphabetical.
   const wire = serializeDoc(
     mkDoc({
       signature: {

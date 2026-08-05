@@ -86,9 +86,8 @@ function readItem(orgRoot: string, filePath: string, type: string, resolved: boo
  * List inbox items, newest first. By DEFAULT returns only the OPEN queue —
  * the top level of each inbox/<type>/ — and excludes inbox/<type>/resolved/.
  *
- * Climb over examen, whose inbox_list recursively included resolved/ items because
- * its directory scanner's skip-list predates the inbox lifecycle (added 2026-06-09)
- * and never added `resolved`. The open queue is what orientation counts read.
+ * A recursive scan would include resolved/ items too; the skip-list excludes
+ * them deliberately. The open queue is what orientation counts read.
  */
 export function listInbox(
   orgRoot: string,

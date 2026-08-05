@@ -17,7 +17,7 @@ tags:
 > records they point to (task files, resolved decisions, knowledge articles)
 > remain authoritative.
 
-> **Migration convention** (the lineage convention, from opus's previous-state).
+> **Migration convention.**
 > Date headings are **date of entry**, never date of migration batch. Two rules
 > follow:
 > 1. **Never create a duplicate heading.** When migrating a section whose

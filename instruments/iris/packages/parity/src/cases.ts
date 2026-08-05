@@ -99,8 +99,7 @@ export const CASES: Case[] = [
 export const IGNORE: Record<string, string[]> = {
   '/api/health': ['timestamp'], // chrono::Utc::now() — advances every call
   // server.uptime / server.lastIndexed: elapsed secs + Utc::now().
-  // recent (added 2026-07-02, exhibited on the first cross-implementation
-  // replay): top-5 docs by `updated` — but `updated` is date-granular and any
+  // recent: top-5 docs by `updated` — but `updated` is date-granular and any
   // active day updates far more than 5 docs, so the boundary tier is sliced by
   // HashMap order (per-process random, like the search cutoff ties). The
   // membership itself is legacy-nondeterministic across restarts —
