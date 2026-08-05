@@ -1,14 +1,25 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useKeyboard } from '@opentui/react';
+import {
+  StyledText,
+  stringToStyledText,
+  fg,
+  bold,
+  italic,
+  underline,
+  type StylableInput,
+} from '@opentui/core';
 import { usePalette } from '../ThemeProvider';
+import type { Palette } from '../theme';
 import { useStableDimensions } from '../use-stable-dimensions';
-import { renderMarkdown, type MdLine, type Tone } from '../md-render';
-import { formatLucernaDisplayLine, emptyDisplayRow } from './lucerna-display';
+import { renderMarkdown, type MdLine, type MdSeg, type Tone } from '../md-render';
+import { emptyDisplayRow, formatLucernaDisplayLine } from './lucerna-display';
 
 /**
  * Full-screen-ish detail overlay for Lucerna review items (SearchOverlay layout:
  * centered, most of the terminal, fixed opaque row slots, Esc closes).
- * Renders body via the shared md-render pipeline (headings / lists / code tones).
+ * Renders body via the shared md-render pipeline (headings / lists / code tones)
+ * with SPAN-scoped colors — same segment model as Forge MarkdownView.
  */
 
 export interface ReviewOverlayModel {
@@ -23,10 +34,45 @@ export interface ReviewOverlayModel {
   reportPath?: string;
 }
 
-function toneColor(
-  t: ReturnType<typeof usePalette>,
-  tone: Tone,
-): string {
+/** One display segment after Lucerna glyph scrub (link style is span-only). */
+export interface OverlaySeg {
+  text: string;
+  tone: Tone;
+  bold?: boolean;
+  italic?: boolean;
+  underline?: boolean;
+  /** Present when md-render marked a wikilink / markdown link. */
+  wikilink?: string;
+}
+
+export interface OverlayLine {
+  /** Exact-width row string (for residual / pad tests). */
+  text: string;
+  /** Per-span tones — only path/wikilink tokens use tone `link`. */
+  segs: OverlaySeg[];
+}
+
+/**
+ * Scrub multi-byte glyphs the same way formatLogCell does, but without width
+ * pad — applied per segment so styles stay span-aligned.
+ */
+export function scrubOverlayGlyphs(s: string): string {
+  return s
+    .replace(/\u2192/g, '->')
+    .replace(/\u2190/g, '<-')
+    .replace(/\u2022/g, '-') // list bullet
+    .replace(/\u2191/g, 'up')
+    .replace(/\u2193/g, 'dn')
+    .replace(/\u2014/g, '-')
+    .replace(/\u2013/g, '-')
+    .replace(/\u00a0/g, ' ')
+    .replace(/\u25a3/g, '#')
+    .replace(/[\u2500-\u257f]/g, '-')
+    // Keep middle-dot + ellipsis; other non-ASCII → ?
+    .replace(/[^\t\r\n\x20-\x7e\u00b7\u2026]/g, '?');
+}
+
+function toneColor(t: Palette, tone: Tone): string {
   switch (tone) {
     case 'h1':
     case 'h2':
@@ -55,13 +101,16 @@ function toneColor(
   }
 }
 
-/** Flatten an MdLine to plain text for fixed-width opaque rows. */
+/** Flatten an MdLine to plain text (tests / residual helpers). */
 export function mdLineToText(line: MdLine): string {
   if (!line.length) return ' ';
   return line.map((s) => s.text).join('') || ' ';
 }
 
-/** Dominant tone for color (prefer heading/code/marker over body text). */
+/**
+ * Dominant tone for a line — used only by tests/legacy; the overlay paints
+ * spans, not this aggregate (which caused whole-line link color).
+ */
 export function mdLineTone(line: MdLine): Tone {
   if (!line.length) return 'text';
   const prefer: Tone[] = ['h1', 'h2', 'h3', 'code', 'codeblock', 'marker', 'link', 'quote'];
@@ -72,24 +121,82 @@ export function mdLineTone(line: MdLine): Tone {
 }
 
 /**
- * Build display lines for tests / overlay: markdown → fixed-width plain rows
- * with a semantic tone per row (color only at the view layer).
- *
- * Uses the same `renderMarkdown` / `parseInline` pipeline as Forge's MarkdownView
- * (labels for `[[wikilinks]]` and `[text](url)` — no second link convention).
- * Lucerna's opaque-row scrub maps md-render's bullet (•) to ASCII hyphen so
- * list markers never become "?" on this surface.
+ * True only for md-render link segments (wikilink / markdown link). Bare
+ * short hex, parenthesized dates, and plain prose never get link tone —
+ * same matcher as Forge MarkdownView (`parseInline` only).
  */
-export function buildReviewOverlayLines(
-  body: string,
-  width: number,
-): Array<{ text: string; tone: Tone }> {
+export function isLinkSeg(seg: Pick<OverlaySeg, 'tone' | 'wikilink' | 'text'>): boolean {
+  return seg.tone === 'link';
+}
+
+/** Pad scrubbed segments to exact row width (opaque clear). */
+export function padOverlaySegs(segs: OverlaySeg[], width: number): OverlaySeg[] {
+  const w = Math.max(1, width);
+  let out: OverlaySeg[] = segs.length
+    ? segs.map((s) => ({ ...s, text: scrubOverlayGlyphs(s.text) }))
+    : [{ text: ' ', tone: 'text' }];
+
+  // Drop empty segments after scrub
+  out = out.filter((s) => s.text.length > 0);
+  if (out.length === 0) out = [{ text: ' ', tone: 'text' }];
+
+  let len = out.reduce((a, s) => a + s.text.length, 0);
+  if (len > w) {
+    // Hard trim from the end (renderMarkdown already wraps; scrub length drift is rare)
+    const trimmed: OverlaySeg[] = [];
+    let used = 0;
+    for (const s of out) {
+      if (used >= w) break;
+      const take = Math.min(s.text.length, w - used);
+      trimmed.push({ ...s, text: s.text.slice(0, take) });
+      used += take;
+    }
+    out = trimmed;
+    len = used;
+  }
+  if (len < w) {
+    out.push({ text: ' '.repeat(w - len), tone: 'text' });
+  }
+  return out;
+}
+
+/**
+ * Build display lines: markdown → wrapped MdLines (Forge pipeline) → scrubbed
+ * span rows of exact width. Link tone stays on the matched token only.
+ */
+export function buildReviewOverlayLines(body: string, width: number): OverlayLine[] {
   const w = Math.max(12, width);
   const md = renderMarkdown(body || ' ', w);
-  return md.map((line) => ({
-    text: formatLucernaDisplayLine(mdLineToText(line), w),
-    tone: mdLineTone(line),
-  }));
+  return md.map((line) => {
+    const raw: OverlaySeg[] = (line.length ? line : [{ text: ' ', tone: 'text' as Tone }]).map(
+      (s: MdSeg) => ({
+        text: s.text,
+        tone: s.tone,
+        bold: s.bold,
+        italic: s.italic,
+        underline: s.underline,
+        wikilink: s.wikilink,
+      }),
+    );
+    const segs = padOverlaySegs(raw, w);
+    return {
+      segs,
+      text: segs.map((s) => s.text).join(''),
+    };
+  });
+}
+
+/** Span list → OpenTUI StyledText (mirrors MarkdownView.toStyled). */
+export function overlayLineToStyled(line: OverlayLine, p: Palette): StyledText {
+  if (!line.segs.length) return stringToStyledText(' ');
+  const chunks = line.segs.map((seg) => {
+    let c: StylableInput = seg.text.length ? seg.text : ' ';
+    if (seg.italic) c = italic(c);
+    if (seg.bold) c = bold(c);
+    if (seg.underline || seg.tone === 'link') c = underline(c);
+    return fg(toneColor(p, seg.tone))(c);
+  });
+  return new StyledText(chunks);
 }
 
 /** Footer hint vocabulary — ASCII, matches Activity Log / member footers (`up/dn`). */
@@ -113,11 +220,8 @@ export function LucernaReviewOverlay({
   active?: boolean;
   model: ReviewOverlayModel | null;
   onClose: () => void;
-  /** Mark dream reviewed (status flip). */
   onReview?: () => void;
-  /** Mark proposal applied (status only). */
   onApply?: () => void;
-  /** Mark proposal closed (status only). */
   onCloseProposal?: () => void;
 }) {
   const t = usePalette();
@@ -132,14 +236,15 @@ export function LucernaReviewOverlay({
   const left = Math.max(0, Math.floor((dims.width - width) / 2));
   const height = Math.max(10, dims.height - 4);
   const top = 1;
-  // chrome: title border + meta + footer = ~4 rows inside padding
   const listRows = Math.max(4, height - 6);
   const innerW = Math.max(12, width - 4);
 
   const lines = useMemo(() => {
-    if (!model) return [] as Array<{ text: string; tone: Tone }>;
+    if (!model) return [] as OverlayLine[];
     return buildReviewOverlayLines(model.body, innerW);
   }, [model, innerW]);
+
+  const blankStyled = useMemo(() => stringToStyledText(emptyDisplayRow(innerW)), [innerW]);
 
   const maxScroll = Math.max(0, lines.length - listRows);
   const clamped = Math.min(scroll, maxScroll);
@@ -195,7 +300,6 @@ export function LucernaReviewOverlay({
       paddingLeft={1}
       paddingRight={1}
     >
-      {/* Meta row — opaque clear */}
       <box height={1} flexShrink={0} overflow="hidden" backgroundColor={t.background}>
         <text fg={t.muted} wrapMode="none">
           {formatLucernaDisplayLine(meta || ' ', Math.max(8, width - 4))}
@@ -209,25 +313,10 @@ export function LucernaReviewOverlay({
         </box>
       ) : null}
 
-      {/* Body: fixed opaque slots (stale-cell craft) */}
+      {/* Body: fixed opaque slots; span-scoped StyledText (Forge MarkdownView pattern). */}
       <box flexDirection="column" flexGrow={1} flexShrink={1} minHeight={0} backgroundColor={t.background}>
         {Array.from({ length: listRows }, (_, vi) => {
           const row = shown[vi];
-          if (!row) {
-            return (
-              <box
-                key={`r-${vi}`}
-                height={1}
-                flexShrink={0}
-                overflow="hidden"
-                backgroundColor={t.background}
-              >
-                <text fg={t.muted} wrapMode="none">
-                  {emptyDisplayRow(innerW)}
-                </text>
-              </box>
-            );
-          }
           return (
             <box
               key={`r-${vi}`}
@@ -236,9 +325,10 @@ export function LucernaReviewOverlay({
               overflow="hidden"
               backgroundColor={t.background}
             >
-              <text fg={toneColor(t, row.tone)} wrapMode="none">
-                {row.text.length === innerW ? row.text : formatLucernaDisplayLine(row.text, innerW)}
-              </text>
+              <text
+                wrapMode="none"
+                content={row ? overlayLineToStyled(row, t) : blankStyled}
+              />
             </box>
           );
         })}
