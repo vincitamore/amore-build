@@ -6,7 +6,57 @@ monorepo sync commits; everything below is the fork's own delta, newest first.
 This document is compiled into the binary — update it in the same change as the
 work it describes.
 
-## Unreleased
+## v0.3.0
+
+- **The house keeps itself.** Lucerna, the opt-in house steward, gains
+  agentic maintenance dreams: governed sessions through your own model
+  configuration that survey the house, refresh its graph and search
+  index, and write reports and proposals for review. Web tools are
+  disabled on maintenance spawns, every spawn runs under a wall-clock
+  kill, budgets and token metering come from real usage envelopes, writes
+  are default-deny, and nothing is enabled until the operator flips it —
+  `amore init --with-lucerna` to install, dreams off by default,
+  auto-commit dry-run.
+- **Semantic search sets itself up.** `amore init` now runs
+  `iris qmd setup` after installing iris: a pinned qmd runtime under
+  `~/.amore/instruments/qmd/`, per-house collections, and full hybrid
+  search (BM25 + embeddings + query expansion + rerank) as the default
+  tier. The iris daemon keeps the index fresh as the tree changes, so
+  nobody has to remember an update step; `--no-qmd` skips it all. Fuzzy,
+  content, and semantic modes ride the dash palette, the CLI, and the
+  API.
+- **The review loop closes in the dash.** The Lucerna tab lists dreams
+  and proposals pending-first, opens a full reading overlay with rendered
+  markdown (a manifest and its linked report read as one), and flips
+  review status byte-exact from the TUI or the CLI. The Dashboard pulse
+  carries the pending-review count, and the Forge view groups dream
+  artifacts by pipeline.
+- **The typed-edge graph gains agentic tiers.** `iris edges update
+  --tier 2` runs a generate-and-judge pass through a headless `amore`
+  spawn with a quote-validity gate before any edge lands live. Every edge
+  carries its tier and provenance; stewardship stays after the fact —
+  list, show, edit, remove, with removals durable across re-derives.
+- **Iris moves home.** Client state now lives at
+  `~/.amore/instruments/iris/` beside the other companions. A legacy
+  `~/.iris` is copied over automatically on first run — verified, marked,
+  never deleted — and `IRIS_HOME` overrides everything. `iris --version`
+  answers with a version now, too.
+- **Doctor covers the companions.** A new instruments section reports
+  iris / lucerna / speculum presence and version, honest enablement
+  state, and the managed search stack (qmd runtime, models, house index,
+  js runtime), taking version facts only from version-shaped output.
+- **Init refuses to nest houses.** Bare `amore init` inside an existing
+  house is refused rather than planting a house-inside-a-house;
+  `amore init .` adopts a pre-manifest house without overwriting
+  customized files, and opting out of iris keeps init quiet about the
+  features that ride along with it.
+- **The autonomy story is documented and receipted.** `docs/autonomy.md`
+  states every default an operator can verify; `docs/egress.md`
+  inventories every instrument network touchpoint; and
+  `scripts/lucerna_egress_capture.sh` traces one full dream cycle under
+  syscall-level capture.
+
+## v0.2
 
 - **Opt-in companions ride the same release tag.** `amore init --with-lucerna`
   and `amore init --with-speculum` fetch the house steward and session

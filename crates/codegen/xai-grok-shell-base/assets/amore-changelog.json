@@ -1,6 +1,41 @@
 [
   {
     "category": "features",
+    "description": "**The house keeps itself** — Lucerna's agentic maintenance dreams run governed sessions through your own model configuration and write reviewable reports and proposals; opt-in install, dreams off by default, budgets, wall-clock kill, default-deny writes.",
+    "breaking_change": false
+  },
+  {
+    "category": "features",
+    "description": "**Semantic search sets itself up** — `amore init` runs `iris qmd setup`: pinned runtime, house collections, full hybrid search by default, and the iris daemon keeps the index fresh automatically; `--no-qmd` opts out.",
+    "breaking_change": false
+  },
+  {
+    "category": "features",
+    "description": "**The review loop closes in the dash** — dreams and proposals list pending-first with a full reading overlay, and review flips land byte-exact from the TUI or the CLI.",
+    "breaking_change": false
+  },
+  {
+    "category": "features",
+    "description": "**The typed-edge graph gains agentic tiers** — `iris edges update --tier 2` generates and judges edges through a headless `amore` spawn with a quote-validity gate; every edge carries tier and provenance, stewardship stays after the fact.",
+    "breaking_change": false
+  },
+  {
+    "category": "features",
+    "description": "**Iris moves home** — client state now lives at `~/.amore/instruments/iris/`; a legacy `~/.iris` migrates automatically on first run (verified, marked, never deleted).",
+    "breaking_change": false
+  },
+  {
+    "category": "features",
+    "description": "**Doctor covers the companions** — an instruments section reports iris / lucerna / speculum presence, versions, honest enablement, and the managed search stack.",
+    "breaking_change": false
+  },
+  {
+    "category": "fixes",
+    "description": "**Init refuses to nest houses** — bare `amore init` inside an existing house is refused; `amore init .` adopts a pre-manifest house without overwriting your files.",
+    "breaking_change": false
+  },
+  {
+    "category": "features",
     "description": "**Opt-in companions ride the same release tag** — `amore init --with-lucerna` and `amore init --with-speculum` fetch the house steward and session mirror from the matching GitHub Release (sha256-verified, linked beside `amore`); both default off, iris stays default-on with `--no-iris`.",
     "breaking_change": false
   },
