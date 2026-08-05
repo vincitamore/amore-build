@@ -174,8 +174,12 @@ check groups as of 2026-08-04: `.amore`/`.grok` precedence, `~/.amore`
 default home, identity/binary naming (argv0 aliases), auto-update hard-off
 (`FORK_AUTO_UPDATE_HARD_OFF`), the embed + `init` ownership tests, the
 brand-boundary gate, the `resolved_bin_name()` branding call-site pins
-(resume-hint / titles / completions), and the doctor-namespace migration
-pins — then builds and smokes `amore` on the host. The script is the
+(resume-hint / titles / completions), the doctor-namespace migration
+pins, and the egress pins (telemetry mode defaults to `Disabled`; no
+`GROK_TELEMETRY_BUILD_*` reporting token referenced in any workflow) —
+then builds and smokes `amore` on the host. The egress pins re-verify the
+shipped posture at every sync, so the public egress statement is
+re-checked mechanically rather than trusted to memory. The script is the
 authoritative list; keep this sentence in sync when it grows. The Linux
 pager suite and full crate suite remain CI's job (see §5); `--verify` says
 what it can and cannot run rather than faking a green.

@@ -358,6 +358,25 @@ def cmd_verify(dry_run: bool) -> int:
         MANAGED_TEXT_FORMAT, "fn adopt_legacy_namespace",
         "managed_text adopts legacy-namespace blocks in plan", problems)
 
+    # 6d. egress posture: the telemetry subsystem stays inert by default and
+    #     no release lane bakes in a reporting token. These pins back the
+    #     public egress statement (README / SECURITY / the announcement); a
+    #     sync that flips either must be caught here, not by a reader.
+    _check_file_contains(
+        "crates/codegen/xai-grok-telemetry/src/config.rs",
+        "#[default]\n    Disabled",
+        "telemetry mode defaults to Disabled", problems)
+    workflow_dir = REPO / ".github" / "workflows"
+    workflows = sorted(workflow_dir.glob("*.yml")) if workflow_dir.exists() else []
+    tainted = [w.name for w in workflows
+               if "GROK_TELEMETRY_BUILD" in w.read_text(encoding="utf-8", errors="replace")]
+    if not workflows:
+        problems.append("no workflow files found — cannot verify no-baked-token")
+    elif tainted:
+        problems.append(f"telemetry build token referenced in workflows: {tainted}")
+    else:
+        print("  ok  no GROK_TELEMETRY_BUILD_* token in any workflow")
+
     # 7. build + smoke (this host). Build is the long pole; allow skipping.
     #    The full Linux pager suite remains CI-owned (UPSTREAM.md §5).
     if dry_run:
