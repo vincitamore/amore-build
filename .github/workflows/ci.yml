@@ -14,6 +14,10 @@ name: ci
 # amore-changelog.md) and templates/house/** markdown ARE build inputs and
 # must keep triggering. docs/** includes the screenshot assets.
 on:
+  # Manual trigger: force-pushes across unrelated histories (the 2026-08-05
+  # clobber restore) do not fire the push event's workflows — dispatch fills
+  # that gap.
+  workflow_dispatch:
   push:
     branches: [main]
     paths-ignore:
