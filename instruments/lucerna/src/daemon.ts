@@ -24,6 +24,7 @@ import { RUNTIME_FILES, healthPath, logPath, sentinelPath } from "./paths.ts";
 import { executeLightAction, isAdmittedAction, actionBudgetTier, actionCooldownClass } from "./actions.ts";
 import { mergeGovernanceLists, loadUserGovernance } from "./governance.ts";
 import { AutoCommitter } from "./auto-commit.ts";
+import { runDreamCycle, type DreamCycleResult } from "./somniator.ts";
 
 const LOG_MAX_BYTES = 5 * 1024 * 1024;
 
@@ -101,6 +102,8 @@ export class DaemonLoop {
   private readonly startedAt = Date.now();
   private cycleCount = 0;
   private lists = mergeGovernanceLists();
+  /** Set by wake sentinel: request one immediate dream cycle when dreams enabled. */
+  private wakeDreamRequested = false;
 
   constructor(private config: LucernaConfig) {
     this.stateManager = new StateManager(config.runtimeDir, {
@@ -206,12 +209,34 @@ export class DaemonLoop {
       }
     }
 
-    // Phase 1: no autonomous planner. Dreams-enabled only notes readiness.
-    if (this.heartbeat.isDreaming && this.config.dreamsEnabled) {
-      appendLog(
-        this.config.runtimeDir,
-        "dream phase reached; autonomous planner deferred (phase 1 light-only)",
-      );
+    // Light dream planner: dreaming phase when due, or wake-triggered immediate cycle.
+    if (this.config.dreamsEnabled) {
+      const due =
+        this.wakeDreamRequested ||
+        (this.heartbeat.isDreaming && this.stateManager.canStartCycle().allowed);
+      if (due) {
+        this.wakeDreamRequested = false;
+        try {
+          const result = await runDreamCycle(this.config, {
+            stateManager: this.stateManager,
+            force: false,
+          });
+          if (result.status === "ran" || result.status === "skipped") {
+            console.log(
+              `  [DREAM] ${result.status}${result.action ? ` ${result.action}` : ""}: ${result.reason}`,
+            );
+          } else if (result.status === "refused") {
+            console.log(`  [DREAM] refused: ${result.reason}`);
+          } else {
+            console.log(`  [DREAM] ${result.status}: ${result.reason}`);
+          }
+        } catch (err) {
+          appendLog(this.config.runtimeDir, `dream-cycle error: ${err}`);
+          console.error(`  [CYCLE] dream-cycle error: ${err}`);
+        } finally {
+          this.writeHealth();
+        }
+      }
     }
 
     if (this.cycleCount % 30 === 1) {
@@ -219,6 +244,17 @@ export class DaemonLoop {
         `  [CYCLE ${this.cycleCount}] heartbeat=${this.heartbeat} uptime=${Math.round((Date.now() - this.startedAt) / 1000)}s`,
       );
     }
+  }
+
+  /**
+   * Run one planner-driven dream cycle (CLI dream-cycle path).
+   * --force overrides schedule only; enablement is always honored.
+   */
+  async runDreamCycleNow(opts?: { force?: boolean }): Promise<DreamCycleResult> {
+    return runDreamCycle(this.config, {
+      stateManager: this.stateManager,
+      force: opts?.force === true,
+    });
   }
 
   /**
@@ -280,6 +316,9 @@ export class DaemonLoop {
     if (!consumeSentinel(this.config.runtimeDir, "wake")) return;
     console.log("  [SENTINEL] wake - stimulate heartbeat");
     this.heartbeat.stimulate();
+    if (this.config.dreamsEnabled) {
+      this.wakeDreamRequested = true;
+    }
     this.stateManager.setActivity("wake", "wake sentinel consumed");
     this.stateManager.save();
     appendLog(this.config.runtimeDir, "wake consumed");

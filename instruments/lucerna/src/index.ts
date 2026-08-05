@@ -2,7 +2,14 @@
  * @amore/lucerna  -  house steward daemon public surface.
  */
 
-export { VERSION, PROCESS_NAME, loadConfig, type LucernaConfig } from "./config.ts";
+export {
+  VERSION,
+  PROCESS_NAME,
+  loadConfig,
+  packageVersion,
+  formatVersionLine,
+  type LucernaConfig,
+} from "./config.ts";
 export {
   PROTECTED_PATTERNS,
   WRITABLE_PATTERNS,
@@ -24,6 +31,7 @@ export {
   recordAction,
   recordTokenUsage,
   budgetSnapshot,
+  formatBudgetForPlanner,
   type BudgetCounters,
   type TokenUsage,
 } from "./budget.ts";
@@ -53,6 +61,25 @@ export {
 } from "./actions.ts";
 export { AutoCommitter, dryRunAgainstFixture } from "./auto-commit.ts";
 export { DaemonLoop, consumeSentinel, runLifecycleSmoke } from "./daemon.ts";
-export { StateManager } from "./state.ts";
+export { StateManager, type DreamCycleOutcome } from "./state.ts";
 export { Heartbeat } from "./heartbeat.ts";
 export { houseRuntimeDir, userConfigDir, RUNTIME_FILES } from "./paths.ts";
+export {
+  runDreamCycle,
+  parseDreamPick,
+  gatherHouseSnapshot,
+  DREAM_PICK_SCHEMA,
+  DREAM_PICK_ACTIONS,
+  buildPlannerSystemPrompt,
+  buildPlannerUserPrompt,
+  lightDreamRelPath,
+  type DreamPick,
+  type DreamCycleResult,
+} from "./somniator.ts";
+export {
+  appendNotification,
+  readNotifications,
+  rotateNotificationsIfNeeded,
+  notificationsPath,
+  type LucernaNotification,
+} from "./notifications.ts";

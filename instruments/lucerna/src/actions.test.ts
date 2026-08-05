@@ -85,15 +85,18 @@ describe("helpers", () => {
 });
 
 describe("light actions against synthetic house", () => {
-  test("survey-org writes forge report only", () => {
+  test("survey-org writes forge/dreams report only", async () => {
     const house = syntheticHouse();
     try {
       const r = runSurveyOrg(house);
       expect(r.ok).toBe(true);
       expect(r.artifactPath).toBeDefined();
-      expect(r.artifactPath!.includes("forge")).toBe(true);
+      expect(r.artifactPath!.replace(/\\/g, "/")).toContain("forge/dreams/");
       expect(canWrite(house, r.artifactPath!)).toBe(true);
       expect(existsSync(r.artifactPath!)).toBe(true);
+      const body = await Bun.file(r.artifactPath!).text();
+      expect(body).toContain("triggered-by: dream");
+      expect(body).toContain("dream-action: survey-org");
     } finally {
       rmSync(house, { recursive: true, force: true });
     }

@@ -13,7 +13,8 @@
     "typecheck": "tsc --noEmit",
     "cli": "bun run src/cli.ts",
     "start": "bun run src/cli.ts start",
-    "smoke": "bun run src/cli.ts smoke"
+    "smoke": "bun run src/cli.ts smoke",
+    "build:compile": "bun run scripts/build-compile.ts"
   },
   "devDependencies": {
     "@types/node": "latest",

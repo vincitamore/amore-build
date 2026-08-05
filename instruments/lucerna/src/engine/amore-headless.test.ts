@@ -45,6 +45,20 @@ describe("buildAmoreHeadlessArgv", () => {
     });
     expect(noModel).not.toContain("--model");
   });
+
+  test("jsonSchema adds --json-schema and forces json output format", () => {
+    const schema = JSON.stringify({ type: "object", properties: { action: { type: "string" } } });
+    const argv = buildAmoreHeadlessArgv({
+      promptFile: "p.md",
+      cwd: "C:/house",
+      maxTurns: 1,
+      jsonSchema: schema,
+    });
+    expect(argv).toContain("--json-schema");
+    expect(argv[argv.indexOf("--json-schema") + 1]).toBe(schema);
+    expect(argv).toContain("--output-format");
+    expect(argv[argv.indexOf("--output-format") + 1]).toBe("json");
+  });
 });
 
 describe("parseJsonEnvelope + usage", () => {

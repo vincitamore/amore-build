@@ -359,6 +359,17 @@ export function recordAction(
   };
 }
 
+/** Compact multi-line budget block for planner prompts. */
+export function formatBudgetForPlanner(snapshot: BudgetSnapshot): string {
+  return [
+    `BUDGET_DAILY: ${snapshot.remainingDaily} actions remaining today (max ${snapshot.dailyCap}/day).`,
+    `BUDGET_WEEKLY: ${snapshot.remainingWeekly} expensive actions remaining this week (max ${snapshot.weeklyCap}/week).`,
+    `CYCLE_COOLDOWN: ${snapshot.cycleCooldownElapsed ? "elapsed (may start)" : `active (${Math.ceil(snapshot.cycleCooldownRemainingMs / 60_000)}m remaining)`}.`,
+    `TOKENS: ${snapshot.tokensToday}/${snapshot.dailyTokenCeiling} today${snapshot.tokenCeilingReached ? " (ceiling reached)" : ""}.`,
+    `actionsToday: ${snapshot.actionsToday}; actionsThisWeek(expensive): ${snapshot.actionsThisWeek}`,
+  ].join("\n");
+}
+
 export function budgetSnapshot(
   counters: BudgetCounters,
   now: Date = new Date(),

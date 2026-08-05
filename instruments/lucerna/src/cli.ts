@@ -2,7 +2,7 @@
 /**
  * lucerna CLI  -  house steward daemon control surface.
  *
- *   lucerna status|start|stop|dream <action>|log [-n]|smoke
+ *   lucerna status|start|stop|dream <action>|dream-cycle|dreams|log [-n]|smoke
  */
 
 import {
@@ -13,7 +13,7 @@ import {
   unlinkSync,
 } from "node:fs";
 import { join } from "node:path";
-import { loadConfig, packageVersion, VERSION } from "./config.ts";
+import { loadConfig, packageVersion, VERSION, formatVersionLine } from "./config.ts";
 import {
   DaemonLoop,
   appendLog,
@@ -37,19 +37,26 @@ import {
   DEFAULT_DAILY_TOKEN_CEILING,
 } from "./budget.ts";
 import { PROTECTED_PATTERNS, WRITABLE_PATTERNS } from "./governance.ts";
+import { DREAM_PICK_SCHEMA } from "./somniator.ts";
 
 const HELP = `lucerna  -  house steward daemon
 
 Usage:
-  lucerna status [--house PATH]
-  lucerna start  [--house PATH] [--dreams-enabled] [--auto-commit-live] [--dry-run]
-  lucerna stop   [--house PATH]
-  lucerna dream  <action> [--house PATH] [--respect-gates]
-  lucerna log    [-n N] [--house PATH]
-  lucerna smoke  [--house PATH]
+  lucerna status      [--house PATH]
+  lucerna start       [--house PATH] [--dreams-enabled] [--auto-commit-live] [--dry-run]
+  lucerna stop        [--house PATH]
+  lucerna dream       <action> [--house PATH] [--respect-gates]
+  lucerna dream-cycle [--house PATH] [--force]
+  lucerna dreams      [-n N] [--house PATH]
+  lucerna log         [-n N] [--house PATH]
+  lucerna smoke       [--house PATH]
+  lucerna version | --version
 
-Light actions (phase 1):
+Light actions:
   ${ADMITTED_ACTION_KEYS.join(", ")}
+
+dream-cycle runs one planner pick (at most one light action). --force overrides
+the cycle schedule only; it never enables dreams when dreamsEnabled is false.
 
 Defaults:
   dreams OFF, auto-commit dry-run, daily actions ${DAILY_ACTION_BUDGET},
@@ -100,6 +107,8 @@ async function cmdStatus(args: string[]): Promise<number> {
 
   const { enablement } = readEnablementFile(config.runtimeDir);
   let budget: Record<string, unknown> | null = null;
+  let dreamScheduling: Record<string, unknown> | null = null;
+  let lastCycle: unknown = null;
   if (existsSync(sPath)) {
     try {
       const sm = new StateManager(config.runtimeDir, {
@@ -108,10 +117,37 @@ async function cmdStatus(args: string[]): Promise<number> {
         cooldownMs: config.cycleCooldownMs,
         tokenCeiling: config.dailyTokenCeiling,
       });
-      budget = sm.budgetSnapshot() as unknown as Record<string, unknown>;
+      const snap = sm.budgetSnapshot();
+      budget = snap as unknown as Record<string, unknown>;
+      const gate = sm.canStartCycle();
+      lastCycle = sm.get().dream.lastCycleOutcome ?? null;
+      dreamScheduling = {
+        dreamsEnabled: enablement.dreamsEnabled || config.dreamsEnabled,
+        fileDreamsEnabled: enablement.dreamsEnabled,
+        cycleCooldownElapsed: snap.cycleCooldownElapsed,
+        cycleCooldownRemainingMs: snap.cycleCooldownRemainingMs,
+        lastCycleEnded: snap.lastCycleEnded,
+        allowedToStartCycle: gate.allowed,
+        gateReason: gate.reason,
+        totalDreams: sm.get().dream.totalDreams,
+        cycleActive: sm.get().dream.cycleActive,
+      };
     } catch {
       budget = null;
+      dreamScheduling = null;
     }
+  } else {
+    dreamScheduling = {
+      dreamsEnabled: enablement.dreamsEnabled || config.dreamsEnabled,
+      fileDreamsEnabled: enablement.dreamsEnabled,
+      cycleCooldownElapsed: true,
+      cycleCooldownRemainingMs: 0,
+      lastCycleEnded: null,
+      allowedToStartCycle: enablement.dreamsEnabled || config.dreamsEnabled,
+      gateReason: enablement.dreamsEnabled || config.dreamsEnabled ? "ok" : "dreams disabled",
+      totalDreams: 0,
+      cycleActive: false,
+    };
   }
 
   const out = {
@@ -126,6 +162,8 @@ async function cmdStatus(args: string[]): Promise<number> {
     statePresent: existsSync(sPath),
     enablement,
     budget,
+    dreamScheduling,
+    lastCycle,
     driver: "amore-headless",
     amoreBin: resolveAmoreBin(config.amoreBin),
     dreamsAutonomousDefault: false,
@@ -198,6 +236,50 @@ async function cmdDream(args: string[]): Promise<number> {
   return result.ok ? 0 : 1;
 }
 
+async function cmdDreamCycle(args: string[]): Promise<number> {
+  const config = loadConfig(args);
+  const force = args.includes("--force");
+  const loop = new DaemonLoop(config);
+  const result = await loop.runDreamCycleNow({ force });
+  console.log(JSON.stringify(result, null, 2));
+  // refused for enablement is a clean non-zero; schedule refuse is non-zero too
+  if (result.status === "ran" || result.status === "skipped") return 0;
+  return 1;
+}
+
+async function cmdDreams(args: string[]): Promise<number> {
+  const config = loadConfig(args);
+  const nFlag = getArg(args, "-n");
+  const n = nFlag ? parseInt(nFlag, 10) : 20;
+  const sm = new StateManager(config.runtimeDir, {
+    dailyCap: config.dailyActionCap,
+    weeklyCap: config.weeklyExpensiveCap,
+    cooldownMs: config.cycleCooldownMs,
+    tokenCeiling: config.dailyTokenCeiling,
+  });
+  const history = sm.dreamCycleHistory(Number.isFinite(n) ? Math.max(1, n) : 20);
+  const snap = sm.budgetSnapshot();
+  const gate = sm.canStartCycle();
+  console.log(
+    JSON.stringify(
+      {
+        dreamsEnabled: config.dreamsEnabled,
+        totalDreams: sm.get().dream.totalDreams,
+        lastCycleEnded: sm.get().dream.lastCycleEnded,
+        scheduling: {
+          allowedToStartCycle: gate.allowed,
+          reason: gate.reason,
+          cycleCooldownRemainingMs: snap.cycleCooldownRemainingMs,
+        },
+        history,
+      },
+      null,
+      2,
+    ),
+  );
+  return 0;
+}
+
 async function cmdLog(args: string[]): Promise<number> {
   const config = loadConfig(args);
   const nFlag = getArg(args, "-n");
@@ -230,17 +312,23 @@ async function cmdSmoke(args: string[]): Promise<number> {
     detail: WRITABLE_PATTERNS.join(","),
   });
 
-  // 2. Argv builder never pairs --single with --prompt-file
+  // 2. Argv builder never pairs --single with --prompt-file; schema flag present
   const argv = buildAmoreHeadlessArgv({
     promptFile: "/tmp/p.md",
     cwd: config.houseRoot,
     maxTurns: 1,
     outputFormat: "json",
+    jsonSchema: JSON.stringify(DREAM_PICK_SCHEMA),
   });
   results.push({
     check: "argv-no-single-with-prompt-file",
     ok: argv.includes("--prompt-file") && !argv.includes("--single"),
     detail: argv.join(" "),
+  });
+  results.push({
+    check: "argv-json-schema",
+    ok: argv.includes("--json-schema"),
+    detail: argv.includes("--json-schema") ? "present" : "missing",
   });
 
   // 3. Envelope parse (fixture)
@@ -338,6 +426,12 @@ async function main(): Promise<void> {
     case "dream":
       code = await cmdDream(argv); // keep action name in args for parser
       break;
+    case "dream-cycle":
+      code = await cmdDreamCycle(rest);
+      break;
+    case "dreams":
+      code = await cmdDreams(rest);
+      break;
     case "log":
       code = await cmdLog(rest);
       break;
@@ -348,6 +442,12 @@ async function main(): Promise<void> {
     case "--help":
     case "-h":
       console.log(HELP);
+      code = 0;
+      break;
+    case "version":
+    case "--version":
+    case "-V":
+      console.log(formatVersionLine());
       code = 0;
       break;
     default:

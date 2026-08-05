@@ -27,6 +27,14 @@ import {
 } from "./budget.ts";
 import { RUNTIME_FILES } from "./paths.ts";
 
+export interface DreamCycleOutcome {
+  at: string;
+  status: "ran" | "skipped" | "refused" | "failed";
+  reason: string;
+  action?: string;
+  artifactPath?: string;
+}
+
 export interface DreamState {
   pipelineRunning: boolean;
   pipelineStarted: string | null;
@@ -41,6 +49,9 @@ export interface DreamState {
   recentActions?: Record<string, string>;
   tokensToday: number;
   lastTokenDate: string | null;
+  /** Most recent cycle outcomes (newest first). */
+  cycleHistory?: DreamCycleOutcome[];
+  lastCycleOutcome?: DreamCycleOutcome | null;
 }
 
 export interface AutoCommitDraft {
@@ -80,6 +91,8 @@ function emptyState(): LucernaState {
       recentActions: {},
       tokensToday: 0,
       lastTokenDate: null,
+      cycleHistory: [],
+      lastCycleOutcome: null,
     },
     lastActivity: null,
     lastActionResults: [],
@@ -136,6 +149,10 @@ export class StateManager {
             ...(emptyState().dream.recentActions ?? {}),
             ...(raw.dream?.recentActions ?? {}),
           },
+          cycleHistory: Array.isArray(raw.dream?.cycleHistory)
+            ? raw.dream.cycleHistory
+            : [],
+          lastCycleOutcome: raw.dream?.lastCycleOutcome ?? null,
         },
         lastActionResults: Array.isArray(raw.lastActionResults) ? raw.lastActionResults : [],
       };
@@ -281,5 +298,17 @@ export class StateManager {
     const next = recordTokenUsage(this.asCounters(), usage, now);
     this.state.dream.tokensToday = next.tokensToday;
     this.state.dream.lastTokenDate = next.lastTokenDate;
+  }
+
+  pushDreamCycleOutcome(outcome: DreamCycleOutcome): void {
+    this.state.dream.lastCycleOutcome = outcome;
+    this.state.dream.cycleHistory = [
+      outcome,
+      ...(this.state.dream.cycleHistory ?? []),
+    ].slice(0, 40);
+  }
+
+  dreamCycleHistory(limit = 20): DreamCycleOutcome[] {
+    return (this.state.dream.cycleHistory ?? []).slice(0, limit);
   }
 }

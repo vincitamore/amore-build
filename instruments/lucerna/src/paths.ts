@@ -20,6 +20,7 @@ export const RUNTIME_FILES = {
   enable: "lucerna.enable.json",
   governanceUser: "governance.user.toml",
   pid: "daemon.pid",
+  notifications: "notifications.jsonl",
 } as const;
 
 /** House-local runtime directory for state, health, logs, sentinels, enablement. */

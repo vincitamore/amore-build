@@ -112,9 +112,9 @@ function writeReport(
   actionKey: string,
   lists: GovernanceLists = defaultLists(),
 ): ActionResult {
-  const forgeDir = join(houseRoot, "forge");
-  ensureDir(forgeDir);
-  const path = join(forgeDir, name);
+  const dreamsDir = join(houseRoot, "forge", "dreams");
+  ensureDir(dreamsDir);
+  const path = join(dreamsDir, name);
   const body = content.trimStart().startsWith("---")
     ? content
     : [
@@ -420,6 +420,7 @@ export function runStateCleanup(
   const keep = new Set<string>(Object.values(RUNTIME_FILES));
   keep.add("state.json.tmp");
   keep.add("health.json.tmp");
+  keep.add("notifications.jsonl.tmp");
 
   let entries;
   try {

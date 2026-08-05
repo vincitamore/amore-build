@@ -8,7 +8,8 @@ Lucerna is the Amore house steward daemon. It keeps a light heartbeat over a hou
 - **Two-list governance**: protected house identity surfaces are default-deny; only `inbox/captures/`, `forge/`, and lucerna's own runtime state may be written autonomously.
 - **Tiered budgets**: 12 actions per day, 6 expensive actions per week, 2 hour cycle cooldown, per-action cooldowns, and a soft daily token ceiling fed from driver usage envelopes.
 - **Enablement flags** default both off: dreams and live auto-commit require an explicit flip.
-- **Light actions** (phase 1, model-free): `survey-org`, `substrate-health`, `inbox-age-report`, `state-cleanup`.
+- **Light actions** (model-free): `survey-org`, `substrate-health`, `inbox-age-report`, `state-cleanup`.
+- **Light dreams** (opt-in planner): when `dreamsEnabled` is true, Lucerna may run one planner call per cycle and execute at most one light action.
 - **Auto-commit dry-run**: drafts a commit message via one headless call; never commits unless live mode is enabled (live mode is draft-only in this release).
 
 ## Install
@@ -59,6 +60,25 @@ File: `<house>/instruments/lucerna/lucerna.enable.json`
 
 Absent file: both false. Malformed JSON: both false, with a log line. CLI flags and env vars OR with the file for one-shot override. Safe defaults never flip themselves on.
 
+## Light dreams
+
+A light dream is one autonomous maintenance cycle: Lucerna gathers a compact house snapshot (org counts, budget counters, recent action history), then makes a single `amore` headless call with a JSON schema that constrains the pick to the admitted light action keys or `skip`. At most one light action runs per cycle. A `skip` pick writes no report and spends only the planning call.
+
+Dreams stay **off by default**. Autonomous cycles run only when `dreamsEnabled` is true in `lucerna.enable.json` (or an equivalent start-time OR of that file with env/CLI). Absent or malformed enablement keeps dreams off. The `wake` sentinel can request an immediate cycle when dreams are already enabled; `sleep` still forces the dreaming heartbeat phase; `halt` stops the daemon as usual.
+
+Budgets apply end to end: 12 actions per day, 6 expensive actions per week, per-action cooldowns, a 2 hour cycle cooldown, and a soft daily token ceiling that includes the planning call. A refused cycle records its reason in `state.json` and the log. `lucerna dream-cycle --force` may override the cycle schedule, but it never overrides enablement.
+
+Executed actions write dated reports under `<house>/forge/dreams/` with frontmatter that includes `triggered-by: dream`. Outcomes worth operator attention (action executed, token ceiling, repeated planner failures) append to `<house>/instruments/lucerna/notifications.jsonl` for local surfaces to read.
+
+The only model path is the operator's own `amore` configuration. Lucerna does not embed provider SDKs, API keys, or hardcoded model identifiers.
+
+```bash
+lucerna dream-cycle --house ~/my-house          # one cycle if enabled + budgets allow
+lucerna dream-cycle --house ~/my-house --force  # ignore schedule only
+lucerna dreams -n 10 --house ~/my-house         # recent cycle history from state
+lucerna status --house ~/my-house               # includes dream scheduling fields
+```
+
 ## File-based control surface
 
 Under `<house>/instruments/lucerna/`:
@@ -72,6 +92,7 @@ Under `<house>/instruments/lucerna/`:
 | `wake` | write then delete-on-consume; stimulate heartbeat |
 | `sleep` | write then delete-on-consume; force dreaming phase |
 | `lucerna.enable.json` | durable enablement knobs |
+| `notifications.jsonl` | append-only operator attention queue |
 | `governance.user.toml` | additive protected paths only |
 
 Example:
@@ -81,6 +102,8 @@ lucerna start --house ~/my-house
 echo > ~/my-house/instruments/lucerna/halt   # request stop
 lucerna status --house ~/my-house
 lucerna dream survey-org --house ~/my-house
+lucerna dream-cycle --house ~/my-house
+lucerna dreams -n 10 --house ~/my-house
 lucerna log -n 50 --house ~/my-house
 lucerna smoke --house /tmp/synthetic-house
 ```

@@ -2,7 +2,7 @@
  * Lucerna configuration  -  house root, enablement, budget caps, binary pins.
  */
 
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { readEnablementFile, resolveStartFlags } from "./enablement.ts";
 import { houseRuntimeDir, userConfigDir } from "./paths.ts";
@@ -13,9 +13,20 @@ import {
   DEFAULT_DAILY_TOKEN_CEILING,
 } from "./budget.ts";
 import { resolveAmoreBin } from "./engine/amore-headless.ts";
+// Embed package.json so `bun build --compile` ships the real version string.
+import packageJson from "../package.json";
 
-export const VERSION = "0.1.0";
+/** Process name printed by CLI status and version lines. */
 export const PROCESS_NAME = "lucerna";
+
+/**
+ * Package version from package.json (embedded at compile time).
+ * Not a hardcoded release number.
+ */
+export const VERSION: string =
+  typeof packageJson.version === "string" && packageJson.version.trim()
+    ? packageJson.version.trim()
+    : "0.0.0";
 
 export interface LucernaConfig {
   houseRoot: string;
@@ -163,16 +174,12 @@ export function loadConfig(args: string[] = process.argv.slice(2)): LucernaConfi
   };
 }
 
-/** Read package version from package.json when available. */
-export function packageVersion(fromDir: string = import.meta.dir): string {
-  try {
-    const pkgPath = resolve(fromDir, "..", "package.json");
-    if (existsSync(pkgPath)) {
-      const j = JSON.parse(readFileSync(pkgPath, "utf-8")) as { version?: string };
-      return j.version ?? VERSION;
-    }
-  } catch {
-    /* ignore */
-  }
+/** Package version (embedded from package.json for source and compiled binary). */
+export function packageVersion(): string {
   return VERSION;
+}
+
+/** One-line version string for CLI `--version` / `version`. */
+export function formatVersionLine(): string {
+  return `${PROCESS_NAME} ${packageVersion()}`;
 }
