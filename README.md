@@ -285,6 +285,19 @@ hints); to upgrade, re-run the installer — it keeps an `amore.prev` rollback.
 
 ---
 
+## Egress
+
+On the wire, the shipped binary talks to the endpoints you configure and
+nothing else. The telemetry subsystem inherited from upstream ships inert:
+disabled by default, no client constructed while disabled, no token baked
+into any release build, and every upstream sync re-verifies that posture
+mechanically. Both credential rails of the shipped binaries were captured
+under syscall-level tracing before this claim was written: the method is
+[`scripts/egress_capture.sh`](scripts/egress_capture.sh) and the receipts
+are in [`docs/egress.md`](docs/egress.md).
+
+---
+
 ## License
 
 First-party code is **Apache License 2.0** — see [`LICENSE`](LICENSE) and

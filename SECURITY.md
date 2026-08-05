@@ -32,6 +32,16 @@ security org: response is **best-effort, no SLA**. Reasonable-coordination
 disclosure is appreciated — we aim to acknowledge useful reports and will
 credit reporters in release notes unless you ask otherwise.
 
+### Egress posture
+
+The shipped binary talks to the endpoints you configure and nothing else;
+the inherited telemetry subsystem ships inert (disabled by default, no
+client constructed while disabled, no reporting token baked into any
+release build). Receipts and the capture method: `docs/egress.md` +
+`scripts/egress_capture.sh`; the posture is re-pinned mechanically at every
+upstream sync by `scripts/sync_upstream.py --verify`. Traffic that
+contradicts this is a vulnerability — report it.
+
 ### Scope guidance
 
 - Secrets handling is documented in `docs/authentication.md`
