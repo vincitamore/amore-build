@@ -8,14 +8,25 @@ name: ci
 # left on device" building rlibs). Split, each profile gets a whole runner —
 # and the two run in parallel.
 
+# paths-ignore: skip the 2-platform release-profile build for changes that
+# cannot alter the binary. Root "*.md" is deliberate — NOT "**.md": the
+# compiled-in changelog (crates/codegen/xai-grok-shell-base/assets/
+# amore-changelog.md) and templates/house/** markdown ARE build inputs and
+# must keep triggering. docs/** includes the screenshot assets.
 on:
   push:
     branches: [main]
     paths-ignore:
       - "instruments/iris/**"
+      - "docs/**"
+      - "*.md"
+      - ".gitignore"
   pull_request:
     paths-ignore:
       - "instruments/iris/**"
+      - "docs/**"
+      - "*.md"
+      - ".gitignore"
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
