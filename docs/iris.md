@@ -22,8 +22,8 @@ Three surfaces share one product name:
 
 | Surface | Role |
 |---------|------|
-| **Daemon** | Live org index on `127.0.0.1:3853` — recursive file watch, wikilink/backlink graph, fuzzy search (`/api/search`, index mode) |
-| **CLI** (`iris`) | Org verbs powered by `@amore/regula` (`task`, `inbox`, `reminder`, `knowledge`, plus `status`, `search`, `daemon`, …) and daemon-backed reads |
+| **Daemon** | Live org index on `127.0.0.1:3853` — recursive file watch, wikilink/backlink graph, multi-mode search (`/api/search`) |
+| **CLI** (`iris`) | Org verbs powered by `@amore/regula` (`task`, `inbox`, `reminder`, `knowledge`, plus `status`, `search`, `qmd`, `daemon`, …) and daemon-backed reads |
 | **Dash** (TUI) | OpenTUI interactive dashboard — Dashboard / Tasks / Inbox / Reminders / Knowledge / Files / Forge / Lucerna / Graph (hotkeys `1`–`9` in that order) |
 
 Iris ships the full regula org-CRUD surface — every task / inbox / reminder /
@@ -84,12 +84,57 @@ iris task list --json
 iris inbox list
 iris reminder list
 iris knowledge create --title "…"
-iris search "query"      # fuzzy index search via the daemon
+iris search "query"      # fuzzy index search via the daemon (default)
+iris search "query" --mode lex    # BM25 content search (managed qmd)
+iris search "query" --mode query  # hybrid semantic search (managed qmd)
+iris qmd setup           # install pinned qmd + bootstrap house index
+iris qmd status          # runtime pin, models, index counts, refresh state
 iris lucerna status      # house steward health (via daemon proxy)
 iris lucerna start       # detached start of Lucerna in the house
 iris dash --member Lucerna   # open the dash focused on Lucerna
 iris commands            # org-verb capability manifest
 ```
+
+### Search modes
+
+Iris search has three user-facing modes. The daemon default stays the
+in-process fuzzy index so existing clients keep the same response shape.
+
+| Mode | CLI / API | Backend | Needs |
+|------|-----------|---------|-------|
+| **Fuzzy** | `--mode index` (default), `GET /api/search?q=` | Iris in-memory index (title, path, tags) | Daemon only |
+| **Content** | `--mode lex` | Managed [qmd](https://github.com/tobi/qmd) BM25 over house markdown | `iris qmd setup` (package + index; no models) |
+| **Semantic** | `--mode query` (hybrid) or `--mode vec` (vectors only) | Managed qmd hybrid (embed + expansion + rerank) | Setup **without** `--no-models` (~2.1 GB GGUF models, once) |
+
+The managed companion lives under `~/.amore/instruments/qmd/`: a pinned
+`@tobilu/qmd` install in `runtime/`, per-house `houses/<id>/index.yml` and
+`index.sqlite`, and shared models under `models/`. Iris always spawns
+`node <absolute>/dist/cli/qmd.js` (never the broken Windows npm shim) and
+never opens a qmd HTTP port.
+
+```sh
+iris qmd setup              # install pin, six org collections, first index, hybrid models
+iris qmd setup --no-models  # package + BM25 only (offline-friendly after npm)
+iris qmd status             # pin, model presence, docs/vectors/pending, last refresh
+iris qmd update [--embed]   # incremental re-walk; optional embedding pass
+```
+
+When a non-index mode is requested and qmd is not ready, the API returns
+HTTP 200 with `{ available: false, reason, items: [] }` rather than a
+silent empty list. Fuzzy search always works without qmd. Search does not
+use any Amore chat model configuration; qmd loads local GGUF models only.
+
+The dash search palette (`/`) cycles modes with Tab: fuzzy, content,
+semantic. A status line reports backend unavailability and indexing state
+when the companion is refreshing.
+
+While the daemon runs, it debounce-batches org-tree markdown changes into
+quiet `qmd update` (and embed when models already exist) so the content
+index stays current without a manual refresh habit. Setup owns model
+downloads; automatic refresh never pulls new models from the network.
+
+Egress for the companion (npm registry at setup; huggingface.co model
+pulls at setup) is listed in [`egress.md`](egress.md).
 
 Lucerna ops surface (start/stop, enablement, notifications, file contract):
 [`iris-lucerna.md`](iris-lucerna.md).
@@ -245,8 +290,8 @@ Daemon defaults:
 | Knob | Default |
 |------|---------|
 | Bind / port | `127.0.0.1:3853` (loopback-only by design; the bind is pinned, the port is `IRIS_PORT` / `--port`) |
-| Env prefix | `IRIS_*` (e.g. `IRIS_PORT`, `IRIS_URL`, `IRIS_ORG_ROOT`, `IRIS_DAEMON_BIN`, `IRIS_ALLOW_FOREIGN_ROOT`, …) |
-| Home / state | `~/.iris` (crash logs, `allowed-roots.json`, …) |
+| Env prefix | `IRIS_*` (e.g. `IRIS_PORT`, `IRIS_URL`, `IRIS_ORG_ROOT`, `IRIS_DAEMON_BIN`, `IRIS_ALLOW_FOREIGN_ROOT`, `IRIS_HOME`, …) |
+| Home / state | `~/.amore/instruments/iris/` (crash logs, `allowed-roots.json`, TUI config, …); override with `IRIS_HOME` |
 
 ---
 
@@ -266,7 +311,7 @@ Mutation opt-in channels (any one suffices):
 
 1. CLI flag `--allow-foreign-root`
 2. Env `IRIS_ALLOW_FOREIGN_ROOT=1` (also accepts `true` / `yes`)
-3. Path listed in `~/.iris/allowed-roots.json` (interactive TTY confirm can plant this; non-interactive must use flag or env)
+3. Path listed in `~/.amore/instruments/iris/allowed-roots.json` (interactive TTY confirm can plant this; non-interactive must use flag or env)
 
 Every refusal names a one-line remedy. Writes go through `@amore/regula`; the
 CLI calls `ensureMutationTrust` on write verbs before mutating.
@@ -275,6 +320,32 @@ CLI calls `ensureMutationTrust` on write verbs before mutating.
 CLI mutation trust seam are live today. Do not assume a richer dash-side trust
 UX or automatic wiring beyond what the CLI/daemon already enforce — further
 dash trust presentation is a follow-on, not a promised surface.
+
+### Instrument home and upgrade migration
+
+Iris keeps durable client state under the Amore instruments root, alongside the
+other companions:
+
+| Path | Role |
+|------|------|
+| `~/.amore/instruments/iris/` | Active home (default) |
+| `IRIS_HOME` | Absolute (or `~/…`) override; wins over the default layout |
+| `$AMORE_HOME/instruments/iris/` | Same layout when `AMORE_HOME` relocates the Amore root |
+
+**First run after upgrade:** if the new home is not present yet and a legacy
+`~/.iris` directory exists, iris copies that tree into
+`~/.amore/instruments/iris/`, verifies file counts and byte sizes, writes a
+`migrated-from.json` marker in the new home, and leaves a `MOVED.md` pointer in
+the old directory. The legacy tree is **not** deleted in this release so
+nothing is destroyed during upgrade. You may remove `~/.iris` yourself once
+you confirm the new home looks right.
+
+If migration cannot complete (permissions, disk, or another process holding the
+migration lock without finishing), iris keeps using the legacy home for that
+run, logs a clear line on stderr, and does not split new writes across two
+homes. Fix the underlying issue and restart to retry the move.
+
+Force a specific home at any time with `IRIS_HOME=/path/to/dir`.
 
 ---
 

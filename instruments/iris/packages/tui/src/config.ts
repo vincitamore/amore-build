@@ -1,13 +1,18 @@
-import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { resolveIrisHome } from '@amore/regula';
 
 // Single on-disk config for the TUI (theme + per-view collapse state), at
-// ~/.iris/config.json. All readers/writers go through here so independent
+// <iris-home>/config.json. All readers/writers go through here so independent
 // settings (theme, collapsed groups) never clobber each other.
 
-const DIR = join(homedir(), '.iris');
-const FILE = join(DIR, 'config.json');
+function configDir(): string {
+  return resolveIrisHome();
+}
+
+function configFile(): string {
+  return join(configDir(), 'config.json');
+}
 
 export interface IrisConfig {
   theme?: string;
@@ -17,7 +22,7 @@ export interface IrisConfig {
 
 export function readConfig(): IrisConfig {
   try {
-    return JSON.parse(readFileSync(FILE, 'utf8')) as IrisConfig;
+    return JSON.parse(readFileSync(configFile(), 'utf8')) as IrisConfig;
   } catch {
     return {};
   }
@@ -25,13 +30,14 @@ export function readConfig(): IrisConfig {
 
 export function writeConfig(cfg: IrisConfig): void {
   try {
-    mkdirSync(DIR, { recursive: true });
+    const file = configFile();
+    mkdirSync(configDir(), { recursive: true });
     // Atomic write: serialize to a temp file, then rename over the target (atomic on the same fs).
     // A torn direct write would leave invalid JSON that readConfig's catch silently resets to {} —
     // losing every persisted setting. tmp + rename makes the swap all-or-nothing.
-    const tmp = `${FILE}.${process.pid}.tmp`;
+    const tmp = `${file}.${process.pid}.tmp`;
     writeFileSync(tmp, `${JSON.stringify(cfg, null, 2)}\n`);
-    renameSync(tmp, FILE);
+    renameSync(tmp, file);
   } catch {
     // best-effort; a read-only home just means settings don't persist
   }

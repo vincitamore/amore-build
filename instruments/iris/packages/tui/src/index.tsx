@@ -13,7 +13,7 @@ import { dlog, installCrashHandlers } from './debug';
 // warn. Set before the renderer is created so the key handler inherits it.
 setMaxListeners(64);
 
-installCrashHandlers(); // crash-context logging (IRIS_TUI_DEBUG=1 → ~/.iris/tui-debug.log)
+installCrashHandlers(); // crash-context logging (IRIS_TUI_DEBUG=1 → <iris-home>/tui-debug.log)
 dlog('boot', 'createCliRenderer');
 
 // Register extra tree-sitter grammars (rust/python/bash/go/…) so the code view highlights

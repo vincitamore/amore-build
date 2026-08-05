@@ -69,7 +69,8 @@ describe('isHouseRoot / evaluateRootTrust', () => {
 
   test('allow-list record trusts without markers', () => {
     plantAllowedRoot(root, fakeHome);
-    expect(allowedRootsPath(fakeHome)).toContain('.iris');
+    expect(allowedRootsPath(fakeHome)).toContain(join('instruments', 'iris'));
+    expect(allowedRootsPath(fakeHome).endsWith('allowed-roots.json')).toBe(true);
     const d = evaluateRootTrust(root, { env: {}, homeDir: fakeHome });
     expect(d.trusted).toBe(true);
     expect(d.level).toBe('allow-list');

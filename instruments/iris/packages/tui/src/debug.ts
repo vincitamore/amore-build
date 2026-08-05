@@ -1,24 +1,30 @@
 import { appendFileSync, mkdirSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { resolveIrisHome } from '@amore/regula';
 
 // Crash-context logger. OFF unless IRIS_TUI_DEBUG is set. Writes synchronously (so the
-// last line survives a native segfault) to ~/.iris/tui-debug.log. Used to identify what
+// last line survives a native segfault) to <iris-home>/tui-debug.log. Used to identify what
 // the TUI was doing at crash time — member switches, directory reads, render-rate bursts
 // (a runaway re-render loop is a prime suspect for native-renderer crashes).
 
 // On by default while we chase native segfaults — set IRIS_TUI_DEBUG=0 to silence.
 const ENABLED = process.env.IRIS_TUI_DEBUG !== '0';
-const DIR = join(homedir(), '.iris');
-const FILE = join(DIR, 'tui-debug.log');
 let started = false;
+
+function debugDir(): string {
+  return resolveIrisHome();
+}
+
+function debugFile(): string {
+  return join(debugDir(), 'tui-debug.log');
+}
 
 function ensure(): void {
   if (started) return;
   started = true;
   try {
-    mkdirSync(DIR, { recursive: true });
-    appendFileSync(FILE, `\n==== TUI start ${new Date().toISOString()} pid=${process.pid} ====\n`);
+    mkdirSync(debugDir(), { recursive: true });
+    appendFileSync(debugFile(), `\n==== TUI start ${new Date().toISOString()} pid=${process.pid} ====\n`);
   } catch {
     // best-effort
   }
@@ -28,7 +34,7 @@ export function dlog(area: string, msg: string): void {
   if (!ENABLED) return;
   ensure();
   try {
-    appendFileSync(FILE, `${Date.now()} ${area} ${msg}\n`);
+    appendFileSync(debugFile(), `${Date.now()} ${area} ${msg}\n`);
   } catch {
     // best-effort
   }

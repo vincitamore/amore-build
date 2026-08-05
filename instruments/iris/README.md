@@ -23,7 +23,8 @@ Public home of the instrument inside the `amore-build` repo
 
 Building from source and packaging: **[BUILD.md](BUILD.md)**. Foreign-root
 trust is tiered: daemon reads work on any root; mutations need house markers or
-`--allow-foreign-root` / `IRIS_ALLOW_FOREIGN_ROOT=1` / `~/.iris/allowed-roots.json`.
+`--allow-foreign-root` / `IRIS_ALLOW_FOREIGN_ROOT=1` /
+`~/.amore/instruments/iris/allowed-roots.json`.
 
 ## Run
 
@@ -35,8 +36,11 @@ trust is tiered: daemon reads work on any root; mutations need house markers or
 
 Env: `IRIS_PORT` / `IRIS_URL` / `IRIS_ORG_ROOT` / `IRIS_TIMEOUT_MS` /
 `IRIS_DAEMON_BIN` / `IRIS_WATCH_DEBOUNCE_MS` / `IRIS_THEME` /
-`IRIS_TUI_DEBUG` / `IRIS_BROWSER` / `IRIS_ALLOW_FOREIGN_ROOT`.
-State lives under `~/.iris` (including `allowed-roots.json` for mutation opt-in).
+`IRIS_TUI_DEBUG` / `IRIS_BROWSER` / `IRIS_ALLOW_FOREIGN_ROOT` / `IRIS_HOME`.
+State lives under `~/.amore/instruments/iris/` (including `allowed-roots.json`
+for mutation opt-in). Override with `IRIS_HOME`. On first run after upgrade, a
+legacy `~/.iris` tree is copied into the new home automatically (see
+[docs/iris.md](../../docs/iris.md)).
 
 ## History
 

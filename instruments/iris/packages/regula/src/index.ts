@@ -12,3 +12,4 @@ export * from './forge';
 export * from './lint';
 export * from './status';
 export * from './root-trust';
+export * from './home';

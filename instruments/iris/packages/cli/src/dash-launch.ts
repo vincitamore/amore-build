@@ -40,7 +40,6 @@ export async function resolveTuiEntry(): Promise<string> {
 export async function launchDash(passthroughArgs: string[] = []): Promise<never> {
   const { join, dirname } = await import('node:path');
   const { existsSync, mkdirSync, openSync, appendFileSync, closeSync } = await import('node:fs');
-  const { homedir } = await import('node:os');
   const entry = await resolveTuiEntry();
   if (!existsSync(entry)) {
     emit(fail('NOT_FOUND', `TUI entry not found (looked at ${entry})`, 'dash'));
@@ -50,8 +49,9 @@ export async function launchDash(passthroughArgs: string[] = []): Promise<never>
   // Bun's own crash handler still prints a stack trace (and a symbolicated remap URL) to stderr —
   // which the alt-screen exit/terminal reset would otherwise eat. stdout stays inherited (the
   // render). On exit we record the code; a huge code (e.g. Windows access violation 0xC0000005 =
-  // 3221225477) flags a native crash. Pair with ~/.iris/tui-debug.log (the dlog breadcrumbs).
-  const crashLog = join(homedir(), '.iris', 'tui-crash.log');
+  // 3221225477) flags a native crash. Pair with <iris-home>/tui-debug.log (the dlog breadcrumbs).
+  const { resolveIrisHome } = await import('@amore/regula');
+  const crashLog = join(resolveIrisHome(), 'tui-crash.log');
   let errFd: number | undefined;
   try {
     mkdirSync(dirname(crashLog), { recursive: true });

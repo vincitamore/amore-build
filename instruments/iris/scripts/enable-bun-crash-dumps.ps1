@@ -1,9 +1,9 @@
 # Enable Windows full crash dumps for bun.exe — the DEFINITIVE native-segfault diagnostic.
 #
 # The iris TUI runs on Bun over OpenTUI's native Zig renderer. A native segfault (access
-# violation) bypasses Bun's JS crash handlers, so the ~/.iris/tui-debug.log breadcrumbs and
-# ~/.iris/tui-crash.log (Bun's stderr trace) narrow WHERE it died — but a full minidump gives
-# the exact native call stack (which Zig/OpenTUI function faulted).
+# violation) bypasses Bun's JS crash handlers, so the instrument home's tui-debug.log
+# breadcrumbs and tui-crash.log (Bun's stderr trace) narrow WHERE it died — but a full
+# minidump gives the exact native call stack (which Zig/OpenTUI function faulted).
 #
 # This configures Windows Error Reporting LocalDumps for bun.exe to write a FULL dump on crash.
 # Run ONCE, elevated (it writes to HKLM). Dumps land in the folder below; analyze with WinDbg/cdb
@@ -18,7 +18,11 @@ param([switch]$Disable)
 
 $ErrorActionPreference = 'Stop'
 $key = 'HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\bun.exe'
-$dumpDir = Join-Path $env:USERPROFILE '.iris\crashdumps'
+if ($env:IRIS_HOME -and $env:IRIS_HOME.Trim() -ne '') {
+  $dumpDir = Join-Path $env:IRIS_HOME 'crashdumps'
+} else {
+  $dumpDir = Join-Path $env:USERPROFILE '.amore\instruments\iris\crashdumps'
+}
 
 # Must be elevated to write under HKLM.
 $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)

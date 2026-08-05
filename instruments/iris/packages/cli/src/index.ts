@@ -31,7 +31,7 @@ function helpText(): Record<string, unknown> {
     notes: [
       'Reads (status, list, search, graph, …) work on any resolved org root.',
       'Mutations require a house root (AGENTS.md|AGENT.md|CLAUDE.md + tasks/) or opt-in:',
-      '  --allow-foreign-root | IRIS_ALLOW_FOREIGN_ROOT=1 | ~/.iris/allowed-roots.json',
+      '  --allow-foreign-root | IRIS_ALLOW_FOREIGN_ROOT=1 | ~/.amore/instruments/iris/allowed-roots.json',
     ],
   };
 }

@@ -1,7 +1,7 @@
 import { spawn } from 'child_process';
 import { appendFileSync, existsSync, mkdirSync, openSync } from 'fs';
-import { homedir } from 'os';
 import { dirname, join, resolve as resolvePath } from 'path';
+import { resolveIrisHome } from '@amore/regula';
 
 export class DaemonError extends Error {
   constructor(
@@ -217,9 +217,9 @@ export async function ensureDaemon(opts: EnsureDaemonOptions = {}): Promise<{ ur
   return { url, spawned: true };
 }
 
-/** Path for the spawned daemon's captured stderr: `~/.iris/daemon-spawn.err` (dir ensured). */
+/** Path for the spawned daemon's captured stderr: `<iris-home>/daemon-spawn.err` (dir ensured). */
 function daemonSpawnErrPath(): string {
-  const dir = join(homedir(), '.iris');
+  const dir = resolveIrisHome();
   try {
     mkdirSync(dir, { recursive: true });
   } catch {

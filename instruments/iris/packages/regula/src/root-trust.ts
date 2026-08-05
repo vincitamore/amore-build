@@ -9,7 +9,7 @@
 // Opt-in channels (any one suffices):
 //   1. --allow-foreign-root (CLI / callers pass allowForeignRoot: true)
 //   2. IRIS_ALLOW_FOREIGN_ROOT=1
-//   3. path present in ~/.iris/allowed-roots.json
+//   3. path present in allowed-roots.json under the iris instrument home
 //
 // Interactive confirm (TTY only) can plant (3). Non-interactive must use
 // (1) or (2) — never prompt when stdin is not a TTY.
@@ -21,6 +21,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { RegulaError } from './errors';
+import { allowedRootsDisplay, resolveIrisHome } from './home';
 
 /** House markers: orientation doc + tasks/ directory (same as org-root walk-up). */
 export function isHouseRoot(dir: string): boolean {
@@ -40,12 +41,21 @@ export function isHouseRoot(dir: string): boolean {
 export function foreignRootRemedy(): string {
   return (
     'pass --allow-foreign-root, set IRIS_ALLOW_FOREIGN_ROOT=1, ' +
-    'or allow the root (interactive confirm plants ~/.iris/allowed-roots.json)'
+    `or allow the root (interactive confirm plants ${allowedRootsDisplay()})`
   );
 }
 
-export function allowedRootsPath(homeDir: string = homedir()): string {
-  return join(homeDir, '.iris', 'allowed-roots.json');
+/**
+ * Path to the per-user allow list under the iris instrument home.
+ * @param userHome when set (tests), resolve under that user home with a clean env;
+ *   when omitted, use process-wide resolveIrisHome() (honors IRIS_HOME / AMORE_HOME).
+ */
+export function allowedRootsPath(userHome?: string): string {
+  const home =
+    userHome !== undefined
+      ? resolveIrisHome({ userHome, env: {} })
+      : resolveIrisHome();
+  return join(home, 'allowed-roots.json');
 }
 
 interface AllowedRootsFile {
@@ -53,8 +63,8 @@ interface AllowedRootsFile {
   roots: string[];
 }
 
-function readAllowedRoots(homeDir: string): string[] {
-  const path = allowedRootsPath(homeDir);
+function readAllowedRoots(userHome?: string): string[] {
+  const path = allowedRootsPath(userHome);
   if (!existsSync(path)) return [];
   try {
     const raw = JSON.parse(readFileSync(path, 'utf-8')) as AllowedRootsFile;
@@ -66,20 +76,20 @@ function readAllowedRoots(homeDir: string): string[] {
 }
 
 /** True when the resolved path is on the per-user allow list. */
-export function isRootAllowed(root: string, homeDir: string = homedir()): boolean {
+export function isRootAllowed(root: string, userHome?: string): boolean {
   const resolved = resolve(root);
-  return readAllowedRoots(homeDir).includes(resolved);
+  return readAllowedRoots(userHome).includes(resolved);
 }
 
 /**
- * Plant (or reaffirm) a root on the allow list. Creates ~/.iris/ as needed.
+ * Plant (or reaffirm) a root on the allow list. Creates the instrument home as needed.
  * Returns the resolved path that was recorded.
  */
-export function plantAllowedRoot(root: string, homeDir: string = homedir()): string {
+export function plantAllowedRoot(root: string, userHome?: string): string {
   const resolved = resolve(root);
-  const path = allowedRootsPath(homeDir);
+  const path = allowedRootsPath(userHome);
   mkdirSync(dirname(path), { recursive: true });
-  const existing = readAllowedRoots(homeDir);
+  const existing = readAllowedRoots(userHome);
   if (!existing.includes(resolved)) existing.push(resolved);
   const body: AllowedRootsFile = { version: 1, roots: existing };
   writeFileSync(path, JSON.stringify(body, null, 2) + '\n', 'utf-8');
@@ -93,7 +103,7 @@ export interface RootTrustOptions {
   allowForeignRoot?: boolean;
   /** Env bag (default process.env). */
   env?: NodeJS.ProcessEnv;
-  /** Home dir for ~/.iris/allowed-roots.json (default os.homedir()). */
+  /** User home for instrument-home resolution (default os.homedir()). */
   homeDir?: string;
 }
 
@@ -151,7 +161,7 @@ export function evaluateRootTrust(root: string, opts: RootTrustOptions = {}): Ro
       trusted: true,
       level: 'allow-list',
       root: resolved,
-      reason: 'path is in ~/.iris/allowed-roots.json',
+      reason: `path is in ${allowedRootsDisplay()}`,
     };
   }
   const remedy = foreignRootRemedy();
@@ -250,7 +260,7 @@ export async function ensureMutationTrust(
       trusted: true,
       level: 'allow-list',
       root: decision.root,
-      reason: 'operator confirmed; planted ~/.iris/allowed-roots.json',
+      reason: `operator confirmed; planted ${allowedRootsDisplay()}`,
     };
   }
 
@@ -263,7 +273,7 @@ export async function ensureMutationTrust(
 async function defaultConfirm(root: string): Promise<boolean> {
   process.stderr.write(
     `[iris] ${resolve(root)} is not a recognized house root (need AGENTS.md|AGENT.md|CLAUDE.md + tasks/).\n` +
-      `[iris] Allow mutations on this root and remember it in ~/.iris/allowed-roots.json? [y/N] `,
+      `[iris] Allow mutations on this root and remember it in ${allowedRootsDisplay()}? [y/N] `,
   );
   const line = await readStdinLine();
   const answer = line.trim().toLowerCase();
