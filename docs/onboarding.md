@@ -73,11 +73,14 @@ iris companion install (§ below).
 **Iris companion (also installed by default):** init downloads the iris
 release archive for your platform, verifies its published checksum, unpacks
 the binaries into `instruments/iris/`, and **links them beside the `amore`
-binary** — so `iris` resolves on `PATH` wherever `amore` does, with no
-manual step. This is the only part of `init` that touches the network —
-`--no-iris` skips it and makes `init` fully offline. A failed download
-never fails the house; the summary says what happened and
-`amore init --refresh` finishes later. See [iris.md](iris.md).
+binary** so `iris` resolves on `PATH` wherever `amore` does, with no
+manual step. Optional companions use the same release channel when requested:
+`--with-lucerna` and `--with-speculum` (both **off** by default). The only
+network touch in `init` is those companion fetches. Fully offline init:
+`--no-iris` and do not pass `--with-lucerna` or `--with-speculum`. A failed
+download never fails the house; the summary says what happened and
+`amore init --refresh` finishes later. See [iris.md](iris.md),
+[autonomy.md](autonomy.md), and [egress.md](egress.md).
 
 **Also (not a house file):** init appends the absolute path of
 `<house>/.amore/hooks` to the global always-trusted registry

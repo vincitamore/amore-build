@@ -90,7 +90,12 @@ rendered in-product on the welcome screen and by `/release-notes`).
 
 > **PATH note:** `amore doctor` (and `amore doctor --json`, field
 > `pathCollision`) detects when another `amore` binary on `PATH` would shadow
-> Amore Build.
+> Amore Build. Doctor also reports companion instruments (iris, lucerna,
+> speculum): install presence and version, iris daemon home (`~/.iris`), and —
+> when lucerna is installed and a house enablement file is reachable from the
+> current directory — lucerna dreams / auto-commit enablement. Opt-in
+> companions that are absent are informational only; doctor never starts
+> daemons or flips enablement.
 
 ### Build from source
 
@@ -268,6 +273,8 @@ telemetry. Full story (with a screenshot of every tab):
 | [`docs/authentication.md`](docs/authentication.md) | OAuth + BYOK dual rail, `auth.json` anti-copy rule |
 | [`docs/onboarding.md`](docs/onboarding.md) | `amore init` house tree, ownership, refresh |
 | [`docs/iris.md`](docs/iris.md) | Iris companion |
+| [`docs/autonomy.md`](docs/autonomy.md) | Lucerna enablement defaults, governance, kill paths |
+| [`docs/egress.md`](docs/egress.md) | Egress receipts, capture scripts, instrument inventory |
 | [`UPSTREAM.md`](UPSTREAM.md) | Fork provenance and sync policy |
 | [`examples/config.multi-provider.toml`](examples/config.multi-provider.toml) | Multi-provider config sample |
 
@@ -294,7 +301,9 @@ into any release build, and every upstream sync re-verifies that posture
 mechanically. Both credential rails of the shipped binaries were captured
 under syscall-level tracing before this claim was written: the method is
 [`scripts/egress_capture.sh`](scripts/egress_capture.sh) and the receipts
-are in [`docs/egress.md`](docs/egress.md).
+are in [`docs/egress.md`](docs/egress.md). One Lucerna dream cycle under the
+same harness: [`scripts/lucerna_egress_capture.sh`](scripts/lucerna_egress_capture.sh).
+Autonomy defaults: [`docs/autonomy.md`](docs/autonomy.md).
 
 ---
 

@@ -64,7 +64,8 @@ changes from the house's own state surface:
 ![Forge tab](assets/iris/forge.png)
 
 **Lucerna** — house steward ops: health, enablement, start/stop, notifications.
-Full contract: [`iris-lucerna.md`](iris-lucerna.md).
+Full contract: [`iris-lucerna.md`](iris-lucerna.md). Autonomy defaults and
+egress inventory: [`autonomy.md`](autonomy.md), [`egress.md`](egress.md).
 
 ![Lucerna tab](assets/iris/lucerna.png)
 

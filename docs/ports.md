@@ -26,4 +26,7 @@ otherwise collide on one machine.
 ## See also
 
 - [iris](iris.md) for the org index companion on 3853
+- [iris-lucerna](iris-lucerna.md) for file-based Lucerna control (no Lucerna listener)
+- [autonomy](autonomy.md) for Lucerna enablement defaults and kill paths
 - [egress](egress.md) for when the harness or an instrument reaches the network
+- [SECURITY.md](../SECURITY.md) for reporting and the autonomy summary
