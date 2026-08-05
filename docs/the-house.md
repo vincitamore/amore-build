@@ -38,7 +38,7 @@ leave off."
   that asks the agent whether it left the tree in order before ending a
   turn.
 
-## What accretes
+## What the house keeps
 
 The point of the house is time. A per-repo agent starts every session from
 zero; a house session starts mid-relationship. Current-state says what is

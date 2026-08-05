@@ -14,7 +14,7 @@ from it always: one working tree the agent inhabits — orientation surfaces
 read at session start, org schemas for tasks / captures / knowledge /
 reminders, cross-project doctrine, orchestration skills, and session hooks
 including a stop gate — while your project repos live around it, each
-keeping its own history. The house accretes for months: every session
+keeping its own history. The point of the house is time: every session
 starts where the last one stopped, and lessons banked in one project apply
 to the next. The **iris** companion keeps the house's live index with a
 loopback-only daemon, org CLI verbs, and an eight-tab dash. Any
