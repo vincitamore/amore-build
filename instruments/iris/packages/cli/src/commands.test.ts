@@ -1,5 +1,6 @@
 import { test, expect } from 'bun:test';
 import { COMMANDS, resolveCommand, type CommandSpec } from './commands';
+import { lucernaWriteExit } from './lucerna';
 
 function resolveOk(argv: string[]): CommandSpec {
   const r = resolveCommand(argv);
@@ -51,6 +52,20 @@ test('tranche-2 write/read classification (athanor run is write; athanor reads a
   expect(byName['inbox promote'].isWrite).toBe(true);
 });
 
+test('edges verbs resolve and classify write/read correctly', () => {
+  expect(resolveOk(['edges', 'derive']).name).toBe('edges derive');
+  expect(resolveOk(['edges', 'list']).name).toBe('edges list');
+  expect(resolveOk(['edges', 'remove', 'a.md', 'b.md', 'depends-on']).name).toBe('edges remove');
+  expect(resolveOk(['edges', 'validate']).name).toBe('edges validate');
+  expect(resolveOk(['edges', 'stats']).name).toBe('edges stats');
+  const byName = Object.fromEntries(COMMANDS.map((c) => [c.name, c]));
+  expect(byName['edges derive'].isWrite).toBe(true);
+  expect(byName['edges remove'].isWrite).toBe(true);
+  expect(byName['edges list'].isWrite).toBe(false);
+  expect(byName['edges validate'].isWrite).toBe(false);
+  expect(byName['edges stats'].isWrite).toBe(false);
+});
+
 test('inbox promote requires --to task|knowledge before touching regula', () => {
   const spec = COMMANDS.find((c) => c.name === 'inbox promote')!;
   expect(() => spec.run({ orgRoot: '/nonexistent', args: { positional: ['x'], flags: {} } })).toThrow(/--to/);
@@ -96,6 +111,38 @@ test('search rejects an invalid --mode before any daemon call', () => {
   expect(
     spec.run({ orgRoot: '/nonexistent', args: { positional: ['q'], flags: { mode: 'bogus' } } }),
   ).rejects.toThrow(/mode/);
+});
+
+test('lucerna verbs resolve to the right spec', () => {
+  expect(resolveOk(['lucerna', 'status']).name).toBe('lucerna status');
+  expect(resolveOk(['lucerna', 'log']).name).toBe('lucerna log');
+  expect(resolveOk(['lucerna', 'halt']).name).toBe('lucerna halt');
+  expect(resolveOk(['lucerna', 'wake']).name).toBe('lucerna wake');
+  expect(resolveOk(['lucerna', 'sleep']).name).toBe('lucerna sleep');
+});
+
+test('lucerna write/read classification', () => {
+  const byName = Object.fromEntries(COMMANDS.map((c) => [c.name, c]));
+  expect(byName['lucerna status'].isWrite).toBe(false);
+  expect(byName['lucerna log'].isWrite).toBe(false);
+  expect(byName['lucerna halt'].isWrite).toBe(true);
+  expect(byName['lucerna wake'].isWrite).toBe(true);
+  expect(byName['lucerna sleep'].isWrite).toBe(true);
+});
+
+test('lucerna log rejects invalid --n before any daemon call', () => {
+  const spec = COMMANDS.find((c) => c.name === 'lucerna log')!;
+  expect(
+    spec.run({ orgRoot: '/nonexistent', args: { positional: [], flags: { n: '0' } } }),
+  ).rejects.toThrow(/--n/);
+  expect(
+    spec.run({ orgRoot: '/nonexistent', args: { positional: [], flags: { n: 'x' } } }),
+  ).rejects.toThrow(/--n/);
+});
+
+test('lucernaWriteExit maps ok:false to ACTIONABLE', () => {
+  expect(lucernaWriteExit({ ok: true })).toBe(0);
+  expect(lucernaWriteExit({ ok: false })).toBe(1);
 });
 
 test('search rejects a non-positive --n before any daemon call', () => {

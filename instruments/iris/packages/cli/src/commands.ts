@@ -5,6 +5,8 @@ import { type ParsedArgs, csv, str } from './contract';
 import { EXIT } from './contract';
 import { daemonGet } from './daemon';
 import * as athanor from './athanor';
+import * as edges from './edges';
+import * as lucerna from './lucerna';
 
 export interface RunContext {
   orgRoot: string;
@@ -812,6 +814,113 @@ export const COMMANDS: CommandSpec[] = [
       });
       return args.flags.preview === true ? athanor.previewRun(plan) : athanor.dispatchRun(plan);
     },
+  },
+
+  // ── lucerna (agency control — thin clients over /api/lucerna/*) ──
+  {
+    name: 'lucerna status',
+    summary: 'Lucerna health + state (via the iris daemon). Reports Offline truthfully when Lucerna is not installed',
+    isWrite: false,
+    booleanFlags: [],
+    flags: {},
+    run: () => lucerna.lucernaStatus(),
+  },
+  {
+    name: 'lucerna log',
+    summary: "Tail Lucerna's activity log (via the iris daemon); --filter substring-matches",
+    isWrite: false,
+    booleanFlags: [],
+    flags: { n: 'lines (default 50)', filter: 'only lines containing this substring' },
+    run: async ({ args }) => {
+      const nStr = str(args.flags, 'n');
+      let n = 50;
+      if (nStr !== undefined) {
+        n = Number(nStr);
+        if (!Number.isInteger(n) || n <= 0) throw new regula.RegulaError('USAGE', `Invalid --n '${nStr}' (expected a positive integer)`);
+      }
+      return lucerna.lucernaLog(n, str(args.flags, 'filter'));
+    },
+  },
+  {
+    name: 'lucerna halt',
+    summary: 'Write the Lucerna halt sentinel (graceful stop; Lucerna deletes the file on consume)',
+    isWrite: true,
+    booleanFlags: [],
+    flags: {},
+    run: () => lucerna.lucernaHalt(),
+    exit: lucerna.lucernaWriteExit,
+  },
+  {
+    name: 'lucerna wake',
+    summary: 'Write the Lucerna wake sentinel',
+    isWrite: true,
+    booleanFlags: [],
+    flags: {},
+    run: () => lucerna.lucernaWake(),
+    exit: lucerna.lucernaWriteExit,
+  },
+  {
+    name: 'lucerna sleep',
+    summary: 'Write the Lucerna sleep sentinel',
+    isWrite: true,
+    booleanFlags: [],
+    flags: {},
+    run: () => lucerna.lucernaSleep(),
+    exit: lucerna.lucernaWriteExit,
+  },
+
+  // ── edges (vinculum tier-0 — structural typed edges into graph/edges.jsonl) ──
+  {
+    name: 'edges derive',
+    summary:
+      'Derive structural typed edges from house frontmatter + self-labels; write graph/edges.jsonl (idempotent reconcile)',
+    isWrite: true,
+    booleanFlags: [],
+    flags: {
+      house: 'house root override (default: resolved org root)',
+    },
+    run: ({ orgRoot, args }) => edges.runEdgesDerive(orgRoot, args),
+  },
+  {
+    name: 'edges list',
+    summary: 'List served edges from graph/edges.jsonl',
+    isWrite: false,
+    booleanFlags: [],
+    flags: {
+      type: 'filter by edge type (e.g. depends-on)',
+      house: 'house root override',
+    },
+    run: ({ orgRoot, args }) => edges.runEdgesList(orgRoot, args),
+  },
+  {
+    name: 'edges remove',
+    summary: 'Remove one edge by source target type (after-the-fact review)',
+    isWrite: true,
+    booleanFlags: [],
+    flags: {
+      house: 'house root override',
+    },
+    run: ({ orgRoot, args }) => edges.runEdgesRemove(orgRoot, args),
+  },
+  {
+    name: 'edges validate',
+    summary: 'Validate every line in graph/edges.jsonl against the edge schema',
+    isWrite: false,
+    booleanFlags: [],
+    flags: {
+      house: 'house root override',
+    },
+    run: ({ orgRoot, args }) => edges.runEdgesValidate(orgRoot, args),
+  },
+  {
+    name: 'edges stats',
+    summary: 'Edge store counts by type / tier / provenance',
+    isWrite: false,
+    booleanFlags: [],
+    flags: {
+      house: 'house root override',
+    },
+    run: ({ orgRoot, args }) => edges.runEdgesStats(orgRoot, args),
   },
 ];
 

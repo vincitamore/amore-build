@@ -13,6 +13,7 @@
       },
       "dependencies": {
         "@amore/regula": "workspace:*",
+        "@amore/vinculum": "workspace:*",
       },
       "devDependencies": {
         "@types/node": "latest",
@@ -56,9 +57,9 @@
       "name": "@amore/tui",
       "version": "0.0.0",
       "dependencies": {
+        "@amore/regula": "workspace:*",
         "@opentui/core": "latest",
         "@opentui/react": "latest",
-        "@amore/regula": "workspace:*",
         "d3-force": "^3.0.0",
         "katex": "^0.16.22",
         "marked": "^18.0.5",
@@ -72,8 +73,31 @@
         "bun-types": "latest",
       },
     },
+    "packages/vinculum": {
+      "name": "@amore/vinculum",
+      "version": "0.0.0",
+      "dependencies": {
+        "@amore/regula": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/node": "latest",
+        "bun-types": "latest",
+      },
+    },
   },
   "packages": {
+    "@amore/cli": ["@amore/cli@workspace:packages/cli"],
+
+    "@amore/daemon": ["@amore/daemon@workspace:packages/daemon"],
+
+    "@amore/parity": ["@amore/parity@workspace:packages/parity"],
+
+    "@amore/regula": ["@amore/regula@workspace:packages/regula"],
+
+    "@amore/tui": ["@amore/tui@workspace:packages/tui"],
+
+    "@amore/vinculum": ["@amore/vinculum@workspace:packages/vinculum"],
+
     "@opentui/core": ["@opentui/core@0.4.5", "", { "dependencies": { "bun-ffi-structs": "0.2.4", "diff": "9.0.0", "marked": "17.0.1", "string-width": "7.2.0", "strip-ansi": "7.1.2" }, "optionalDependencies": { "@opentui/core-darwin-arm64": "0.4.5", "@opentui/core-darwin-x64": "0.4.5", "@opentui/core-linux-arm64": "0.4.5", "@opentui/core-linux-arm64-musl": "0.4.5", "@opentui/core-linux-x64": "0.4.5", "@opentui/core-linux-x64-musl": "0.4.5", "@opentui/core-win32-arm64": "0.4.5", "@opentui/core-win32-x64": "0.4.5" }, "peerDependencies": { "web-tree-sitter": "0.25.10" } }, "sha512-JsgRTPkA6e+Vxmumxai6SElOSlRQkbzNKHlCfemlArRiLhfC1IZ9RXJo2QH4xSu+uBOWAM90uss73/pPlkdEig=="],
 
     "@opentui/core-darwin-arm64": ["@opentui/core-darwin-arm64@0.4.5", "", { "os": "darwin", "cpu": "arm64" }, "sha512-8KUG0oRidnR+oW1RSZJ72/PhZLl+qRRMk5U/mieF4c0SJ5V3tYACpBZAKzQfHNd1f7QzD8FHZct1lPpQgtmkWg=="],
@@ -93,16 +117,6 @@
     "@opentui/core-win32-x64": ["@opentui/core-win32-x64@0.4.5", "", { "os": "win32", "cpu": "x64" }, "sha512-Y8T/yXCDGagRGiQrtmuB6AhRcPucKFs/Dre3v8kJwNYqDccI4FzUPKclZ7djfmRZNjl7JUqPhZZP/PwDpQocMg=="],
 
     "@opentui/react": ["@opentui/react@0.4.5", "", { "dependencies": { "@opentui/core": "0.4.5", "react-reconciler": "^0.33.0" }, "peerDependencies": { "react": ">=19.2.0", "react-devtools-core": "^7.0.1", "ws": "^8.18.0" } }, "sha512-n88Vx0cMmAu++/S14WscjvdcT46IDcxve02jMtcfHQ9j6cySRHfILfGEpOB7xxc8RpCwQceEyOjkKkfzPzm6Jg=="],
-
-    "@amore/cli": ["@amore/cli@workspace:packages/cli"],
-
-    "@amore/daemon": ["@amore/daemon@workspace:packages/daemon"],
-
-    "@amore/parity": ["@amore/parity@workspace:packages/parity"],
-
-    "@amore/regula": ["@amore/regula@workspace:packages/regula"],
-
-    "@amore/tui": ["@amore/tui@workspace:packages/tui"],
 
     "@types/d3-force": ["@types/d3-force@3.0.10", "", {}, "sha512-ZYeSaCF3p73RdOKcjj+swRlZfnYpK1EbaDiYICEEp5Q6sUiqFaFQ9qgoshp5CzIyyb/yD09kD9o2zEltCexlgw=="],
 
