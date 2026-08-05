@@ -132,7 +132,8 @@ detection. Never required to run Amore Build — absence is quiet.
 **Auto-update hard-off.** Compile-time policy in `xai-grok-update`
 (`FORK_AUTO_UPDATE_HARD_OFF`): auto-update is forced ineffective so the fork cannot
 self-update back to upstream. Newer builds come from Amore Build release
-artifacts, not upstream installers.
+artifacts, not upstream installers. The upgrade path is re-running the
+installer; it keeps an `amore.prev` rollback of the previous copy.
 
 **Test-suite platform coverage (inherited).** The upstream suite is written
 against unix hosts: a substantial set of tests assert unix path shapes, unix

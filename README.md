@@ -46,10 +46,43 @@ amore --version
 The installers fetch the newest [GitHub Release](https://github.com/vincitamore/amore-build/releases)
 asset for your platform, verify its published sha256, and install the binary
 (`~/.local/bin` on unix, `%USERPROFILE%\amore\bin` on Windows — override with
-`AMORE_INSTALL_DIR`, pin a tag with `AMORE_VERSION`). They are
+`AMORE_INSTALL_DIR`, pin a tag with `AMORE_VERSION`). Linux binaries target
+glibc 2.35+ (Ubuntu 22.04 or newer, Debian 12 or newer). They are
 [`scripts/install.sh`](scripts/install.sh) and
 [`scripts/install.ps1`](scripts/install.ps1) in this repository if you prefer
 to read before you run.
+
+**To upgrade, re-run the same installer**: it fetches and verifies the newest
+release and keeps the previous binary beside it as `amore.prev` for rollback.
+(In-app auto-update is compiled off in this fork; the installer is the upgrade
+path.)
+
+### First session
+
+The one-liner installs the `amore` binary only — the house and the iris
+companion arrive in step 3, not with the installer:
+
+1. **Install** (above), then `amore --version`.
+2. **`amore setup`** — the guided wizard writes model credentials and config
+   under `~/.amore`.
+3. **`amore init`** — run it in the directory that will become your house: it
+   plants the house tree and installs the [iris companion](docs/iris.md)
+   binaries onto `PATH` beside `amore`.
+4. **Launch `amore` from the house.** Every session after this one starts
+   where the last one stopped.
+
+### Uninstall
+
+The footprint is enumerable, and removing it is three deletes:
+
+- **Binaries** — remove the install dir (`~/.local/bin/amore*` on unix,
+  `%USERPROFILE%\amore\bin` on Windows). The iris binaries `amore init`
+  linked onto `PATH` live beside `amore`, so they go with it.
+- **State** — remove `~/.amore` (config + credentials) and `~/.iris`
+  (iris's root-trust allow list and logs).
+- **Houses** — any house you created is an ordinary directory that belongs
+  to you (usually its own git repo). Keep it or delete it; nothing else
+  references it.
 
 See the [changelog](crates/codegen/xai-grok-shell-base/assets/amore-changelog.md)
 for the latest fixes, features, and improvements in each release (also
@@ -230,6 +263,7 @@ telemetry. Full story (with a screenshot of every tab):
 
 | Doc | What |
 |-----|------|
+| [`docs/the-house.md`](docs/the-house.md) | **The house** — the one-launch-point working method the fork is built around |
 | [`docs/setup-models.md`](docs/setup-models.md) | BYOK model recipes (DeepSeek / GLM / any OpenAI-compatible host) |
 | [`docs/authentication.md`](docs/authentication.md) | OAuth + BYOK dual rail, `auth.json` anti-copy rule |
 | [`docs/onboarding.md`](docs/onboarding.md) | `amore init` house tree, ownership, refresh |
@@ -247,7 +281,7 @@ Product env surface: **`AMORE_*` primary** with silent `GROK_*` legacy
 aliases (`AMORE_HOME`, `AMORE_DEFAULT_MODEL`, `AMORE_SYSTEM_PROMPT_LABEL`,
 `AMORE_AUTH_*`, …). Provider keys (`XAI_API_KEY`, other vendor keys) stay
 unaliased. Auto-update is hard-off in this fork (no in-app xAI reinstall
-hints).
+hints); to upgrade, re-run the installer — it keeps an `amore.prev` rollback.
 
 ---
 

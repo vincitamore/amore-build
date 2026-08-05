@@ -22,7 +22,8 @@ not an upstream contribution queue and not an xAI project. See
    primary with `GROK_*` legacy aliases (`XAI_API_KEY` unchanged — it names
    the provider).
 3. **Auto-update and upstream reinjection stay off.** A fork must never
-   update itself back into upstream.
+   update itself back into upstream. Users upgrade by re-running the
+   installer, which keeps an `amore.prev` rollback.
 4. **Changelog doctrine.** Any user-visible change updates BOTH
    `crates/codegen/xai-grok-shell-base/assets/amore-changelog.md` and
    `amore-changelog.json` in the same commit — the welcome screen and
