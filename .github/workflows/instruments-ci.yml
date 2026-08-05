@@ -1,0 +1,126 @@
+# instruments-ci.yml — push/PR lane for instruments/lucerna and instruments/speculum
+#
+# Path-scoped matrix (ubuntu/windows/macos × instrument): bun install → test →
+# build:compile → artifact assert → binary smoke (--version must run and print).
+# All lanes strict. Iris keeps its own iris-ci.yml.
+#
+# Artifact names match the shared compile contract:
+#   <name>-{windows|darwin|linux}-{x64|arm64}[.exe]
+# produced by `bun run build:compile` in each package directory.
+
+name: instruments-ci
+
+on:
+  push:
+    paths:
+      - "instruments/lucerna/**"
+      - "instruments/speculum/**"
+      - ".github/workflows/instruments-ci.yml"
+  pull_request:
+    paths:
+      - "instruments/lucerna/**"
+      - "instruments/speculum/**"
+      - ".github/workflows/instruments-ci.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    name: ${{ matrix.instrument }} (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        instrument: [lucerna, speculum]
+
+    defaults:
+      run:
+        working-directory: instruments/${{ matrix.instrument }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        timeout-minutes: 5
+
+      - name: Setup Bun 1.3.x
+        uses: oven-sh/setup-bun@v2
+        timeout-minutes: 5
+        with:
+          bun-version: "1.3.x"
+
+      - name: Cache bun install
+        uses: actions/cache@v4
+        timeout-minutes: 5
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-${{ matrix.instrument }}-bun-${{ hashFiles(format('instruments/{0}/bun.lock', matrix.instrument)) }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.instrument }}-bun-
+
+      - name: bun install (frozen)
+        timeout-minutes: 10
+        run: bun install --frozen-lockfile
+
+      - name: bun test (0 fail)
+        timeout-minutes: 15
+        run: bun test
+
+      - name: build:compile
+        timeout-minutes: 20
+        run: bun run build:compile
+
+      - name: Assert artifacts exist
+        timeout-minutes: 2
+        shell: bash
+        run: |
+          set -euo pipefail
+          NAME="${{ matrix.instrument }}"
+          if [ "${{ runner.os }}" = "Windows" ]; then OS=windows; EXT=.exe
+          elif [ "${{ runner.os }}" = "macOS" ]; then OS=darwin; EXT=
+          else OS=linux; EXT=
+          fi
+          if [ "${{ runner.arch }}" = "ARM64" ]; then ARCH=arm64; else ARCH=x64; fi
+          BIN="dist/${NAME}-${OS}-${ARCH}${EXT}"
+          echo "expect binary: $BIN"
+          test -f "$BIN" || { echo "FAIL: missing artifact $BIN"; ls -la dist/ || true; exit 1; }
+          echo "artifacts ok"
+
+      # Capture command output to a file first; never pipe live output through head.
+      - name: Smoke (unix) — run and print version
+        if: runner.os != 'Windows'
+        timeout-minutes: 5
+        shell: bash
+        run: |
+          set -euo pipefail
+          NAME="${{ matrix.instrument }}"
+          case "$(uname -s)" in Darwin*) OS=darwin ;; *) OS=linux ;; esac
+          case "$(uname -m)" in arm64|aarch64) ARCH=arm64 ;; *) ARCH=x64 ;; esac
+          BIN="dist/${NAME}-${OS}-${ARCH}"
+          chmod +x "$BIN" || true
+          "$BIN" --version > version.txt
+          cat version.txt
+          test -s version.txt || { echo "FAIL: --version produced empty output"; exit 1; }
+          head -c 200 version.txt
+          echo
+          echo "smoke: --version ok"
+
+      - name: Smoke (windows) — run and print version
+        if: runner.os == 'Windows'
+        timeout-minutes: 5
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $name = "${{ matrix.instrument }}"
+          $arch = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'arm64' } else { 'x64' }
+          $bin = "dist/${name}-windows-${arch}.exe"
+          if (-not (Test-Path $bin)) { throw "missing binary $bin" }
+          $out = & $bin --version 2>&1 | Out-String
+          if ($LASTEXITCODE -ne 0) { throw "--version exit=$LASTEXITCODE" }
+          if ([string]::IsNullOrWhiteSpace($out)) { throw "--version produced empty output" }
+          $path = Join-Path $env:RUNNER_TEMP "${name}-version.txt"
+          $out | Out-File -FilePath $path -Encoding utf8
+          Get-Content $path | Select-Object -First 1
+          Write-Host "smoke: --version ok"

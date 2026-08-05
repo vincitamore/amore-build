@@ -8,6 +8,11 @@ work it describes.
 
 ## Unreleased
 
+- **Opt-in companions ride the same release tag.** `amore init --with-lucerna`
+  and `amore init --with-speculum` fetch the house steward and session
+  mirror from the matching GitHub Release — sha256-verified, linked beside
+  `amore` the way iris already is. Both default off; iris stays default-on
+  with `--no-iris` as the offline opt-out.
 - **The system prompt introduces the harness by its right name.** The
   compiled-in prompt templates lagged one commit behind their plaintext
   sources, so the resident model's system prompt carried a stale product

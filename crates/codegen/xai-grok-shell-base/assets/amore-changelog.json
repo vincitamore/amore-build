@@ -1,5 +1,10 @@
 [
   {
+    "category": "features",
+    "description": "**Opt-in companions ride the same release tag** — `amore init --with-lucerna` and `amore init --with-speculum` fetch the house steward and session mirror from the matching GitHub Release (sha256-verified, linked beside `amore`); both default off, iris stays default-on with `--no-iris`.",
+    "breaking_change": false
+  },
+  {
     "category": "fixes",
     "description": "**The system prompt introduces the harness by its right name** — the compiled-in prompt templates lagged their plaintext sources by one commit, leaving a stale product name and docs path in the resident model's system prompt; regenerated, with the regeneration script now shipping in-tree.",
     "breaking_change": false

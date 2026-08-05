@@ -1,15 +1,17 @@
 name: release
 
-# Tag-triggered release: amore binary ×5 targets + iris companion assets,
-# checksums, version inject, and the GitHub Release attach.
+# Tag-triggered release: amore binary ×5 targets + instrument companion assets
+# (iris, lucerna, speculum), checksums, version inject, and the GitHub Release
+# attach.
 #
 # Version: the tag drives the compiled version through GROK_VERSION
 # (xai-grok-version: option_env!("GROK_VERSION") → CARGO_PKG_VERSION). The tag
 # and the in-tree xai-grok-version crate version MUST agree (v0.1.0 ↔ 0.1.0).
 #
-# Iris: matrix mirrors iris-release-assets.yml (linux-x64, darwin-arm64,
-# windows-x64). Expansion lanes (darwin-x64, linux-arm64, dash artifacts) are a
-# not built here.
+# Instruments (iris / lucerna / speculum): matrix is linux-x64, darwin-arm64,
+# windows-x64. Expansion lanes (darwin-x64, linux-arm64) are not built here.
+# Each package is compiled with `bun run build:compile` in its package dir;
+# contract output is dist/<name>-<os>-<arch>[.exe].
 
 on:
   push:
@@ -232,9 +234,205 @@ jobs:
             instruments/iris/release/*.tar.gz.sha256
           if-no-files-found: error
 
+  lucerna:
+    name: lucerna — ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest,  name: lucerna-linux-x64,    suffix: linux-x64,    }
+          - { os: windows-latest, name: lucerna-windows-x64,  suffix: windows-x64,  }
+          - { os: macos-15,       name: lucerna-darwin-arm64, suffix: darwin-arm64, }
+    defaults:
+      run:
+        working-directory: instruments/lucerna
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3"
+
+      - name: bun cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: lucerna-bun-${{ runner.os }}-${{ hashFiles('instruments/lucerna/bun.lock') }}
+          restore-keys: lucerna-bun-${{ runner.os }}-
+
+      - name: Install deps
+        run: bun install --frozen-lockfile
+
+      - name: Build compiled binary
+        run: bun run build:compile
+
+      # Capture JSON/text to a file first; never pipe live command output through
+      # head (Windows/PowerShell buffering and false-empty traps).
+      - name: Smoke — run and print version (unix)
+        if: matrix.os != 'windows-latest'
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN="dist/${{ matrix.name }}"
+          test -f "$BIN" || { echo "::error::missing $BIN"; ls -la dist/ || true; exit 1; }
+          chmod +x "$BIN"
+          "$BIN" --version > version.txt
+          cat version.txt
+          test -s version.txt || { echo "::error::--version produced empty output"; exit 1; }
+          head -c 200 version.txt
+          echo
+
+      - name: Smoke — run and print version (windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          $bin = "dist\${{ matrix.name }}.exe"
+          if (-not (Test-Path $bin)) { throw "missing $bin" }
+          $out = & $bin --version 2>&1 | Out-String
+          if ($LASTEXITCODE -ne 0) { throw "--version exited $LASTEXITCODE" }
+          if ([string]::IsNullOrWhiteSpace($out)) { throw "--version produced empty output" }
+          $out | Out-File -FilePath version.txt -Encoding utf8
+          Get-Content version.txt | Select-Object -First 1
+
+      - name: Package (unix — tar.gz)
+        if: matrix.os != 'windows-latest'
+        working-directory: instruments/lucerna
+        shell: bash
+        run: |
+          set -e
+          BIN="${{ matrix.name }}"
+          test -f "dist/$BIN"
+          chmod +x "dist/$BIN"
+          mkdir -p release
+          tar -C dist -czf "release/$BIN.tar.gz" "$BIN"
+          sha256sum "release/$BIN.tar.gz" > "release/$BIN.tar.gz.sha256"
+          ls -la release/
+
+      - name: Package (windows — zip)
+        if: matrix.os == 'windows-latest'
+        working-directory: instruments/lucerna
+        run: |
+          $bin = "${{ matrix.name }}.exe"
+          if (-not (Test-Path "dist/$bin")) { throw "missing dist/$bin" }
+          New-Item -ItemType Directory -Force -Path release | Out-Null
+          Compress-Archive -Path "dist/$bin" -DestinationPath "release/$bin.zip" -Force
+          $sha = (Get-FileHash "release/$bin.zip" -Algorithm SHA256).Hash.ToLower()
+          "$sha  $bin.zip" | Out-File -FilePath "release/$bin.zip.sha256" -Encoding ascii
+          Get-Item release/* | Format-List Name, Length
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: |
+            instruments/lucerna/release/*.zip
+            instruments/lucerna/release/*.zip.sha256
+            instruments/lucerna/release/*.tar.gz
+            instruments/lucerna/release/*.tar.gz.sha256
+          if-no-files-found: error
+
+  speculum:
+    name: speculum — ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest,  name: speculum-linux-x64,    suffix: linux-x64,    }
+          - { os: windows-latest, name: speculum-windows-x64,  suffix: windows-x64,  }
+          - { os: macos-15,       name: speculum-darwin-arm64, suffix: darwin-arm64, }
+    defaults:
+      run:
+        working-directory: instruments/speculum
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3"
+
+      - name: bun cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: speculum-bun-${{ runner.os }}-${{ hashFiles('instruments/speculum/bun.lock') }}
+          restore-keys: speculum-bun-${{ runner.os }}-
+
+      - name: Install deps
+        run: bun install --frozen-lockfile
+
+      - name: Build compiled binary
+        run: bun run build:compile
+
+      # Capture JSON/text to a file first; never pipe live command output through
+      # head (Windows/PowerShell buffering and false-empty traps).
+      - name: Smoke — run and print version (unix)
+        if: matrix.os != 'windows-latest'
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN="dist/${{ matrix.name }}"
+          test -f "$BIN" || { echo "::error::missing $BIN"; ls -la dist/ || true; exit 1; }
+          chmod +x "$BIN"
+          "$BIN" --version > version.txt
+          cat version.txt
+          test -s version.txt || { echo "::error::--version produced empty output"; exit 1; }
+          head -c 200 version.txt
+          echo
+
+      - name: Smoke — run and print version (windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          $bin = "dist\${{ matrix.name }}.exe"
+          if (-not (Test-Path $bin)) { throw "missing $bin" }
+          $out = & $bin --version 2>&1 | Out-String
+          if ($LASTEXITCODE -ne 0) { throw "--version exited $LASTEXITCODE" }
+          if ([string]::IsNullOrWhiteSpace($out)) { throw "--version produced empty output" }
+          $out | Out-File -FilePath version.txt -Encoding utf8
+          Get-Content version.txt | Select-Object -First 1
+
+      - name: Package (unix — tar.gz)
+        if: matrix.os != 'windows-latest'
+        working-directory: instruments/speculum
+        shell: bash
+        run: |
+          set -e
+          BIN="${{ matrix.name }}"
+          test -f "dist/$BIN"
+          chmod +x "dist/$BIN"
+          mkdir -p release
+          tar -C dist -czf "release/$BIN.tar.gz" "$BIN"
+          sha256sum "release/$BIN.tar.gz" > "release/$BIN.tar.gz.sha256"
+          ls -la release/
+
+      - name: Package (windows — zip)
+        if: matrix.os == 'windows-latest'
+        working-directory: instruments/speculum
+        run: |
+          $bin = "${{ matrix.name }}.exe"
+          if (-not (Test-Path "dist/$bin")) { throw "missing dist/$bin" }
+          New-Item -ItemType Directory -Force -Path release | Out-Null
+          Compress-Archive -Path "dist/$bin" -DestinationPath "release/$bin.zip" -Force
+          $sha = (Get-FileHash "release/$bin.zip" -Algorithm SHA256).Hash.ToLower()
+          "$sha  $bin.zip" | Out-File -FilePath "release/$bin.zip.sha256" -Encoding ascii
+          Get-Item release/* | Format-List Name, Length
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: |
+            instruments/speculum/release/*.zip
+            instruments/speculum/release/*.zip.sha256
+            instruments/speculum/release/*.tar.gz
+            instruments/speculum/release/*.tar.gz.sha256
+          if-no-files-found: error
+
   release:
     name: GitHub Release
-    needs: [amore, iris]
+    needs: [amore, iris, lucerna, speculum]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     steps:
@@ -277,6 +475,8 @@ jobs:
             echo "| \`amore-{platform}\` | TUI agent binary — verify with the adjacent \`.sha256\` |"
             echo "| \`iris-{platform}\` | Companion org/knowledge multi-tool (regula verbs included) |"
             echo "| \`iris-dash-{platform}\` | Optional standalone dash (TTY) — the multi-tool re-execs it when present |"
+            echo "| \`lucerna-{platform}\` | Optional house steward (opt-in via \`amore init --with-lucerna\`) |"
+            echo "| \`speculum-{platform}\` | Optional session mirror (opt-in via \`amore init --with-speculum\`) |"
             echo
             echo "## Provenance"
             echo

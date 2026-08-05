@@ -12,7 +12,9 @@ name: ci
 # cannot alter the binary. Root "*.md" is deliberate — NOT "**.md": the
 # compiled-in changelog (crates/codegen/xai-grok-shell-base/assets/
 # amore-changelog.md) and templates/house/** markdown ARE build inputs and
-# must keep triggering. docs/** includes the screenshot assets.
+# must keep triggering. docs/** includes the screenshot assets. Bun-only
+# instrument trees (iris, lucerna, speculum) have their own CI lanes and must
+# not re-trigger this Rust build.
 on:
   # Manual trigger: force-pushes across unrelated histories (the 2026-08-05
   # clobber restore) do not fire the push event's workflows — dispatch fills
@@ -22,12 +24,16 @@ on:
     branches: [main]
     paths-ignore:
       - "instruments/iris/**"
+      - "instruments/lucerna/**"
+      - "instruments/speculum/**"
       - "docs/**"
       - "*.md"
       - ".gitignore"
   pull_request:
     paths-ignore:
       - "instruments/iris/**"
+      - "instruments/lucerna/**"
+      - "instruments/speculum/**"
       - "docs/**"
       - "*.md"
       - ".gitignore"

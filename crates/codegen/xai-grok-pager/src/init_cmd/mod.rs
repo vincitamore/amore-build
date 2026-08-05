@@ -9,9 +9,11 @@
 //! which fetches it from the matching release — so `init` is not a network-free
 //! operation unless you pass `--no-iris`. Iris is part of the house, and the
 //! honest install story is better than a "no network required" claim kept
-//! true by shipping a house without its instrument. A fetch that fails never
-//! fails the house: the tree is already complete, and the failure is reported
-//! with the command to finish later.
+//! true by shipping a house without its instrument. Optional companions
+//! (`--with-lucerna`, `--with-speculum`) ride the same release tag and the
+//! same fetch path, default off. A fetch that fails never fails the house:
+//! the tree is already complete, and the failure is reported with the command
+//! to finish later.
 
 use std::collections::BTreeMap;
 use std::io::{IsTerminal as _, Write};
@@ -25,6 +27,7 @@ use crate::house_embed::{HouseEntry, embedded_house_entries};
 /// Relative path of the install manifest inside the target repo.
 pub const MANIFEST_REL: &str = ".amore/house-install.json";
 
+pub mod instrument_fetch;
 pub mod iris_fetch;
 
 const MANIFEST_VERSION: u32 = 1;
@@ -67,9 +70,16 @@ pub struct InitArgs {
     /// Install the iris companion (default: on; explicit opt-in, no-op when already default).
     #[arg(long = "with-iris", conflicts_with = "no_iris")]
     pub with_iris: bool,
-    /// Skip installing iris. `init` then makes no network request at all.
+    /// Skip installing iris. Combined with no optional companions, `init`
+    /// makes no network request at all.
     #[arg(long = "no-iris", conflicts_with = "with_iris")]
     pub no_iris: bool,
+    /// Install the lucerna house steward from the matching release (default: off).
+    #[arg(long = "with-lucerna")]
+    pub with_lucerna: bool,
+    /// Install the speculum session mirror from the matching release (default: off).
+    #[arg(long = "with-speculum")]
+    pub with_speculum: bool,
     /// Print the plan; write nothing.
     #[arg(long)]
     pub dry_run: bool,
@@ -91,6 +101,8 @@ impl Default for InitArgs {
             no_lattice: false,
             with_iris: false,
             no_iris: false,
+            with_lucerna: false,
+            with_speculum: false,
             dry_run: false,
             yes: false,
         }
@@ -117,10 +129,21 @@ impl InitArgs {
     ///
     /// Iris is part of the house rather than an optional extra, so it is
     /// installed unless refused — the same shape as skills, hooks and the
-    /// lattice. `--no-iris` is also the offline switch: it is the only thing
-    /// in `init` that touches the network.
+    /// lattice. `--no-iris` alone is the offline switch only when no optional
+    /// companions are requested; `--with-lucerna` / `--with-speculum` also
+    /// reach the network.
     pub fn iris_enabled(&self) -> bool {
         !self.no_iris
+    }
+
+    /// Lucerna install: default OFF; `--with-lucerna` on.
+    pub fn lucerna_enabled(&self) -> bool {
+        self.with_lucerna
+    }
+
+    /// Speculum install: default OFF; `--with-speculum` on.
+    pub fn speculum_enabled(&self) -> bool {
+        self.with_speculum
     }
 }
 
@@ -400,8 +423,37 @@ pub fn run_with_context(
     } else {
         iris_fetch::IrisOutcome::OptedOut
     };
+    let lucerna = if args.lucerna_enabled() {
+        instrument_fetch::install(
+            &instrument_fetch::LUCERNA,
+            &root,
+            xai_grok_version::VERSION,
+            args.dry_run,
+        )
+    } else {
+        instrument_fetch::Outcome::OptedOut
+    };
+    let speculum = if args.speculum_enabled() {
+        instrument_fetch::install(
+            &instrument_fetch::SPECULUM,
+            &root,
+            xai_grok_version::VERSION,
+            args.dry_run,
+        )
+    } else {
+        instrument_fetch::Outcome::OptedOut
+    };
 
-    write_summary(writer, &root, &plans, wrote_manifest, &hooks_registry, &iris)?;
+    write_summary(
+        writer,
+        &root,
+        &plans,
+        wrote_manifest,
+        &hooks_registry,
+        &iris,
+        &lucerna,
+        &speculum,
+    )?;
 
     Ok(InitReport {
         root,
@@ -748,6 +800,8 @@ fn write_summary(
     wrote_manifest: bool,
     hooks: &HooksRegistryReport,
     iris: &iris_fetch::IrisOutcome,
+    lucerna: &instrument_fetch::Outcome,
+    speculum: &instrument_fetch::Outcome,
 ) -> Result<()> {
     let mut written = Vec::new();
     let mut skipped = Vec::new();
@@ -796,6 +850,12 @@ fn write_summary(
     )?;
 
     if let Some(line) = iris.summary_line() {
+        writeln!(writer, "{line}")?;
+    }
+    if let Some(line) = lucerna.summary_line() {
+        writeln!(writer, "{line}")?;
+    }
+    if let Some(line) = speculum.summary_line() {
         writeln!(writer, "{line}")?;
     }
 
@@ -973,6 +1033,9 @@ mod unit_tests {
         assert!(args.hooks_enabled());
         assert!(args.lattice_enabled());
         assert!(args.iris_enabled());
+        // Optional companions stay off until asked for.
+        assert!(!args.lucerna_enabled());
+        assert!(!args.speculum_enabled());
     }
 
     #[test]
@@ -986,7 +1049,28 @@ mod unit_tests {
         assert!(!off(|a| a.no_hooks = true).hooks_enabled());
         assert!(!off(|a| a.no_lattice = true).lattice_enabled());
         // --no-iris is also the offline switch: it must actually disable the
-        // one code path in `init` that makes a network request.
+        // default-on network path in `init`.
         assert!(!off(|a| a.no_iris = true).iris_enabled());
+    }
+
+    #[test]
+    fn optional_companions_default_off_and_opt_in() {
+        let args = InitArgs::default();
+        assert!(!args.lucerna_enabled());
+        assert!(!args.speculum_enabled());
+        assert!(!args.with_lucerna);
+        assert!(!args.with_speculum);
+
+        let mut on = InitArgs::default();
+        on.with_lucerna = true;
+        on.with_speculum = true;
+        assert!(on.lucerna_enabled());
+        assert!(on.speculum_enabled());
+        // Opt-in companions do not flip iris polarity.
+        assert!(on.iris_enabled());
+        on.no_iris = true;
+        assert!(!on.iris_enabled());
+        assert!(on.lucerna_enabled());
+        assert!(on.speculum_enabled());
     }
 }
