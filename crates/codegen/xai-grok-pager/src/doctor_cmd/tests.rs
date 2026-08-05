@@ -374,6 +374,16 @@ fn human_wayland_error_includes_detail_once() {
             "  ? data-control                 error: probe worker died\n",
             "  · status                       unavailable\n",
             "\n",
+            "Instruments\n",
+            "  · iris                         not installed (default companion; see recommendation)\n",
+            "  ? iris daemon home             home unavailable\n",
+            "  · lucerna                      not installed (opt-in: amore init --with-lucerna)\n",
+            "  · speculum                     not installed (opt-in: amore init --with-speculum)\n",
+            "  · qmd runtime                  home unavailable\n",
+            "  · qmd models                   home unavailable\n",
+            "  · qmd house index              home unavailable\n",
+            "  · js runtime                   missing (need Node.js >= 22 or Bun); see recommendation\n",
+            "\n",
             "Findings\n",
             "  ! clipboard.delivery-unavailable No configured clipboard route can reach the intended clipboard\n",
             "      Each in-app copy is also written to the backup path shown by the operation. Use `/copy <file>` for an explicit file or `/minimal` for terminal-native selection, then check the native clipboard tool reported above.\n",
@@ -482,6 +492,16 @@ fn human_healthy_fixture_is_exact() {
             "  · SSH wrap                     off\n",
             "  · status                       confirmed\n",
             "\n",
+            "Instruments\n",
+            "  · iris                         not installed (default companion; see recommendation)\n",
+            "  ? iris daemon home             home unavailable\n",
+            "  · lucerna                      not installed (opt-in: amore init --with-lucerna)\n",
+            "  · speculum                     not installed (opt-in: amore init --with-speculum)\n",
+            "  · qmd runtime                  home unavailable\n",
+            "  · qmd models                   home unavailable\n",
+            "  · qmd house index              home unavailable\n",
+            "  · js runtime                   missing (need Node.js >= 22 or Bun); see recommendation\n",
+            "\n",
             "0 issues, 0 recommendations\n",
         )
     );
@@ -511,6 +531,16 @@ fn human_mixed_fixture_is_exact() {
             "  · osc 52                       supported\n",
             "  · SSH wrap                     off\n",
             "  · status                       confirmed\n",
+            "\n",
+            "Instruments\n",
+            "  · iris                         not installed (default companion; see recommendation)\n",
+            "  ? iris daemon home             home unavailable\n",
+            "  · lucerna                      not installed (opt-in: amore init --with-lucerna)\n",
+            "  · speculum                     not installed (opt-in: amore init --with-speculum)\n",
+            "  · qmd runtime                  home unavailable\n",
+            "  · qmd models                   home unavailable\n",
+            "  · qmd house index              home unavailable\n",
+            "  · js runtime                   missing (need Node.js >= 22 or Bun); see recommendation\n",
             "\n",
             "Findings\n",
             "  ! terminal.tmux-clipboard      OSC 52 clipboard passthrough is disabled\n",
@@ -669,6 +699,16 @@ fn human_incomplete_fixture_is_exact_without_duplicate_probe_rows() {
             "  · SSH wrap                     off\n",
             "  · status                       confirmed\n",
             "\n",
+            "Instruments\n",
+            "  · iris                         not installed (default companion; see recommendation)\n",
+            "  ? iris daemon home             home unavailable\n",
+            "  · lucerna                      not installed (opt-in: amore init --with-lucerna)\n",
+            "  · speculum                     not installed (opt-in: amore init --with-speculum)\n",
+            "  · qmd runtime                  home unavailable\n",
+            "  · qmd models                   home unavailable\n",
+            "  · qmd house index              home unavailable\n",
+            "  · js runtime                   missing (need Node.js >= 22 or Bun); see recommendation\n",
+            "\n",
             "Needs a running session\n",
             "  Some checks only run in Grok. Start Grok and run /doctor.\n",
             "\n",
@@ -736,6 +776,19 @@ fn json_empty_fixture_pins_null_policy() {
                     "dataControl": "unavailable",
                     "delivery": "confirmed",
                     "fix": null
+                },
+                "instruments": {
+                    "iris": {"status": "not_installed"},
+                    "irisDaemonHome": {"status": "home_unavailable"},
+                    "lucerna": {"status": "not_installed"},
+                    "lucernaEnablement": {"status": "not_observed"},
+                    "speculum": {"status": "not_installed"},
+                    "qmd": {
+                        "runtime": {"status": "home_unavailable"},
+                        "models": {"status": "home_unavailable"},
+                        "houseIndex": {"status": "home_unavailable"},
+                        "jsRuntime": {"status": "missing"}
+                    }
                 }
             },
             "findings": [],
@@ -798,6 +851,19 @@ fn json_contract_is_structural_stable_ordered_and_ansi_free() {
                     "dataControl": "not_applicable",
                     "delivery": "confirmed",
                     "fix": null
+                },
+                "instruments": {
+                    "iris": {"status": "not_installed"},
+                    "irisDaemonHome": {"status": "home_unavailable"},
+                    "lucerna": {"status": "not_installed"},
+                    "lucernaEnablement": {"status": "not_observed"},
+                    "speculum": {"status": "not_installed"},
+                    "qmd": {
+                        "runtime": {"status": "home_unavailable"},
+                        "models": {"status": "home_unavailable"},
+                        "houseIndex": {"status": "home_unavailable"},
+                        "jsRuntime": {"status": "missing"}
+                    }
                 }
             },
             "findings": [

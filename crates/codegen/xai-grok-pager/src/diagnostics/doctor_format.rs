@@ -142,6 +142,9 @@ pub fn format_doctor(report: &DiagnosticReport) -> String {
     out
 }
 
+/// Label column width for the Instruments section (fits `qmd house index`).
+const INSTRUMENT_LABEL_WIDTH: usize = 16;
+
 fn format_instruments_section(
     instruments: &super::InstrumentsFacts,
     out: &mut String,
@@ -149,40 +152,46 @@ fn format_instruments_section(
     use super::instruments as inst;
     use super::CompanionInstall;
 
-    out.push_str(&format!(
-        "  iris         {}\n",
+    let mut row = |label: &str, value: String| {
+        out.push_str(&format!(
+            "  {label:<w$} {value}\n",
+            w = INSTRUMENT_LABEL_WIDTH
+        ));
+    };
+
+    row(
+        "iris",
         match &instruments.iris {
             CompanionInstall::NotInstalled => "not installed".to_owned(),
             other => inst::format_install_line(other),
-        }
-    ));
-    out.push_str(&format!(
-        "  iris home    {}\n",
-        inst::format_iris_daemon_home(&instruments.iris_daemon_home)
-    ));
-    out.push_str(&format!(
-        "  lucerna      {}\n",
+        },
+    );
+    row(
+        "iris home",
+        inst::format_iris_daemon_home(&instruments.iris_daemon_home),
+    );
+    row(
+        "lucerna",
         match &instruments.lucerna {
             CompanionInstall::NotInstalled => "not installed (opt-in)".to_owned(),
             other => inst::format_install_line(other),
-        }
-    ));
+        },
+    );
     if instruments.lucerna.is_installed() {
         let (dreams, auto_commit) =
             inst::format_lucerna_enablement(&instruments.lucerna_enablement);
-        out.push_str(&format!("  dreams       {dreams}\n"));
-        out.push_str(&format!("  auto-commit  {auto_commit}\n"));
+        row("dreams", dreams);
+        row("auto-commit", auto_commit);
     }
-    out.push_str(&format!(
-        "  speculum     {}\n",
+    row(
+        "speculum",
         match &instruments.speculum {
             CompanionInstall::NotInstalled => "not installed (opt-in)".to_owned(),
             other => inst::format_install_line(other),
-        }
-    ));
+        },
+    );
     for (label, value) in inst::format_qmd_search_lines(&instruments.qmd) {
-        // Pad labels to the same column as iris/lucerna rows.
-        out.push_str(&format!("  {label:<12} {value}\n"));
+        row(label, value);
     }
 }
 
