@@ -8,6 +8,11 @@ import { statusCommand } from "./commands/status";
 import { forgetCommand } from "./commands/forget";
 import { scanCommand } from "./commands/scan";
 import { usageCommand } from "./commands/usage";
+import { lensCommand, lensHelpText } from "./commands/lens";
+import { lensesCommand } from "./commands/lenses";
+import { auditCommand } from "./commands/audit";
+import { defaultAuditPath } from "./paths";
+import { versionLine } from "./version";
 
 function usage(): void {
   console.log(`speculum — mirror for local Amore Build agent sessions
@@ -44,13 +49,29 @@ Commands:
                         --model M      Substring filter on model id
                         --json
 
-  --help, -h            Show this message
+  lens <name>           Agentic lens over a scrubbed session slice (egress)
+                        --dry-run      Selection + scrub + audit; no model call
+                        See: speculum lens --help
 
-Privacy: everything is local. Nothing leaves the machine. Ingest is explicit
-(\`speculum ingest\`). \`forget\` removes a session from the derived index only.
+  lenses                List available lenses and egress notes
+
+  audit                 Tail the append-only lens audit log
+                        -n N           Last N records (default 20)
+
+  --help, -h            Show this message
+  --version, -V, version  Print package version and exit
+
+Privacy: probes, ingest, status, forget, and usage are local only. Lenses are
+opt-in egress: each \`speculum lens\` command sends a scrubbed slice to the
+model the local amore configuration routes to. The scrubber fails closed.
+Audit log: ${defaultAuditPath()}
 
 Probe rates are heuristic — pattern banks are unvalidated on this corpus.
 `);
+}
+
+function printVersion(): void {
+  console.log(versionLine());
 }
 
 const COMMANDS: Record<string, (args: string[]) => Promise<void>> = {
@@ -59,6 +80,9 @@ const COMMANDS: Record<string, (args: string[]) => Promise<void>> = {
   forget: forgetCommand,
   scan: scanCommand,
   usage: usageCommand,
+  lens: lensCommand,
+  lenses: lensesCommand,
+  audit: auditCommand,
 };
 
 async function main(): Promise<void> {
@@ -66,6 +90,17 @@ async function main(): Promise<void> {
 
   if (!cmd || cmd === "--help" || cmd === "-h") {
     usage();
+    process.exit(0);
+  }
+
+  if (cmd === "--version" || cmd === "-V" || cmd === "version") {
+    printVersion();
+    process.exit(0);
+  }
+
+  // `speculum lens --help` is handled inside lensCommand via lensHelpText.
+  if (cmd === "lens" && (rest[0] === "--help" || rest[0] === "-h")) {
+    console.log(lensHelpText());
     process.exit(0);
   }
 

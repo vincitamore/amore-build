@@ -3,13 +3,14 @@
 A **local mirror** over your own Amore Build agent sessions.
 
 Speculum walks `~/.amore/sessions`, builds a rebuildable sqlite index, and runs
-heuristic probes plus token/turn usage accounting. It does not call models, open
-network sockets, or upload anything.
+heuristic probes plus token/turn usage accounting. Local commands never call
+models or open network sockets. Optional **lenses** send a scrubbed session
+slice through the user's own amore configuration for a qualitative read.
 
 ## Privacy doctrine
 
-- **Everything stays on the machine.** Probes and usage report only against the
-  local index.
+- **Probes and usage stay on the machine.** They report only against the local
+  index.
 - **Ingest is explicit.** Nothing is indexed until you run `speculum ingest`.
 - **`forget` is complete for the index.** `speculum forget <session-prefix>`
   deletes that session's events, usage rows, and session row, and marks the
@@ -17,6 +18,12 @@ network sockets, or upload anything.
   Source files under `~/.amore/sessions` are left alone (delete those with the
   harness if you want the originals gone).
 - The index is a **derived** database. Source of truth remains the session tree.
+- **Lenses are opt-in egress.** Nothing is sent without an explicit
+  `speculum lens <name>` command. Before any model call, the selected slice is
+  scrubbed locally (secrets, emails, absolute home paths). The scrubber fails
+  closed: residual unredactable content or an oversize payload aborts the lens.
+  Nothing partial is ever sent. Every invocation (including dry-run and
+  refusal) is recorded in the local audit log.
 
 ## Install / run
 
@@ -28,6 +35,13 @@ bun run src/cli.ts --help
 
 Binary entry: `bun run src/cli.ts` (package name `@amore/speculum`).
 
+Compiled single-file binary (host OS/arch):
+
+```bash
+bun run build:compile
+# → dist/speculum-windows-x64.exe  (or darwin/linux + x64/arm64)
+```
+
 ## Commands
 
 | Command | Purpose |
@@ -38,6 +52,10 @@ Binary entry: `bun run src/cli.ts` (package name `@amore/speculum`).
 | `speculum forget <prefix>` | Purge one session from the index |
 | `speculum scan` | Run all probes (or `--probe <name>`) |
 | `speculum usage` | Per-model token and turn totals |
+| `speculum lenses` | List available lenses and egress notes |
+| `speculum lens <name>` | Run a lens over a selected, scrubbed slice |
+| `speculum lens <name> --dry-run` | Selection + scrub + audit only (no model) |
+| `speculum audit [-n N]` | Tail the append-only lens audit log |
 
 Common flags: `--json`, date filters `--since` / `--until` where noted.
 
@@ -78,6 +96,44 @@ corpus. Treat numbers as investigative signals, not measured precision.
 
 Sensitive-content matching is best-effort regex, not a security guarantee.
 
+## Lenses (opt-in egress)
+
+Lenses select a session slice from the local index, scrub it, and send the
+scrubbed prompt through the **user's own amore configuration** (binary
+`amore` on PATH, or `SPECULUM_AMORE_BIN`). The model that answers is whatever
+that configuration routes to. Speculum does not ship API keys or provider SDKs.
+
+| Lens | Role |
+|------|------|
+| `session-postmortem` | What went wrong and where the loop stalled |
+| `pattern-extraction` | Recurring tool-use and correction patterns |
+| `usage-story` | Narrative read of the session arc and thrash texture |
+
+Selection flags: `--session`, `--last-n`, `--project`, `--since` / `--until`,
+`--probe-hit <probe>`. Default when no selection is given: `--last-n 1`.
+
+**Scrub (fail-closed).** Before any model call, secret-shaped strings (the same
+classes the sensitive-content probe flags, plus password-style assignments),
+email addresses, and absolute home paths are replaced with typed placeholders.
+The scrubber returns counts by class. If redaction cannot be completed with
+confidence, or the prompt-file would exceed 100 KB, the lens **aborts** with a
+clear message. There is no silent truncation and no "warn and send" path.
+
+**Dry-run.** `speculum lens <name> --dry-run` runs selection, scrub, and audit,
+prints the scrub report, and never spawns amore.
+
+**Reports.** Successful lens runs write a dated markdown report under
+`~/.amore/instruments/speculum/lens-reports/`, labeled with the lens name and
+the model id from the amore JSON envelope when present.
+
+**Audit log.** Every lens invocation appends one JSONL record (timestamp, lens,
+selection, payload bytes, scrub counts, accepted/refused/dry-run + reason, and
+on send: model id and token usage). Path:
+
+`~/.amore/instruments/speculum/lens-audit.jsonl`
+
+Also printed by `speculum lens --help` and `speculum lenses`.
+
 ## Usage accounting
 
 `speculum usage` aggregates `turn_completed.usage` fields:
@@ -97,6 +153,9 @@ reports counts and tokens only.
 | `SPECULUM_SESSIONS_DIR` | `$AMORE_HOME/sessions` | Sessions tree (tests/fixtures) |
 | `SPECULUM_HOME` | `$AMORE_HOME/instruments/speculum` | Instrument data dir |
 | `SPECULUM_DB` | `$SPECULUM_HOME/speculum.sqlite` | Sqlite path |
+| `SPECULUM_AUDIT_PATH` | `$SPECULUM_HOME/lens-audit.jsonl` | Lens audit log |
+| `SPECULUM_REPORTS_DIR` | `$SPECULUM_HOME/lens-reports` | Lens report directory |
+| `SPECULUM_AMORE_BIN` | `amore` on PATH | Amore binary for lenses |
 
 ## Tests
 
@@ -105,11 +164,12 @@ bun test
 ```
 
 Fixtures are synthetic only. The suite never reads conversational content from
-live sessions into assertions.
+live sessions into assertions. Lens tests stub the amore binary (no network).
 
-## Out of scope (v1)
+## Out of scope
 
-- Lens runner / LLM analysis of transcripts
 - Dataset builder for fine-tuning
 - Ingest adapters for other agent harnesses
 - Price tables and cost estimates
+- Multi-harness ingest for other agent products
+- Full interactive TUI

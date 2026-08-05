@@ -3,14 +3,15 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Session mirror over local Amore Build agent sessions — probes and usage accounting, fully local.",
+  "description": "Session mirror over local Amore Build agent sessions: local probes/usage, opt-in agentic lenses with fail-closed scrub.",
   "bin": {
     "speculum": "src/cli.ts"
   },
   "scripts": {
     "start": "bun run src/cli.ts",
     "test": "bun test",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "build:compile": "bun run scripts/build-compile.ts"
   },
   "devDependencies": {
     "@types/bun": "latest",

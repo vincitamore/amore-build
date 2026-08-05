@@ -1,14 +1,15 @@
 /**
  * Sqlite event store via bun:sqlite. Derived and rebuildable from sessions.
+ *
+ * Schema is imported as text so `bun build --compile` embeds it in the binary
+ * (a runtime readFileSync of a sibling .sql would fail once compiled).
  */
 
 import { Database } from "bun:sqlite";
-import { mkdirSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { mkdirSync } from "node:fs";
+import { dirname } from "node:path";
 import { defaultDbPath } from "../paths";
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
+import SCHEMA_SQL from "./schema.sql" with { type: "text" };
 
 export type Db = Database;
 
@@ -23,8 +24,7 @@ export function openDb(path?: string): Db {
   db.run("PRAGMA journal_mode = WAL");
   db.run("PRAGMA synchronous = NORMAL");
 
-  const schema = readFileSync(join(__dirname, "schema.sql"), "utf-8");
-  db.exec(schema);
+  db.exec(SCHEMA_SQL);
   db.run(`PRAGMA user_version = ${SCHEMA_VERSION}`);
   return db;
 }

@@ -21,7 +21,7 @@ export function sessionsRoot(): string {
 }
 
 /**
- * Instrument data directory (sqlite store, etc.):
+ * Instrument data directory (sqlite store, audit log, lens reports):
  *   `~/.amore/instruments/speculum/`
  * Override with SPECULUM_HOME.
  */
@@ -32,4 +32,26 @@ export function instrumentHome(): string {
 /** Default sqlite path under the instrument home. */
 export function defaultDbPath(): string {
   return process.env.SPECULUM_DB?.trim() || join(instrumentHome(), "speculum.sqlite");
+}
+
+/**
+ * Append-only lens audit log (JSONL). Every lens invocation appends one record.
+ * Override with SPECULUM_AUDIT_PATH.
+ */
+export function defaultAuditPath(): string {
+  return (
+    process.env.SPECULUM_AUDIT_PATH?.trim() ||
+    join(instrumentHome(), "lens-audit.jsonl")
+  );
+}
+
+/**
+ * Directory for dated lens markdown reports.
+ * Override with SPECULUM_REPORTS_DIR.
+ */
+export function defaultReportsDir(): string {
+  return (
+    process.env.SPECULUM_REPORTS_DIR?.trim() ||
+    join(instrumentHome(), "lens-reports")
+  );
 }
