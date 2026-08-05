@@ -53,6 +53,10 @@ jobs:
 
       - name: Install protoc
         uses: arduino/setup-protoc@v3
+        with:
+          # Authenticated: the runner's shared IP exhausts the anonymous
+          # GitHub API pool (bit 2026-08-05, killed a tests job in 16s).
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install Rust toolchain (rust-toolchain.toml)
         uses: dtolnay/rust-toolchain@master
@@ -125,6 +129,10 @@ jobs:
 
       - name: Install protoc
         uses: arduino/setup-protoc@v3
+        with:
+          # Authenticated: the runner's shared IP exhausts the anonymous
+          # GitHub API pool (bit 2026-08-05, killed a tests job in 16s).
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install Rust toolchain (rust-toolchain.toml)
         uses: dtolnay/rust-toolchain@master
