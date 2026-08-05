@@ -3,6 +3,7 @@
 
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { addressEdges, edgeIdOf, resolveEdgeId } from './edge-id';
 import {
   type Edge,
   edgeKey,
@@ -11,6 +12,7 @@ import {
   validateEdge,
   VOLUME_WARD_PER_NODE,
 } from './schema';
+import { addSuppression, applyOverride, overrideMap, upsertOverride } from './stewardship';
 
 export interface StoreFiles {
   dir: string;
@@ -73,6 +75,9 @@ export interface EdgeFilter {
   tier?: string;
   node?: string;
   signal?: string;
+  source?: string;
+  target?: string;
+  assertedBy?: string;
 }
 
 export function filterEdges(edges: Edge[], f: EdgeFilter): Edge[] {
@@ -81,7 +86,10 @@ export function filterEdges(edges: Edge[], f: EdgeFilter): Edge[] {
       (!f.type || e.type === f.type) &&
       (!f.tier || e.confidence === f.tier) &&
       (!f.node || e.source === f.node || e.target === f.node) &&
-      (!f.signal || e.provenance.signal === f.signal),
+      (!f.signal || e.provenance.signal === f.signal) &&
+      (!f.source || e.source === f.source) &&
+      (!f.target || e.target === f.target) &&
+      (!f.assertedBy || e.provenance.asserted_by === f.assertedBy),
   );
 }
 
@@ -142,9 +150,12 @@ export function storeStats(orgRoot: string): StoreStats {
 export interface RemoveResult {
   removed: number;
   remaining: number;
+  id?: string;
+  edge?: Edge;
+  suppression?: ReturnType<typeof addSuppression>;
 }
 
-/** Remove edges matching (source, target, type) after normalization. */
+/** Remove edges matching (source, target, type) after normalization. Records a suppression. */
 export function removeEdge(orgRoot: string, source: string, target: string, type: string): RemoveResult {
   const { edges } = readStore(orgRoot);
   const probe = validateEdge({
@@ -158,14 +169,100 @@ export function removeEdge(orgRoot: string, source: string, target: string, type
     refines_wikilink: false,
   });
   if (!probe.ok) {
-    // type/node id invalid — treat as no match rather than throwing from schema alone
     return { removed: 0, remaining: edges.length };
   }
   const key = edgeKey(probe.edge);
+  const hit = edges.find((e) => edgeKey(e) === key);
   const kept = edges.filter((e) => edgeKey(e) !== key);
   const removed = edges.length - kept.length;
-  if (removed > 0) rewriteEdges(orgRoot, kept);
-  return { removed, remaining: kept.length };
+  if (removed > 0 && hit) {
+    rewriteEdges(orgRoot, kept);
+    const suppression = addSuppression(orgRoot, hit);
+    return {
+      removed,
+      remaining: kept.length,
+      id: edgeIdOf(hit),
+      edge: hit,
+      suppression,
+    };
+  }
+  return { removed: 0, remaining: edges.length };
+}
+
+export type RemoveByIdResult =
+  | { ok: true; removed: 1; remaining: number; id: string; edge: Edge; suppression: ReturnType<typeof addSuppression> }
+  | { ok: false; reason: 'not-found' | 'ambiguous'; remaining: number; matches?: string[] };
+
+/** Remove one edge by stable id (or unique prefix). Suppression makes it durable across re-derive. */
+export function removeEdgeById(orgRoot: string, id: string): RemoveByIdResult {
+  const { edges } = readStore(orgRoot);
+  const resolved = resolveEdgeId(edges, id);
+  if (!resolved.ok) {
+    return { ok: false, reason: resolved.reason, remaining: edges.length, matches: resolved.matches };
+  }
+  const key = edgeKey(resolved.edge);
+  const kept = edges.filter((e) => edgeKey(e) !== key);
+  rewriteEdges(orgRoot, kept);
+  const suppression = addSuppression(orgRoot, resolved.edge);
+  return {
+    ok: true,
+    removed: 1,
+    remaining: kept.length,
+    id: resolved.id,
+    edge: resolved.edge,
+    suppression,
+  };
+}
+
+export type EditByIdResult =
+  | { ok: true; id: string; edge: Edge }
+  | { ok: false; reason: 'not-found' | 'ambiguous'; matches?: string[] };
+
+/**
+ * Edit user-adjustable fields (note, label) on an edge by id.
+ * Writes the served store and an override record so structural re-derive preserves the edit.
+ */
+export function editEdgeById(
+  orgRoot: string,
+  id: string,
+  patch: { note?: string | null; label?: string | null },
+): EditByIdResult {
+  const { edges } = readStore(orgRoot);
+  const resolved = resolveEdgeId(edges, id);
+  if (!resolved.ok) {
+    return { ok: false, reason: resolved.reason, matches: resolved.matches };
+  }
+  const key = edgeKey(resolved.edge);
+  let next: Edge = { ...resolved.edge };
+  if (patch.note !== undefined) {
+    if (patch.note === null || patch.note.trim() === '') delete next.note;
+    else next.note = patch.note.trim();
+  }
+  if (patch.label !== undefined) {
+    if (patch.label === null || patch.label.trim() === '') delete next.label;
+    else next.label = patch.label.trim();
+  }
+  const updated = edges.map((e) => (edgeKey(e) === key ? next : e));
+  rewriteEdges(orgRoot, updated);
+  upsertOverride(orgRoot, next, patch);
+  // Re-read override application is already on `next`; stamp from override map for consistency.
+  const stamped = applyOverride(next, overrideMap(orgRoot).get(key));
+  const finalEdges = updated.map((e) => (edgeKey(e) === key ? stamped : e));
+  if (JSON.stringify(stamped) !== JSON.stringify(next)) rewriteEdges(orgRoot, finalEdges);
+  return { ok: true, id: resolved.id, edge: stamped };
+}
+
+export function listAddressedEdges(orgRoot: string, filter: EdgeFilter = {}) {
+  const { edges, badLines } = readStore(orgRoot);
+  const filtered = filterEdges(edges, filter);
+  return { edges: addressEdges(filtered), badLines, count: filtered.length };
+}
+
+export function showEdgeById(orgRoot: string, id: string): EditByIdResult {
+  const { edges } = readStore(orgRoot);
+  const resolved = resolveEdgeId(edges, id);
+  if (!resolved.ok) return { ok: false, reason: resolved.reason, matches: resolved.matches };
+  return { ok: true, id: resolved.id, edge: resolved.edge };
 }
 
 export interface ValidateReport {

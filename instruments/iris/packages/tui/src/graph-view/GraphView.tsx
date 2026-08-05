@@ -1,7 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useKeyboard, useTerminalDimensions } from '@opentui/react';
 import { RGBA } from '@opentui/core';
-import { axisKeyOf, layoutWorld, renderView, DEFAULT_GRAPH_CONFIG, type FocusState, type GraphConfig, type GraphData, type LayoutMode, type WorldNode } from '../render/graph';
+import { axisKeyOf, layoutWorld, renderView, DEFAULT_GRAPH_CONFIG, resolveTypedEdgesOverlay, type FocusState, type GraphConfig, type GraphData, type LayoutMode, type WorldNode } from '../render/graph';
 import { transientOrphans } from '../render/orphans';
 import { dlog } from '../debug';
 import { clampHops, focusSubset } from '../render/focus';
@@ -140,20 +140,28 @@ export function GraphView({
   // focused view); a boolean = the user's explicit choice this session (they toggled Typed edges in
   // the config modal while focused, which must win). Reset to null on every focus enter/exit.
   const [focusOverlay, setFocusOverlay] = useState<boolean | null>(null);
-  const overlayOn = focused ? focusOverlay ?? true : config.typedEdges === 'on';
-  // Detect a user toggle of Typed edges (config.typedEdges changes) WHILE focused → record it as the
-  // explicit override so it beats the focus default. Skip the mount fire; read `focused` from a ref so
-  // the effect keys ONLY on config.typedEdges (a focus enter must not be read as a toggle).
+  // Outside focus: auto ON when the house has typed edges, OFF when empty/absent. The first user
+  // change to config.typedEdges (config modal) marks an explicit override that wins thereafter.
+  const [typedUserSet, setTypedUserSet] = useState(false);
+  const typedInit = useRef(true);
   const focusedRef = useRef(focused);
   focusedRef.current = focused;
-  const typedInit = useRef(true);
   useEffect(() => {
     if (typedInit.current) {
       typedInit.current = false;
       return;
     }
+    setTypedUserSet(true);
     if (focusedRef.current) setFocusOverlay(config.typedEdges === 'on');
   }, [config.typedEdges]);
+  const hasTypedEdges = semanticLinks.length > 0;
+  const overlayOn = focused
+    ? focusOverlay ?? true
+    : resolveTypedEdgesOverlay({
+        hasTypedEdges,
+        configTypedEdges: config.typedEdges,
+        userSet: typedUserSet,
+      });
   const enterFocus = (seed: string) => {
     dlog('graph', `focus enter seed=${seed}`);
     setFocusSeed(seed);

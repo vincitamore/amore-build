@@ -394,6 +394,20 @@ export const DEFAULT_GRAPH_CONFIG: GraphConfig = {
   statusForce: 0, // raw force by default — the attention-radial bias is opt-in via the config modal
 };
 
+/**
+ * Whether the typed-edge overlay should draw outside focus mode.
+ * Auto default: ON when the house has at least one served typed edge, OFF when
+ * absent/empty. An explicit user toggle (`userSet`) always wins over the auto default.
+ */
+export function resolveTypedEdgesOverlay(opts: {
+  hasTypedEdges: boolean;
+  configTypedEdges: 'on' | 'off';
+  userSet: boolean;
+}): boolean {
+  if (opts.userSet) return opts.configTypedEdges === 'on';
+  return opts.hasTypedEdges;
+}
+
 const RECENCY_FULL_FADE_DAYS = 180; // a node this stale is fully faded
 const HUB_DEGREE = 8; // degree ≥ this → emphasized (bold + a size halo) when emphasizeHubs is on
 const MEGA_DEGREE = 20; // degree ≥ this → a fuller 5×5 halo (vs the 3×3 hub halo)

@@ -207,6 +207,10 @@ export interface Edge {
   verify_key: EdgeVerifyKey | null;
   refines_wikilink: boolean;
   stale?: boolean;
+  /** Optional operator annotation; preserved across re-derive via graph/overrides.jsonl. */
+  note?: string;
+  /** Optional short display label; preserved across re-derive via graph/overrides.jsonl. */
+  label?: string;
 }
 
 export function isValidNodeId(id: string): boolean {
@@ -407,6 +411,17 @@ export function validateEdge(raw: unknown): ValidationResult {
     errors.push('stale must be a boolean');
   }
 
+  let note: string | undefined;
+  if (raw.note !== undefined && raw.note !== null) {
+    if (typeof raw.note !== 'string') errors.push('note must be a string when present');
+    else if (raw.note.trim().length > 0) note = raw.note.trim();
+  }
+  let label: string | undefined;
+  if (raw.label !== undefined && raw.label !== null) {
+    if (typeof raw.label !== 'string') errors.push('label must be a string when present');
+    else if (raw.label.trim().length > 0) label = raw.label.trim();
+  }
+
   if (errors.length > 0) return { ok: false, errors };
 
   const edge: Edge = normalizeEdge({
@@ -421,6 +436,8 @@ export function validateEdge(raw: unknown): ValidationResult {
     verify_key,
     refines_wikilink: raw.refines_wikilink === true,
     ...(raw.stale === true ? { stale: true } : {}),
+    ...(note ? { note } : {}),
+    ...(label ? { label } : {}),
   });
   return { ok: true, edge };
 }
@@ -440,6 +457,8 @@ export function serializeEdge(e: Edge): string {
   if (e.verify_key) ordered.verify_key = e.verify_key;
   ordered.refines_wikilink = e.refines_wikilink;
   if (e.stale) ordered.stale = true;
+  if (e.note) ordered.note = e.note;
+  if (e.label) ordered.label = e.label;
   return JSON.stringify(ordered);
 }
 

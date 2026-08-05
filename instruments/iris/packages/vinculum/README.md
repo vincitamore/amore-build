@@ -20,21 +20,32 @@ merges that file into `/api/graph?edges=semantic|both`; this package only writes
 
 Edges land as `confidence: asserted` with provenance `asserted_by: structural-v0`.
 Re-running `iris edges derive` reconciles: adds new structural edges, drops
-structural edges whose source fact vanished, and never mutates non-structural edges.
+structural edges whose source fact vanished, never mutates non-structural edges,
+honors `graph/suppressions.jsonl`, and merges `graph/overrides.jsonl` (user note
+and label win).
+
+## Edge identity
+
+Stable short id = first 12 hex chars of `sha256(type|source|target)` after
+normalization. Collision-checked when addressing a store snapshot (id width
+lengthens if needed). Used by `list` / `show` / `remove` / `edit`.
 
 ## CLI
 
 ```
 iris edges derive [--house <dir>]
-iris edges list [--type <type>]
-iris edges remove <src> <dst> <type>
+iris edges list [--type] [--source] [--target] [--asserted-by] [--json]
+iris edges show <id>
+iris edges edit <id> --note "..." | --label "..." | --clear-note | --clear-label
+iris edges remove <id>
 iris edges validate
 iris edges stats
 ```
 
 ## Store
 
-`graph/edges.jsonl` — one JSON object per line. Schema fields match what the
-daemon expects (`source`, `target`, `type`, `confidence`, `refines_wikilink`)
-plus full provenance (`evidence`, `verify_key`, `provenance`) for freshness
-and review later.
+| File | Role |
+|------|------|
+| `graph/edges.jsonl` | Served edges |
+| `graph/suppressions.jsonl` | Durable removes (re-derive will not re-create) |
+| `graph/overrides.jsonl` | Durable note/label edits (merged on re-derive) |
