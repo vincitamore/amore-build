@@ -82,12 +82,18 @@ function stubRunner(log: string[] = [], replies: Record<string, QmdSpawnResult> 
   };
 }
 
-/** Isolated deps: no global qmd leakage into temp instrument homes. */
+/**
+ * Isolated deps: no host PATH / node / npm / global qmd.
+ * resolveRuntime + which close the CI Windows timeout class (where.exe / real node).
+ */
 function iso(extra: Record<string, unknown> = {}) {
   return {
     instrumentHome,
     allowGlobal: false as const,
     runner: stubRunner(),
+    resolveRuntime: () => ({ kind: 'node' as const, bin: join(tmp, 'fake-node') }),
+    which: (_name: string) => null,
+    detectGlobal: () => null,
     ...extra,
   };
 }

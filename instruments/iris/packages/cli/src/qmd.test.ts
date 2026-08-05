@@ -68,19 +68,31 @@ describe('iris qmd verbs', () => {
     expect(upd.booleanFlags).toContain('embed');
   });
 
-  test('setup --no-models --json shape', async () => {
-    setQmdTestDeps({
+  /** Hermetic deps: never walk host PATH or spawn real node/npm (CI Windows). */
+  function hermetic(extra: Record<string, unknown> = {}) {
+    return {
       instrumentHome,
-      allowGlobal: false,
+      allowGlobal: false as const,
       runner: stubRunner(),
-      npmInstall: async ({ prefix, packageSpec }) => {
-        expect(packageSpec).toBe(`@tobilu/qmd@${QMD_PIN}`);
-        const qmdJs = join(prefix, 'node_modules', '@tobilu', 'qmd', 'dist', 'cli', 'qmd.js');
-        mkdirSync(join(qmdJs, '..'), { recursive: true });
-        writeFileSync(qmdJs, '// stub\n');
-        return { ok: true, stdout: '', stderr: '', code: 0 };
-      },
-    });
+      resolveRuntime: () => ({ kind: 'node' as const, bin: join(tmp, 'fake-node') }),
+      which: (_name: string) => null as string | null,
+      detectGlobal: () => null as string | null,
+      ...extra,
+    };
+  }
+
+  test('setup --no-models --json shape', async () => {
+    setQmdTestDeps(
+      hermetic({
+        npmInstall: async ({ prefix, packageSpec }: { prefix: string; packageSpec: string }) => {
+          expect(packageSpec).toBe(`@tobilu/qmd@${QMD_PIN}`);
+          const qmdJs = join(prefix, 'node_modules', '@tobilu', 'qmd', 'dist', 'cli', 'qmd.js');
+          mkdirSync(join(qmdJs, '..'), { recursive: true });
+          writeFileSync(qmdJs, '// stub\n');
+          return { ok: true, stdout: '', stderr: '', code: 0 };
+        },
+      }),
+    );
     const payload = await runQmdSetup(orgRoot, {
       positional: [],
       flags: { 'no-models': true },
@@ -96,7 +108,7 @@ describe('iris qmd verbs', () => {
   });
 
   test('status --json when missing runtime', async () => {
-    setQmdTestDeps({ instrumentHome, allowGlobal: false, runner: stubRunner() });
+    setQmdTestDeps(hermetic());
     const payload = await runQmdStatus(orgRoot, { positional: [], flags: {} });
     expect(payload.state).toBe('not-installed');
     expect(payload.available).toBe(false);
@@ -104,7 +116,7 @@ describe('iris qmd verbs', () => {
   });
 
   test('update without setup exits unavailable path', async () => {
-    setQmdTestDeps({ instrumentHome, allowGlobal: false, runner: stubRunner() });
+    setQmdTestDeps(hermetic());
     const payload = await runQmdUpdate(orgRoot, { positional: [], flags: {} });
     expect(payload.ok).toBe(false);
     expect(qmdExit(payload)).toBe(69);

@@ -279,7 +279,12 @@ export function buildQmdEnv(paths: QmdPaths, extra?: Record<string, string | und
 
 // ── resolve node / qmd.js ────────────────────────────────────────────────────
 
-function whichOnPath(name: string): string | null {
+/**
+ * Resolve a binary on PATH. Host-dependent; tests inject via QmdDeps.which
+ * so setup never depends on the runner PATH (where.exe can stall near 5s on
+ * some Windows CI images).
+ */
+export function whichOnPath(name: string): string | null {
   const pathEnv = process.env.PATH ?? process.env.Path ?? '';
   const exts =
     process.platform === 'win32'
@@ -302,7 +307,7 @@ function whichOnPath(name: string): string | null {
   try {
     const r = spawnSync(process.platform === 'win32' ? 'where.exe' : 'which', [name], {
       encoding: 'utf8',
-      timeout: 5000,
+      timeout: 2000,
     });
     if (r.status === 0 && r.stdout) {
       const line = r.stdout.split(/\r?\n/).map((s) => s.trim()).find(Boolean);
@@ -314,17 +319,21 @@ function whichOnPath(name: string): string | null {
   return null;
 }
 
-/** Prefer node >= 22, else bun on PATH. */
-export function resolveJsRuntime(): { kind: 'node' | 'bun'; bin: string } | null {
+export type JsRuntime = { kind: 'node' | 'bun'; bin: string };
+
+/** Prefer node >= 22, else bun on PATH. Override via QmdDeps.resolveRuntime in tests. */
+export function resolveJsRuntime(
+  which: (name: string) => string | null = whichOnPath,
+): JsRuntime | null {
   const node =
     process.env.IRIS_NODE_BIN && existsSync(process.env.IRIS_NODE_BIN)
       ? process.env.IRIS_NODE_BIN
-      : whichOnPath('node');
+      : which('node');
   if (node) {
     try {
       const r = spawnSync(node, ['-p', 'process.versions.node'], {
         encoding: 'utf8',
-        timeout: 5000,
+        timeout: 2000,
       });
       if (r.status === 0) {
         const ver = (r.stdout ?? '').trim();
@@ -332,7 +341,7 @@ export function resolveJsRuntime(): { kind: 'node' | 'bun'; bin: string } | null
         if (Number.isFinite(major) && major >= 22) return { kind: 'node', bin: node };
         // Accept node anyway if bun absent — setup will report version note
         if (Number.isFinite(major) && major >= 18) {
-          const bun = whichOnPath('bun');
+          const bun = which('bun');
           if (!bun) return { kind: 'node', bin: node };
         } else {
           // too old — fall through to bun
@@ -347,7 +356,7 @@ export function resolveJsRuntime(): { kind: 'node' | 'bun'; bin: string } | null
   const bun =
     process.env.IRIS_BUN_BIN && existsSync(process.env.IRIS_BUN_BIN)
       ? process.env.IRIS_BUN_BIN
-      : whichOnPath('bun');
+      : which('bun');
   if (bun) return { kind: 'bun', bin: bun };
   if (node) return { kind: 'node', bin: node };
   return null;
@@ -398,10 +407,15 @@ export function detectGlobalQmdJs(): string | null {
   return null;
 }
 
-export function resolveQmd(
-  paths: QmdPaths,
-  opts?: { allowGlobal?: boolean; detectGlobal?: () => string | null },
-): QmdResolve {
+export interface ResolveQmdOpts {
+  allowGlobal?: boolean;
+  detectGlobal?: () => string | null;
+  /** Override node/bun resolution (tests — no host PATH). */
+  resolveRuntime?: () => JsRuntime | null;
+}
+
+export function resolveQmd(paths: QmdPaths, opts?: ResolveQmdOpts): QmdResolve {
+  const resolveRt = opts?.resolveRuntime ?? resolveJsRuntime;
   const envBin = process.env.IRIS_QMD_BIN || process.env.QMD_BIN;
   if (envBin) {
     const abs = resolve(envBin);
@@ -413,7 +427,7 @@ export function resolveQmd(
           : null
       : null;
     if (qmdJs) {
-      const rt = resolveJsRuntime();
+      const rt = resolveRt();
       return {
         kind: 'env',
         qmdJs,
@@ -425,7 +439,7 @@ export function resolveQmd(
 
   const managed = managedQmdJs(paths.runtimeDir);
   if (existsSync(managed)) {
-    const rt = resolveJsRuntime();
+    const rt = resolveRt();
     return {
       kind: 'managed',
       qmdJs: managed,
@@ -439,7 +453,7 @@ export function resolveQmd(
   if (allowGlobal) {
     const globalJs = (opts?.detectGlobal ?? detectGlobalQmdJs)();
     if (globalJs) {
-      const rt = resolveJsRuntime();
+      const rt = resolveRt();
       return {
         kind: 'global',
         qmdJs: globalJs,
@@ -449,7 +463,7 @@ export function resolveQmd(
     }
   }
 
-  const rt = resolveJsRuntime();
+  const rt = resolveRt();
   return {
     kind: 'missing',
     qmdJs: null,
@@ -551,7 +565,10 @@ export async function defaultQmdRunner(
     instrumentHome: opts.instrumentHome,
     houseId: opts.houseId,
   });
-  const resolved = resolveQmd(paths, { allowGlobal: opts.allowGlobal });
+  const resolved = resolveQmd(paths, {
+    allowGlobal: opts.allowGlobal,
+    // Production runner uses default resolveJsRuntime; tests pass via env only.
+  });
   if (!resolved.qmdJs || !resolved.nodeBin) {
     return {
       code: 69,
@@ -770,6 +787,25 @@ export interface QmdDeps {
   allowGlobal?: boolean;
   /** Override global detection (tests). */
   detectGlobal?: () => string | null;
+  /**
+   * Override node/bun resolution. Tests MUST inject this so setup never walks
+   * the host PATH or spawns real node/where.exe (CI Windows timeout class).
+   */
+  resolveRuntime?: () => JsRuntime | null;
+  /**
+   * Override PATH lookup (npm/bun/node names). Tests inject a pure function
+   * that never touches the host environment.
+   */
+  which?: (name: string) => string | null;
+}
+
+/** Bundle resolve opts from injectable deps (no host probes when stubs set). */
+export function resolveOptsFromDeps(deps: QmdDeps): ResolveQmdOpts {
+  return {
+    allowGlobal: deps.allowGlobal,
+    detectGlobal: deps.detectGlobal,
+    resolveRuntime: deps.resolveRuntime,
+  };
 }
 
 function logLine(deps: QmdDeps, line: string): void {
@@ -830,7 +866,10 @@ export async function qmdSetup(
     (opts.onProgress ?? ((s) => logLine(deps, s)))(line);
   };
 
-  const rt = resolveJsRuntime();
+  const which = deps.which ?? whichOnPath;
+  const resolveRt =
+    deps.resolveRuntime ?? (() => resolveJsRuntime(which));
+  const rt = resolveRt();
   if (!rt) {
     return {
       ok: false,
@@ -854,10 +893,12 @@ export async function qmdSetup(
   const preferGlobal = opts.useGlobal === true;
   const allowGlobal = deps.allowGlobal !== false;
   const findGlobal = deps.detectGlobal ?? detectGlobalQmdJs;
-  let resolved = resolveQmd(paths, {
-    allowGlobal: allowGlobal && preferGlobal,
+  const rqOpts = (allow: boolean): ResolveQmdOpts => ({
+    allowGlobal: allow,
     detectGlobal: findGlobal,
+    resolveRuntime: resolveRt,
   });
+  let resolved = resolveQmd(paths, rqOpts(allowGlobal && preferGlobal));
 
   // Prefer managed pin. Use global only with --use-global, or as escape after npm fails.
   if (preferGlobal && allowGlobal) {
@@ -871,14 +912,14 @@ export async function qmdSetup(
         qmdJs: g,
       });
       progress(`using global qmd at ${g}`);
-      resolved = resolveQmd(paths, { allowGlobal: true, detectGlobal: findGlobal });
+      resolved = resolveQmd(paths, rqOpts(true));
     }
   }
 
   if (resolved.kind !== 'managed' && resolved.kind !== 'env' && !preferGlobal) {
     if (!existsSync(managedQmdJs(paths.runtimeDir))) {
       progress(`installing ${QMD_PACKAGE}@${QMD_PIN} into ${paths.runtimeDir}`);
-      const npmBin = whichOnPath('npm');
+      const npmBin = which('npm');
       const installer = deps.npmInstall ?? defaultNpmInstaller;
       const inst = await installer({
         prefix: paths.runtimeDir,
@@ -930,7 +971,7 @@ export async function qmdSetup(
         qmdJs: managedQmdJs(paths.runtimeDir),
       });
     }
-    resolved = resolveQmd(paths, { allowGlobal, detectGlobal: findGlobal });
+    resolved = resolveQmd(paths, rqOpts(allowGlobal));
   }
 
   if (!resolved.qmdJs || !resolved.nodeBin) {
@@ -988,13 +1029,14 @@ export async function qmdSetup(
   }
 
   const models = modelsPresent(paths);
+  const finalResolved = resolveQmd(paths, rqOpts(allowGlobal));
   return {
     ok: true,
     code: 0,
     pin: readManifest(paths)?.pin ?? QMD_PIN,
     houseId: paths.houseId,
-    resolveKind: resolveQmd(paths).kind,
-    qmdJs: resolveQmd(paths).qmdJs,
+    resolveKind: finalResolved.kind,
+    qmdJs: finalResolved.qmdJs,
     collections: ORG_COLLECTIONS.map((c) => c.name),
     models,
     steps,
@@ -1021,10 +1063,7 @@ export async function qmdUpdate(
       error: 'house index not bootstrapped — run iris qmd setup',
     };
   }
-  const resolved = resolveQmd(paths, {
-    allowGlobal: deps.allowGlobal,
-    detectGlobal: deps.detectGlobal,
-  });
+  const resolved = resolveQmd(paths, resolveOptsFromDeps(deps));
   if (!resolved.qmdJs) {
     return {
       ok: false,
@@ -1083,11 +1122,7 @@ export async function qmdStatus(
   refresh?: QmdRefreshController | null,
 ): Promise<QmdStatusBlock & Record<string, unknown>> {
   const paths = resolveQmdPaths(orgRoot, { instrumentHome: deps.instrumentHome });
-  const resolveOpts = {
-    allowGlobal: deps.allowGlobal,
-    detectGlobal: deps.detectGlobal,
-  };
-  const resolved = resolveQmd(paths, resolveOpts);
+  const resolved = resolveQmd(paths, resolveOptsFromDeps(deps));
   const models = modelsPresent(paths);
   const refreshSnap = refresh?.snapshot() ?? {
     lastRefreshAt: null,
@@ -1287,10 +1322,7 @@ export async function qmdSearch(
       items: [],
     };
   }
-  const resolved = resolveQmd(paths, {
-    allowGlobal: deps.allowGlobal,
-    detectGlobal: deps.detectGlobal,
-  });
+  const resolved = resolveQmd(paths, resolveOptsFromDeps(deps));
   if (!resolved.qmdJs) {
     return {
       available: false,
@@ -1417,8 +1449,7 @@ export function createQmdRefreshController(
     if (stopped) return;
     const paths = resolveQmdPaths(orgRoot, { instrumentHome: deps.instrumentHome });
     const resolved = resolveQmd(paths, {
-      allowGlobal: deps.allowGlobal,
-      detectGlobal: deps.detectGlobal,
+      ...resolveOptsFromDeps(deps),
     });
     if (!resolved.qmdJs || !existsSync(paths.configYml)) {
       // Guard: never install or download from refresh
