@@ -55,13 +55,17 @@ SUBSTRATE_DIRS = ("crates", "third_party", "prod")
 
 # The fork-owned surface: everything else. Scanned for stray mentions.
 SCAN_EXCLUDES = {
-    ".git", "target", "node_modules", ".sweep-scratch",
+    ".git", "target", "node_modules", ".sweep-scratch", "__pycache__", "dist",
 }
-# Scripts whose whole job is describing the grok boundary. They mention the
-# word in self-documenting prose (docstrings, the allowed list itself) and
-# are the wrong place to look for product-name drift. Scanned by hand;
-# exempted here.
-SELF_DOC = {"scripts/check_grok_boundary.py", "scripts/sync_upstream.py"}
+# Scripts whose whole job is describing the grok boundary or scanning source
+# for name drift. They mention the word in self-documenting prose (docstrings,
+# pattern tables, the allowed list itself) and are the wrong place to look for
+# product-name drift. Scanned by hand; exempted here.
+SELF_DOC = {
+    "scripts/check_grok_boundary.py",
+    "scripts/sync_upstream.py",
+    "scripts/check_source_hygiene.py",
+}
 # Files that are build/packaging metadata or binary-ish; grok there is always
 # upstream names (Cargo.toml dependency paths, lockfiles) or intentional.
 SCAN_SKIP_NAMES = {"Cargo.lock", "Cargo.toml", "package-lock.json", "bun.lock"}

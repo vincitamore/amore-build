@@ -32,3 +32,7 @@ __pycache__/
 
 # Instrument dependencies and local state
 instruments/*/node_modules/
+
+# Compiled instrument binaries (build:compile output; release lanes build their own)
+instruments/*/dist/
+instruments/iris/packages/*/dist/
