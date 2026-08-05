@@ -593,66 +593,169 @@ export async function defaultQmdRunner(
   });
 }
 
-export const defaultNpmInstaller: NpmInstaller = async ({ prefix, packageSpec, npmBin, nodeBin }) => {
-  mkdirSync(prefix, { recursive: true });
-  if (npmBin) {
-    return new Promise((resolvePromise) => {
-      const child = nodeSpawn(npmBin, ['install', '--prefix', prefix, packageSpec, '--no-fund', '--no-audit'], {
-        env: process.env,
-        windowsHide: true,
-      });
-      let stdout = '';
-      let stderr = '';
-      child.stdout?.on('data', (d) => {
-        stdout += String(d);
-      });
-      child.stderr?.on('data', (d) => {
-        stderr += String(d);
-      });
-      child.on('error', (err) => {
-        resolvePromise({ ok: false, stdout, stderr: String(err), code: 2 });
-      });
-      child.on('close', (code) => {
-        resolvePromise({
-          ok: code === 0,
-          stdout,
-          stderr,
-          code: code ?? 1,
-        });
-      });
-    });
+/**
+ * Resolve npm's JS entry beside the node binary.
+ * Standard layout: <dir of node>/node_modules/npm/bin/npm-cli.js
+ * (Windows Program Files nodejs install and typical unix node trees).
+ * Also try ../lib/node_modules (prefix layout on some unix installs).
+ */
+export function resolveNpmCliJs(nodeBin: string): string | null {
+  if (!nodeBin) return null;
+  const dir = dirname(resolve(nodeBin));
+  const candidates = [
+    join(dir, 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+    join(dir, '..', 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+  ];
+  for (const c of candidates) {
+    try {
+      if (existsSync(c)) return resolve(c);
+    } catch {
+      // continue
+    }
   }
-  // bun fallback: bun add --cwd prefix
-  const bun = whichOnPath('bun');
+  return null;
+}
+
+/** Quote one argv token for cmd.exe /c (double quotes doubled). */
+export function quoteCmdArg(s: string): string {
+  if (s.length === 0) return '""';
+  if (!/[\s"&<>|^%!]/.test(s)) return s;
+  return `"${s.replace(/"/g, '""')}"`;
+}
+
+export type NpmInstallSpawnKind = 'node-cli' | 'cmd-shell' | 'npm-direct' | 'bun' | 'missing';
+
+export interface NpmInstallSpawnPlan {
+  kind: NpmInstallSpawnKind;
+  command: string;
+  args: string[];
+}
+
+/**
+ * Pure spawn plan for managed npm install.
+ * Prefer node + absolute npm-cli.js (never trust Windows npm.cmd without a shell).
+ * When npm-cli.js is absent: shell-safe .cmd on win32, direct spawn elsewhere.
+ * Last tool fallback: bun add.
+ */
+export function planNpmInstallSpawn(opts: {
+  prefix: string;
+  packageSpec: string;
+  nodeBin: string;
+  npmBin: string | null;
+  /** Override resolution (tests). Pass null to force missing. */
+  npmCliJs?: string | null;
+  bunBin?: string | null;
+  platform?: NodeJS.Platform;
+}): NpmInstallSpawnPlan {
+  const installArgs = ['install', '--prefix', opts.prefix, opts.packageSpec, '--no-fund', '--no-audit'];
+  const npmCli =
+    opts.npmCliJs !== undefined ? opts.npmCliJs : resolveNpmCliJs(opts.nodeBin);
+
+  if (npmCli) {
+    return {
+      kind: 'node-cli',
+      command: opts.nodeBin,
+      args: [npmCli, ...installArgs],
+    };
+  }
+
+  if (opts.npmBin) {
+    const platform = opts.platform ?? process.platform;
+    const isWinShim =
+      platform === 'win32' || /\.(cmd|bat)$/i.test(opts.npmBin);
+    if (isWinShim) {
+      // Node 20.12+/22 refuses spawn(.cmd) without a shell (EINVAL).
+      // Fixed argv + local prefix: cmd.exe /d /s /c with quoted tokens.
+      const line = [quoteCmdArg(opts.npmBin), ...installArgs.map(quoteCmdArg)].join(' ');
+      const comspec =
+        process.env.ComSpec && process.env.ComSpec.length > 0
+          ? process.env.ComSpec
+          : 'cmd.exe';
+      return {
+        kind: 'cmd-shell',
+        command: comspec,
+        args: ['/d', '/s', '/c', line],
+      };
+    }
+    return {
+      kind: 'npm-direct',
+      command: opts.npmBin,
+      args: installArgs,
+    };
+  }
+
+  const bun =
+    opts.bunBin !== undefined
+      ? opts.bunBin
+      : whichOnPath('bun');
   if (bun) {
-    return new Promise((resolvePromise) => {
-      const child = nodeSpawn(bun, ['add', packageSpec, '--cwd', prefix], {
-        env: process.env,
-        windowsHide: true,
-      });
-      let stdout = '';
-      let stderr = '';
-      child.stdout?.on('data', (d) => {
-        stdout += String(d);
-      });
-      child.stderr?.on('data', (d) => {
-        stderr += String(d);
-      });
-      child.on('error', (err) => {
-        resolvePromise({ ok: false, stdout, stderr: String(err), code: 2 });
-      });
-      child.on('close', (code) => {
-        resolvePromise({ ok: code === 0, stdout, stderr, code: code ?? 1 });
-      });
+    return {
+      kind: 'bun',
+      command: bun,
+      args: ['add', opts.packageSpec, '--cwd', opts.prefix],
+    };
+  }
+
+  return { kind: 'missing', command: '', args: [] };
+}
+
+function runSpawnPlan(
+  plan: NpmInstallSpawnPlan,
+): Promise<{ ok: boolean; stdout: string; stderr: string; code: number }> {
+  if (plan.kind === 'missing' || !plan.command) {
+    return Promise.resolve({
+      ok: false,
+      stdout: '',
+      stderr: 'npm or bun required to install the managed qmd package',
+      code: 69,
     });
   }
-  void nodeBin;
-  return {
-    ok: false,
-    stdout: '',
-    stderr: 'npm or bun required to install the managed qmd package',
-    code: 69,
-  };
+  return new Promise((resolvePromise) => {
+    const child = nodeSpawn(plan.command, plan.args, {
+      env: process.env,
+      windowsHide: true,
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout?.on('data', (d) => {
+      stdout += String(d);
+    });
+    child.stderr?.on('data', (d) => {
+      stderr += String(d);
+    });
+    child.on('error', (err) => {
+      resolvePromise({ ok: false, stdout, stderr: String(err), code: 2 });
+    });
+    child.on('close', (code) => {
+      resolvePromise({
+        ok: code === 0,
+        stdout,
+        stderr,
+        code: code ?? 1,
+      });
+    });
+  });
+}
+
+/**
+ * Install pinned qmd into runtime prefix.
+ * Primary: node <abs>/npm-cli.js install … (Windows-safe; no .cmd spawn).
+ * Fallback: shell-safe npm.cmd, then bun, then fail (caller may use global qmd).
+ */
+export const defaultNpmInstaller: NpmInstaller = async ({
+  prefix,
+  packageSpec,
+  npmBin,
+  nodeBin,
+}) => {
+  mkdirSync(prefix, { recursive: true });
+  const plan = planNpmInstallSpawn({
+    prefix,
+    packageSpec,
+    nodeBin,
+    npmBin,
+  });
+  return runSpawnPlan(plan);
 };
 
 // ── high-level ops ───────────────────────────────────────────────────────────

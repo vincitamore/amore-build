@@ -18,11 +18,14 @@ import {
   deriveHouseId,
   mapQmdFileToOrgPath,
   parseQmdSearchJson,
+  planNpmInstallSpawn,
   qmdInstrumentHome,
   qmdSearch,
   qmdSetup,
   qmdStatus,
   qmdUpdate,
+  quoteCmdArg,
+  resolveNpmCliJs,
   resolveQmdPaths,
   type NpmInstaller,
   type QmdRunner,
@@ -95,6 +98,102 @@ const stubNpm: NpmInstaller = async ({ prefix }) => {
   writeFileSync(qmdJs, '// stub\n');
   return { ok: true, stdout: '', stderr: '', code: 0 };
 };
+
+describe('npm install spawn plan (Windows-safe)', () => {
+  test('resolveNpmCliJs finds npm-cli.js beside node', () => {
+    const nodeRoot = join(tmp, 'nodejs');
+    const nodeBin = join(nodeRoot, 'node.exe');
+    const npmCli = join(nodeRoot, 'node_modules', 'npm', 'bin', 'npm-cli.js');
+    mkdirSync(join(npmCli, '..'), { recursive: true });
+    writeFileSync(nodeBin, '');
+    writeFileSync(npmCli, '// npm\n');
+    expect(resolveNpmCliJs(nodeBin)).toBe(npmCli);
+  });
+
+  test('resolveNpmCliJs returns null when missing', () => {
+    const nodeBin = join(tmp, 'lonely-node', 'node');
+    mkdirSync(join(nodeBin, '..'), { recursive: true });
+    writeFileSync(nodeBin, '');
+    expect(resolveNpmCliJs(nodeBin)).toBeNull();
+  });
+
+  test('plan prefers node + absolute npm-cli.js (primary path)', () => {
+    const nodeBin = join(tmp, 'n', 'node.exe');
+    const npmCli = join(tmp, 'n', 'node_modules', 'npm', 'bin', 'npm-cli.js');
+    const prefix = join(tmp, 'runtime');
+    const plan = planNpmInstallSpawn({
+      prefix,
+      packageSpec: `@tobilu/qmd@${QMD_PIN}`,
+      nodeBin,
+      npmBin: join(tmp, 'n', 'npm.cmd'), // present but must not be chosen
+      npmCliJs: npmCli,
+      platform: 'win32',
+    });
+    expect(plan.kind).toBe('node-cli');
+    expect(plan.command).toBe(nodeBin);
+    expect(plan.args[0]).toBe(npmCli);
+    expect(plan.args.slice(1)).toEqual([
+      'install',
+      '--prefix',
+      prefix,
+      `@tobilu/qmd@${QMD_PIN}`,
+      '--no-fund',
+      '--no-audit',
+    ]);
+  });
+
+  test('plan uses cmd.exe /d /s /c when npm-cli.js absent on win32', () => {
+    const nodeBin = join(tmp, 'n2', 'node.exe');
+    const npmCmd = join(tmp, 'n2', 'npm.cmd');
+    const prefix = join(tmp, 'runtime2');
+    const plan = planNpmInstallSpawn({
+      prefix,
+      packageSpec: `@tobilu/qmd@${QMD_PIN}`,
+      nodeBin,
+      npmBin: npmCmd,
+      npmCliJs: null,
+      platform: 'win32',
+    });
+    expect(plan.kind).toBe('cmd-shell');
+    expect(plan.args[0]).toBe('/d');
+    expect(plan.args[1]).toBe('/s');
+    expect(plan.args[2]).toBe('/c');
+    const line = plan.args[3]!;
+    expect(line).toContain(quoteCmdArg(npmCmd));
+    expect(line).toContain('install');
+    expect(line).toContain(quoteCmdArg(prefix));
+    expect(line).toContain(`@tobilu/qmd@${QMD_PIN}`);
+    // Must not be a bare spawn of npm.cmd as plan.command
+    expect(plan.command.toLowerCase()).not.toMatch(/npm\.cmd$/);
+  });
+
+  test('plan falls through to bun when no npm-cli and no npmBin', () => {
+    const plan = planNpmInstallSpawn({
+      prefix: join(tmp, 'rt'),
+      packageSpec: `@tobilu/qmd@${QMD_PIN}`,
+      nodeBin: join(tmp, 'node'),
+      npmBin: null,
+      npmCliJs: null,
+      bunBin: join(tmp, 'bun.exe'),
+      platform: 'win32',
+    });
+    expect(plan.kind).toBe('bun');
+    expect(plan.command).toBe(join(tmp, 'bun.exe'));
+    expect(plan.args).toEqual(['add', `@tobilu/qmd@${QMD_PIN}`, '--cwd', join(tmp, 'rt')]);
+  });
+
+  test('plan is missing when no installer tools', () => {
+    const plan = planNpmInstallSpawn({
+      prefix: join(tmp, 'rt'),
+      packageSpec: `@tobilu/qmd@${QMD_PIN}`,
+      nodeBin: join(tmp, 'node'),
+      npmBin: null,
+      npmCliJs: null,
+      bunBin: null,
+    });
+    expect(plan.kind).toBe('missing');
+  });
+});
 
 describe('paths + pin + house id', () => {
   test('pin is exact', () => {
