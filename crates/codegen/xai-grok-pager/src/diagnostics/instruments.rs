@@ -108,17 +108,71 @@ pub fn probe_instruments() -> InstrumentsFacts {
 }
 
 /// Resolve `name` beside the running binary, then on PATH; run `--version`.
+///
+/// The binary is reported as installed when found. The version string is kept
+/// only when the first output line matches a companion version shape
+/// (`name` + dotted numeric version). JSON errors, usage blurbs, and empty
+/// output never become version facts.
 pub fn probe_companion(name: &str) -> CompanionInstall {
     let Some(path) = resolve_companion_bin(name) else {
         return CompanionInstall::NotInstalled;
     };
     match run_version(&path) {
-        Ok(version) => CompanionInstall::Installed {
+        Ok(line) => CompanionInstall::Installed {
             path,
-            version: Some(version),
+            version: parse_companion_version_line(&line),
         },
         Err(error) => CompanionInstall::ProbeFailed { path, error },
     }
+}
+
+/// Accept a companion `--version` first line only when it looks like a real
+/// version: a non-space name token, then a dotted numeric version
+/// (`^\S+ v?[0-9]+\.[0-9]+` …). Rejects JSON envelopes, description/usage
+/// lines, and empty input. Returns the truncated original line when valid.
+pub fn parse_companion_version_line(line: &str) -> Option<String> {
+    let line = line.trim();
+    if line.is_empty() {
+        return None;
+    }
+    // Name token: one or more non-whitespace chars, then whitespace, then version.
+    let mut parts = line.split_whitespace();
+    let name = parts.next()?;
+    if name.is_empty() {
+        return None;
+    }
+    let ver_token = parts.next()?;
+    if !version_token_has_dotted_numeric(ver_token) {
+        return None;
+    }
+    Some(truncate_version(line))
+}
+
+/// `v?[0-9]+\.[0-9]+` at the start of the token (more components / suffix ok).
+fn version_token_has_dotted_numeric(token: &str) -> bool {
+    let body = token.strip_prefix('v').unwrap_or(token);
+    let bytes = body.as_bytes();
+    if bytes.is_empty() {
+        return false;
+    }
+    let mut i = 0;
+    // [0-9]+
+    if !bytes[i].is_ascii_digit() {
+        return false;
+    }
+    while i < bytes.len() && bytes[i].is_ascii_digit() {
+        i += 1;
+    }
+    // \.
+    if i >= bytes.len() || bytes[i] != b'.' {
+        return false;
+    }
+    i += 1;
+    // [0-9]+
+    if i >= bytes.len() || !bytes[i].is_ascii_digit() {
+        return false;
+    }
+    true
 }
 
 /// Prefer the directory of `current_exe` (init links companions there), else PATH.
@@ -647,7 +701,7 @@ pub fn format_install_line(install: &CompanionInstall) -> String {
     match install {
         CompanionInstall::Installed { path, version } => match version {
             Some(v) => format!("installed {v} ({})", path.display()),
-            None => format!("installed ({})", path.display()),
+            None => format!("installed, version unreported ({})", path.display()),
         },
         CompanionInstall::NotInstalled => "not installed".to_owned(),
         CompanionInstall::ProbeFailed { path, error } => {
@@ -980,6 +1034,64 @@ mod tests {
             format_install_line(&CompanionInstall::NotInstalled),
             "not installed"
         );
+    }
+
+    #[test]
+    fn format_install_unreported_version() {
+        let line = format_install_line(&CompanionInstall::Installed {
+            path: PathBuf::from("/bin/iris"),
+            version: None,
+        });
+        assert!(line.contains("version unreported"), "{line}");
+        assert!(line.contains("/bin/iris") || line.contains("iris"), "{line}");
+    }
+
+    #[test]
+    fn companion_version_line_parseable_accepted() {
+        let v = parse_companion_version_line("iris 0.2.120").unwrap();
+        assert!(v.contains("iris"));
+        assert!(v.contains("0.2.120"));
+        // Optional v prefix and extra trailing text on the line still ok.
+        assert!(parse_companion_version_line("lucerna v1.0.0 (release)").is_some());
+        assert!(parse_companion_version_line("speculum 2.5.3-alpha.1").is_some());
+    }
+
+    #[test]
+    fn companion_version_line_json_envelope_rejected() {
+        assert_eq!(parse_companion_version_line("{"), None);
+        assert_eq!(
+            parse_companion_version_line(r#"{"error":"unknown command","ok":false}"#),
+            None
+        );
+        assert_eq!(
+            parse_companion_version_line(r#"{ "status": "error", "message": "no such flag" }"#),
+            None
+        );
+    }
+
+    #[test]
+    fn companion_version_line_usage_description_rejected() {
+        assert_eq!(
+            parse_companion_version_line("speculum — mirror for the session corpus"),
+            None
+        );
+        assert_eq!(
+            parse_companion_version_line("speculum - mirror for the session corpus"),
+            None
+        );
+        assert_eq!(
+            parse_companion_version_line("Usage: iris [command] [options]"),
+            None
+        );
+        // Bare dotted version without a name token is not a companion shape.
+        assert_eq!(parse_companion_version_line("v1.2.3"), None);
+        assert_eq!(parse_companion_version_line("1.2.3"), None);
+    }
+
+    #[test]
+    fn companion_version_line_empty_rejected() {
+        assert_eq!(parse_companion_version_line(""), None);
+        assert_eq!(parse_companion_version_line("   \n\t  "), None);
     }
 
     #[test]
