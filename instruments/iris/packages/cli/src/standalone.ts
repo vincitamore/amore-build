@@ -15,6 +15,7 @@
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { versionLine } from './version';
 
 /** True when running inside a `bun build --compile` executable ($bunfs virtual FS). */
 export function isCompiledBinary(): boolean {
@@ -74,6 +75,7 @@ function help(): void {
       '  iris status|task|inbox|…           org verbs (regula + daemon reads)',
       '  iris regula <verb>                 explicit regula passthrough',
       '  iris commands [--json]             capability manifest',
+      '  iris --version',
       '  iris --help',
       '',
       'Dash (OpenTUI) is source-build only from this artifact — see BUILD.md.',
@@ -96,6 +98,12 @@ async function runCli(args: string[]): Promise<void> {
 }
 
 const argv = process.argv.slice(2);
+
+// Version first — works with no daemon and no house (doctor instruments probe).
+if (argv[0] === '--version' || argv[0] === '-V' || argv[0] === 'version') {
+  process.stdout.write(versionLine() + '\n');
+  process.exit(0);
+}
 
 if (argv.length === 0 || argv[0] === 'dash') {
   // Prefer a sibling compiled dash artifact when present (release layout).

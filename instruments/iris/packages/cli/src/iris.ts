@@ -14,8 +14,9 @@
  */
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { versionLine } from "./version";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CLI_ENTRY = join(HERE, "index.ts");
@@ -35,6 +36,7 @@ function help(): void {
       "  iris <regula-verb>   any regula verb (task, inbox, …)",
       "  iris regula <verb>   explicit regula passthrough",
       "  iris daemon [--port N]  start house iris daemon (default 3853)",
+      "  iris --version",
       "  iris --help",
       "",
       "Org root: $IRIS_ORG_ROOT or walk-up for (AGENTS.md|AGENT.md|CLAUDE.md)+tasks/.",
@@ -46,6 +48,7 @@ function help(): void {
 }
 
 function runBun(entry: string, args: string[], opts: { inherit?: boolean } = {}): never {
+  void opts;
   const r = spawnSync(process.execPath, [entry, ...args], {
     stdio: "inherit",
     env: process.env,
@@ -54,6 +57,12 @@ function runBun(entry: string, args: string[], opts: { inherit?: boolean } = {})
 }
 
 const argv = process.argv.slice(2);
+
+// Version first — works with no daemon and no house (doctor instruments probe).
+if (argv[0] === "--version" || argv[0] === "-V" || argv[0] === "version") {
+  process.stdout.write(versionLine() + "\n");
+  process.exit(0);
+}
 
 if (argv.length === 0 || argv[0] === "dash") {
   const rest = argv[0] === "dash" ? argv.slice(1) : [];

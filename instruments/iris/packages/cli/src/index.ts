@@ -13,6 +13,7 @@ import {
 } from './contract';
 import { DaemonError } from './daemon';
 import { completionScript, resolveCompletions } from './completion';
+import { versionLine } from './version';
 
 function emit(obj: unknown): void {
   process.stdout.write(JSON.stringify(obj, null, 2) + '\n');
@@ -37,6 +38,12 @@ function helpText(): Record<string, unknown> {
 }
 
 const argv = process.argv.slice(2);
+
+// Version before any org-root / daemon / command resolution (doctor smoke).
+if (argv[0] === '--version' || argv[0] === '-V' || argv[0] === 'version') {
+  process.stdout.write(versionLine() + '\n');
+  process.exit(EXIT.OK);
+}
 
 if (argv.length === 0 || argv[0] === 'help' || argv[0] === '--help') {
   emit(ok({ command: 'help', ...helpText() }));
