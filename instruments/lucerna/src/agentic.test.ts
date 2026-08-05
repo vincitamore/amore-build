@@ -12,6 +12,8 @@ import { tmpdir } from "node:os";
 import { spawn } from "node:child_process";
 import {
   buildManifestFrontmatter,
+  buildAgenticReportFrontmatter,
+  ensureAgenticReportFrontmatter,
   buildProposalFrontmatter,
   dreamManifestRelPath,
   writeDreamManifest,
@@ -83,6 +85,43 @@ describe("agentic catalog helpers", () => {
     expect(agenticMaxTurns("agentic-housekeeping")).toBe(16);
     expect(DEFAULT_AGENTIC_WALL_MS).toBe(20 * 60 * 1000);
     expect(MAINTENANCE_DISALLOWED_TOOLS).toBe("web_search,web_fetch");
+  });
+});
+
+describe("agentic report frontmatter", () => {
+  test("joins pipeline/recipe and omits status pending", () => {
+    const fm = buildAgenticReportFrontmatter("self-orient", "2026-08-05");
+    expect(fm).toContain("type: forge");
+    expect(fm).toContain("pipeline: dream-self-orient");
+    expect(fm).toContain("recipe: dream");
+    expect(fm).toContain("dream-action: self-orient");
+    expect(fm).toContain("created: '2026-08-05'");
+    expect(fm).toContain("triggered-by: dream");
+    expect(fm).not.toContain("status:");
+    expect(fm).not.toMatch(/status:\s*pending/);
+  });
+
+  test("ensureAgenticReportFrontmatter rewrites agent status: pending", () => {
+    const raw = [
+      "---",
+      "type: forge",
+      "status: pending",
+      "dream-action: self-orient",
+      "created: '2026-08-05'",
+      "triggered-by: dream",
+      "---",
+      "",
+      "# self-orient",
+      "",
+      "Body stays.",
+      "",
+    ].join("\n");
+    const out = ensureAgenticReportFrontmatter(raw, "self-orient");
+    expect(out).toContain("pipeline: dream-self-orient");
+    expect(out).toContain("recipe: dream");
+    expect(out).toContain("Body stays.");
+    expect(out).not.toMatch(/status:\s*pending/);
+    expect(out).toContain("created: '2026-08-05'");
   });
 });
 
@@ -243,6 +282,8 @@ describe("runAgenticAction with stub amore", () => {
         const rel = m?.[1] ?? "forge/dreams/fallback-self-orient.md";
         const abs = join(house, rel);
         mkdirSync(join(abs, ".."), { recursive: true });
+        // Intentionally write legacy shape (status: pending, no pipeline) —
+        // runner must normalize to pipeline-linked artifact frontmatter.
         writeFileSync(
           abs,
           [
@@ -292,6 +333,13 @@ describe("runAgenticAction with stub amore", () => {
       expect(man).toContain("pipeline: dream-self-orient");
       expect(r.proposalPaths && r.proposalPaths.length >= 1).toBe(true);
       expect(r.ok).toBe(true);
+      expect(r.artifactPath).toBeDefined();
+      const report = readFileSync(r.artifactPath!, "utf-8");
+      expect(report).toContain("pipeline: dream-self-orient");
+      expect(report).toContain("recipe: dream");
+      expect(report).toContain("dream-action: self-orient");
+      expect(report).toContain("triggered-by: dream");
+      expect(report).not.toMatch(/status:\s*pending/);
     } finally {
       rmSync(house, { recursive: true, force: true });
     }

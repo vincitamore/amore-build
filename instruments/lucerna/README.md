@@ -112,8 +112,9 @@ An agentic dream runs a multi-turn `amore` loop so the spawned agent can read th
 
 | Artifact | Path | Notes |
 |----------|------|-------|
-| Dream manifest | `forge/dreams/sessions/<YYYYMMDD-HHmmss>-<action>.manifest.md` | Frontmatter includes `type: forge`, `pipeline: dream-<action>`, `recipe: dream`, `triggered-by: dream`, `review-status: pending` |
-| Light / agentic report | `forge/dreams/<ts>-<action>.md` | Same light-dream report shape with `triggered-by: dream` |
+| Dream manifest | `forge/dreams/sessions/<YYYYMMDD-HHmmss>-<action>.manifest.md` | Frontmatter includes `type: forge`, `pipeline: dream-<action>`, `recipe: dream`, `triggered-by: dream`, `review-status: pending` (this is the review handle) |
+| Agentic report | `forge/dreams/<ts>-<action>.md` | Same `pipeline: dream-<action>` and `recipe: dream` as the manifest; no `status: pending` (pipeline artifact, not a queue item) |
+| Light report | `forge/dreams/<ts>-<action>.md` | Wave-2 shape: `status: pending`, `dream-action`, `triggered-by: dream` (no pipeline field) |
 | Proposal | `forge/proposals/<slug>.md` | `type: proposal`, `status: pending`, `triggered-by: dream`; never auto-applied |
 
 A resident agent reviews manifests (`review-status: pending` → `reviewed`) and applies or closes proposals (`status: pending` → `applied` or `closed`). House skill: `.amore/skills/somniator/SKILL.md` in the house template.

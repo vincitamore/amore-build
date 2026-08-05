@@ -122,6 +122,55 @@ export function buildManifestFrontmatter(opts: {
   ].join("\n");
 }
 
+/**
+ * Frontmatter for agentic REPORT artifacts under forge/dreams/<ts>-<action>.md.
+ * Matches the companion manifest on pipeline/recipe so the house Forge surface
+ * groups them. No status: pending — review lives on the manifest's review-status;
+ * the report is a pipeline artifact, not a separate queue item.
+ * Light-dream reports keep the wave-2 shape (status: pending) unchanged.
+ */
+export function buildAgenticReportFrontmatter(
+  actionKey: string,
+  created?: string,
+): string {
+  const day = created ?? localDate();
+  return [
+    "---",
+    "type: forge",
+    `pipeline: dream-${actionKey}`,
+    "recipe: dream",
+    `dream-action: ${actionKey}`,
+    `created: '${day}'`,
+    "triggered-by: dream",
+    "---",
+  ].join("\n");
+}
+
+/**
+ * Ensure an agentic report body has the pipeline-linked frontmatter.
+ * Strips a leading YAML fence if present and rebuilds required fields.
+ * Drops status: pending if the agent wrote it.
+ */
+export function ensureAgenticReportFrontmatter(
+  body: string,
+  actionKey: string,
+): string {
+  const text = body.replace(/^\uFEFF/, "");
+  let rest = text;
+  let created: string | undefined;
+  if (text.startsWith("---")) {
+    const end = text.indexOf("\n---", 3);
+    if (end >= 0) {
+      const fm = text.slice(3, end);
+      const m = fm.match(/^created:\s*['"]?([0-9]{4}-[0-9]{2}-[0-9]{2})/m);
+      if (m) created = m[1];
+      rest = text.slice(end + 4).replace(/^\r?\n/, "");
+    }
+  }
+  const fm = buildAgenticReportFrontmatter(actionKey, created);
+  return `${fm}\n\n${rest.trimStart()}`;
+}
+
 export function buildManifestBody(opts: {
   actionKey: string;
   reason: string;
@@ -563,11 +612,13 @@ Write a complete report to:
 
   ${opts.dreamRelPath}
 
-Start with YAML frontmatter:
+Start with YAML frontmatter EXACTLY (pipeline fields link this report to the dream
+manifest; do not use status: pending — review lives on the session manifest):
 
 ---
 type: forge
-status: pending
+pipeline: dream-${opts.actionKey}
+recipe: dream
 dream-action: ${opts.actionKey}
 created: '${localDate()}'
 triggered-by: dream
@@ -729,15 +780,7 @@ export async function runAgenticAction(
 
   // Fallback report if agent did not write the dream file
   if (!existsSync(dreamAbs)) {
-    const fallback = [
-      "---",
-      "type: forge",
-      "status: pending",
-      `dream-action: ${actionKey}`,
-      `created: '${localDate()}'`,
-      "triggered-by: dream",
-      "---",
-      "",
+    const fallbackBody = [
       `# ${actionKey}`,
       "",
       `> Fallback wrap: agent did not write the dream file. Reason: ${reason}`,
@@ -747,7 +790,23 @@ export async function runAgenticAction(
       `Generated at ${localTimestamp()} by lucerna agentic dream.`,
       "",
     ].join("\n");
-    writeGuarded(config.houseRoot, dreamAbs, fallback, lists);
+    writeGuarded(
+      config.houseRoot,
+      dreamAbs,
+      ensureAgenticReportFrontmatter(fallbackBody, actionKey),
+      lists,
+    );
+  } else {
+    // Normalize frontmatter: pipeline/recipe join the manifest; drop status: pending
+    try {
+      const raw = readFileSync(dreamAbs, "utf-8");
+      const normalized = ensureAgenticReportFrontmatter(raw, actionKey);
+      if (normalized !== raw) {
+        writeGuarded(config.houseRoot, dreamAbs, normalized, lists);
+      }
+    } catch {
+      /* leave as-is if unreadable */
+    }
   }
 
   const agentText = (() => {

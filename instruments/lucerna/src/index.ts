@@ -108,6 +108,8 @@ export {
   FULL_AGENTIC_KEYS,
   isFullAgenticKey,
   buildManifestFrontmatter,
+  buildAgenticReportFrontmatter,
+  ensureAgenticReportFrontmatter,
   buildProposalFrontmatter,
   dreamManifestRelPath,
   type GovernanceBreach,
