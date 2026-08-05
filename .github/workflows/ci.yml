@@ -172,9 +172,14 @@ jobs:
       # gate. Windows is gated on build + smoke (the `build` job) plus the
       # crate suites below, which are clean there. See UPSTREAM.md § What
       # differs and the fork's Windows test discipline.
+      # needs_animation_gates_prompt_history_tick_delivery: upstream timing
+      # flake (asserts a daemon poll lands within a tick). Failed 2/2 runs
+      # on 2026-08-05 after passing twice the same night on identical code;
+      # the file is touched only by sync bundles. Declared exclusion per the
+      # repo's flake discipline; re-check at the next upstream sync.
       - name: Test pager crate (unit + integration)
         if: matrix.os == 'ubuntu-latest'
-        run: cargo test -p xai-grok-pager
+        run: cargo test -p xai-grok-pager -- --skip needs_animation_gates_prompt_history_tick_delivery
 
       # --no-fail-fast: cargo otherwise stops at the first failing test
       # BINARY, which masked the update-crate suite behind an agent-crate
