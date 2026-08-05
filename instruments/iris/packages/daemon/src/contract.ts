@@ -341,6 +341,38 @@ export interface DaemonConfig {
  * cache-control: private, max-age=300 and the mime map; unknown query params
  * ignored everywhere.
  */
+/**
+ * Optional managed-qmd search/status surface (injected by the composition root
+ * or created by startServer when absent). Search modes lex|vec|query proxy here;
+ * mode=index never touches it.
+ */
+export interface QmdSearchHit {
+  path: string;
+  title: string;
+  score?: number;
+  snippet?: string;
+}
+
+export interface QmdSearchResult {
+  available: boolean;
+  reason?: string;
+  backend: 'qmd';
+  mode: 'lex' | 'vec' | 'query';
+  query: string;
+  items: QmdSearchHit[];
+}
+
+export interface QmdModule {
+  search(
+    orgRoot: string,
+    query: string,
+    mode: 'lex' | 'vec' | 'query',
+    limit: number,
+  ): Promise<QmdSearchResult>;
+  status(orgRoot: string): Promise<Record<string, unknown>>;
+  refresh?: { snapshot(): object; stop(): void } | null;
+}
+
 export interface DaemonDeps {
   config: DaemonConfig;
   index: OrgIndex;
@@ -348,6 +380,8 @@ export interface DaemonDeps {
   graph: GraphModule;
   projects: ProjectsModule;
   search: SearchModule;
+  /** Managed qmd companion — absent means lex/vec/query report available:false. */
+  qmd?: QmdModule;
 }
 
 /** RFC3339 UTC, 9 fractional digits, '+00:00' offset (parity-ignored value,

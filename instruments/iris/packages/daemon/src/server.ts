@@ -17,6 +17,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import type { DaemonDeps } from './contract.ts';
+import { createQmdModule, startQmdRefreshWatch } from './proxies/qmd.ts';
 import { emptyStatus } from './routes/http.ts';
 import { health } from './routes/health.ts';
 import { status } from './routes/status.ts';
@@ -73,7 +74,7 @@ function handle(deps: DaemonDeps, req: Request): Response | Promise<Response> {
         exclude_prefix: params.get('exclude_prefix') ?? undefined,
       });
     case '/api/search':
-      return searchRoute(deps, params.get('q'));
+      return searchRoute(deps, params.get('q'), params.get('mode'), params.get('limit'));
     case '/api/graph':
       return graphRoute(deps, params);
     case '/api/projects':
@@ -102,15 +103,35 @@ export function buildFetch(deps: DaemonDeps): (req: Request) => Response | Promi
   return (req) => handle(deps, req);
 }
 
+export interface StartedServer {
+  server: ReturnType<typeof Bun.serve>;
+  /** Stop the HTTP server and any qmd refresh watch. */
+  stop(): void;
+}
+
+/** Ensure deps carry a qmd module; start automatic freshness when not injected. */
+export function wireQmd(deps: DaemonDeps, opts?: { noRefresh?: boolean }): DaemonDeps {
+  if (deps.qmd) return deps;
+  if (opts?.noRefresh || process.env.IRIS_QMD_NO_REFRESH === '1') {
+    return { ...deps, qmd: createQmdModule() };
+  }
+  const refresh = startQmdRefreshWatch(deps.config.orgRoot);
+  return { ...deps, qmd: createQmdModule({}, refresh) };
+}
+
 /** Start Bun.serve on config.port with the wired deps. Returns the Bun server.
  *
  *  Loopback-only by design: iris is a local-first instrument and its index is
  *  the org tree — Bun's default hostname is 0.0.0.0 (all interfaces), which
- *  would expose it to the LAN. Pinned, not configurable. */
+ *  would expose it to the LAN. Pinned, not configurable.
+ *
+ *  When `deps.qmd` is absent, a default managed-qmd module is attached and a
+ *  debounced freshness watch is started (disabled with IRIS_QMD_NO_REFRESH=1). */
 export function startServer(deps: DaemonDeps): ReturnType<typeof Bun.serve> {
+  const wired = wireQmd(deps);
   return Bun.serve({
     hostname: "127.0.0.1",
-    port: deps.config.port,
-    fetch: buildFetch(deps),
+    port: wired.config.port,
+    fetch: buildFetch(wired),
   });
 }

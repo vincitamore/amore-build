@@ -146,6 +146,16 @@ model; tier 2 model-judged edges require a working `amore` binary). There
 is no before-the-fact approval gate on derived edges; stewardship is
 after-the-fact (`iris edges list/show/edit/remove` plus suppressions).
 
+### Iris qmd index freshness
+
+When the iris daemon is running and a managed qmd house index exists, the
+daemon debounce-batches markdown changes under the org sections into a
+serialized local `qmd update` (and a bounded embed pass only when embedding
+models are already on disk). That path is a local subprocess with no
+network: model downloads remain an explicit setup step, never a background
+pull. Operators can inspect last refresh time and pending change counts with
+`iris qmd status`. Disable automatic refresh with `IRIS_QMD_NO_REFRESH=1`.
+
 ### Maintenance tool restriction
 
 Maintenance dream spawns that reach a model are expected to disable web

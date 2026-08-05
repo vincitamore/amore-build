@@ -19,7 +19,7 @@
 import type { DaemonDeps } from '../contract.ts';
 import { json, rfc3339Nanos } from './http.ts';
 
-export function status(deps: DaemonDeps): Response {
+export function status(deps: DaemonDeps): Response | Promise<Response> {
   const docs = [...deps.index.docs.values()];
 
   const byType: Record<string, number> = {};
@@ -53,10 +53,19 @@ export function status(deps: DaemonDeps): Response {
 
   const uptime = Math.floor((Date.now() - deps.config.startedAt) / 1000);
 
-  return json({
+  const base = {
     server: { uptime, connectedClients: 1, lastIndexed: rfc3339Nanos(Date.now()) },
     documents: { total: deps.index.docs.size, byType, byStatus },
     tags: { total: top.length, top },
     recent,
-  });
+  };
+
+  if (!deps.qmd) {
+    return json({
+      ...base,
+      qmd: { state: 'not-installed', available: false, reason: 'qmd backend not configured' },
+    });
+  }
+
+  return deps.qmd.status(deps.config.orgRoot).then((qmd) => json({ ...base, qmd }));
 }

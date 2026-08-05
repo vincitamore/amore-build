@@ -13,6 +13,23 @@ interface SearchResult {
   type?: string;
 }
 
+/** UI modes map to API modes: fuzzy→index, content→lex, semantic→query. */
+export type SearchUiMode = 'fuzzy' | 'content' | 'semantic';
+
+const UI_MODES: SearchUiMode[] = ['fuzzy', 'content', 'semantic'];
+
+function apiMode(ui: SearchUiMode): 'index' | 'lex' | 'query' {
+  if (ui === 'content') return 'lex';
+  if (ui === 'semantic') return 'query';
+  return 'index';
+}
+
+function modeLabel(ui: SearchUiMode): string {
+  if (ui === 'content') return 'content (BM25)';
+  if (ui === 'semantic') return 'semantic (hybrid)';
+  return 'fuzzy index (local)';
+}
+
 function folderOf(path: string): string {
   return path.split('/').slice(0, -1).join('/') || '(root)';
 }
@@ -43,10 +60,10 @@ function subcategoryOf(r: SearchResult): string {
 }
 
 /**
- * Global search palette (`/` from any member). Index-mode only against the daemon
- * fuzzy index (`/api/search`, scoped to the active member's type). ↑↓ moves, Enter
- * searches (then opens the selection), Esc closes. Picking a result hands the path
- * up for the shell to open in a DocView.
+ * Global search palette (`/` from any member). Modes: fuzzy (index), content (lex),
+ * semantic (hybrid query). ↑↓ moves, Tab cycles mode, Enter searches (then opens
+ * the selection), Esc closes. Picking a result hands the path up for the shell
+ * to open in a DocView.
  */
 export function SearchOverlay({
   active = true,
@@ -68,8 +85,9 @@ export function SearchOverlay({
   const inputRef = useRef<{ value?: string } | null>(null);
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchResult[]>([]);
-  const [status, setStatus] = useState('type a query · ⏎ search');
+  const [status, setStatus] = useState('type a query · ⏎ search · tab mode');
   const [sel, setSel] = useState(0);
+  const [uiMode, setUiMode] = useState<SearchUiMode>('fuzzy');
 
   // Kept MOUNTED (Shell toggles `active`); reset to a blank search each time it's shown.
   useEffect(() => {
@@ -77,7 +95,7 @@ export function SearchOverlay({
     setQuery('');
     setResults([]);
     setSel(0);
-    setStatus('type a query · ⏎ search');
+    setStatus('type a query · ⏎ search · tab mode');
     if (inputRef.current) inputRef.current.value = '';
   }, [active]);
 
@@ -85,7 +103,7 @@ export function SearchOverlay({
     if (!active) return; // hidden — don't fetch
     if (!query.trim()) {
       setResults([]);
-      setStatus('type a query · ⏎ search');
+      setStatus('type a query · ⏎ search · tab mode');
       return;
     }
     if (!daemonUrl) {
@@ -98,12 +116,23 @@ export function SearchOverlay({
       try {
         const url = new URL(`${daemonUrl}/api/search`);
         url.searchParams.set('q', query);
+        const mode = apiMode(uiMode);
+        if (mode !== 'index') url.searchParams.set('mode', mode);
         if (defaultType) url.searchParams.set('type', defaultType);
         url.searchParams.set('limit', '40');
         const res = await fetch(url);
         const j = (await res.json()) as {
           items?: Array<{ path: string; title: string; score?: number; snippet?: string; status?: string; type?: string }>;
+          available?: boolean;
+          reason?: string;
         };
+        if (!alive) return;
+        if (j.available === false) {
+          setResults([]);
+          setSel(0);
+          setStatus(j.reason ? j.reason : 'search backend unavailable');
+          return;
+        }
         const items: SearchResult[] = (j.items ?? []).map((x) => ({
           path: x.path,
           title: x.title || x.path.split('/').pop() || x.path,
@@ -113,11 +142,9 @@ export function SearchOverlay({
           status: x.status,
           type: x.type,
         }));
-        if (alive) {
-          setResults(items);
-          setSel(0);
-          setStatus(items.length ? `${items.length} results` : 'no matches');
-        }
+        setResults(items);
+        setSel(0);
+        setStatus(items.length ? `${items.length} results` : 'no matches');
       } catch {
         if (alive) setStatus('search failed');
       }
@@ -125,7 +152,7 @@ export function SearchOverlay({
     return () => {
       alive = false;
     };
-  }, [active, query, daemonUrl, defaultType]);
+  }, [active, query, daemonUrl, defaultType, uiMode]);
 
   // Group results by category → subcategory, preserving rank throughout: the top result's
   // category leads, and within it the top result's subcategory leads. `sel` indexes here.
@@ -171,6 +198,13 @@ export function SearchOverlay({
     if (!active) return; // mounted-but-hidden
     const n = (key.name ?? '').toLowerCase();
     if (n === 'escape') return onClose();
+    if (n === 'tab') {
+      setUiMode((cur) => {
+        const i = UI_MODES.indexOf(cur);
+        return UI_MODES[(i + 1) % UI_MODES.length]!;
+      });
+      return;
+    }
     if (n === 'up') return setSel((s) => Math.max(0, s - 1));
     if (n === 'down') return setSel((s) => Math.min(grouped.length - 1, s + 1));
     if (n === 'return' || n === 'enter') {
@@ -203,6 +237,8 @@ export function SearchOverlay({
   const dOffset = Math.max(0, Math.min(curDisplay - Math.floor(listRows / 2), Math.max(0, display.length - listRows)));
   const shown = display.slice(dOffset, dOffset + listRows);
 
+  const modeHint = modeLabel(uiMode);
+
   return (
     <box
       visible={active}
@@ -229,11 +265,12 @@ export function SearchOverlay({
         backgroundColor={t.background}
         textColor={t.foreground}
       />
-      <box flexShrink={0}>
-        <text fg={t.muted}>{`${status}  ·  fuzzy index (local)`}</text>
+      {/* Status + mode: always paint opaque background so prior glyphs clear (stale-cell craft). */}
+      <box flexShrink={0} backgroundColor={t.background}>
+        <text fg={t.muted}>{`${status}  ·  ${modeHint}  ·  tab cycles mode`}</text>
       </box>
 
-      <box flexDirection="column" flexGrow={1}>
+      <box flexDirection="column" flexGrow={1} backgroundColor={t.background}>
         {/* FIXED ROW SLOTS: a constant `listRows` count of boxes keyed by slot index. */}
         {Array.from({ length: listRows }, (_, vi) => {
           const d = shown[vi];
@@ -269,8 +306,8 @@ export function SearchOverlay({
               onMouseDown={onDown}
             >
               <text fg={mainFg}>{main}</text>
-              <box flexGrow={1} />
-              {right ? <text fg={t.muted}>{right}</text> : null}
+              <box flexGrow={1} backgroundColor={bg} />
+              {right ? <text fg={t.muted}>{right}</text> : <text fg={t.background}>{' '}</text>}
             </box>
           );
         })}

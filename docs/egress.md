@@ -92,6 +92,9 @@ for a later release.
 | **amore init** | GitHub Releases fetch for companions | Install / `--refresh` when iris (default on) or `--with-lucerna` / `--with-speculum` is requested | Documented URL base `https://github.com/vincitamore/amore-build/releases/download`; sha256-verified. Offline when iris is opted out **and** optional companions are not requested |
 | **iris** | Loopback HTTP `127.0.0.1:3853` | When the iris daemon is running | Local only; [ports.md](ports.md). Not WAN egress |
 | **iris** | Release fetch | Same as `amore init` companion install (iris asset) | Install-time only |
+| **iris qmd** | npm registry (`registry.npmjs.org`) install of pinned `@tobilu/qmd` | Explicit `iris qmd setup` (or init-driven setup) into `~/.amore/instruments/qmd/runtime/` | Deliberate one-shot package install; no global npm; no PATH edits |
+| **iris qmd** | Hugging Face GGUF model pulls (`huggingface.co`) for embedding, rerank, and query-expansion models | Explicit setup without `--no-models` (first hybrid enablement) | Hosts resolve as `https://huggingface.co/<repo>/resolve/main/<file>` for the three default GGUF files (~2.1 GB total). Nothing at query time once models are cached; automatic index refresh is local-only |
+| **iris qmd** | Search / update / embed after setup | Query and daemon refresh | Local subprocess only; no network when models and package are present |
 | **lucerna** | Model via `amore` spawn only | When dreams (or auto-commit draft) are enabled and a cycle runs | `scripts/lucerna_egress_capture.sh`; defaults off ([autonomy.md](autonomy.md)) |
 | **lucerna** | Network listener | **None** | File-based control only |
 | **speculum** | Probes / ingest / usage | Explicit CLI; **no network** | Local sqlite + session tree only |
