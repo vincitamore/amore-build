@@ -119,6 +119,17 @@ iris qmd status             # pin, model presence, docs/vectors/pending, last re
 iris qmd update [--embed]   # incremental re-walk; optional embedding pass
 ```
 
+A healthy fresh house reports ready in one screen (real output from a
+released build over a just-created house):
+
+```
+qmd: ready-semantic
+  pin: 2.1.0
+  house: e2e-house-66938a1d6fff
+  docs: 9  vectors: 24  pending: 0
+  models: embed=yes rerank=yes expand=yes
+```
+
 When a non-index mode is requested and qmd is not ready, the API returns
 HTTP 200 with `{ available: false, reason, items: [] }` rather than a
 silent empty list. Fuzzy search always works without qmd. Search does not
