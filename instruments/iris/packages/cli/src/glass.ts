@@ -12,7 +12,7 @@ import { launchDash, resolveTuiEntry } from './dash-launch';
 
 const NOTE =
   'iris opens the dashboard (the span). Org verbs (status, task, knowledge, inbox, ' +
-  'reminder, lint, search, links, graph, athanor, …) live under `iris <verb>`.';
+  'reminder, lint, search, links, graph, athanor, lucerna, …) live under `iris <verb>`.';
 
 const argv = process.argv.slice(2);
 

@@ -82,6 +82,13 @@ export const ENDPOINTS: Endpoint[] = [
   { method: 'GET', path: '/api/oraculum/health', pathParams: [], queryParams: [], consumers: ['client'], tier: 'excluded', reason: 'proxy' },
   { method: 'POST', path: '/api/oraculum/chat', pathParams: [], queryParams: [], consumers: ['client'], tier: 'excluded', reason: 'proxy' },
   { method: 'POST', path: '/api/oraculum/expand', pathParams: [], queryParams: [], consumers: ['client'], tier: 'excluded', reason: 'proxy' },
+  // Lucerna agency state-file proxy (live Bun routes only; no goldens for POSTs)
+  { method: 'GET', path: '/api/lucerna/health', pathParams: [], queryParams: [], consumers: ['tui', 'cli'], tier: 'excluded', reason: 'proxy', note: 'lucerna runtime health.json' },
+  { method: 'GET', path: '/api/lucerna/status', pathParams: [], queryParams: [], consumers: ['tui', 'cli'], tier: 'excluded', reason: 'proxy', note: 'lucerna state + enablement' },
+  { method: 'GET', path: '/api/lucerna/log', pathParams: [], queryParams: ['n'], consumers: ['tui', 'cli'], tier: 'excluded', reason: 'proxy' },
+  { method: 'POST', path: '/api/lucerna/halt', pathParams: [], queryParams: [], consumers: ['tui', 'cli'], tier: 'excluded', reason: 'proxy' },
+  { method: 'POST', path: '/api/lucerna/wake', pathParams: [], queryParams: [], consumers: ['tui', 'cli'], tier: 'excluded', reason: 'proxy' },
+  { method: 'POST', path: '/api/lucerna/sleep', pathParams: [], queryParams: [], consumers: ['tui', 'cli'], tier: 'excluded', reason: 'proxy' },
 
   // ── EXCLUDED: auth — identity / signing ────────────────────────────────────
   { method: 'GET', path: '/api/identity', pathParams: [], queryParams: [], consumers: ['client'], tier: 'excluded', reason: 'auth' },

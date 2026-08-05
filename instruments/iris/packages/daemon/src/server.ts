@@ -27,6 +27,7 @@ import { searchRoute } from './routes/search.ts';
 import { graphRoute } from './routes/graph.ts';
 import { listProjects, projectFile, projectTree } from './routes/projects.ts';
 import { daemonStatus } from './routes/daemon-status.ts';
+import { lucernaRoute } from './routes/lucerna.ts';
 
 const FILES_PREFIX = '/api/files/';
 const ASSETS_PREFIX = '/api/assets/';
@@ -47,6 +48,10 @@ function handle(deps: DaemonDeps, req: Request): Response | Promise<Response> {
   const url = new URL(req.url);
   const pathname = url.pathname;
   const params = url.searchParams;
+
+  // Lucerna state-surface routes handle their own methods (GET reads + POST
+  // governance) — dispatched before the GET-only guard below.
+  if (pathname.startsWith('/api/lucerna/')) return lucernaRoute(deps.config, req);
 
   if (req.method !== 'GET') return emptyStatus(404);
 

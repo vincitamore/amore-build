@@ -15,6 +15,7 @@ import { RemindersMember } from '../members/RemindersMember';
 import { KnowledgeMember } from '../members/KnowledgeMember';
 import { FilesMember } from '../members/FilesMember';
 import { ForgeMember } from '../members/ForgeMember';
+import { LucernaMember } from '../members/LucernaMember';
 import { DocView } from '../components/DocView';
 import { SearchOverlay } from '../SearchOverlay';
 import { ThemePicker } from '../ThemePicker';
@@ -36,13 +37,14 @@ const MReminders = memo(RemindersMember);
 const MKnowledge = memo(KnowledgeMember);
 const MFiles = memo(FilesMember);
 const MForge = memo(ForgeMember);
+const MLucerna = memo(LucernaMember);
 // GraphView + the global DocView are also kept-mounted and were the ACTUAL churn source (their
 // child GraphConfigModal / MarkdownView re-rendered on every Shell re-render). Memoize them too so
 // they go quiet unless their own props change.
 const MGraphView = memo(GraphView);
 const MDocView = memo(DocView);
 
-const MEMBERS = ['Dashboard', 'Tasks', 'Inbox', 'Reminders', 'Knowledge', 'Files', 'Forge', 'Graph'] as const;
+const MEMBERS = ['Dashboard', 'Tasks', 'Inbox', 'Reminders', 'Knowledge', 'Files', 'Forge', 'Lucerna', 'Graph'] as const;
 
 // Layout modes the graph's `m` key cycles through, in order. See render/graph.ts for each.
 const LAYOUT_MODES: LayoutMode[] = ['force', 'cluster', 'status', 'community', 'radial'];
@@ -403,6 +405,8 @@ export function Shell({ onQuit }: { onQuit?: () => void }) {
         return <MFiles inputActive={on} onCapture={cap} daemonUrl={daemonReady} />;
       case 'Forge':
         return <MForge inputActive={on} onCapture={cap} daemonUrl={daemonReady} />;
+      case 'Lucerna':
+        return <MLucerna inputActive={on} onCapture={cap} daemonUrl={daemonReady} />;
       default:
         return <MDashboard active={on} daemonUrl={daemonReady} onNavigate={navigate} onOpen={openDoc} />;
     }
