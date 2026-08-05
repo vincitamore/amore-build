@@ -22,9 +22,11 @@ pub enum QmdSetupOutcome {
     Configured,
     /// Dry-run: would have run setup after a successful iris install.
     WouldConfigure,
-    /// User passed `--no-qmd`.
+    /// User passed `--no-qmd` while iris was still in play.
     OptedOut,
-    /// Iris was not installed in this run (`--no-iris` or fetch failure).
+    /// Iris was not installed this run (`--no-iris` or fetch failure). Silent
+    /// in the summary: the user already opted out of (or lost) the stack qmd
+    /// rides on; do not print a second guidance line naming iris.
     SkippedNoIris,
     /// Iris binary could not be resolved next to the install / PATH link.
     SkippedNoBinary { reason: String },
@@ -33,7 +35,7 @@ pub enum QmdSetupOutcome {
 }
 
 impl QmdSetupOutcome {
-    /// One line for the init summary. Silent only when there is nothing to say.
+    /// One line for the init summary. `None` when silent (iris opt-out / no iris).
     pub fn summary_line(&self) -> Option<String> {
         match self {
             Self::Configured => Some(
@@ -46,10 +48,8 @@ impl QmdSetupOutcome {
             Self::OptedOut => Some(
                 "  qmd:          skipped (--no-qmd); finish later with `iris qmd setup`".to_owned(),
             ),
-            Self::SkippedNoIris => Some(
-                "  qmd:          skipped (no iris); install iris, then run `iris qmd setup`"
-                    .to_owned(),
-            ),
+            // Match iris OptedOut: no summary noise when the companion stack is off.
+            Self::SkippedNoIris => None,
             Self::SkippedNoBinary { reason } => Some(format!(
                 "  qmd:          not set up ({reason}); the house is complete without it. \
                  Finish later with `iris qmd setup`"
@@ -74,15 +74,18 @@ pub fn run(
     dry_run: bool,
     writer: &mut dyn Write,
 ) -> QmdSetupOutcome {
-    if no_qmd {
-        return QmdSetupOutcome::OptedOut;
-    }
+    // No iris in this run: stay silent (even if `--no-qmd` is also set). The
+    // companion stack is off; do not print a qmd guidance line that names iris.
     match iris {
-        IrisOutcome::OptedOut => QmdSetupOutcome::SkippedNoIris,
-        IrisOutcome::Failed { .. } | IrisOutcome::UnsupportedHost { .. } => {
-            QmdSetupOutcome::SkippedNoIris
+        IrisOutcome::OptedOut
+        | IrisOutcome::Failed { .. }
+        | IrisOutcome::UnsupportedHost { .. } => {
+            return QmdSetupOutcome::SkippedNoIris;
         }
         IrisOutcome::Installed { linked, .. } => {
+            if no_qmd {
+                return QmdSetupOutcome::OptedOut;
+            }
             if dry_run {
                 return QmdSetupOutcome::WouldConfigure;
             }
@@ -172,13 +175,17 @@ mod tests {
         let mut buf = Vec::new();
         let out = run(root.path(), &iris, true, false, &mut buf);
         assert_eq!(out, QmdSetupOutcome::OptedOut);
-        let line = out.summary_line().unwrap();
-        assert!(line.contains("--no-qmd"));
-        assert!(line.contains("iris qmd setup"));
+        let line = out.summary_line().expect("--no-qmd must print a summary line");
+        assert!(line.contains("--no-qmd"), "{line}");
+        assert!(line.contains("iris qmd setup"), "{line}");
+        // Informative path names the setup command; that is fine when iris is on.
+        assert!(!line.to_ascii_lowercase().contains("no iris"), "{line}");
     }
 
     #[test]
-    fn no_iris_implies_skip() {
+    fn no_iris_implies_skip_and_is_silent() {
+        // `--no-iris` opts out of the whole companion stack; qmd must not add a
+        // second line that re-mentions iris (integration: no_iris_makes_init_fully_offline).
         let root = tempfile::tempdir().unwrap();
         let mut buf = Vec::new();
         let out = run(
@@ -189,11 +196,16 @@ mod tests {
             &mut buf,
         );
         assert_eq!(out, QmdSetupOutcome::SkippedNoIris);
-        assert!(out.summary_line().unwrap().contains("no iris"));
+        assert_eq!(out.summary_line(), None);
+        assert!(
+            buf.is_empty(),
+            "skipped-no-iris must write nothing to the summary stream: {}",
+            String::from_utf8_lossy(&buf)
+        );
     }
 
     #[test]
-    fn failed_iris_fetch_skips_setup() {
+    fn failed_iris_fetch_skips_setup_silently() {
         let root = tempfile::tempdir().unwrap();
         let mut buf = Vec::new();
         let out = run(
@@ -206,6 +218,7 @@ mod tests {
             &mut buf,
         );
         assert_eq!(out, QmdSetupOutcome::SkippedNoIris);
+        assert_eq!(out.summary_line(), None);
     }
 
     #[test]
