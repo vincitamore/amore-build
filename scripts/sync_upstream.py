@@ -413,6 +413,15 @@ def cmd_verify(dry_run: bool) -> int:
         INIT_CMD_FILE, 'long = "with-speculum"',
         "init exposes --with-speculum opt-in companion flag", problems)
     _check_file_contains(
+        INIT_CMD_FILE, 'long = "no-qmd"',
+        "init exposes --no-qmd opt-out for semantic search setup", problems)
+    _check_file_contains(
+        INIT_CMD_FILE, "qmd_setup::run",
+        "init calls qmd_setup::run after iris companion install", problems)
+    _check_file_contains(
+        INSTRUMENTS_DIAG_FILE, "probe_qmd_search",
+        "doctor instruments probe registers qmd/search probe (probe_qmd_search)", problems)
+    _check_file_contains(
         INSTRUMENT_FETCH_FILE, RELEASE_BASE_NEEDLE,
         "instrument_fetch RELEASE_BASE names the fork release repo", problems)
     _check_file_contains(

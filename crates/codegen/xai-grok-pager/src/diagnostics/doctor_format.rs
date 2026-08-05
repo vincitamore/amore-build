@@ -147,7 +147,7 @@ fn format_instruments_section(
     out: &mut String,
 ) {
     use super::instruments as inst;
-    use super::{CompanionInstall, IrisDaemonHome};
+    use super::CompanionInstall;
 
     out.push_str(&format!(
         "  iris         {}\n",
@@ -156,17 +156,10 @@ fn format_instruments_section(
             other => inst::format_install_line(other),
         }
     ));
-    match &instruments.iris_daemon_home {
-        IrisDaemonHome::Present { path } => {
-            out.push_str(&format!("  iris home    present ({})\n", path.display()));
-        }
-        IrisDaemonHome::Absent { path } => {
-            out.push_str(&format!("  iris home    absent ({})\n", path.display()));
-        }
-        IrisDaemonHome::HomeUnavailable => {
-            out.push_str("  iris home    unavailable\n");
-        }
-    }
+    out.push_str(&format!(
+        "  iris home    {}\n",
+        inst::format_iris_daemon_home(&instruments.iris_daemon_home)
+    ));
     out.push_str(&format!(
         "  lucerna      {}\n",
         match &instruments.lucerna {
@@ -187,6 +180,10 @@ fn format_instruments_section(
             other => inst::format_install_line(other),
         }
     ));
+    for (label, value) in inst::format_qmd_search_lines(&instruments.qmd) {
+        // Pad labels to the same column as iris/lucerna rows.
+        out.push_str(&format!("  {label:<12} {value}\n"));
+    }
 }
 
 fn format_findings(report: &DiagnosticReport, out: &mut String) {

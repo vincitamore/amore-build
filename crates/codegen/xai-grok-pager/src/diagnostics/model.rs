@@ -156,11 +156,36 @@ impl CompanionInstall {
     }
 }
 
-/// Iris daemon state directory (`~/.iris`).
+/// Which iris state home is live after the managed-home migration.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum IrisHomeLayout {
+    /// `~/.amore/instruments/iris/` (preferred).
+    Managed,
+    /// Legacy `~/.iris`. `moved_marker` is true when `MOVED.md` is present
+    /// (migration left a pointer in the old home).
+    Legacy { moved_marker: bool },
+}
+
+impl IrisHomeLayout {
+    pub fn status_label(&self) -> &'static str {
+        match self {
+            Self::Managed => "managed",
+            Self::Legacy { .. } => "legacy",
+        }
+    }
+}
+
+/// Iris daemon state directory: managed home first, then legacy `~/.iris`.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum IrisDaemonHome {
-    Present { path: std::path::PathBuf },
-    Absent { path: std::path::PathBuf },
+    Present {
+        path: std::path::PathBuf,
+        layout: IrisHomeLayout,
+    },
+    Absent {
+        managed_path: std::path::PathBuf,
+        legacy_path: std::path::PathBuf,
+    },
     HomeUnavailable,
 }
 
@@ -170,6 +195,121 @@ impl IrisDaemonHome {
             Self::Present { .. } => "present",
             Self::Absent { .. } => "absent",
             Self::HomeUnavailable => "home_unavailable",
+        }
+    }
+}
+
+/// Managed `@tobilu/qmd` runtime under `~/.amore/instruments/qmd/runtime/`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum QmdRuntimeFact {
+    Present {
+        path: std::path::PathBuf,
+        /// Pinned package version when readable from disk (never by spawning).
+        version: Option<String>,
+    },
+    Absent {
+        path: std::path::PathBuf,
+    },
+    HomeUnavailable,
+}
+
+impl QmdRuntimeFact {
+    pub fn status_label(&self) -> &'static str {
+        match self {
+            Self::Present { .. } => "present",
+            Self::Absent { .. } => "absent",
+            Self::HomeUnavailable => "home_unavailable",
+        }
+    }
+}
+
+/// Search models under `~/.amore/instruments/qmd/models/` (filesystem only).
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum QmdModelsFact {
+    Present {
+        path: std::path::PathBuf,
+        count: usize,
+        total_bytes: u64,
+        names: Vec<String>,
+    },
+    Absent {
+        path: std::path::PathBuf,
+    },
+    HomeUnavailable,
+}
+
+impl QmdModelsFact {
+    pub fn status_label(&self) -> &'static str {
+        match self {
+            Self::Present { .. } => "present",
+            Self::Absent { .. } => "absent",
+            Self::HomeUnavailable => "home_unavailable",
+        }
+    }
+}
+
+/// House-scoped qmd index under `~/.amore/instruments/qmd/houses/<id>/`.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum QmdHouseIndexFact {
+    Present {
+        path: std::path::PathBuf,
+        house_id: String,
+    },
+    Absent {
+        path: std::path::PathBuf,
+        house_id: String,
+    },
+    /// No house root found from the current directory ancestry.
+    HouseNotResolved,
+    HomeUnavailable,
+}
+
+impl QmdHouseIndexFact {
+    pub fn status_label(&self) -> &'static str {
+        match self {
+            Self::Present { .. } => "present",
+            Self::Absent { .. } => "absent",
+            Self::HouseNotResolved => "house_not_resolved",
+            Self::HomeUnavailable => "home_unavailable",
+        }
+    }
+}
+
+/// Host JS runtime needed to run the managed qmd package (node >= 22 or bun).
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum JsRuntimeFact {
+    Available {
+        kind: String,
+        version: String,
+    },
+    Missing,
+}
+
+impl JsRuntimeFact {
+    pub fn status_label(&self) -> &'static str {
+        match self {
+            Self::Available { .. } => "available",
+            Self::Missing => "missing",
+        }
+    }
+}
+
+/// Semantic search (qmd) facts for doctor: filesystem + PATH only, never spawn.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct QmdSearchFacts {
+    pub runtime: QmdRuntimeFact,
+    pub models: QmdModelsFact,
+    pub house_index: QmdHouseIndexFact,
+    pub js_runtime: JsRuntimeFact,
+}
+
+impl Default for QmdSearchFacts {
+    fn default() -> Self {
+        Self {
+            runtime: QmdRuntimeFact::HomeUnavailable,
+            models: QmdModelsFact::HomeUnavailable,
+            house_index: QmdHouseIndexFact::HomeUnavailable,
+            js_runtime: JsRuntimeFact::Missing,
         }
     }
 }
@@ -207,6 +347,8 @@ pub struct InstrumentsFacts {
     pub lucerna: CompanionInstall,
     pub lucerna_enablement: LucernaEnablementFact,
     pub speculum: CompanionInstall,
+    /// Managed qmd semantic search (filesystem probes only).
+    pub qmd: QmdSearchFacts,
 }
 
 impl Default for InstrumentsFacts {
@@ -217,6 +359,7 @@ impl Default for InstrumentsFacts {
             lucerna: CompanionInstall::NotInstalled,
             lucerna_enablement: LucernaEnablementFact::NotObserved,
             speculum: CompanionInstall::NotInstalled,
+            qmd: QmdSearchFacts::default(),
         }
     }
 }

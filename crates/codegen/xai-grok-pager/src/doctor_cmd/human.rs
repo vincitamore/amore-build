@@ -230,9 +230,7 @@ fn format_finding(out: &mut String, finding: &DiagnosticFinding) {
 }
 
 fn format_instruments(out: &mut String, instruments: &crate::diagnostics::InstrumentsFacts) {
-    use crate::diagnostics::{
-        CompanionInstall, IrisDaemonHome, instruments as inst,
-    };
+    use crate::diagnostics::{CompanionInstall, IrisDaemonHome, instruments as inst};
 
     let iris_line = match &instruments.iris {
         CompanionInstall::NotInstalled => {
@@ -243,14 +241,11 @@ fn format_instruments(out: &mut String, instruments: &crate::diagnostics::Instru
     fact(out, "iris", &iris_line);
 
     match &instruments.iris_daemon_home {
-        IrisDaemonHome::Present { path } => {
-            fact(out, "iris daemon home", &format!("present ({})", path.display()));
-        }
-        IrisDaemonHome::Absent { path } => {
-            fact(out, "iris daemon home", &format!("absent ({})", path.display()));
-        }
         IrisDaemonHome::HomeUnavailable => {
             unavailable(out, "iris daemon home", "home unavailable");
+        }
+        other => {
+            fact(out, "iris daemon home", &inst::format_iris_daemon_home(other));
         }
     }
 
@@ -278,6 +273,10 @@ fn format_instruments(out: &mut String, instruments: &crate::diagnostics::Instru
         other => inst::format_install_line(other),
     };
     fact(out, "speculum", &speculum_line);
+
+    for (label, value) in inst::format_qmd_search_lines(&instruments.qmd) {
+        fact(out, label, &value);
+    }
 }
 
 fn format_newline(newline: &NewlineFact) -> String {

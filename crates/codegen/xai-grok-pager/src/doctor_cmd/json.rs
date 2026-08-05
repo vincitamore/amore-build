@@ -3,8 +3,9 @@ use serde::Serialize;
 use crate::clipboard::{ClipboardDelivery, NativeClipboardPreflight, Osc52Capability};
 use crate::diagnostics::{
     CompanionInstall, DataControlFact, DiagnosticFinding, DiagnosticReport, FindingDisposition,
-    InstrumentsFacts, IrisDaemonHome, LucernaEnablementFact, NewlineFact, ProbeNote, ProbeStatus,
-    RuntimeFact, VoiceFacts,
+    InstrumentsFacts, IrisDaemonHome, IrisHomeLayout, JsRuntimeFact, LucernaEnablementFact,
+    NewlineFact, ProbeNote, ProbeStatus, QmdHouseIndexFact, QmdModelsFact, QmdRuntimeFact,
+    QmdSearchFacts, RuntimeFact, VoiceFacts,
 };
 use crate::host::HostOs;
 use crate::terminal::{ByobuBackend, ModifierFate, MultiplexerKind, TerminalName};
@@ -134,6 +135,7 @@ struct JsonInstrumentsFacts<'a> {
     lucerna: JsonCompanionInstall<'a>,
     lucerna_enablement: JsonLucernaEnablement<'a>,
     speculum: JsonCompanionInstall<'a>,
+    qmd: JsonQmdSearchFacts<'a>,
 }
 
 impl<'a> From<&'a InstrumentsFacts> for JsonInstrumentsFacts<'a> {
@@ -144,6 +146,7 @@ impl<'a> From<&'a InstrumentsFacts> for JsonInstrumentsFacts<'a> {
             lucerna: JsonCompanionInstall::from(&facts.lucerna),
             lucerna_enablement: JsonLucernaEnablement::from(&facts.lucerna_enablement),
             speculum: JsonCompanionInstall::from(&facts.speculum),
+            qmd: JsonQmdSearchFacts::from(&facts.qmd),
         }
     }
 }
@@ -191,22 +194,219 @@ struct JsonIrisDaemonHome<'a> {
     status: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     path: Option<&'a str>,
+    /// `managed` or `legacy` when present.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    layout: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    moved_marker: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    managed_path: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    legacy_path: Option<&'a str>,
 }
 
 impl<'a> From<&'a IrisDaemonHome> for JsonIrisDaemonHome<'a> {
     fn from(home: &'a IrisDaemonHome) -> Self {
         match home {
-            IrisDaemonHome::Present { path } => Self {
-                status: "present",
-                path: path.to_str(),
+            IrisDaemonHome::Present { path, layout } => match layout {
+                IrisHomeLayout::Managed => Self {
+                    status: "present",
+                    path: path.to_str(),
+                    layout: Some("managed"),
+                    moved_marker: None,
+                    managed_path: None,
+                    legacy_path: None,
+                },
+                IrisHomeLayout::Legacy { moved_marker } => Self {
+                    status: "present",
+                    path: path.to_str(),
+                    layout: Some("legacy"),
+                    moved_marker: Some(*moved_marker),
+                    managed_path: None,
+                    legacy_path: None,
+                },
             },
-            IrisDaemonHome::Absent { path } => Self {
+            IrisDaemonHome::Absent {
+                managed_path,
+                legacy_path,
+            } => Self {
                 status: "absent",
-                path: path.to_str(),
+                path: None,
+                layout: None,
+                moved_marker: None,
+                managed_path: managed_path.to_str(),
+                legacy_path: legacy_path.to_str(),
             },
             IrisDaemonHome::HomeUnavailable => Self {
                 status: "home_unavailable",
                 path: None,
+                layout: None,
+                moved_marker: None,
+                managed_path: None,
+                legacy_path: None,
+            },
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct JsonQmdSearchFacts<'a> {
+    runtime: JsonQmdRuntime<'a>,
+    models: JsonQmdModels<'a>,
+    house_index: JsonQmdHouseIndex<'a>,
+    js_runtime: JsonJsRuntime<'a>,
+}
+
+impl<'a> From<&'a QmdSearchFacts> for JsonQmdSearchFacts<'a> {
+    fn from(facts: &'a QmdSearchFacts) -> Self {
+        Self {
+            runtime: JsonQmdRuntime::from(&facts.runtime),
+            models: JsonQmdModels::from(&facts.models),
+            house_index: JsonQmdHouseIndex::from(&facts.house_index),
+            js_runtime: JsonJsRuntime::from(&facts.js_runtime),
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct JsonQmdRuntime<'a> {
+    status: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    path: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    version: Option<&'a str>,
+}
+
+impl<'a> From<&'a QmdRuntimeFact> for JsonQmdRuntime<'a> {
+    fn from(fact: &'a QmdRuntimeFact) -> Self {
+        match fact {
+            QmdRuntimeFact::Present { path, version } => Self {
+                status: "present",
+                path: path.to_str(),
+                version: version.as_deref(),
+            },
+            QmdRuntimeFact::Absent { path } => Self {
+                status: "absent",
+                path: path.to_str(),
+                version: None,
+            },
+            QmdRuntimeFact::HomeUnavailable => Self {
+                status: "home_unavailable",
+                path: None,
+                version: None,
+            },
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct JsonQmdModels<'a> {
+    status: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    path: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    count: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    total_bytes: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    names: Option<&'a [String]>,
+}
+
+impl<'a> From<&'a QmdModelsFact> for JsonQmdModels<'a> {
+    fn from(fact: &'a QmdModelsFact) -> Self {
+        match fact {
+            QmdModelsFact::Present {
+                path,
+                count,
+                total_bytes,
+                names,
+            } => Self {
+                status: "present",
+                path: path.to_str(),
+                count: Some(*count),
+                total_bytes: Some(*total_bytes),
+                names: Some(names.as_slice()),
+            },
+            QmdModelsFact::Absent { path } => Self {
+                status: "absent",
+                path: path.to_str(),
+                count: None,
+                total_bytes: None,
+                names: None,
+            },
+            QmdModelsFact::HomeUnavailable => Self {
+                status: "home_unavailable",
+                path: None,
+                count: None,
+                total_bytes: None,
+                names: None,
+            },
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct JsonQmdHouseIndex<'a> {
+    status: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    path: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    house_id: Option<&'a str>,
+}
+
+impl<'a> From<&'a QmdHouseIndexFact> for JsonQmdHouseIndex<'a> {
+    fn from(fact: &'a QmdHouseIndexFact) -> Self {
+        match fact {
+            QmdHouseIndexFact::Present { path, house_id } => Self {
+                status: "present",
+                path: path.to_str(),
+                house_id: Some(house_id.as_str()),
+            },
+            QmdHouseIndexFact::Absent { path, house_id } => Self {
+                status: "absent",
+                path: path.to_str(),
+                house_id: Some(house_id.as_str()),
+            },
+            QmdHouseIndexFact::HouseNotResolved => Self {
+                status: "house_not_resolved",
+                path: None,
+                house_id: None,
+            },
+            QmdHouseIndexFact::HomeUnavailable => Self {
+                status: "home_unavailable",
+                path: None,
+                house_id: None,
+            },
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct JsonJsRuntime<'a> {
+    status: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    kind: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    version: Option<&'a str>,
+}
+
+impl<'a> From<&'a JsRuntimeFact> for JsonJsRuntime<'a> {
+    fn from(fact: &'a JsRuntimeFact) -> Self {
+        match fact {
+            JsRuntimeFact::Available { kind, version } => Self {
+                status: "available",
+                kind: Some(kind.as_str()),
+                version: Some(version.as_str()),
+            },
+            JsRuntimeFact::Missing => Self {
+                status: "missing",
+                kind: None,
+                version: None,
             },
         }
     }

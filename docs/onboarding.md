@@ -74,13 +74,18 @@ iris companion install (§ below).
 release archive for your platform, verifies its published checksum, unpacks
 the binaries into `instruments/iris/`, and **links them beside the `amore`
 binary** so `iris` resolves on `PATH` wherever `amore` does, with no
-manual step. Optional companions use the same release channel when requested:
-`--with-lucerna` and `--with-speculum` (both **off** by default). The only
-network touch in `init` is those companion fetches. Fully offline init:
-`--no-iris` and do not pass `--with-lucerna` or `--with-speculum`. A failed
-download never fails the house; the summary says what happened and
-`amore init --refresh` finishes later. See [iris.md](iris.md),
-[autonomy.md](autonomy.md), and [egress.md](egress.md).
+manual step. After iris is linked, init runs **`iris qmd setup`** so the
+house has managed semantic search (runtime under
+`~/.amore/instruments/qmd/`, house index, and hybrid models). Skip that
+step with **`--no-qmd`**; **`--no-iris`** implies the skip. Optional
+companions use the same release channel when requested: `--with-lucerna`
+and `--with-speculum` (both **off** by default). Network touch in `init`
+is those companion fetches plus qmd package/model downloads on first
+setup. Fully offline init: `--no-iris` (or `--no-qmd` if iris is kept)
+and do not pass `--with-lucerna` or `--with-speculum`. A failed download
+or setup never fails the house; the summary says what happened and
+`iris qmd setup` (or `amore init --refresh`) finishes later. See
+[iris.md](iris.md), [autonomy.md](autonomy.md), and [egress.md](egress.md).
 
 **Also (not a house file):** init appends the absolute path of
 `<house>/.amore/hooks` to the global always-trusted registry
@@ -145,6 +150,7 @@ content belongs to and how to customize it safely.
 | `.amore/house-install.json` | Install manifest (`version` + `files` → sha256) | **Tool-managed** — refresh uses it as the source of truth for "untouched". Do not hand-edit hashes. |
 | `~/.amore/hooks-paths` (global) | Always-trusted hooks directory registry | Re-run init (hooks enabled) re-registers if missing. Remove the project line to drop global trust. |
 | `instruments/iris/` | The iris companion binaries | Fetched from the matching release, then linked beside the `amore` binary onto `PATH`; `--no-iris` skips (offline switch). |
+| `~/.amore/instruments/qmd/` (global) | Managed semantic search runtime, models, and per-house indexes | Created by `iris qmd setup` (default during init). `--no-qmd` skips; finish later with `iris qmd setup`. |
 
 ---
 
@@ -157,7 +163,8 @@ All flags are long-options on `amore init` (see `amore init --help`).
 | `--no-lattice` | lattice **on** | Omit every path equal to `context/principle-lattice.md` or ending in `/principle-lattice.md` (includes `.amore/rules/principle-lattice.md`). The shipped `AGENTS.md` template marks lattice-only orientation with HTML-comment markers so the lattice vs no-lattice reading is explicit in-source. Init drops lattice **files**; it does not rewrite the AGENTS body — the markers document which paragraphs belong to lattice mode. |
 | `--no-skills` | skills **on** | Omit all of `.amore/skills/**`. Explicit `--skills` is a no-op when already default-on. |
 | `--no-hooks` | hooks **on** | Do **not** write `.amore/hooks/**` (paths still appear in the plan as skipped) and skip global `hooks-paths` registration. Explicit `--hooks` is a no-op when already default-on. |
-| `--no-iris` | iris **on** | Skip the companion install. This is also the offline switch — the download is the only network request `init` makes. |
+| `--no-iris` | iris **on** | Skip the companion install (and implies `--no-qmd`). This is the offline switch when no optional companions are requested. |
+| `--no-qmd` | qmd setup **on** (when iris installs) | Skip automatic `iris qmd setup` after iris. Semantic search can be finished later with `iris qmd setup` from the house root. |
 | `--dry-run` | off | Print the plan; write nothing (no files, no manifest, no hooks-paths, no download). |
 | `--yes` / `-y` | off | Headless-safe; no prompts. **Required** for non-interactive `--force` overwrites. |
 | `--force` | off | Overwrite user-modified files (confirm unless `--yes`). |

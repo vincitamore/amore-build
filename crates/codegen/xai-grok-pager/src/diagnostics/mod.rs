@@ -39,13 +39,14 @@ pub(crate) use model::{
     NOTIFICATION_PROTOCOL_FALLBACK_ID, SANDBOX_PROFILE_CONFLICT_ID, VOICE_NO_INPUT_DEVICE_ID,
     VSCODE_SSH_NON_ASCII_ID,
 };
-pub use instruments::{apply_instruments_probe, IRIS_MISSING_ID};
+pub use instruments::{apply_instruments_probe, IRIS_MISSING_ID, QMD_JS_RUNTIME_MISSING_ID};
 pub use model::{
     ClipboardFacts, ColorFacts, CompanionInstall, DataControlFact, DiagnosticFacts,
     DiagnosticFinding, DiagnosticId, DiagnosticReport, FindingDisposition, InstrumentsFacts,
-    IrisDaemonHome, KeyboardFact, LucernaEnablementFact, ManualRemediation, NewlineFact, ProbeNote,
-    ProbeStatus, RuntimeFact, TmuxColorPassthrough, TmuxFacts, TmuxOptionFact, TmuxSupportFact,
-    VoiceFacts,
+    IrisDaemonHome, IrisHomeLayout, JsRuntimeFact, KeyboardFact, LucernaEnablementFact,
+    ManualRemediation, NewlineFact, ProbeNote, ProbeStatus, QmdHouseIndexFact, QmdModelsFact,
+    QmdRuntimeFact, QmdSearchFacts, RuntimeFact, TmuxColorPassthrough, TmuxFacts, TmuxOptionFact,
+    TmuxSupportFact, VoiceFacts,
 };
 pub use view::{DiagnosticSnapshot, view};
 

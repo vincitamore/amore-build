@@ -9,11 +9,13 @@
 //! which fetches it from the matching release — so `init` is not a network-free
 //! operation unless you pass `--no-iris`. Iris is part of the house, and the
 //! honest install story is better than a "no network required" claim kept
-//! true by shipping a house without its instrument. Optional companions
+//! true by shipping a house without its instrument. After iris is linked,
+//! init runs `iris qmd setup` so semantic search is ready in the new house
+//! (skip with `--no-qmd`; `--no-iris` implies skip). Optional companions
 //! (`--with-lucerna`, `--with-speculum`) ride the same release tag and the
-//! same fetch path, default off. A fetch that fails never fails the house:
-//! the tree is already complete, and the failure is reported with the command
-//! to finish later.
+//! same fetch path, default off. A fetch or setup failure never fails the
+//! house: the tree is already complete, and the failure is reported with the
+//! command to finish later.
 
 use std::collections::BTreeMap;
 use std::io::{IsTerminal as _, Write};
@@ -29,6 +31,7 @@ pub const MANIFEST_REL: &str = ".amore/house-install.json";
 
 pub mod instrument_fetch;
 pub mod iris_fetch;
+pub mod qmd_setup;
 
 const MANIFEST_VERSION: u32 = 1;
 
@@ -74,6 +77,11 @@ pub struct InitArgs {
     /// makes no network request at all.
     #[arg(long = "no-iris", conflicts_with = "with_iris")]
     pub no_iris: bool,
+    /// Skip automatic semantic search setup (`iris qmd setup`) after iris.
+    /// Implied by `--no-iris`. Finish later with `iris qmd setup` from the
+    /// house root.
+    #[arg(long = "no-qmd")]
+    pub no_qmd: bool,
     /// Install the lucerna house steward from the matching release (default: off).
     #[arg(long = "with-lucerna")]
     pub with_lucerna: bool,
@@ -101,6 +109,7 @@ impl Default for InitArgs {
             no_lattice: false,
             with_iris: false,
             no_iris: false,
+            no_qmd: false,
             with_lucerna: false,
             with_speculum: false,
             dry_run: false,
@@ -144,6 +153,14 @@ impl InitArgs {
     /// Speculum install: default OFF; `--with-speculum` on.
     pub fn speculum_enabled(&self) -> bool {
         self.with_speculum
+    }
+
+    /// Semantic search setup: default ON when iris installs; `--no-qmd` off.
+    ///
+    /// `--no-iris` also skips setup (no iris binary to invoke). Callers still
+    /// pass `no_qmd` into the setup step so the summary can name the opt-out.
+    pub fn qmd_enabled(&self) -> bool {
+        !self.no_qmd && self.iris_enabled()
     }
 }
 
@@ -453,6 +470,9 @@ pub fn run_with_context(
         &iris,
         &lucerna,
         &speculum,
+        // Semantic search setup runs after iris is linked so the binary path
+        // is known. Failures degrade to a summary note; the house stays complete.
+        |w| qmd_setup::run(&root, &iris, args.no_qmd, args.dry_run, w),
     )?;
 
     Ok(InitReport {
@@ -802,6 +822,7 @@ fn write_summary(
     iris: &iris_fetch::IrisOutcome,
     lucerna: &instrument_fetch::Outcome,
     speculum: &instrument_fetch::Outcome,
+    qmd_step: impl FnOnce(&mut dyn Write) -> qmd_setup::QmdSetupOutcome,
 ) -> Result<()> {
     let mut written = Vec::new();
     let mut skipped = Vec::new();
@@ -856,6 +877,12 @@ fn write_summary(
         writeln!(writer, "{line}")?;
     }
     if let Some(line) = speculum.summary_line() {
+        writeln!(writer, "{line}")?;
+    }
+
+    // qmd setup after companion lines so progress streams under the summary.
+    let qmd = qmd_step(writer);
+    if let Some(line) = qmd.summary_line() {
         writeln!(writer, "{line}")?;
     }
 
@@ -1027,12 +1054,14 @@ mod unit_tests {
     fn everything_the_house_needs_is_on_by_default() {
         // Iris joined this list when it stopped being an optional extra: a
         // plain `amore init` gives you the whole house, and each piece has an
-        // explicit opt-out rather than an opt-in nobody discovers.
+        // explicit opt-out rather than an opt-in nobody discovers. Semantic
+        // search setup follows iris by default.
         let args = InitArgs::default();
         assert!(args.skills_enabled());
         assert!(args.hooks_enabled());
         assert!(args.lattice_enabled());
         assert!(args.iris_enabled());
+        assert!(args.qmd_enabled());
         // Optional companions stay off until asked for.
         assert!(!args.lucerna_enabled());
         assert!(!args.speculum_enabled());
@@ -1051,6 +1080,10 @@ mod unit_tests {
         // --no-iris is also the offline switch: it must actually disable the
         // default-on network path in `init`.
         assert!(!off(|a| a.no_iris = true).iris_enabled());
+        assert!(!off(|a| a.no_iris = true).qmd_enabled());
+        assert!(!off(|a| a.no_qmd = true).qmd_enabled());
+        // --no-qmd leaves iris on.
+        assert!(off(|a| a.no_qmd = true).iris_enabled());
     }
 
     #[test]
