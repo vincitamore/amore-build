@@ -2595,11 +2595,6 @@ pub fn render_extensions_modal(
                         {
                             fields.push(("author".to_string(), a.clone()));
                         }
-                        if let Some(ref tools) = skill.allowed_tools
-                            && !tools.is_empty()
-                        {
-                            fields.push(("tools".to_string(), tools.join(", ")));
-                        }
                         entry_fields.push(fields);
                         entry_is_header.push(false);
                         entry_dimmed.push(!skill.enabled);
@@ -4636,7 +4631,6 @@ mod tests {
             plugin_version: None,
             plugin_root: None,
             plugin_data: None,
-            allowed_tools: None,
             model: None,
             effort: None,
             user_invocable: false,

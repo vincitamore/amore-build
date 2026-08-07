@@ -59,16 +59,36 @@ pub fn floor_char_boundary(s: &str, index: usize) -> usize {
     i
 }
 
+/// Display width of a single grapheme cluster, applying the terminal's
+/// regional-indicator rule: a flag (an RI pair) is painted 2 columns wide and
+/// an unpaired (lone) RI still reserves the full 2 columns, never the char
+/// width of 1. All other clusters report their normal [`UnicodeWidthStr`]
+/// width, which keeps a multi-`char` grapheme (an emoji ZWJ family) whole.
+fn grapheme_display_width(g: &str) -> usize {
+    let ri_count = g
+        .chars()
+        .filter(|c| ('\u{1F1E6}'..='\u{1F1FF}').contains(c))
+        .count();
+    if ri_count > 0 && g.chars().count() == ri_count {
+        // Pure RI cluster: round up to an even count so a lone indicator is 2.
+        return ri_count + (ri_count & 1);
+    }
+    g.width()
+}
+
 /// Byte offset at which cumulative display width exceeds `max_width`.
-/// Returns `s.len()` when the entire string fits.
+/// Returns `s.len()` when the entire string fits. Grapheme-cluster aware: a
+/// multi-`char` grapheme (an emoji ZWJ family, or a regional-indicator flag
+/// painted as one 2-wide cell) is never cut mid-cluster, and a lone regional
+/// indicator counts as 2 columns to match what terminals paint.
 pub fn byte_offset_at_width(s: &str, max_width: usize) -> usize {
     let mut width = 0;
-    for (i, ch) in s.char_indices() {
-        let cw = UnicodeWidthChar::width(ch).unwrap_or(0);
-        if width + cw > max_width {
-            return i;
+    for (byte, g) in s.grapheme_indices(true) {
+        let gw = grapheme_display_width(g);
+        if width + gw > max_width {
+            return byte;
         }
-        width += cw;
+        width += gw;
     }
     s.len()
 }
@@ -89,9 +109,10 @@ pub fn truncate_str(s: &str, max_width: usize) -> String {
     let needs_ellipsis = end < s.len();
 
     if needs_ellipsis && max_width > 1 {
-        // Back up one char to make room for '…' (1 display column).
+        // Back up one grapheme to make room for '…' (1 display column), so a
+        // cut never strands an orphaned ZWJ or half a regional-indicator flag.
         let truncated_end = s[..end]
-            .char_indices()
+            .grapheme_indices(true)
             .next_back()
             .map(|(i, _)| i)
             .unwrap_or(0);
@@ -347,6 +368,85 @@ mod tests {
         let result = truncate_str(s, 8);
         assert!(result.ends_with('…'));
         assert!(result.len() <= 12); // safe byte length
+    }
+
+    // ── grapheme-cluster awareness (byte_offset_at_width / truncate_str) ──
+
+    #[test]
+    fn byte_offset_at_width_ri_pair_not_split() {
+        // 🇺🇸 (U+1F1FA U+1F1F8): a regional-indicator pair painted as one
+        // 2-wide flag. It must never be cut mid-flag.
+        // In 1 column the whole 2-wide flag does not fit → cut at the start.
+        assert_eq!(byte_offset_at_width("\u{1F1FA}\u{1F1F8}", 1), 0);
+        // In 2 columns the whole flag fits (8 bytes) → full length.
+        assert_eq!(byte_offset_at_width("\u{1F1FA}\u{1F1F8}", 2), 8);
+    }
+
+    #[test]
+    fn lone_regional_indicator_is_width_two() {
+        // A single, unpaired regional indicator is painted 2 columns wide (the
+        // terminal reserves a flag-width cell), never the char width of 1.
+        assert_eq!(byte_offset_at_width("\u{1F1FA}", 1), 0);
+        assert_eq!(byte_offset_at_width("\u{1F1FA}", 2), 4);
+        // 'a'(1) + lone RI(2) = 3 columns total.
+        assert_eq!(byte_offset_at_width("a\u{1F1FA}", 2), 1); // RI can't fit at 2
+        assert_eq!(byte_offset_at_width("a\u{1F1FA}", 3), 5); // all fits (5 bytes)
+    }
+
+    #[test]
+    fn byte_offset_at_width_zwj_family_not_split() {
+        // 👨👩👧 = U+1F468 ZWJ U+1F469 ZWJ U+1F467, one width-2 grapheme (18 bytes).
+        assert_eq!(
+            byte_offset_at_width("\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}", 1),
+            0
+        );
+        assert_eq!(
+            byte_offset_at_width("\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}", 2),
+            18
+        );
+        // 'a'(1) + family(2) = 3 → the whole family fits (19 bytes), never split
+        // at some mid-family byte like "a👨" + an orphaned ZWJ.
+        assert_eq!(
+            byte_offset_at_width("a\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}", 3),
+            19
+        );
+    }
+
+    #[test]
+    fn truncate_str_keeps_zwj_family_whole() {
+        // "a👨👩👧" = 3 columns → fits exactly, unchanged.
+        assert_eq!(
+            truncate_str("a\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}", 3),
+            "a\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}"
+        );
+        // Only 2 columns left: the family (width 2) can't fit after 'a', so the
+        // whole cluster is dropped for the ellipsis — never a partial slice
+        // leaving an orphaned ZWJ.
+        let t = truncate_str("a\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}", 2);
+        assert_eq!(t, "\u{2026}");
+        assert!(!t.contains('\u{200D}'));
+        // A lone family at the start in 1 column collapses to the ellipsis.
+        assert_eq!(
+            truncate_str("\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}", 1),
+            "\u{2026}"
+        );
+    }
+
+    #[test]
+    fn truncate_str_does_not_split_ri_flag_or_overflow() {
+        // Flag(2) + ' ' + 'x'. At 2 columns the flag fits but ' '+... does not,
+        // so the whole 2-wide flag must be yielded for the ellipsis — never a
+        // mid-flag "🇺…" slice.
+        assert_eq!(truncate_str("\u{1F1FA}\u{1F1F8} x", 2), "\u{2026}");
+        // The family (width 2) fits entirely in 4 columns → no ellipsis, no
+        // overflow past max_width.
+        assert_eq!(
+            truncate_str("\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}", 4),
+            "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}"
+        );
+        let t = truncate_str("\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}x", 2);
+        assert_eq!(t, "\u{2026}");
+        assert!(!t.contains('\u{200D}'));
     }
 
     // ── truncate_line tests ─────────────────────────────────────────

@@ -2620,9 +2620,10 @@ impl MvpAgent {
     /// - **Sessions with live work stay resident.** We do NOT send `Shutdown`
     ///   and do NOT drop the `SessionHandle`, so the actor, its pending
     ///   permission oneshots, and its `KillOnDrop` tool subprocesses all
-    ///   survive. The route/driver detach is groundwork for PR-3 (the
-    ///   driver/subscriber maps don't exist yet), so for now we only mark the
-    ///   live state.
+    ///   survive. The driver/subscriber detachment lives on the leader
+    ///   (`leader/server.rs`), which keeps the `session_driver` and
+    ///   `session_subscribers` maps and detaches/transfers the driver on
+    ///   client disconnect; here we only mark the live state.
     /// - **Fully idle sessions are unloaded to disk** to bound memory (the
     ///   `sessions`/`session_threads` maps are uncapped). This preserves the
     ///   legacy unload path — `Shutdown` the actor, drop the `SessionHandle`,

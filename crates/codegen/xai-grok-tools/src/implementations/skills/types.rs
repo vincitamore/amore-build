@@ -95,8 +95,6 @@ pub struct SkillInfo {
     /// Plugin data dir for plugin-backed skills, used for ${CLAUDE_PLUGIN_DATA} expansion.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub plugin_data: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub allowed_tools: Option<Vec<String>>,
     /// Optional model override for skill execution.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
@@ -173,7 +171,6 @@ impl Default for SkillInfo {
             plugin_version: None,
             plugin_root: None,
             plugin_data: None,
-            allowed_tools: None,
             model: None,
             effort: None,
             user_invocable: true,

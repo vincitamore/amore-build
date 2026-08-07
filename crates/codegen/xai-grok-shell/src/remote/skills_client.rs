@@ -261,7 +261,6 @@ fn product_skill_info(
         plugin_version: None,
         plugin_root: None,
         plugin_data: None,
-        allowed_tools: None,
         model: None,
         effort: None,
         user_invocable: true,

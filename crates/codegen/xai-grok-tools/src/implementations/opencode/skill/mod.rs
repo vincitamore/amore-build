@@ -350,7 +350,6 @@ mod tests {
             plugin_version: None,
             plugin_root: None,
             plugin_data: None,
-            allowed_tools: None,
             license: None,
             compatibility: None,
             metadata: None,

@@ -1,0 +1,101 @@
+name: installers
+
+# Parse and smoke both canonical installers (scripts/install.sh and
+# scripts/install.ps1) that back the amore.build one-liners.
+#
+# Neither installer exposes a dry-run flag, so each smoke runs it into a
+# disposable scratch AMORE_INSTALL_DIR (no persistent install, nothing lands in
+# the user's real install dir or on PATH) and asserts BOTH that it exits 0 AND
+# that it prints a version. An exit-code-only check is not enough: a loader
+# failure at the release glibc floor has been observed to exit 0 with no output,
+# and that is exactly what the run-AND-print assert catches. Output is captured
+# to a file first and then asserted, never piped through head.
+#
+# Triggers: on changes to either installer, on a published release (so the job
+# smokes the freshly built assets), and on manual dispatch.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "scripts/install.sh"
+      - "scripts/install.ps1"
+  release:
+    types: [published]
+
+concurrency:
+  group: installers-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bash:
+    name: install.sh — parse + run-and-print smoke
+    # 22.04 is the release glibc floor (releases are built on it). Running the
+    # smoke on the same floor is what makes a regressed binary fail to load; do
+    # not bump this lane to -latest.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Parse
+        run: bash -n scripts/install.sh
+
+      - name: Smoke — install into a scratch dir, assert run AND non-empty print
+        shell: bash
+        run: |
+          set -euo pipefail
+          scratch="$(mktemp -d)"
+          trap 'rm -rf "$scratch"' EXIT
+          if ! AMORE_INSTALL_DIR="$scratch/amore" bash scripts/install.sh > install-sh.log 2>&1; then
+            echo "::error::install.sh failed"
+            cat install-sh.log
+            exit 1
+          fi
+          if [ ! -s install-sh.log ]; then
+            echo "::error::install.sh exited 0 with empty output (loader failure at the glibc floor?)"
+            exit 1
+          fi
+          cat install-sh.log
+          grep -E 'amore [0-9]+\.[0-9]+\.[0-9]+' install-sh.log \
+            || { echo "::error::no version string printed"; exit 1; }
+
+  powershell:
+    name: install.ps1 — parse + run-and-print smoke
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Parse
+        run: |
+          $tokens = $null
+          $errors = $null
+          $null = [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path 'scripts\install.ps1'), [ref]$tokens, [ref]$errors)
+          if ($errors -and $errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Error $_.ToString() }
+            throw 'install.ps1 failed to parse'
+          }
+
+      - name: Smoke — install into a scratch dir, assert run AND non-empty print
+        run: |
+          $scratch = Join-Path $env:RUNNER_TEMP ("amore-install-smoke-" + [guid]::NewGuid().ToString('N'))
+          New-Item -ItemType Directory -Path $scratch | Out-Null
+          $env:AMORE_INSTALL_DIR = Join-Path $scratch 'amore'
+          try {
+            & powershell -NoProfile -ExecutionPolicy Bypass -File scripts\install.ps1 *> install-ps1.log
+            $code = $LASTEXITCODE
+            if ($code -ne 0) {
+              Get-Content install-ps1.log
+              throw "install.ps1 exited $code"
+            }
+            if ([string]::IsNullOrWhiteSpace((Get-Content install-ps1.log -Raw))) {
+              throw 'install.ps1 exited 0 with empty output (loader failure?)'
+            }
+            Get-Content install-ps1.log
+            if (-not (Select-String -Path install-ps1.log -Pattern 'amore[ \t]+v?\d+\.\d+\.\d+')) {
+              throw 'no version string printed'
+            }
+          } finally {
+            Remove-Item -Recurse -Force $scratch -ErrorAction SilentlyContinue
+          }

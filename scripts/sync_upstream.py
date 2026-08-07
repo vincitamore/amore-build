@@ -518,6 +518,24 @@ def cmd_verify(dry_run: bool) -> int:
     _check_file_contains(
         "crates/codegen/xai-grok-sampler/src/client.rs", "fn extract_request_id(",
         "provider x-request-id/request-id extracted from failed responses and logged", problems)
+    _check_file_contains(
+        "crates/codegen/xai-grok-tools/src/implementations/skills/discovery.rs", "allowed_tools_key_is_ignored_not_surfaced",
+        "SkillInfo.allowed_tools removed; the ignored-legacy-key regression test pins the deletion", problems)
+    _check_file_contains(
+        "instruments/iris/packages/tui/package.json", '"@opentui/core": "^0.4.5"',
+        "iris TUI pins @opentui at a named floor, not floating latest", problems)
+    _check_file_contains(
+        ".github/workflows/release.yml", "it need not agree with",
+        "release version gate is tag-driven GROK_VERSION; the crate tracks upstream", problems)
+    _check_file_contains(
+        ".github/workflows/installers.yml", "name: installers",
+        "keeps the installer parse + run-and-print smoke from being dropped", problems)
+    _check_file_contains(
+        "crates/codegen/xai-grok-pager-render/src/render/line_utils.rs", "grapheme_display_width",
+        "width/truncate helpers are grapheme-cluster aware (RI pairs, ZWJ families)", problems)
+    _check_file_contains(
+        "crates/codegen/xai-grok-shell/src/agent/mvp_agent/agent_ops.rs", "detachment lives on the leader",
+        "driver/subscriber detach comment points at the real leader home", problems)
 
     # 7. build + smoke (this host). Build is the long pole; allow skipping.
     #    The full Linux pager suite remains CI-owned (UPSTREAM.md §5).

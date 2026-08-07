@@ -169,24 +169,6 @@ fn parse_boolean_frontmatter(value: Option<&serde_yaml::Value>) -> bool {
         || matches!(value, Some(Value::String(s)) if s == "true")
 }
 
-/// Coerce `allowed-tools`: a comma- or space-delimited string, or a YAML list.
-/// Separators inside `()` are kept whole so a spec like `Bash(git diff:*)`
-/// survives. A wrong type yields `None`.
-fn coerce_tool_list(value: Option<&serde_yaml::Value>) -> Option<Vec<String>> {
-    use serde_yaml::Value;
-    match value? {
-        Value::String(s) => Some(split_top_level(s, '(', ')', true)),
-        Value::Sequence(seq) => Some(
-            seq.iter()
-                .filter_map(|v| v.as_str())
-                .filter(|t| !t.is_empty())
-                .map(str::to_string)
-                .collect(),
-        ),
-        _ => None,
-    }
-}
-
 /// Split on top-level separators, keeping `open`/`close` groups whole (so
 /// `{a,b}` or `Bash(a,b)` stays one item). Always splits on commas; also on
 /// whitespace when `split_ws` is set (tool lists). Items are trimmed; empties
@@ -306,7 +288,6 @@ pub struct ParsedFrontmatter {
     pub author: Option<String>,
     pub metadata: Option<std::collections::HashMap<String, String>>,
     pub argument_hint: Option<String>,
-    pub allowed_tools: Option<Vec<String>>,
     pub model: Option<String>,
     pub effort: Option<String>,
     pub user_invocable: bool,
@@ -553,7 +534,6 @@ pub fn parse_skill_frontmatter(
         author,
         metadata,
         argument_hint: coerce_to_string(frontmatter.get("argument-hint")),
-        allowed_tools: coerce_tool_list(frontmatter.get("allowed-tools")),
         model: coerce_to_string(frontmatter.get("model")),
         effort: coerce_to_string(frontmatter.get("effort")),
         // Absent `user-invocable` defaults to true; `disable-model-invocation` to false.
@@ -705,7 +685,6 @@ pub fn parse_skill_files(skill_files: Vec<(PathBuf, SkillScope)>) -> Vec<SkillIn
                             author: None,
                             metadata: None,
                             argument_hint: None,
-                            allowed_tools: None,
                             model: None,
                             effort: None,
                             user_invocable: true,
@@ -730,7 +709,6 @@ pub fn parse_skill_files(skill_files: Vec<(PathBuf, SkillScope)>) -> Vec<SkillIn
                             author: None,
                             metadata: None,
                             argument_hint: None,
-                            allowed_tools: None,
                             model: None,
                             effort: None,
                             user_invocable: true,
@@ -799,7 +777,6 @@ pub fn parse_skill_files(skill_files: Vec<(PathBuf, SkillScope)>) -> Vec<SkillIn
                 plugin_version: None,
                 plugin_root: None,
                 plugin_data: None,
-                allowed_tools: parsed.allowed_tools,
                 model: parsed.model,
                 effort: parsed.effort,
                 user_invocable: parsed.user_invocable,
@@ -1029,7 +1006,8 @@ mod tests {
     fn recovery_ignores_non_scalar_keys_like_allowed_tools() {
         // Recovery is limited to known scalar keys, so a list
         // field like `allowed-tools` on the recovery path is never salvaged as a
-        // mangled string (e.g. ["[Bash", "Edit]"]).
+        // mangled string (e.g. ["[Bash", "Edit]"]). The skill still recovers its
+        // description even when an unrelated list key forces the recovery path.
         let skill = parse_one(
             "at",
             concat!(
@@ -1042,7 +1020,6 @@ mod tests {
             ),
         );
         assert_eq!(skill.description, "Real desc.");
-        assert!(skill.allowed_tools.is_none()); // not mangled from the broken list
     }
 
     #[test]
@@ -1118,15 +1095,11 @@ mod tests {
         // the quoting retry plus per-field coercion.
         let skill = parse_one(
             "d",
-            "---\nname: d\ndescription: Deploy: push to prod\nwhen-to-use: trig\nuser-invocable: yes\nallowed-tools: bash, grep\neffort: 5\n---\n",
+            "---\nname: d\ndescription: Deploy: push to prod\nwhen-to-use: trig\nuser-invocable: yes\neffort: 5\n---\n",
         );
         assert_eq!(skill.description, "Deploy: push to prod");
         assert_eq!(skill.when_to_use.as_deref(), Some("trig"));
         assert!(!skill.user_invocable); // only literal `true` is true; `yes` → false
-        assert_eq!(
-            skill.allowed_tools,
-            Some(vec!["bash".into(), "grep".into()])
-        );
         assert_eq!(skill.effort.as_deref(), Some("5"));
     }
 
@@ -1155,15 +1128,16 @@ mod tests {
     }
 
     #[test]
-    fn allowed_tools_keep_specs_with_spaces_and_inner_commas() {
+    fn allowed_tools_key_is_ignored_not_surfaced() {
+        // A skill frontmatter may still carry an `allowed-tools` key from
+        // legacy docs. It is tolerated and the skill parses cleanly, but the
+        // key is no longer surfaced as a read field (no phantom trust slot).
         let skill = parse_one(
             "d",
             "---\nname: d\ndescription: x\nallowed-tools: Read, Bash(git log --format=%h,%s)\n---\n",
         );
-        assert_eq!(
-            skill.allowed_tools,
-            Some(vec!["Read".into(), "Bash(git log --format=%h,%s)".into()])
-        );
+        assert_eq!(skill.name, "d");
+        assert_eq!(skill.description, "x");
     }
 
     #[test]
@@ -1275,7 +1249,6 @@ when-to-use: \"\"
 name: review
 description: Code review tool
 when-to-use: User says review my code
-allowed-tools: grep, read
 argument-hint: PR number
 model: test-model
 ---
@@ -1287,10 +1260,6 @@ model: test-model
         );
         assert_eq!(parsed.argument_hint.as_deref(), Some("PR number"));
         assert_eq!(parsed.model.as_deref(), Some("test-model"));
-        assert_eq!(
-            parsed.allowed_tools.as_deref(),
-            Some(["grep".to_string(), "read".to_string()].as_slice())
-        );
     }
 
     #[test]

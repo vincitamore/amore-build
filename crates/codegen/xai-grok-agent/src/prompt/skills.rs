@@ -1072,44 +1072,11 @@ mod tests {
     }
 
     #[test]
-    fn parse_allowed_tools_comma_string() {
+    fn allowed_tools_key_is_ignored() {
         let content = "---\nname: my-skill\ndescription: test\nallowed-tools: \"bash, read_file, grep\"\n---\n";
         let parsed = parse_skill_frontmatter(content, None).unwrap();
-        assert_eq!(
-            parsed.allowed_tools.as_deref(),
-            Some(
-                [
-                    "bash".to_string(),
-                    "read_file".to_string(),
-                    "grep".to_string()
-                ]
-                .as_slice()
-            )
-        );
-    }
-
-    #[test]
-    fn parse_allowed_tools_yaml_list() {
-        let content = "---\nname: my-skill\ndescription: test\nallowed-tools:\n  - bash\n  - read_file\n  - grep\n---\n";
-        let parsed = parse_skill_frontmatter(content, None).unwrap();
-        assert_eq!(
-            parsed.allowed_tools.as_deref(),
-            Some(
-                [
-                    "bash".to_string(),
-                    "read_file".to_string(),
-                    "grep".to_string()
-                ]
-                .as_slice()
-            )
-        );
-    }
-
-    #[test]
-    fn parse_allowed_tools_omitted() {
-        let content = "---\nname: my-skill\ndescription: test\n---\n";
-        let parsed = parse_skill_frontmatter(content, None).unwrap();
-        assert!(parsed.allowed_tools.is_none());
+        assert_eq!(parsed.name, "my-skill");
+        assert_eq!(parsed.description, "test");
     }
 
     #[test]
@@ -1237,37 +1204,22 @@ mod tests {
     }
 
     #[test]
-    fn parse_allowed_tools_space_delimited() {
-        // agentskills.io format: space-delimited with tool patterns
+    fn allowed_tools_key_ignored_with_pattern_spec() {
         let content = "---\nname: my-skill\ndescription: test\nallowed-tools: \"Bash(git:*) Read Write\"\n---\n";
         let parsed = parse_skill_frontmatter(content, None).unwrap();
-        assert_eq!(
-            parsed.allowed_tools.as_deref(),
-            Some(
-                [
-                    "Bash(git:*)".to_string(),
-                    "Read".to_string(),
-                    "Write".to_string()
-                ]
-                .as_slice()
-            )
-        );
+        assert_eq!(parsed.name, "my-skill");
     }
 
     #[test]
     fn parse_full_spec_plus_extensions() {
         // Mixed agentskills.io spec fields + our extensions — all must parse.
-        let content = "---\nname: my-skill\ndescription: A full skill\nlicense: MIT\ncompatibility: Python 3.12+\nmetadata:\n  author: test-org\n  version: \"2.0\"\nallowed-tools:\n  - bash\n  - read_file\nargument-hint: file path\nmodel: grok-3\neffort: high\nuser-invocable: true\ndisable-model-invocation: false\n---\nBody content.\n";
+        let content = "---\nname: my-skill\ndescription: A full skill\nlicense: MIT\ncompatibility: Python 3.12+\nmetadata:\n  author: test-org\n  version: \"2.0\"\nargument-hint: file path\nmodel: grok-3\neffort: high\nuser-invocable: true\ndisable-model-invocation: false\n---\nBody content.\n";
         let parsed = parse_skill_frontmatter(content, None).unwrap();
         assert_eq!(parsed.name, "my-skill");
         assert_eq!(parsed.description, "A full skill");
         assert_eq!(parsed.license.as_deref(), Some("MIT"));
         assert_eq!(parsed.compatibility.as_deref(), Some("Python 3.12+"));
         assert_eq!(parsed.author.as_deref(), Some("test-org"));
-        assert_eq!(
-            parsed.allowed_tools.as_deref(),
-            Some(["bash".to_string(), "read_file".to_string()].as_slice())
-        );
         assert_eq!(parsed.argument_hint.as_deref(), Some("file path"));
         assert_eq!(parsed.model.as_deref(), Some("grok-3"));
         assert_eq!(parsed.effort.as_deref(), Some("high"));
@@ -1554,7 +1506,6 @@ mod tests {
             plugin_version: None,
             plugin_root: None,
             plugin_data: None,
-            allowed_tools: None,
             license: None,
             compatibility: None,
             metadata: None,

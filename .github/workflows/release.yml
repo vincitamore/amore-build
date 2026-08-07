@@ -5,8 +5,12 @@ name: release
 # attach.
 #
 # Version: the tag drives the compiled version through GROK_VERSION
-# (xai-grok-version: option_env!("GROK_VERSION") → CARGO_PKG_VERSION). The tag
-# and the in-tree xai-grok-version crate version MUST agree (v0.1.0 ↔ 0.1.0).
+# (xai-grok-version: option_env!("GROK_VERSION") → CARGO_PKG_VERSION). The
+# release gate is the tag: the Version inject step casts the tag (leading v
+# stripped) into GROK_VERSION and the smoke step asserts --version contains it.
+# The in-tree xai-grok-version crate version tracks upstream and is the API
+# client version, independent of the product release — it need not agree with
+# the tag.
 #
 # Instruments (iris / lucerna / speculum): matrix is linux-x64, darwin-arm64,
 # windows-x64. Expansion lanes (darwin-x64, linux-arm64) are not built here.
