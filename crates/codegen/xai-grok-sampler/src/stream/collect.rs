@@ -88,6 +88,7 @@ mod tests {
                     role: Some(Role::Assistant),
                     content: Some(text.to_string()),
                     reasoning_content: None,
+                    reasoning_key: None,
                     tool_calls: vec![],
                     tool_call_id: None,
                 },

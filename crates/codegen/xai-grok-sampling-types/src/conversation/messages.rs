@@ -354,6 +354,34 @@ pub fn build_messages_request(req: &ConversationRequest) -> crate::messages::Mes
     }
 }
 
+/// One `prepare_history` rule: drop foreign reasoning signatures on a backend switch.
+///
+/// `Reasoning` items persist their provider signature in `encrypted_content` — for the
+/// Anthropic Messages backend that is the native `Thinking` `signature`; for a different
+/// backend it is that backend's own encrypted blob. A signature is only usable by the
+/// backend that produced it, so after a cross-backend switch every carried signature is
+/// foreign and would be replayed as an invalid Anthropic `Thinking` signature by
+/// `build_messages_request`, which Anthropic rejects with a hard 400.
+///
+/// When `strip_foreign_signatures` is true (the first turn after the backend changed) the
+/// offending `Reasoning` items are removed. When false (a same-backend turn) nothing is
+/// touched, keeping the byte-identical prefix that prompt caching aligns on. Text-only
+/// reasoning carries no signature (`encrypted_content` empty/absent) and is left in place
+/// either way.
+///
+/// Returns the number of items removed.
+pub fn prepare_history(items: &mut Vec<ConversationItem>, strip_foreign_signatures: bool) -> usize {
+    if !strip_foreign_signatures {
+        return 0;
+    }
+    let before = items.len();
+    items.retain(|item| match item {
+        ConversationItem::Reasoning(r) => r.encrypted_content.as_deref().map_or(true, str::is_empty),
+        _ => true,
+    });
+    before - items.len()
+}
+
 /// `Thinking` is dropped because this `From` returns a single item; the
 /// streaming consumer emits the sibling `Reasoning` item instead.
 impl From<crate::messages::MessagesResponse> for ConversationItem {

@@ -1688,7 +1688,7 @@ async fn state_is_busy_reflects_queued_inputs() {
             {
                 let state = actor.state.lock().await;
                 assert!(
-                    !state_is_busy(&state),
+                    !state_is_busy(&state, &[], &[]),
                     "an idle actor (no turn, empty queue) must report not busy"
                 );
             }
@@ -1696,7 +1696,7 @@ async fn state_is_busy_reflects_queued_inputs() {
                 let mut state = actor.state.lock().await;
                 state.pending_inputs.push_back(user_input("queued-1"));
                 assert!(
-                    state_is_busy(&state),
+                    state_is_busy(&state, &[], &[]),
                     "a non-empty pending_inputs queue must report busy"
                 );
             }
@@ -1704,7 +1704,7 @@ async fn state_is_busy_reflects_queued_inputs() {
                 let mut state = actor.state.lock().await;
                 state.pending_inputs.clear();
                 assert!(
-                    !state_is_busy(&state),
+                    !state_is_busy(&state, &[], &[]),
                     "clearing the queue must return to not busy"
                 );
             }

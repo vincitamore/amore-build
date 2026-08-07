@@ -509,3 +509,93 @@ fn upgrade_legacy_reasoning_singular_anthropic_no_id() {
     assert_eq!(r.id, "");
     assert_eq!(r.encrypted_content.as_deref(), Some("signature-bytes-here"));
 }
+
+// ============================================================================
+// prepare_history: foreign-signature strip on a cross-backend switch
+// ============================================================================
+
+/// Collect every `signature` emitted onto the Anthropic wire by `build_messages_request`.
+fn thinking_signatures(req: &ConversationRequest) -> Vec<String> {
+    let msgs = build_messages_request(req);
+    let mut out = Vec::new();
+    for message in &msgs.messages {
+        if let crate::messages::MessageContent::Blocks(blocks) = &message.content {
+            for block in blocks {
+                if let crate::messages::ContentBlock::Thinking { signature, .. } = block {
+                    if !signature.is_empty() {
+                        out.push(signature.clone());
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+/// A request whose history holds a reasoning sibling carrying a foreign
+/// `encrypted_content` (a signature from a different backend) plus an answer.
+fn request_with_foreign_reasoning(encrypted: Option<&str>) -> ConversationRequest {
+    let items = vec![
+        reasoning_sibling("r1", "Let me think...", encrypted),
+        ConversationItem::assistant("answer"),
+    ];
+    ConversationRequest {
+        items,
+        model: Some("test-model".to_string()),
+        ..Default::default()
+    }
+}
+
+#[test]
+fn prepare_history_strips_foreign_signature_on_switch_turn() {
+    let mut req = request_with_foreign_reasoning(Some("FOREIGN-SIGNATURE"));
+
+    // A cross-backend switch turn: the strip rule is active.
+    let removed = super::messages::prepare_history(&mut req.items, true);
+    assert_eq!(removed, 1, "the foreign-signature Reasoning item must be dropped");
+    assert!(
+        !req.items
+            .iter()
+            .any(|i| matches!(i, ConversationItem::Reasoning(_))),
+        "Reasoning item must be gone from history"
+    );
+
+    // No foreign signature may reach the Anthropic wire.
+    let sigs = thinking_signatures(&req);
+    assert!(
+        !sigs.iter().any(|s| s == "FOREIGN-SIGNATURE"),
+        "foreign signature leaked onto the Messages wire: {sigs:?}"
+    );
+}
+
+#[test]
+fn prepare_history_preserves_signature_on_same_backend_turn() {
+    let mut req = request_with_foreign_reasoning(Some("NATIVE-SIGNATURE"));
+
+    // A same-backend turn (no backend change): the strip rule is inactive so the
+    // byte-identical prefix (and its valid Anthropic signature) is preserved for caching.
+    let removed = super::messages::prepare_history(&mut req.items, false);
+    assert_eq!(removed, 0, "same-backend turns must not strip anything");
+
+    let sigs = thinking_signatures(&req);
+    assert!(
+        sigs.iter().any(|s| s == "NATIVE-SIGNATURE"),
+        "the valid signature must still be replayed on a same-backend turn: {sigs:?}"
+    );
+}
+
+#[test]
+fn prepare_history_keeps_text_only_reasoning_on_switch_turn() {
+    let mut req = request_with_foreign_reasoning(None);
+
+    // Text-only reasoning carries no signature, so it is not foreign and must survive
+    // even on a switch turn.
+    let removed = super::messages::prepare_history(&mut req.items, true);
+    assert_eq!(removed, 0);
+    assert!(
+        req.items
+            .iter()
+            .any(|i| matches!(i, ConversationItem::Reasoning(_))),
+        "text-only reasoning (no encrypted_content) must be preserved"
+    );
+}

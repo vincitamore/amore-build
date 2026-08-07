@@ -45,6 +45,13 @@ impl SessionActor {
                 "supports_backend_search": sampling_config.supports_backend_search,
             })),
         );
+        // Read the current backend before applying the new one, so the comparison
+        // below sees the model we are switching away from.
+        let old_backend = self
+            .chat_state_handle
+            .get_sampling_config()
+            .await
+            .map(|c| c.api_backend);
         self.chat_state_handle
             .update_sampling_config(xai_grok_sampling_types::SamplingConfig {
                 base_url: sampling_config.base_url.clone(),
@@ -60,6 +67,27 @@ impl SessionActor {
                 reasoning_effort: sampling_config.reasoning_effort,
                 stream_tool_calls: Some(sampling_config.stream_tool_calls),
             });
+
+        // A backend change invalidates carried reasoning signatures (a signature is only
+        // usable by the backend that produced it), so strip foreign Reasoning siblings once,
+        // at the switch - never on a same-backend turn, which keeps the prompt-cache prefix
+        // aligned.
+        if let Some(old_backend) = old_backend
+            && old_backend != sampling_config.api_backend
+        {
+            let mut conversation = self.chat_state_handle.get_conversation().await;
+            let removed = xai_grok_sampling_types::prepare_history(&mut conversation, true);
+            if removed > 0 {
+                self.chat_state_handle.replace_conversation(conversation);
+                tracing::info!(
+                    session_id = %self.session_info.id.0,
+                    removed,
+                    old_backend = ?old_backend,
+                    new_backend = ?sampling_config.api_backend,
+                    "stripped foreign reasoning signatures after backend switch"
+                );
+            }
+        }
         let existing = self.chat_state_handle.get_credentials().await;
         let session_key = self
             .auth_manager

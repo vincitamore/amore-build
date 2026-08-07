@@ -373,12 +373,142 @@ pub(crate) fn is_session_idle_for_injection(state: &State) -> bool {
         && !state.notifications_suppressed
 }
 /// Predicate behind `SessionCommand::IsBusy`: the session has work in flight
-/// when a turn is running **or** inputs are queued. Consulted by the leader's
-/// idle-unload decision on client disconnect. Kept as a free function so
-/// it can be unit-tested directly against a `State` without spawning a full
-/// actor + leader.
-pub(crate) fn state_is_busy(state: &State) -> bool {
-    state.running_task.is_some() || !state.pending_inputs.is_empty()
+/// when a turn is running, inputs are queued, an agent-created scheduled task
+/// is still pending, or background work (bash / subagent / monitor) is live.
+/// The scheduled and background obligations are consulted by the leader's
+/// idle-unload decision so a session that still holds an agent-created
+/// obligation is never judged idle and unloaded. Kept as a free function so
+/// the turn/queue core can be unit-tested directly against a `State`, with the
+/// live obligation snapshots passed in.
+pub(crate) fn state_is_busy(
+    state: &State,
+    scheduled_tasks: &[xai_grok_tools::implementations::grok_build::scheduler::types::ScheduledTask],
+    background_tasks: &[xai_grok_tools::computer::types::TaskSnapshot],
+) -> bool {
+    state.running_task.is_some()
+        || !state.pending_inputs.is_empty()
+        || has_scheduled_tasks(scheduled_tasks)
+        || has_background_work(background_tasks)
+}
+
+/// True when any agent-created scheduled task is still on the scheduler,
+/// excluding recurring tasks that have already expired on their bounded
+/// horizon. Scheduled obligations survive to their next fire, so their
+/// presence must keep the session resident until they run.
+pub(crate) fn has_scheduled_tasks(
+    tasks: &[xai_grok_tools::implementations::grok_build::scheduler::types::ScheduledTask],
+) -> bool {
+    let now = chrono::Utc::now();
+    tasks.iter().any(|t| !t.is_expired(now))
+}
+
+/// True when any background task or monitor has not yet completed. Live
+/// background work (panic-safe bash, subagents, monitors) is an owned
+/// obligation that idle eviction must not tear down.
+pub(crate) fn has_background_work(tasks: &[xai_grok_tools::computer::types::TaskSnapshot]) -> bool {
+    tasks
+        .iter()
+        .any(xai_grok_tools::computer::types::TaskSnapshot::is_outstanding)
+}
+
+impl SessionActor {
+    /// Aggregate busy query for the `IsBusy` command: the sync turn/queue
+    /// predicate plus live scheduled-task and background-work presence from
+    /// the tool bridge. The scheduled/background snapshots are queried
+    /// outside the state lock, then the state lock is taken once for the
+    /// turn/queue read, so idle eviction never unloads a session that still
+    /// holds an agent-created obligation.
+    pub(crate) async fn is_busy_live(&self) -> bool {
+        let bridge = self.tool_bridge_handle();
+        let scheduled = bridge.list_scheduled_tasks().await;
+        let background = bridge.list_background_tasks().await;
+        let state = self.state.lock().await;
+        state_is_busy(&state, &scheduled, &background)
+    }
+}
+
+#[cfg(test)]
+mod is_busy_tests {
+    use super::*;
+
+    type TestScheduledTask =
+        xai_grok_tools::implementations::grok_build::scheduler::types::ScheduledTask;
+    type TestTaskSnapshot = xai_grok_tools::computer::types::TaskSnapshot;
+
+    /// An idle `State`: no running turn, empty queue, nothing else pending.
+    fn idle_test_state() -> State {
+        State {
+            running_task: None,
+            pending_inputs: VecDeque::new(),
+            pending_notifications: Vec::new(),
+            combine_edit_holds: std::collections::HashSet::new(),
+            notifications_suppressed: false,
+            rewindable: false,
+            nudges_used_this_session: 0,
+        }
+    }
+
+    /// A background task snapshot with the requested completion state, so the
+    /// `is_outstanding` predicate can be exercised without a real command.
+    fn test_task_snapshot(task_id: &str, completed: bool) -> TestTaskSnapshot {
+        let now = std::time::SystemTime::now();
+        TestTaskSnapshot {
+            task_id: task_id.to_string(),
+            command: "echo hello".to_string(),
+            display_command: None,
+            cwd: "/tmp".to_string(),
+            start_time: now,
+            end_time: if completed { Some(now) } else { None },
+            output: String::new(),
+            output_file: std::path::PathBuf::from(format!("/tmp/{}.log", task_id)),
+            truncated: false,
+            exit_code: None,
+            signal: None,
+            completed,
+            kind: Default::default(),
+            block_waited: false,
+            explicitly_killed: false,
+            owner_session_id: None,
+            description: None,
+            is_backgrounded: false,
+            output_total_bytes: 0,
+        }
+    }
+
+    #[test]
+    fn state_is_busy_counts_scheduled_tasks() {
+        let state = idle_test_state();
+        let none: Vec<TestScheduledTask> = Vec::new();
+        assert!(
+            !state_is_busy(&state, &none, &[]),
+            "an idle session with no scheduled or background work must report not busy"
+        );
+        let scheduled = TestScheduledTask::new(60, "run the nightly check".into(), true, true);
+        assert!(
+            state_is_busy(&state, std::slice::from_ref(&scheduled), &[]),
+            "a schedule-only session must report busy so idle eviction never kills the obligation"
+        );
+    }
+
+    #[test]
+    fn state_is_busy_counts_background_work() {
+        let state = idle_test_state();
+        let none: Vec<TestTaskSnapshot> = Vec::new();
+        assert!(
+            !state_is_busy(&state, &[], &none),
+            "an idle session with no completed-missing background work must report not busy"
+        );
+        let running = test_task_snapshot("bg-1", false);
+        assert!(
+            state_is_busy(&state, &[], std::slice::from_ref(&running)),
+            "a background-work-only session must report busy so idle eviction never kills the job"
+        );
+        let done = test_task_snapshot("bg-2", true);
+        assert!(
+            !state_is_busy(&state, &[], std::slice::from_ref(&done)),
+            "a completed background task must not hold the session resident"
+        );
+    }
 }
 use crate::auth::AuthManager;
 #[derive(Clone)]

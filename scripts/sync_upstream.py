@@ -470,6 +470,43 @@ def cmd_verify(dry_run: bool) -> int:
         INSTRUMENTS_CI_WORKFLOW, "instruments/speculum/**",
         "instruments-ci.yml path-scoped to instruments/speculum", problems)
 
+    # 6d. defect-remediation fix pins (amore-build-defect-remediation campaign,
+    #     2026-08-07). Each pins an upstream file so a future sync cannot
+    #     silently drop the fix.
+    _check_file_contains(
+        "crates/codegen/xai-grok-shell/src/leader/client.rs", "control_command_min_protocol",
+        "per-command minimum-floor control-protocol gate (replaces exact-equality)", problems)
+    _check_file_contains(
+        "crates/codegen/xai-grok-shell/src/leader/mod.rs", "client::control_command_min_protocol",
+        "discovery enforces the same per-command floor as send_control", problems)
+    _check_file_contains(
+        "crates/codegen/xai-grok-shell/src/session/acp_session.rs", "fn is_busy_live",
+        "scheduled/background obligations keep a session resident so idle eviction cannot drop them", problems)
+    _check_file_contains(
+        "crates/codegen/xai-grok-sampling-types/src/types.rs", "impl<'de> Deserialize<'de> for ChatChunkDelta",
+        "hand-written ChatChunkDelta Deserialize accepting all three reasoning-trace spellings", problems)
+    _check_file_contains(
+        "crates/codegen/xai-grok-sampler/src/events.rs", "input_overflow_error",
+        "zero-output length-stops build an Api context-overflow error carrying model_metadata", problems)
+    _check_file_contains(
+        "crates/codegen/xai-grok-sampler/src/actor/request_task.rs", "classify_length_stop",
+        "zero-output length-stops classify to input-overflow (compaction) not MaxTokensTruncation", problems)
+    _check_file_contains(
+        "crates/codegen/xai-grok-sampler/src/stream/messages.rs", "input_overflow_error",
+        "Messages backend routes zero-output length-stops to input-overflow carrying model_metadata", problems)
+    _check_file_contains(
+        "crates/codegen/xai-grok-sampling-types/src/conversation/messages.rs", "prepare_history",
+        "strip foreign reasoning signatures on a cross-backend switch (rule in messages.rs)", problems)
+    _check_file_contains(
+        "crates/codegen/xai-grok-sampling-types/src/conversation.rs", "pub use messages::prepare_history;",
+        "conversation.rs re-exports prepare_history for the shell caller", problems)
+    _check_file_contains(
+        "crates/codegen/xai-grok-shell/src/session/acp_session_impl/model_switch.rs", "prepare_history(&mut conversation, true)",
+        "model switch strips foreign reasoning signatures only when the backend changed", problems)
+    _check_file_contains(
+        "crates/codegen/xai-grok-shell/src/session/acp_session_tests/tool_layer_images_bridge_tests.rs", "use base64::Engine;",
+        "test-target unblock: base64 Engine trait import (shell lib-test target compiles)", problems)
+
     # 7. build + smoke (this host). Build is the long pole; allow skipping.
     #    The full Linux pager suite remains CI-owned (UPSTREAM.md §5).
     if dry_run:

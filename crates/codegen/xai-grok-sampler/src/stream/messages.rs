@@ -95,7 +95,7 @@ pub fn stream_messages<'a>(
             timestamp_ms: chrono::Utc::now().timestamp_millis(),
         };
 
-        if let Some(metadata) = model_metadata {
+        if let Some(metadata) = model_metadata.clone() {
             yield SamplingEvent::ModelMetadata {
                 request_id: request_id.clone(),
                 metadata,
@@ -517,6 +517,20 @@ pub fn stream_messages<'a>(
         }
 
         if final_stop_reason == Some(StopReason::Length) {
+            // A length-stop that produced no content and no tool call is an
+            // input-overflow signature: the output budget was exhausted
+            // before anything was emitted. Carry the model metadata so the
+            // shell routes it to compaction instead of surfacing it as a
+            // max-tokens truncation.
+            if assistant_text.is_empty() && assistant_tool_calls.is_empty() {
+                yield SamplingEvent::Failed {
+                    request_id: request_id.clone(),
+                    error: SamplingErrorInfo::from(&crate::events::input_overflow_error(
+                        model_metadata.clone(),
+                    )),
+                };
+                return;
+            }
             yield SamplingEvent::Failed {
                 request_id: request_id.clone(),
                 error: SamplingErrorInfo::from(&SamplingError::MaxTokensTruncation),

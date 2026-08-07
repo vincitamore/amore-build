@@ -112,6 +112,34 @@ pub enum ClientError {
     UnsupportedControl(String),
 }
 
+/// Minimum leader protocol version required to issue each control command.
+///
+/// The control gate is a per-command floor, not an exact-equality check: a
+/// connected leader whose `leader_protocol_version` is at or above the floor
+/// for a command may issue that command, and is rejected only for commands
+/// whose floor it has not yet reached. `LEADER_PROTOCOL_VERSION` is the current
+/// wire version and therefore the floor every command ships with today. When a
+/// later protocol adds a command, that command raises its own floor here and
+/// old leaders are gated on just that command instead of the whole control
+/// surface.
+///
+/// The match is exhaustive: adding a [`ControlCommand`] variant is a compile
+/// error until its minimum floor is named.
+pub(super) fn control_command_min_protocol(command: &ControlCommand) -> u32 {
+    match command {
+        ControlCommand::GetLeaderInfo
+        | ControlCommand::CpuProfileStatus
+        | ControlCommand::StartCpuProfile { .. }
+        | ControlCommand::StopCpuProfile
+        | ControlCommand::WorkspaceStart { .. }
+        | ControlCommand::WorkspacePause
+        | ControlCommand::WorkspaceResume
+        | ControlCommand::WorkspaceStop
+        | ControlCommand::WorkspaceStatus
+        | ControlCommand::RelaunchForUpdate { .. } => super::protocol::LEADER_PROTOCOL_VERSION,
+    }
+}
+
 impl LeaderClient {
     pub async fn connect(
         socket_path: PathBuf,
@@ -193,10 +221,11 @@ impl LeaderClient {
                 "leader is legacy and does not advertise protocol metadata".into(),
             )
         })?;
-        if protocol_version != super::protocol::LEADER_PROTOCOL_VERSION {
+        let minimum = control_command_min_protocol(&command);
+        if protocol_version < minimum {
             return Err(ClientError::UnsupportedControl(format!(
-                "leader uses unsupported protocol version {}",
-                protocol_version
+                "leader protocol version {} is below the minimum {} required for {:?}",
+                protocol_version, minimum, command
             )));
         }
         let capabilities = self
@@ -672,12 +701,62 @@ mod tests {
         fake.cancel();
     }
 
-    /// Registration succeeds against a future-protocol leader (the field is
-    /// informational at registration time), but the control surface rejects it.
+    /// Registration succeeds against a leader running an OLDER protocol than a
+    /// command's floor (the field is informational at registration time), but
+    /// issuing that command is rejected at the control gate before anything is
+    /// sent.
     #[tokio::test(start_paused = true)]
-    async fn wrong_protocol_version_registers_but_rejects_control() {
+    async fn older_protocol_leader_rejects_control() {
         let temp = TempDir::new().unwrap();
-        let sock_path = temp.path().join("wrong-proto.sock");
+        let sock_path = temp.path().join("older-proto.sock");
+        let fake = spawn_fake_leader(
+            sock_path.clone(),
+            FakeLeaderBehavior::Normal {
+                versions: FakeVersions {
+                    protocol_version: Some(0),
+                    binary_version: Some(xai_grok_version::VERSION.to_string()),
+                },
+                caps: fake_caps(true, false),
+            },
+        )
+        .await;
+
+        let client = LeaderClient::connect(
+            sock_path,
+            "test",
+            ClientMode::Stdio,
+            ClientCapabilities::default(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(client.registration().leader_protocol_version, Some(0));
+        assert!(
+            control_command_min_protocol(&ControlCommand::GetLeaderInfo) > 0,
+            "GetLeaderInfo must have a positive minimum floor"
+        );
+
+        let err = client
+            .send_control(ControlCommand::GetLeaderInfo)
+            .await
+            .expect_err("control must be rejected for a leader below the command floor");
+        assert!(
+            matches!(err, ClientError::UnsupportedControl(_)),
+            "expected UnsupportedControl, got {err:?}"
+        );
+
+        client.cancel();
+        fake.cancel();
+    }
+
+    /// Registration succeeds against a leader running a NEWER protocol (the
+    /// exact-equality gate used to reject it outright). Under the per-command
+    /// minimum-floor gate the same leader is accepted: `send_control` clears
+    /// the floor check and issues the command, which the idle fake leader never
+    /// answers, so the pending control times out instead of being rejected.
+    #[tokio::test(start_paused = true)]
+    async fn newer_protocol_leader_accepts_control() {
+        let temp = TempDir::new().unwrap();
+        let sock_path = temp.path().join("newer-proto.sock");
         let fake = spawn_fake_leader(
             sock_path.clone(),
             FakeLeaderBehavior::Normal {
@@ -699,14 +778,21 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(client.registration().leader_protocol_version, Some(999));
-
-        let err = client
-            .send_control(ControlCommand::GetLeaderInfo)
-            .await
-            .expect_err("control must be rejected for an unsupported protocol version");
         assert!(
-            matches!(err, ClientError::UnsupportedControl(_)),
-            "expected UnsupportedControl, got {err:?}"
+            control_command_min_protocol(&ControlCommand::GetLeaderInfo) <= 999,
+            "a newer leader must still meet the GetLeaderInfo floor"
+        );
+
+        let outcome = tokio::time::timeout(
+            Duration::from_secs(5),
+            client.send_control(ControlCommand::GetLeaderInfo),
+        )
+        .await;
+        // The gate did not reject (no UnsupportedControl); the command was
+        // issued and simply went unanswered by the idle fake leader.
+        assert!(
+            matches!(outcome, Err(_)),
+            "expected the control to pass the floor gate and wait unanswered, got {outcome:?}"
         );
 
         client.cancel();

@@ -287,7 +287,8 @@ async fn fetch_live_leader_info(socket_path: &Path) -> Result<LiveLeaderInfo, Le
                 ),
             )
         })?;
-        if protocol_version < LEADER_PROTOCOL_VERSION {
+        let min_protocol = client::control_command_min_protocol(&ControlCommand::GetLeaderInfo);
+        if protocol_version < min_protocol {
             return Err(LeaderTargetError::new(
                 LeaderTargetErrorCode::UnsupportedProtocol,
                 format!(

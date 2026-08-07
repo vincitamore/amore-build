@@ -344,6 +344,7 @@ mod tests {
             role: Some(Role::Assistant),
             content: Some(text.to_string()),
             reasoning_content: None,
+            reasoning_key: None,
             tool_calls: vec![],
             tool_call_id: None,
         }])
@@ -436,6 +437,7 @@ mod tests {
             role: Some(Role::Assistant),
             content: None,
             reasoning_content: Some("thinking...".into()),
+            reasoning_key: None,
             tool_calls: vec![],
             tool_call_id: None,
         }]);
@@ -500,6 +502,7 @@ mod tests {
             role: None,
             content: None,
             reasoning_content: None,
+            reasoning_key: None,
             tool_calls: vec![ChunkToolCallDelta {
                 index: 0,
                 id: Some("call_abc".into()),
@@ -516,6 +519,7 @@ mod tests {
             role: None,
             content: None,
             reasoning_content: None,
+            reasoning_key: None,
             tool_calls: vec![ChunkToolCallDelta {
                 index: 0,
                 id: None,

@@ -597,6 +597,11 @@ async fn drive_l2(
     output_observed: Arc<AtomicBool>,
 ) -> AttemptOutcome {
     let mut l2 = pin!(l2);
+    // Model metadata is surfaced by the L2 transform as an early
+    // `ModelMetadata` event; retain it so a zero-output length-stop can be
+    // classified as an input overflow carrying the metadata (which the shell
+    // needs to route the failure to compaction).
+    let mut model_metadata: Option<xai_grok_sampling_types::ResponseModelMetadata> = None;
     loop {
         tokio::select! {
             biased;
@@ -621,7 +626,7 @@ async fn drive_l2(
                     }
                     if response.stop_reason == Some(xai_grok_sampling_types::StopReason::Length) {
                         return AttemptOutcome::Failed {
-                            error: SamplingError::MaxTokensTruncation,
+                            error: classify_length_stop(&response, model_metadata),
                         };
                     }
                     // A content-filtered turn (Anthropic refusal, OpenAI
@@ -653,6 +658,9 @@ async fn drive_l2(
                             | SamplingEvent::BackendToolCallCompleted { .. }
                     ) {
                         output_observed.store(true, Ordering::Relaxed);
+                    }
+                    if let SamplingEvent::ModelMetadata { metadata, .. } = &other {
+                        model_metadata = Some(metadata.clone());
                     }
                     let _ = event_tx.send(retag(other, &request_id));
                 }
@@ -777,6 +785,26 @@ fn build_empty_context(
         prompt_tokens,
         model,
         first_choice_seen,
+    }
+}
+
+/// Classify a completed response whose `stop_reason` is `Length`.
+///
+/// A length-stop that produced no visible output and no tool calls is an
+/// input-overflow signature: the model's output budget was exhausted before
+/// it emitted anything, which happens when the input fills the context
+/// window. That case must route to compaction (via the carried model
+/// metadata) rather than be surfaced to the user as an output truncation.
+/// A length-stop that produced content or tool calls is a genuine output
+/// truncation.
+fn classify_length_stop(
+    response: &ConversationResponse,
+    model_metadata: Option<xai_grok_sampling_types::ResponseModelMetadata>,
+) -> SamplingError {
+    if response.empty_reason().is_some() {
+        crate::events::input_overflow_error(model_metadata)
+    } else {
+        SamplingError::MaxTokensTruncation
     }
 }
 
@@ -936,6 +964,78 @@ mod tests {
             }
             other => panic!("expected Api(429), got {other:?}"),
         }
+    }
+
+    #[test]
+    fn classify_zero_output_length_stop_routes_to_compaction_not_truncation() {
+        use xai_grok_sampling_types::{ConversationItem, ResponseModelMetadata};
+        let metadata = Some(ResponseModelMetadata {
+            context_window: Some(128_000),
+            max_completion_tokens: None,
+            models_etag: None,
+        });
+
+        // Zero-output response (empty assistant, no tool calls, no reasoning):
+        // must classify as an input-overflow error that carries the metadata
+        // so the shell can route it to compaction.
+        let zero_output = ConversationResponse {
+            items: vec![ConversationItem::assistant("")],
+            stop_reason: Some(xai_grok_sampling_types::StopReason::Length),
+            usage: None,
+            cost_usd_ticks: None,
+            message_chunks_emitted: 0,
+            doom_loop_signals: Vec::new(),
+            stop_message: None,
+            message_id: None,
+            raw_stop_reason: None,
+            stop_sequence: None,
+        };
+        let err = classify_length_stop(&zero_output, metadata.clone());
+        match &err {
+            SamplingError::Api {
+                status,
+                message,
+                model_metadata,
+                should_retry,
+                ..
+            } => {
+                assert_eq!(status.as_u16(), 400);
+                assert_eq!(*should_retry, Some(false));
+                // Compare field-by-field: ResponseModelMetadata does not
+                // implement PartialEq (and error.rs is not ours to edit).
+                let md = model_metadata.as_ref().expect("metadata present");
+                let expected = metadata.as_ref().expect("metadata provided");
+                assert_eq!(md.context_window, expected.context_window, "metadata must flow to compaction");
+                assert_eq!(md.max_completion_tokens, expected.max_completion_tokens);
+                assert_eq!(md.models_etag, expected.models_etag);
+                assert!(
+                    xai_grok_sampling_types::is_context_length_error(message),
+                    "must classify as a context-length error, not a truncation"
+                );
+            }
+            other => {
+                panic!("expected Api input-overflow error, got {other:?}")
+            }
+        }
+
+        // A length-stop that produced content is a genuine output truncation
+        // and must stay MaxTokensTruncation.
+        let with_content = ConversationResponse {
+            items: vec![ConversationItem::assistant("some output")],
+            stop_reason: Some(xai_grok_sampling_types::StopReason::Length),
+            usage: None,
+            cost_usd_ticks: None,
+            message_chunks_emitted: 0,
+            doom_loop_signals: Vec::new(),
+            stop_message: None,
+            message_id: None,
+            raw_stop_reason: None,
+            stop_sequence: None,
+        };
+        assert!(matches!(
+            classify_length_stop(&with_content, metadata.clone()),
+            SamplingError::MaxTokensTruncation
+        ));
     }
 
     #[test]

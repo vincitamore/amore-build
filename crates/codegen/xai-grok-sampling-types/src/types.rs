@@ -631,7 +631,7 @@ pub struct ToolCallFunctionDelta {
     pub arguments: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[derive(Debug, Serialize, Clone, Default)]
 pub struct ChatChunkDelta {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub role: Option<Role>,
@@ -639,13 +639,17 @@ pub struct ChatChunkDelta {
     pub content: Option<String>,
     /// The streamed reasoning trace. The wire field name depends on the ROUTE,
     /// not the model: directly-served endpoints (xAI, vLLM/SGLang, Z.ai) send
-    /// `reasoning_content`, while OpenRouter normalizes it to `reasoning` (with a
-    /// structured `reasoning_details` beside it). Accept both — the struct has no
-    /// `deny_unknown_fields`, so an unaliased spelling is dropped in silence and
-    /// the harness simply never renders a thought trace. `alias` is
-    /// deserialize-only, so what we serialize on the request path is unchanged.
-    #[serde(alias = "reasoning")]
+    /// `reasoning_content`, while OpenRouter normalizes it to `reasoning`.
+    ///
+    /// Deserialization is hand-written (below) so all three spellings are
+    /// accepted and the first non-empty one wins — a plain serde `alias` would
+    /// reject a delta carrying two spellings as a `duplicate field`.
     pub reasoning_content: Option<String>,
+    /// Which spelling supplied `reasoning_content` on the wire
+    /// (`reasoning_content`, `reasoning`, or `reasoning_text`). Never
+    /// serialized: replay output always writes `reasoning_content` back.
+    #[serde(skip_serializing)]
+    pub reasoning_key: Option<&'static str>,
     /// Tool call deltas. Handles `null` in JSON as empty vec.
     #[serde(
         default,
@@ -655,6 +659,64 @@ pub struct ChatChunkDelta {
     pub tool_calls: Vec<ToolCallDelta>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_call_id: Option<String>,
+}
+
+impl<'de> Deserialize<'de> for ChatChunkDelta {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        // Mirror of `ChatChunkDelta` that keeps the three reasoning-trace
+        // spellings as separate fields, so a delta carrying more than one is
+        // deserialized normally instead of rejected as a duplicate.
+        #[derive(Deserialize)]
+        struct Wire {
+            #[serde(default)]
+            role: Option<Role>,
+            #[serde(default)]
+            content: Option<String>,
+            #[serde(default)]
+            reasoning_content: Option<String>,
+            #[serde(default)]
+            reasoning: Option<String>,
+            #[serde(default)]
+            reasoning_text: Option<String>,
+            #[serde(default, deserialize_with = "deserialize_null_default")]
+            tool_calls: Vec<ToolCallDelta>,
+            #[serde(default)]
+            tool_call_id: Option<String>,
+        }
+
+        let wire = Wire::deserialize(deserializer)?;
+
+        // First non-empty spelling wins; the canonical `reasoning_content` is
+        // preferred, then `reasoning`, then `reasoning_text`.
+        let (reasoning_content, reasoning_key) = [
+            ("reasoning_content", wire.reasoning_content),
+            ("reasoning", wire.reasoning),
+            ("reasoning_text", wire.reasoning_text),
+        ]
+        .into_iter()
+        .find_map(|(key, value)| {
+            value
+                .filter(|text| !text.is_empty())
+                .map(|text| (Some(text), Some(key)))
+        })
+        .unwrap_or((None, None));
+
+        if let Some(key) = reasoning_key {
+            tracing::debug!(field = key, "chat chunk delta carried a reasoning trace");
+        }
+
+        Ok(ChatChunkDelta {
+            role: wire.role,
+            content: wire.content,
+            reasoning_content,
+            reasoning_key,
+            tool_calls: wire.tool_calls,
+            tool_call_id: wire.tool_call_id,
+        })
+    }
 }
 
 /// Parameters to control realtime data.
@@ -1532,6 +1594,63 @@ mod tests {
             Some("direct trace"),
             "the directly-served spelling must keep working"
         );
+    }
+
+    /// Regression test for the dual-present trace delta. A serde `alias` maps
+    /// both spellings onto one field and errors with `duplicate field` when a
+    /// delta carries both. The hand-written `Deserialize` accepts any
+    /// combination, takes the first non-empty spelling, and records which one
+    /// won on `reasoning_key` (never serialized, so replay output is unchanged).
+    #[test]
+    fn chat_chunk_delta_dual_present_reasoning_does_not_error() {
+        let both = r#"{
+            "content": "",
+            "role": "assistant",
+            "reasoning": "openrouter trace",
+            "reasoning_content": "direct trace"
+        }"#;
+        let delta: ChatChunkDelta =
+            serde_json::from_str(both).expect("dual-present delta must not error");
+        assert_eq!(
+            delta.reasoning_content.as_deref(),
+            Some("direct trace"),
+            "canonical `reasoning_content` takes precedence when both are present"
+        );
+        assert_eq!(delta.reasoning_key, Some("reasoning_content"));
+
+        // Serialization must keep writing the canonical `reasoning_content` and
+        // must not leak the recorded key.
+        let serialized = serde_json::to_string(&delta).unwrap();
+        assert!(
+            serialized.contains("\"reasoning_content\"") && !serialized.contains("reasoning_key"),
+            "replay output stays canonical: {}",
+            serialized
+        );
+    }
+
+    #[test]
+    fn chat_chunk_delta_reasoning_first_non_empty_wins() {
+        // Canonical spelling present but empty: fall through to `reasoning`.
+        let empty_canonical = r#"{
+            "role": "assistant",
+            "reasoning_content": "",
+            "reasoning": "fallback trace"
+        }"#;
+        let delta: ChatChunkDelta = serde_json::from_str(empty_canonical)
+            .expect("delta with empty canonical + non-empty alias must not error");
+        assert_eq!(
+            delta.reasoning_content.as_deref(),
+            Some("fallback trace"),
+            "first non-empty spelling wins"
+        );
+        assert_eq!(delta.reasoning_key, Some("reasoning"));
+
+        // The third spelling, `reasoning_text`, is accepted too.
+        let text_spelling = r#"{"role":"assistant","reasoning_text":"text trace"}"#;
+        let delta: ChatChunkDelta = serde_json::from_str(text_spelling)
+            .expect("reasoning_text spelling must deserialize");
+        assert_eq!(delta.reasoning_content.as_deref(), Some("text trace"));
+        assert_eq!(delta.reasoning_key, Some("reasoning_text"));
     }
 
     /// Regression test: cloning `Box<dyn TraceContext>` must not infinitely recurse.

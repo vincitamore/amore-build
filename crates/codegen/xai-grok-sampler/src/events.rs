@@ -296,6 +296,33 @@ impl From<&SamplingError> for SamplingErrorInfo {
     }
 }
 
+/// User-facing message for a length-stop that produced no output. Upstream
+/// models reach that state with a finish reason of `length` and zero tokens
+/// when the input fills the context window. Phrased so
+/// [`is_context_length_error`] classifies it as deterministic: re-sending the
+/// same payload cannot help.
+const INPUT_OVERFLOW_MESSAGE: &str =
+    "input exceeds the model's context window and no output was produced (prompt is too long for this model)";
+
+/// Build a context/input-overflow [`SamplingError`] for a zero-output
+/// length-stop, carrying the model metadata received from response headers.
+///
+/// Carrying the metadata is what lets the shell's compaction logic route the
+/// failure to compaction instead of surfacing it as a max-tokens truncation;
+/// the context-length message keeps it deterministic (never retried with the
+/// same payload).
+pub(crate) fn input_overflow_error(
+    model_metadata: Option<ResponseModelMetadata>,
+) -> SamplingError {
+    SamplingError::Api {
+        status: reqwest::StatusCode::BAD_REQUEST,
+        message: INPUT_OVERFLOW_MESSAGE.to_string(),
+        model_metadata,
+        retry_after_secs: None,
+        should_retry: Some(false),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -441,5 +468,51 @@ mod tests {
         assert_eq!(info.kind, SamplingErrorKind::IdleTimeout);
         assert!(!info.is_retryable);
         assert!(info.message.contains("300s"));
+    }
+
+    #[test]
+    fn input_overflow_error_carries_metadata_and_classifies_as_context_length() {
+        let metadata = ResponseModelMetadata {
+            context_window: Some(128_000),
+            max_completion_tokens: Some(32_768),
+            models_etag: Some("etag-v1".to_string()),
+        };
+        let err = input_overflow_error(Some(metadata.clone()));
+        match &err {
+            SamplingError::Api {
+                status,
+                message,
+                model_metadata,
+                should_retry,
+                ..
+            } => {
+                assert_eq!(status.as_u16(), 400, "input overflow is a client error");
+                assert_eq!(*should_retry, Some(false), "deterministic, never retried");
+                assert!(
+                    xai_grok_sampling_types::is_context_length_error(message),
+                    "message must classify as a context-length error"
+                );
+                // Compare field-by-field: ResponseModelMetadata does not
+                // implement PartialEq (and we do not own error.rs to derive it).
+                let md = model_metadata.as_ref().expect("metadata present");
+                assert_eq!(md.context_window, metadata.context_window);
+                assert_eq!(md.max_completion_tokens, metadata.max_completion_tokens);
+                assert_eq!(md.models_etag, metadata.models_etag);
+            }
+            other => panic!("expected Api input-overflow error, got {other:?}"),
+        }
+
+        // The SamplingErrorInfo the shell consumes must carry the metadata so
+        // should_compact_on_error can route the failure to compaction.
+        let info = SamplingErrorInfo::from(&err);
+        let md = info.model_metadata.as_ref().expect("metadata present");
+        assert_eq!(md.context_window, metadata.context_window);
+        assert_eq!(md.max_completion_tokens, metadata.max_completion_tokens);
+        assert_eq!(md.models_etag, metadata.models_etag);
+        assert_eq!(info.kind, SamplingErrorKind::Api);
+        assert!(
+            !info.is_retryable,
+            "an input overflow is deterministic, not retryable"
+        );
     }
 }
