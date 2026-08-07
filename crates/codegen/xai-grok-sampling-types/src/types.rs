@@ -554,6 +554,11 @@ pub struct PromptTokensDetails {
     pub cached_tokens: u32,
     #[serde(default)]
     pub audio_tokens: u32,
+    /// Prompt tokens written to the server-side prefix cache this call.
+    /// Reported by cache-write-capable gateways; `0` when the backend does not
+    /// emit a write signal. Distinct from `cached_tokens` (the cache-hit subset).
+    #[serde(default)]
+    pub cache_write_tokens: u32,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]

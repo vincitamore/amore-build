@@ -3518,12 +3518,7 @@ pub(crate) fn resolve_model_list(
         if !had_base {
             tracing::debug!(model_key = %key, "config model adding new entry (not in defaults/prefetched)");
             if model_override.context_window.is_none() {
-                tracing::debug!(
-                    model_key = %key,
-                    default = 200_000,
-                    "new model missing context_window, defaulting to 200000 — set context_window in [model.{}] to override",
-                    key,
-                );
+                crate::remote::client::warn_default_context_window_once(key, 200_000);
             }
         }
         let with_provider = model_override.model_provider.as_deref().map(|pid| {

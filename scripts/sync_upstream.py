@@ -506,6 +506,18 @@ def cmd_verify(dry_run: bool) -> int:
     _check_file_contains(
         "crates/codegen/xai-grok-shell/src/session/acp_session_tests/tool_layer_images_bridge_tests.rs", "use base64::Engine;",
         "test-target unblock: base64 Engine trait import (shell lib-test target compiles)", problems)
+    _check_file_contains(
+        "crates/codegen/xai-grok-sampling-types/src/types.rs", "pub cache_write_tokens: u32",
+        "PromptTokensDetails carries the cache-write token field", problems)
+    _check_file_contains(
+        "crates/codegen/xai-grok-sampling-types/src/conversation.rs", "d.cache_write_tokens",
+        "ChatCompletions From<Usage> maps cache_write into cache_creation_prompt_tokens", problems)
+    _check_file_contains(
+        "crates/codegen/xai-grok-shell/src/remote/client.rs", "fn warn_default_context_window_once",
+        "unknown-model context-window fallback stays audible (warn + surface-once), not silent", problems)
+    _check_file_contains(
+        "crates/codegen/xai-grok-sampler/src/client.rs", "fn extract_request_id(",
+        "provider x-request-id/request-id extracted from failed responses and logged", problems)
 
     # 7. build + smoke (this host). Build is the long pole; allow skipping.
     #    The full Linux pager suite remains CI-owned (UPSTREAM.md §5).

@@ -751,6 +751,10 @@ impl From<Usage> for TokenUsage {
             .prompt_tokens_details
             .as_ref()
             .map_or(0, |d| d.cached_tokens);
+        let cache_creation_prompt_tokens = u
+            .prompt_tokens_details
+            .as_ref()
+            .map_or(0, |d| d.cache_write_tokens);
         Self {
             prompt_tokens: u.prompt_tokens,
             completion_tokens: u.completion_tokens,
@@ -760,7 +764,7 @@ impl From<Usage> for TokenUsage {
                 .as_ref()
                 .map_or(0, |d| d.reasoning_tokens),
             cached_prompt_tokens,
-            cache_creation_prompt_tokens: 0,
+            cache_creation_prompt_tokens,
         }
     }
 }
@@ -2412,6 +2416,41 @@ mod tests {
                 "{backend:?}: forwards_prompt_cache_key() disagrees with the mapping"
             );
         }
+    }
+
+    /// A gateway-reported cache-write count lands in `cache_creation_prompt_tokens`,
+    /// distinct from the cache-hit `cached_prompt_tokens`; a zero write stays zero
+    /// (never fabricated from a missing signal).
+    #[test]
+    fn from_usage_maps_cache_write_tokens_to_creation_bucket() {
+        let usage = Usage {
+            prompt_tokens: 6000,
+            completion_tokens: 100,
+            total_tokens: 6100,
+            prompt_tokens_details: Some(crate::types::PromptTokensDetails {
+                cached_tokens: 4000,
+                audio_tokens: 0,
+                cache_write_tokens: 1200,
+            }),
+            completion_tokens_details: None,
+            cost_in_usd_ticks: None,
+        };
+        let tu = TokenUsage::from(usage);
+        assert_eq!(tu.prompt_tokens, 6000);
+        assert_eq!(tu.cached_prompt_tokens, 4000);
+        assert_eq!(tu.cache_creation_prompt_tokens, 1200);
+
+        let no_write = Usage {
+            prompt_tokens: 500,
+            completion_tokens: 50,
+            total_tokens: 550,
+            prompt_tokens_details: Some(crate::types::PromptTokensDetails::default()),
+            completion_tokens_details: None,
+            cost_in_usd_ticks: None,
+        };
+        let tu = TokenUsage::from(no_write);
+        assert_eq!(tu.cached_prompt_tokens, 0);
+        assert_eq!(tu.cache_creation_prompt_tokens, 0);
     }
 
     #[test]

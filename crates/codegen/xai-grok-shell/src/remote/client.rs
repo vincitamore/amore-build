@@ -700,6 +700,32 @@ pub async fn fetch_login_device_flow(cli_chat_proxy_base_url: &str) -> Option<bo
 }
 /// Default context window (256k) when the remote endpoint doesn't provide one.
 pub(crate) const DEFAULT_CONTEXT_WINDOW: u64 = 256_000;
+
+/// Surface that an unknown model fell back to a default context window.
+/// Emits a `warn!` (one line naming the model id and the default applied) so
+/// the silent default becomes audible, and records a single user-visible
+/// notice on the unified log (once per process, not per request) so it
+/// reaches the user. The fallback value itself is left to the caller; this
+/// only makes the default audible.
+pub(crate) fn warn_default_context_window_once(model: &str, default: u64) {
+    use std::sync::OnceLock;
+    static NOTICED: OnceLock<()> = OnceLock::new();
+    tracing::warn!(
+        model = %model,
+        context_window = default,
+        "unknown model has no context window; using a default context window"
+    );
+    NOTICED.get_or_init(|| {
+        xai_grok_telemetry::unified_log::warn(
+            "model: unknown model used a default context window",
+            None,
+            Some(serde_json::json!({
+                "model": model,
+                "context_window": default,
+            })),
+        );
+    });
+}
 #[derive(Debug, Deserialize)]
 struct ModelsResponse {
     data: Vec<serde_json::Value>,
@@ -849,7 +875,10 @@ pub(crate) fn parse_remote_model_value(
         .or_else(|| get_u64(obj, "context_window"))
         .or_else(|| meta.and_then(|m| get_u64(m, "contextWindow")))
         .or_else(|| meta.and_then(|m| get_u64(m, "totalContextTokens")))
-        .unwrap_or(DEFAULT_CONTEXT_WINDOW);
+        .unwrap_or_else(|| {
+            warn_default_context_window_once(&model, DEFAULT_CONTEXT_WINDOW);
+            DEFAULT_CONTEXT_WINDOW
+        });
     let context_window = std::num::NonZeroU64::new(context_window)?;
     let agent_type = get_string(obj, "systemPromptType")
         .or_else(|| get_string(obj, "system_prompt_type"))
@@ -1488,6 +1517,21 @@ mod tests {
             .unwrap_err();
         assert!(matches!(error, BackendError::Serialization(_)));
         server.abort();
+    }
+    #[test]
+    fn parse_remote_model_value_missing_context_window_keeps_default() {
+        // A model entry that carries no context window must fall back to the
+        // standard default and must not change that value: this only makes the
+        // fallback audible (warn + surface-once), it never alters the number.
+        let value = serde_json::json!({
+            "model": "mystery-model",
+        });
+        let result = parse_remote_model_value(&value, "https://default.url").unwrap();
+        assert_eq!(
+            result.context_window,
+            std::num::NonZeroU64::new(DEFAULT_CONTEXT_WINDOW).unwrap(),
+            "missing context window must keep the default, value unchanged"
+        );
     }
     #[test]
     fn parse_openai_format_uses_id_field() {

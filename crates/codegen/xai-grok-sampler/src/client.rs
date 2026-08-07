@@ -229,6 +229,19 @@ fn extract_should_retry(headers: &reqwest::header::HeaderMap) -> Option<bool> {
         })
 }
 
+/// Provider request-id echoed in the `x-request-id` / `request-id` response
+/// header. Some providers use one spelling, some the other; prefer
+/// `x-request-id`, fall back to `request-id`. Empty values are treated as
+/// absent.
+fn extract_request_id(headers: &reqwest::header::HeaderMap) -> Option<String> {
+    headers
+        .get("x-request-id")
+        .or_else(|| headers.get("request-id"))
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string())
+        .filter(|s| !s.is_empty())
+}
+
 fn extract_model_metadata(headers: &reqwest::header::HeaderMap) -> Option<ResponseModelMetadata> {
     let context_window = headers
         .get("x-grok-context-window")
@@ -871,6 +884,7 @@ impl SamplingClient {
         let model_metadata = extract_model_metadata(response.headers());
         let retry_after_secs = extract_retry_after(response.headers());
         let should_retry = extract_should_retry(response.headers());
+        let request_id = extract_request_id(response.headers());
         let bytes = response.bytes().await?;
 
         if !status.is_success() {
@@ -886,6 +900,13 @@ impl SamplingClient {
                 ));
             }
             let message = user_facing_api_error_message(status, bytes.as_ref());
+            tracing::warn!(
+                status = %status,
+                error_message = %message,
+                request_id = ?request_id,
+                body_preview = %Self::body_preview(bytes.as_ref()),
+                "sampling API error"
+            );
             return Err(SamplingError::Api {
                 status,
                 message,
@@ -1030,6 +1051,7 @@ impl SamplingClient {
         let model_metadata = extract_model_metadata(response.headers());
         let retry_after_secs = extract_retry_after(response.headers());
         let should_retry = extract_should_retry(response.headers());
+        let request_id = extract_request_id(response.headers());
         if !status.is_success() {
             if status == reqwest::StatusCode::UNAUTHORIZED {
                 span.record("error", "unauthorized (401)");
@@ -1052,6 +1074,7 @@ impl SamplingClient {
             tracing::error!(
                 status = %status,
                 error_message = %message,
+                request_id = ?request_id,
                 body_preview = %Self::body_preview(bytes.as_ref()),
                 model_id = %model_id,
                 "chat/completions API error"
@@ -1230,6 +1253,7 @@ impl SamplingClient {
         let model_metadata = extract_model_metadata(response.headers());
         let retry_after_secs = extract_retry_after(response.headers());
         let should_retry = extract_should_retry(response.headers());
+        let request_id = extract_request_id(response.headers());
         let bytes = response.bytes().await?;
 
         if !status.is_success() {
@@ -1250,6 +1274,7 @@ impl SamplingClient {
             tracing::warn!(
                 status = %status,
                 error_message = %message,
+                request_id = ?request_id,
                 body_preview = %Self::body_preview(bytes.as_ref()),
                 model_id = %model_id,
                 "responses API error"
@@ -1416,12 +1441,14 @@ impl SamplingClient {
             let model_metadata = extract_model_metadata(response.headers());
             let retry_after_secs = extract_retry_after(response.headers());
             let should_retry = extract_should_retry(response.headers());
+            let request_id = extract_request_id(response.headers());
             let bytes = response.bytes().await?;
             let message = user_facing_api_error_message(status, bytes.as_ref());
             span.record("error", message.as_str());
             tracing::error!(
                 status = %status,
                 error_message = %message,
+                request_id = ?request_id,
                 body_preview = %Self::body_preview(bytes.as_ref()),
                 model_id = %model_id,
                 "responses API error"
@@ -1583,6 +1610,7 @@ impl SamplingClient {
         let model_metadata = extract_model_metadata(response.headers());
         let retry_after_secs = extract_retry_after(response.headers());
         let should_retry = extract_should_retry(response.headers());
+        let request_id = extract_request_id(response.headers());
         let bytes = response.bytes().await?;
 
         if !status.is_success() {
@@ -1603,6 +1631,7 @@ impl SamplingClient {
             tracing::warn!(
                 status = %status,
                 error_message = %message,
+                request_id = ?request_id,
                 body_preview = %Self::body_preview(bytes.as_ref()),
                 model_id = %model_id,
                 "messages API error"
@@ -1730,12 +1759,14 @@ impl SamplingClient {
             let model_metadata = extract_model_metadata(response.headers());
             let retry_after_secs = extract_retry_after(response.headers());
             let should_retry = extract_should_retry(response.headers());
+            let request_id = extract_request_id(response.headers());
             let bytes = response.bytes().await?;
             let message = user_facing_api_error_message(status, bytes.as_ref());
             span.record("error", message.as_str());
             tracing::error!(
                 status = %status,
                 error_message = %message,
+                request_id = ?request_id,
                 body_preview = %Self::body_preview(bytes.as_ref()),
                 model_id = %model_id,
                 "messages API error"
@@ -2119,6 +2150,41 @@ mod tests {
             ),
             (529, "Overloaded", true, Some(3), Some(false)),
         );
+    }
+
+    #[test]
+    fn extract_request_id_prefers_x_request_id() {
+        // No header -> None.
+        let empty = HeaderMap::new();
+        assert_eq!(extract_request_id(&empty), None);
+
+        // Fallback spelling alone.
+        let mut fallback = HeaderMap::new();
+        fallback.insert(
+            HeaderName::from_static("request-id"),
+            HeaderValue::from_static("req_fallback"),
+        );
+        assert_eq!(extract_request_id(&fallback), Some("req_fallback".to_string()));
+
+        // Canonical spelling wins over the fallback.
+        let mut both = HeaderMap::new();
+        both.insert(
+            HeaderName::from_static("request-id"),
+            HeaderValue::from_static("req_fallback"),
+        );
+        both.insert(
+            HeaderName::from_static("x-request-id"),
+            HeaderValue::from_static("req_canonical"),
+        );
+        assert_eq!(extract_request_id(&both), Some("req_canonical".to_string()));
+
+        // Empty value is treated as absent.
+        let mut blank = HeaderMap::new();
+        blank.insert(
+            HeaderName::from_static("x-request-id"),
+            HeaderValue::from_static(""),
+        );
+        assert_eq!(extract_request_id(&blank), None);
     }
 
     fn minimal_config() -> SamplerConfig {
