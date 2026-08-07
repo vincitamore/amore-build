@@ -4262,13 +4262,28 @@ impl ModelInfo {
     /// shell's internal reads (support gate, wire default, session modes) treat
     /// a menu-only model as supported. The single derive site; `to_acp_model_info`
     /// then just reads these fields. Idempotent (the remote/CCP path already sets
-    /// them); the empty-list path leaves both legacy fields untouched.
+    /// them). An explicit out-of-list effort is clamped to the nearest declared
+    /// option rather than left unvalidated. The empty-list path leaves both
+    /// legacy fields untouched.
     fn derive_reasoning_effort_fields(&mut self) {
         if self.reasoning_efforts.is_empty() {
             return;
         }
         self.supports_reasoning_effort = true;
-        if self.reasoning_effort.is_none() {
+        if let Some(effort) = self.reasoning_effort {
+            if !self.reasoning_efforts.iter().any(|opt| opt.value == effort) {
+                // Not a declared option: clamp to the nearest declared value
+                // instead of sending an unsupported effort to the wire.
+                if let Some(nearest) = self.nearest_declared_effort(effort) {
+                    tracing::warn!(
+                        "clamping out-of-list reasoning_effort {:?} to nearest declared option {:?}",
+                        effort,
+                        nearest
+                    );
+                    self.reasoning_effort = Some(nearest);
+                }
+            }
+        } else {
             let default = self
                 .reasoning_efforts
                 .iter()
@@ -4276,6 +4291,29 @@ impl ModelInfo {
                 .or_else(|| self.reasoning_efforts.first())
                 .map(|opt| opt.value);
             self.reasoning_effort = default;
+        }
+    }
+    /// The declared option whose value sits closest to `effort` in canonical
+    /// effort ordering; `None` only for an empty list (caller guards).
+    fn nearest_declared_effort(&self, effort: ReasoningEffort) -> Option<ReasoningEffort> {
+        self.reasoning_efforts
+            .iter()
+            .min_by_key(|opt| {
+                Self::effort_rank(opt.value).abs_diff(Self::effort_rank(effort))
+            })
+            .map(|opt| opt.value)
+    }
+    /// Ordinal position of an effort in the canonical wire ordering
+    /// (from lowest to highest), used to pick the nearest declared option.
+    fn effort_rank(effort: ReasoningEffort) -> u8 {
+        match effort {
+            ReasoningEffort::None => 0,
+            ReasoningEffort::Minimal => 1,
+            ReasoningEffort::Low => 2,
+            ReasoningEffort::Medium => 3,
+            ReasoningEffort::High => 4,
+            ReasoningEffort::Xhigh => 5,
+            ReasoningEffort::Max => 6,
         }
     }
     /// Whether this model appears in the picker for the given auth mode.
@@ -7746,13 +7784,22 @@ reasoning_effort = "low"
         let mut models = IndexMap::new();
         let mut entry = test_model_entry("m", "https://test.api/v1", None, None, None);
         entry.info.reasoning_effort = Some(ReasoningEffort::Low);
-        entry.info.reasoning_efforts = vec![ReasoningEffortOption {
-            id: "high".to_string(),
-            value: ReasoningEffort::High,
-            label: "High".to_string(),
-            description: None,
-            default: true,
-        }];
+        entry.info.reasoning_efforts = vec![
+            ReasoningEffortOption {
+                id: "high".to_string(),
+                value: ReasoningEffort::High,
+                label: "High".to_string(),
+                description: None,
+                default: true,
+            },
+            ReasoningEffortOption {
+                id: "low".to_string(),
+                value: ReasoningEffort::Low,
+                label: "Low".to_string(),
+                description: None,
+                default: false,
+            },
+        ];
         entry.info.derive_reasoning_effort_fields();
         models.insert("m".to_string(), entry);
         let meta = to_acp_model_info(&models)
@@ -7764,6 +7811,42 @@ reasoning_effort = "low"
             .unwrap();
         assert_eq!(meta["supportsReasoningEffort"], true);
         assert_eq!(meta["reasoningEffort"], "low");
+    }
+    #[test]
+    fn acp_model_meta_clamps_out_of_list_reasoning_effort() {
+        let mut models = IndexMap::new();
+        // Explicit `Xhigh` is not a declared option (list only has `low` and
+        // `high`); the derive clamps it to the nearest declared value.
+        let mut entry = test_model_entry("m", "https://test.api/v1", None, None, None);
+        entry.info.reasoning_effort = Some(ReasoningEffort::Xhigh);
+        entry.info.reasoning_efforts = vec![
+            ReasoningEffortOption {
+                id: "low".to_string(),
+                value: ReasoningEffort::Low,
+                label: "Low".to_string(),
+                description: None,
+                default: false,
+            },
+            ReasoningEffortOption {
+                id: "high".to_string(),
+                value: ReasoningEffort::High,
+                label: "High".to_string(),
+                description: None,
+                default: true,
+            },
+        ];
+        entry.info.derive_reasoning_effort_fields();
+        assert_eq!(entry.info.reasoning_effort, Some(ReasoningEffort::High));
+        models.insert("m".to_string(), entry);
+        let meta = to_acp_model_info(&models)
+            .values()
+            .next()
+            .unwrap()
+            .meta
+            .clone()
+            .unwrap();
+        assert_eq!(meta["supportsReasoningEffort"], true);
+        assert_eq!(meta["reasoningEffort"], "high");
     }
     #[test]
     fn acp_model_meta_derives_first_option_when_no_default() {

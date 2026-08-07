@@ -10,6 +10,7 @@ fn session(id: &str, pid: u32) -> ActiveSession {
         pid,
         cwd: "/tmp/test".into(),
         opened_at: Utc::now(),
+        started_at: None,
     }
 }
 

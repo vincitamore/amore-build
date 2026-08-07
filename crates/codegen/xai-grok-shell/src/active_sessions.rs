@@ -17,6 +17,11 @@ pub struct ActiveSession {
     pub pid: u32,
     pub cwd: String,
     pub opened_at: DateTime<Utc>,
+    /// Start identity of the owning process, so a recycled PID that happens
+    /// to be alive is not mistaken for the same session. Captured at
+    /// registration when readable; on non-Windows platforms it stays `None`
+    /// (fail open). `Option` so a missing/unreadable identity is never reaped.
+    pub started_at: Option<u64>,
 }
 
 const DATA_FILENAME: &str = "active_sessions.json";
@@ -46,6 +51,10 @@ pub fn collect_crashed() -> io::Result<Vec<ActiveSession>> {
 pub fn register_in(root: &Path, session: ActiveSession) -> io::Result<()> {
     with_locked_state(root, |sessions| {
         sessions.retain(|s| s.session_id != session.session_id);
+        let mut session = session;
+        if session.started_at.is_none() {
+            session.started_at = process_started_at(session.pid);
+        }
         sessions.push(session);
     })
 }
@@ -65,7 +74,8 @@ pub fn try_unregister_in(root: &Path, session_id: &acp::SessionId) -> io::Result
 
 pub fn collect_crashed_in(root: &Path) -> io::Result<Vec<ActiveSession>> {
     with_locked_state(root, |sessions| {
-        let (alive, dead): (Vec<_>, Vec<_>) = sessions.drain(..).partition(|s| is_pid_alive(s.pid));
+        let (alive, dead): (Vec<_>, Vec<_>) =
+            sessions.drain(..).partition(|s| is_session_alive(s));
         *sessions = alive;
         dead
     })
@@ -203,6 +213,58 @@ fn is_pid_alive(pid: u32) -> bool {
     }
 }
 
+/// Reads the start identity of the process `pid`. On Windows this is the
+/// creation FILETIME from `GetProcessTimes` (100ns ticks since 1601); other
+/// platforms have no portable equivalent, so it returns `None` (fail open).
+fn process_started_at(pid: u32) -> Option<u64> {
+    #[cfg(windows)]
+    {
+        use windows::Win32::Foundation::{CloseHandle, FILETIME};
+        use windows::Win32::System::Threading::{
+            GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+        };
+        let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) }.ok()?;
+        let mut creation = FILETIME::default();
+        let mut exit = FILETIME::default();
+        let mut kernel = FILETIME::default();
+        let mut user = FILETIME::default();
+        let result = unsafe {
+            GetProcessTimes(handle, &mut creation, &mut exit, &mut kernel, &mut user)
+        };
+        let _ = unsafe { CloseHandle(handle) };
+        result.ok()?;
+        Some(
+            (u64::from(creation.dwHighDateTime) << 32) | u64::from(creation.dwLowDateTime),
+        )
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = pid;
+        None
+    }
+}
+
+/// Whether the start identity read at check time (`actual`) still matches the
+/// recorded identity (`expected`). Fail-open, literal: an absent or unreadable
+/// identity is treated as a match (the session is kept alive) — never reap on
+/// uncertainty.
+fn matches_start_identity(expected: Option<u64>, actual: Option<u64>) -> bool {
+    match (expected, actual) {
+        (None, _) | (Some(_), None) => true,
+        (Some(e), Some(a)) => e == a,
+    }
+}
+
+/// A session is alive when its process exists AND its recorded start identity
+/// still matches the process's current one. A *recycled* PID — a different
+/// process that has since taken the same PID — is therefore not alive.
+/// Missing or unreadable identity keeps the session alive (see
+/// [`matches_start_identity`]).
+fn is_session_alive(session: &ActiveSession) -> bool {
+    is_pid_alive(session.pid)
+        && matches_start_identity(session.started_at, process_started_at(session.pid))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -214,6 +276,7 @@ mod tests {
             pid,
             cwd: "/tmp/test".into(),
             opened_at: Utc::now(),
+            started_at: None,
         }
     }
 
@@ -231,6 +294,34 @@ mod tests {
         let dir = TempDir::new().unwrap();
         register_in(dir.path(), make_session("alive", std::process::id())).unwrap();
         register_in(dir.path(), make_session("dead", 2_000_000_000)).unwrap();
+
+        let crashed = collect_crashed_in(dir.path()).unwrap();
+        assert_eq!(crashed.len(), 1);
+        assert_eq!(&*crashed[0].session_id.0, "dead");
+        assert_eq!(&*list_in(dir.path()).unwrap()[0].session_id.0, "alive");
+    }
+
+    #[test]
+    fn matches_start_identity_is_fail_open() {
+        // No recorded identity: alive whatever we can read now.
+        assert!(matches_start_identity(None, None));
+        assert!(matches_start_identity(None, Some(111)));
+        // Recorded identity but unreadable now: fail open, keep alive.
+        assert!(matches_start_identity(Some(111), None));
+        // Both known and identical: same process, alive.
+        assert!(matches_start_identity(Some(111), Some(111)));
+        // Recycled PID: alive but with a different creation identity, so it is
+        // NOT the same session (this is the regression this test guards).
+        assert!(!matches_start_identity(Some(111), Some(222)));
+    }
+
+    #[test]
+    fn collect_crashed_is_fail_open_on_unreadable_identity() {
+        let dir = TempDir::new().unwrap();
+        // Dead PID: always reaped, regardless of identity.
+        register_in(dir.path(), make_session("dead", 2_000_000_000)).unwrap();
+        // Live PID whose identity is unreadable (None on non-Windows): kept.
+        register_in(dir.path(), make_session("alive", std::process::id())).unwrap();
 
         let crashed = collect_crashed_in(dir.path()).unwrap();
         assert_eq!(crashed.len(), 1);

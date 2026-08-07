@@ -240,6 +240,21 @@ impl ActionDef {
     }
 }
 
+/// A detected chord collision: two distinct actions in the same [`When`]
+/// context resolve the same key event, so the earlier-registered action always
+/// wins in [`ActionRegistry::lookup`] and the later one can never fire.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChordCollision {
+    /// The shared chord in its canonical (case/shift-normalized) form.
+    pub chord: KeyShortcut,
+    /// The `When` context in which both actions are registered.
+    pub context: When,
+    /// The action `lookup` resolves first (registration order) for this chord.
+    pub winner: ActionId,
+    /// The action shadowed by `winner` for this chord — it can never fire.
+    pub shadowed: ActionId,
+}
+
 /// Registry of all actions. Single source of truth.
 pub struct ActionRegistry {
     actions: Vec<ActionDef>,
@@ -301,6 +316,54 @@ impl ActionRegistry {
             }
         }
         None
+    }
+
+    /// Detect chord collisions: distinct actions in the same [`When`] context
+    /// that share a binding, so the earlier one would silently win in
+    /// [`Self::lookup`] and the later could never fire.
+    ///
+    /// Collision identity mirrors the key normalization `lookup` applies —
+    /// a `KeyShortcut` is already canonicalized to its code/modifier form
+    /// (case/shift pooled the same way `matches` pools event case), so
+    /// intentional distinctness (bare `j` vs `Shift+j`, or a chord that is
+    /// exclusive to one screen mode) is never flagged. Returns an empty vec
+    /// when there is no collision.
+    ///
+    /// Validation surface only: dispatch remains first-match by design.
+    pub fn chord_collisions(&self) -> Vec<ChordCollision> {
+        let mut collisions = Vec::new();
+        for (i, a) in self.actions.iter().enumerate() {
+            for b in self.actions.iter().skip(i + 1) {
+                if a.context != b.context {
+                    continue;
+                }
+                if let Some(chord) = shared_binding(a, b) {
+                    collisions.push(ChordCollision {
+                        chord,
+                        context: a.context,
+                        winner: a.id,
+                        shadowed: b.id,
+                    });
+                }
+            }
+        }
+        collisions
+    }
+
+    /// Report any chord collisions to the log (a warning per collision), so a
+    /// registry built from re-mapped or config-driven action defs surfaces a
+    /// shadowed binding instead of letting it silently never fire.
+    pub fn report_chord_collisions(&self) {
+        for c in self.chord_collisions() {
+            tracing::warn!(
+                chord = %c.chord,
+                context = %c.context.telemetry_name(),
+                winner = ?c.winner,
+                shadowed = ?c.shadowed,
+                "action chord collision in {}: {:?} shadows {:?} for {} — the earlier action wins; the later can never fire",
+                c.context.telemetry_name(), c.winner, c.shadowed, c.chord,
+            );
+        }
     }
 
     /// Whether `event` matches `id`'s default or any alt, ignoring `When`.
@@ -513,6 +576,20 @@ impl ActionRegistry {
     pub fn all(&self) -> &[ActionDef] {
         &self.actions
     }
+}
+
+/// Return the first binding two action defs share, comparing already-normalized
+/// `KeyShortcut` values (equal code + modifiers) — the same identity `matches`
+/// uses, so a shared binding here is exactly a shared dispatched keypress.
+fn shared_binding(a: &ActionDef, b: &ActionDef) -> Option<KeyShortcut> {
+    let a_keys = std::iter::once(&a.default_key).chain(a.alt_keys.iter());
+    let b_keys = std::iter::once(&b.default_key).chain(b.alt_keys.iter());
+    for ak in a_keys {
+        if b_keys.clone().any(|bk| ak.code == bk.code && ak.modifiers == bk.modifiers) {
+            return Some(*ak);
+        }
+    }
+    None
 }
 
 /// Emit [`xai_grok_telemetry::events::ShortcutUsed`] for an allowlisted binding.
@@ -1017,5 +1094,66 @@ mod tests {
         let hints = registry.hints(&[When::AgentScreen, When::Always]);
         let has_dash = hints.iter().any(|h| h.id == ActionId::OpenIrisDash);
         assert_eq!(has_dash, crate::iris_companion::is_available());
+    }
+
+    #[test]
+    fn chord_collision_detector_fires_on_constructed_duplicate() {
+        let registry = ActionRegistry::new(vec![
+            ActionDef {
+                id: ActionId::SelectNext,
+                label: "first",
+                description: "first",
+                long_help: None,
+                default_key: key!('j'),
+                alt_keys: vec![],
+                category: Category::ConversationNav,
+                context: When::ScrollbackFocused,
+                hint_priority: None,
+                hint_key_display: None,
+                requires_confirmation: false,
+            },
+            ActionDef {
+                id: ActionId::ScrollDown,
+                label: "second",
+                description: "second",
+                long_help: None,
+                default_key: key!('j'),
+                alt_keys: vec![key!(Down)],
+                category: Category::ConversationNav,
+                context: When::ScrollbackFocused,
+                hint_priority: None,
+                hint_key_display: None,
+                requires_confirmation: false,
+            },
+        ]);
+        let collisions = registry.chord_collisions();
+        assert_eq!(collisions.len(), 1);
+        assert_eq!(collisions[0].chord, key!('j'));
+        assert_eq!(collisions[0].context, When::ScrollbackFocused);
+        assert_eq!(collisions[0].winner, ActionId::SelectNext);
+        assert_eq!(collisions[0].shadowed, ActionId::ScrollDown);
+    }
+
+    #[test]
+    fn chord_collision_detector_is_quiet_on_current_defs() {
+        // The shipped registries must not false-positive: bare `j` vs `Shift+j`
+        // are distinct post-normalization, and mode-exclusive chords (Ctrl+G
+        // owning one action per mode) are intentional.
+        for mode in [
+            crate::app::ScreenMode::Fullscreen,
+            crate::app::ScreenMode::Inline,
+            crate::app::ScreenMode::Minimal,
+        ] {
+            for mouse_enabled in [false, true] {
+                let registry = ActionRegistry::defaults_with_config_for(mode, mouse_enabled);
+                let collisions = registry.chord_collisions();
+                assert!(
+                    collisions.is_empty(),
+                    "default registry ({mode:?}, mouse={mouse_enabled}) reported collisions: {collisions:?}"
+                );
+                // The report surface also runs cleanly (no spurious warnings).
+                registry.report_chord_collisions();
+            }
+        }
     }
 }

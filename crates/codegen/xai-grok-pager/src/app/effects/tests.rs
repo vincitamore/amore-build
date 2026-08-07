@@ -851,6 +851,7 @@ fn register_session_in(root: &std::path::Path, id: &str) -> acp::SessionId {
                 pid: std::process::id(),
                 cwd: "/tmp/test".into(),
                 opened_at: chrono::Utc::now(),
+                started_at: None,
             },
         )
         .expect("register");

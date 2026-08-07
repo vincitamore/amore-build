@@ -54,6 +54,7 @@ pub(crate) fn execute(
                 pid: std::process::id(),
                 cwd,
                 opened_at: chrono::Utc::now(),
+                started_at: None, // start identity filled in by register()
             }) {
                 tracing::warn!(?e, "Failed to register active session");
             }

@@ -536,6 +536,21 @@ def cmd_verify(dry_run: bool) -> int:
     _check_file_contains(
         "crates/codegen/xai-grok-shell/src/agent/mvp_agent/agent_ops.rs", "detachment lives on the leader",
         "driver/subscriber detach comment points at the real leader home", problems)
+    _check_file_contains(
+        "crates/codegen/xai-grok-shell/src/active_sessions.rs", "started_at",
+        "active-session start-identity survives so a recycled PID is not the same alive session", problems)
+    _check_file_contains(
+        "crates/codegen/xai-grok-shell/src/agent/config.rs", "nearest_declared_effort",
+        "out-of-list per-model reasoning_effort clamped to nearest declared option and warned", problems)
+    _check_file_contains(
+        "crates/codegen/xai-grok-pager/src/actions/mod.rs", "pub fn chord_collisions",
+        "action-registry reports chord collisions instead of silently first-winning", problems)
+    _check_file_contains(
+        "crates/codegen/xai-grok-pager/src/headless.rs", "// start identity filled in by register()",
+        "headless ActiveSession literal names the started_at field", problems)
+    _check_file_contains(
+        "crates/codegen/xai-grok-pager/src/app/effects/mod.rs", "// start identity filled in by register()",
+        "RegisterActiveSession effect literal names the started_at field", problems)
 
     # 7. build + smoke (this host). Build is the long pole; allow skipping.
     #    The full Linux pager suite remains CI-owned (UPSTREAM.md §5).

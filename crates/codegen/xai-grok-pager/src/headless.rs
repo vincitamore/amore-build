@@ -964,6 +964,7 @@ pub async fn run_single_turn(
                 pid: std::process::id(),
                 cwd: cwd.display().to_string(),
                 opened_at: chrono::Utc::now(),
+                started_at: None, // start identity filled in by register()
             },
         );
     }
