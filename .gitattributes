@@ -1,0 +1,8 @@
+# Keep line endings consistent across platforms.
+#
+# The working tree is LF everywhere, matching the committed blobs and upstream,
+# so a checkout never introduces whole-file end-of-line diffs and sync intake
+# stays a thin diff. Without this, behavior depends on each machine's
+# core.autocrlf and two git builds on one box can disagree about whether the
+# tree is clean.
+* text=auto eol=lf
