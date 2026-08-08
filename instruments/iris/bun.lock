@@ -7,7 +7,7 @@
     },
     "packages/cli": {
       "name": "@amore/cli",
-      "version": "0.0.0",
+      "version": "0.1.0",
       "bin": {
         "iris": "./src/iris.ts",
       },
@@ -58,8 +58,8 @@
       "version": "0.0.0",
       "dependencies": {
         "@amore/regula": "workspace:*",
-        "@opentui/core": "latest",
-        "@opentui/react": "latest",
+        "@opentui/core": "^0.4.5",
+        "@opentui/react": "^0.4.5",
         "d3-force": "^3.0.0",
         "katex": "^0.16.22",
         "marked": "^18.0.5",
@@ -68,9 +68,9 @@
       },
       "devDependencies": {
         "@types/d3-force": "^3.0.10",
-        "@types/node": "latest",
-        "@types/react": "latest",
-        "bun-types": "latest",
+        "@types/node": "^26.1.2",
+        "@types/react": "^19.2.18",
+        "bun-types": "^1.3.14",
       },
     },
     "packages/vinculum": {
@@ -195,6 +195,8 @@
     "web-tree-sitter": ["web-tree-sitter@0.25.10", "", {}, "sha512-Y09sF44/13XvgVKgO2cNDw5rGk6s26MgoZPXLESvMXeefBf7i6/73eFurre0IsTW6E14Y0ArIzhUMmjoc7xyzA=="],
 
     "ws": ["ws@8.21.0", "", {}, "sha512-Vsp28b7DRcimFQvrqu2Wek3z1iYxDCWqHYB8Qsnk/S4RfaCQzPGPyBNuVjJV3cd6UiKtUtp6sNM77gWvzcCH+g=="],
+
+    "@amore/regula/@types/node": ["@types/node@26.2.0", "", { "dependencies": { "undici-types": "~8.3.0" } }, "sha512-5IviulTZeRNp2vAJ514cc/HUlY5nZ9fCbq9DMyC52BrhFZACo3nI0R7qBxhQmo/d27NFe96ur/b7Wwxklda+kg=="],
 
     "@opentui/core/marked": ["marked@17.0.1", "", { "bin": { "marked": "bin/marked.js" } }, "sha512-boeBdiS0ghpWcSwoNm/jJBwdpFaMnZWRzjA6SkUMYb40SVaN1x7mmfGKp0jvexGcx+7y2La5zRZsYFZI6Qpypg=="],
 
