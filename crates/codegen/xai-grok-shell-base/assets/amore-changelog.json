@@ -1,5 +1,40 @@
 [
   {
+    "category": "fixes",
+    "description": "**Agent turns are more reliable** — a delta carrying more than one reasoning-trace spelling no longer ends the turn; a zero-output length stop is treated as input overflow and routes to compaction; foreign reasoning signatures are stripped on a model-backend switch.",
+    "breaking_change": false
+  },
+  {
+    "category": "fixes",
+    "description": "**Scheduled and background work survives a disconnect** — a session holding scheduled tasks or running background work is no longer evicted as idle, so an agent-created obligation is not destroyed.",
+    "breaking_change": false
+  },
+  {
+    "category": "fixes",
+    "description": "**Leader control tolerates mixed protocol versions** — control now enforces a per-command minimum floor instead of exact equality, so a future protocol bump is a soft tolerance rather than a fleet-wide cutover.",
+    "breaking_change": false
+  },
+  {
+    "category": "fixes",
+    "description": "**Failures are traceable** — an unknown model's context window warns and surfaces once instead of a silent over-large default; the provider request-id is captured and logged on every failed response.",
+    "breaking_change": false
+  },
+  {
+    "category": "fixes",
+    "description": "**Cost and config hardening** — cache-write tokens are counted; an out-of-list reasoning effort clamps to the nearest declared option; action chord collisions are reported instead of silently first-winning.",
+    "breaking_change": false
+  },
+  {
+    "category": "fixes",
+    "description": "**Rendering is grapheme-aware** — width and truncate no longer cut flags or emoji families mid-glyph.",
+    "breaking_change": false
+  },
+  {
+    "category": "fixes",
+    "description": "**Release hygiene** — the unenforced allowed_tools skill field is removed; the iris TUI dependencies are pinned to named floors; CI now smokes both canonical installers.",
+    "breaking_change": false
+  },
+  {
     "category": "features",
     "description": "**The house keeps itself** — Lucerna's agentic maintenance dreams run governed sessions through your own model configuration and write reviewable reports and proposals; opt-in install, dreams off by default, budgets, wall-clock kill, default-deny writes.",
     "breaking_change": false

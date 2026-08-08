@@ -493,6 +493,18 @@ jobs:
           } > notes.md
           cat notes.md
 
+      - name: Changelog entry for this release present
+        # The compiled-in user changelog must carry the release version or the
+        # build will not show it in the welcome screen. Enforce on real tag
+        # releases only; a workflow_dispatch dry-run (which never publishes)
+        # is free to skip it.
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          VER="${GITHUB_REF_NAME#v}"
+          grep -q "## v${VER}" crates/codegen/xai-grok-shell-base/assets/amore-changelog.md \
+            || { echo "::error::no '## v${VER}' entry in amore-changelog.md; add the release's user changelog in the same commit"; exit 1; }
+
       - name: Create release + attach assets
         uses: softprops/action-gh-release@v2
         with:

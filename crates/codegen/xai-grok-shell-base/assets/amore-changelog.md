@@ -6,6 +6,37 @@ monorepo sync commits; everything below is the fork's own delta, newest first.
 This document is compiled into the binary — update it in the same change as the
 work it describes.
 
+## v0.3.1
+
+A reliability and hygiene patch on the v0.3.0 line, driven by a verified
+defect campaign. The headline: agent turns and scheduled work no longer break
+or get lost, and failures become traceable.
+
+- **Agent turns are more reliable.** A streamed delta that carries more than
+  one spelling of the reasoning trace in the same message used to terminate
+  the whole turn; it no longer does. A zero-output length stop is now treated
+  as input overflow and routes to compaction instead of a misleading
+  "Response truncated by max_tokens." A model-backend switch strips foreign
+  reasoning signatures on the switch turn, so the next turn stops hard-failing.
+- **Scheduled and background work survives a disconnect.** A session that
+  still holds scheduled tasks or running background work is no longer evicted
+  as idle, so an agent-created obligation is not destroyed when you disconnect.
+- **Leader control tolerates mixed protocol versions.** Control now enforces a
+  per-command minimum protocol floor instead of exact equality, so a future
+  protocol bump becomes a soft tolerance rather than a fleet-wide cutover.
+- **Failures are traceable.** An unknown model's context window warns and
+  surfaces once instead of silently assuming a 256k/200k default that over-runs
+  small local models. The provider request-id is captured and logged on every
+  failed response so a bad turn can be correlated in support.
+- **Cost and config hardening.** Cache-write tokens are now counted. An
+  out-of-list reasoning effort clamps to the nearest declared option. Action
+  chord collisions are reported instead of silently first-winning.
+- **Rendering is grapheme-aware.** Width and truncate no longer cut flags or
+  emoji families mid-glyph.
+- **Housekeeping.** The unenforced `allowed_tools` skill field is removed; the
+  iris TUI dependencies are pinned to named floors; CI now smokes both
+  canonical installers.
+
 ## v0.3.0
 
 - **The house keeps itself.** Lucerna, the opt-in house steward, gains
