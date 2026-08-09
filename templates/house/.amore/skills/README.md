@@ -1,7 +1,7 @@
 # Skills
 
 A skill is a document that teaches the agent a discipline it should apply
-consistently, instead of re-deriving it every session. These six are bundled as
+consistently, instead of re-deriving it every session. These nine are bundled as
 a starting set. They are yours now — edit them, replace them, delete the ones
 you do not use.
 
@@ -29,6 +29,9 @@ Subagents inherit whatever the parent session discovered.
 | `prokope` | Keeping a long, multi-session goal on course — and noticing when it has drifted |
 | `sortes` | Drawing decorrelated review lenses so parallel reviewers do not all find the same thing |
 | `isda` | Measuring how much a piece of text can be compressed without losing what it carries |
+| `somniator` | Applying and closing operand dream proposals; supervised self-orient cycles |
+| `iris` | Operating the org instrument — the index, the org verbs, the lint, the dash |
+| `speculum` | Operating the session mirror — indexing sessions, running probes, reading usage, lenses |
 
 ## Writing your own
 
