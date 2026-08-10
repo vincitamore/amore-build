@@ -190,7 +190,8 @@ export function UsageStage({
     }
   });
 
-  const rowW = Math.max(16, dims.width - 6);
+  // Nested under SessionsMember: same chrome stack as ProbesStage → -8, not Lucerna's -6.
+  const rowW = Math.max(16, dims.width - 8);
   const totals = data?.totals;
   const tokens = totals?.tokens;
   const modelSlice = models.slice(scroll, scroll + modelSlots);

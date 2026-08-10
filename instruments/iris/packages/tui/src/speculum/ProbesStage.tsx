@@ -227,7 +227,9 @@ export function ProbesStage({
     }
   });
 
-  const rowW = Math.max(16, dims.width - 6);
+  // Nested under SessionsMember: member pad (2) + stage pad (2) + panel border (2) + panel pad (2) = 8.
+  // (Lucerna's -6 is top-level; nested stages must account for the member's extra pad.)
+  const rowW = Math.max(16, dims.width - 8);
   const slice = list.slice(scroll, scroll + BOARD_SLOTS);
 
   const body = useMemo(() => {
