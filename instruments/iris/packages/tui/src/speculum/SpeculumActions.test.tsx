@@ -14,13 +14,17 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { Database } from 'bun:sqlite';
 import { createTestRenderer, createMockKeys } from '@opentui/core/testing';
 import { createRoot } from '@opentui/react';
 import { ThemeProvider } from '../ThemeProvider';
 import {
   SpeculumActions,
+  buildLensArgv,
   canSend,
+  defaultLensSelection,
   formatComposition,
+  formatFitsVerdict,
   formatHumanBytes,
   formatIngestFlash,
   formatNarrowHint,
@@ -37,8 +41,121 @@ import {
 
 let tmp: string;
 let prevBin: string | undefined;
+let prevDb: string | undefined;
 let logPath: string;
+let seedDbPath: string;
 let destroy: (() => void) | undefined;
+
+const SEED_DDL = `
+CREATE TABLE events (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id      TEXT NOT NULL,
+  project_path    TEXT NOT NULL,
+  agent           TEXT NOT NULL,
+  parent_session  TEXT,
+  ts              TEXT NOT NULL,
+  kind            TEXT NOT NULL,
+  text            TEXT,
+  tool_name       TEXT,
+  tool_input      TEXT,
+  tool_output     TEXT,
+  tool_error      INTEGER,
+  tool_call_id    TEXT,
+  is_boilerplate  INTEGER NOT NULL DEFAULT 0,
+  sensitive       INTEGER NOT NULL DEFAULT 0,
+  raw             TEXT NOT NULL
+);
+CREATE TABLE sessions (
+  id               TEXT PRIMARY KEY,
+  project_path     TEXT NOT NULL,
+  agent            TEXT NOT NULL,
+  parent_session   TEXT,
+  model_id         TEXT,
+  started_at       TEXT NOT NULL,
+  ended_at         TEXT NOT NULL,
+  turn_count       INTEGER NOT NULL,
+  user_msg_count   INTEGER NOT NULL,
+  tool_call_count  INTEGER NOT NULL,
+  tool_error_count INTEGER NOT NULL
+);
+CREATE TABLE usage (
+  id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id          TEXT NOT NULL,
+  project_path        TEXT NOT NULL,
+  ts                  TEXT NOT NULL,
+  model_id            TEXT,
+  input_tokens        INTEGER NOT NULL DEFAULT 0,
+  output_tokens       INTEGER NOT NULL DEFAULT 0,
+  cached_read_tokens  INTEGER NOT NULL DEFAULT 0,
+  reasoning_tokens    INTEGER NOT NULL DEFAULT 0,
+  total_tokens        INTEGER NOT NULL DEFAULT 0,
+  num_turns           INTEGER NOT NULL DEFAULT 0,
+  model_calls         INTEGER NOT NULL DEFAULT 0,
+  raw                 TEXT NOT NULL
+);
+CREATE TABLE ingest_state (
+  file_path     TEXT PRIMARY KEY,
+  size_bytes    INTEGER NOT NULL,
+  mtime         TEXT NOT NULL,
+  byte_offset   INTEGER NOT NULL,
+  last_ingested TEXT NOT NULL,
+  forgotten     INTEGER NOT NULL DEFAULT 0
+);
+CREATE VIRTUAL TABLE events_fts USING fts5(
+  text,
+  tool_name,
+  tool_input,
+  tool_output
+);
+`;
+
+function seedSessionIndex(path: string): void {
+  const db = new Database(path);
+  try {
+    db.exec(SEED_DDL);
+    db.run('PRAGMA user_version = 4');
+    db.run(
+      `INSERT INTO sessions (
+         id, project_path, agent, parent_session, model_id,
+         started_at, ended_at, turn_count, user_msg_count, tool_call_count, tool_error_count
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        'sess-target-aaa',
+        '/proj/alpha',
+        'primary',
+        null,
+        'model-x',
+        '2026-08-10T12:00:00.000Z',
+        '2026-08-10T13:00:00.000Z',
+        4,
+        2,
+        1,
+        0,
+      ],
+    );
+    db.run(
+      `INSERT INTO sessions (
+         id, project_path, agent, parent_session, model_id,
+         started_at, ended_at, turn_count, user_msg_count, tool_call_count, tool_error_count
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        'sess-target-bbb',
+        '/proj/beta',
+        'primary',
+        null,
+        'model-x',
+        '2026-08-09T12:00:00.000Z',
+        '2026-08-09T13:00:00.000Z',
+        2,
+        1,
+        0,
+        0,
+      ],
+    );
+  } finally {
+    db.close();
+  }
+}
 
 function writeFakeBinary(): string {
   // Multi-verb dispatcher. argv: [bun, script, verb, ...args]
@@ -111,8 +228,14 @@ if (verb === "lens") {
   const dry = args.includes("--dry-run");
   const refuse = existsSync(refuseFlag);
   const oversize = existsSync(oversizeFlag);
+  const noSub = args.includes("--no-subagents");
   const lastNIdx = args.indexOf("--last-n");
   const lastN = lastNIdx >= 0 ? Number.parseInt(args[lastNIdx + 1] ?? "5", 10) : 5;
+  const sessionIdx = args.indexOf("--session");
+  const sessionId = sessionIdx >= 0 ? (args[sessionIdx + 1] ?? null) : null;
+  // Narrowed selection that fits under the oversize-flag corpus: last-n 1 + no-sub, or any --session + no-sub.
+  const fitsNarrow = noSub && (sessionId != null || lastN === 1);
+
   if (dry) {
     if (refuse) {
       console.log(JSON.stringify({
@@ -128,7 +251,7 @@ if (verb === "lens") {
           bytes: 800,
           refuseReason: "residual secret-shaped content",
         },
-        slice: { sessionId: "abc", project: null, turnsRendered: 3, subagentCount: 0 },
+        slice: { sessionId: "abc", project: null, turnsRendered: 3, subagentCount: 0, selectionSessionIds: ["abc"] },
         audit: {
           ts: "2026-08-10T12:20:00.000Z",
           lens: name,
@@ -141,7 +264,7 @@ if (verb === "lens") {
       }, null, 2));
       process.exit(0);
     }
-    if (oversize) {
+    if (oversize && !fitsNarrow) {
       const bytes = 1450141;
       const reason = "payload " + bytes + " bytes exceeds lens cap 102400 bytes; narrow the slice (--session, --since/--until, --last-n); never silently truncated";
       console.log(JSON.stringify({
@@ -162,7 +285,9 @@ if (verb === "lens") {
           project: "/tmp/proj",
           turnsRendered: 4876,
           subagentCount: 71,
-          selectionSessionIds: ["a", "b", "c", "d", "e"].slice(0, Math.max(1, lastN)),
+          selectionSessionIds: sessionId
+            ? [sessionId]
+            : ["a", "b", "c", "d", "e"].slice(0, Math.max(1, lastN)),
         },
         audit: {
           ts: "2026-08-10T12:23:00.000Z",
@@ -176,26 +301,37 @@ if (verb === "lens") {
       }, null, 2));
       process.exit(0);
     }
+    // Sendable dry-run (default, or narrowed under oversize flag).
+    const bytes = fitsNarrow ? 79082 : 1500;
+    const turns = fitsNarrow ? 12 : 8;
+    const subs = noSub ? 0 : 1;
+    const sid = sessionId || "abc";
     console.log(JSON.stringify({
       lens: name,
       refused: true,
-      refusedReason: "dry-run: scrub ok (1500 bytes); model not invoked",
+      refusedReason: "dry-run: scrub ok (" + bytes + " bytes); model not invoked",
       dryRun: true,
       spawned: false,
       modelId: null,
       scrub: {
         ok: true,
         counts: { secret: 0, email: 1, "home-path": 3, "password-assignment": 0 },
-        bytes: 1500,
+        bytes,
         refuseReason: null,
       },
-      slice: { sessionId: "abc", project: "/tmp/proj", turnsRendered: 8, subagentCount: 1 },
+      slice: {
+        sessionId: sid,
+        project: "/tmp/proj",
+        turnsRendered: turns,
+        subagentCount: subs,
+        selectionSessionIds: [sid],
+      },
       audit: {
         ts: "2026-08-10T12:21:00.000Z",
         lens: name,
         decision: "dry-run",
-        reason: "dry-run: scrub ok (1500 bytes); model not invoked",
-        payloadBytes: 1500,
+        reason: "dry-run: scrub ok (" + bytes + " bytes); model not invoked",
+        payloadBytes: bytes,
         scrubCounts: { secret: 0, email: 1, "home-path": 3, "password-assignment": 0 },
       },
       text: null,
@@ -216,7 +352,7 @@ if (verb === "lens") {
       bytes: 1500,
       refuseReason: null,
     },
-    slice: { sessionId: "abc", project: "/tmp/proj", turnsRendered: 8, subagentCount: 1 },
+    slice: { sessionId: sessionId || "abc", project: "/tmp/proj", turnsRendered: 8, subagentCount: noSub ? 0 : 1 },
     audit: {
       ts: "2026-08-10T12:22:00.000Z",
       lens: name,
@@ -319,9 +455,13 @@ beforeAll(() => {
   tmp = mkdtempSync(join(tmpdir(), 'speculum-actions-'));
   logPath = join(tmp, 'spawn-log.jsonl');
   writeFileSync(logPath, '', 'utf8');
+  seedDbPath = join(tmp, 'seed.sqlite');
+  seedSessionIndex(seedDbPath);
   prevBin = process.env.SPECULUM_BIN;
+  prevDb = process.env.SPECULUM_DB;
   const bin = writeFakeBinary();
   process.env.SPECULUM_BIN = bin;
+  process.env.SPECULUM_DB = seedDbPath;
   setRefuseDry(false);
 });
 
@@ -329,6 +469,8 @@ afterAll(() => {
   destroy?.();
   if (prevBin === undefined) delete process.env.SPECULUM_BIN;
   else process.env.SPECULUM_BIN = prevBin;
+  if (prevDb === undefined) delete process.env.SPECULUM_DB;
+  else process.env.SPECULUM_DB = prevDb;
   try {
     rmSync(tmp, { recursive: true, force: true });
   } catch {
@@ -427,6 +569,47 @@ describe('last-n selection helpers', () => {
   test('formatSelectionLabel is plain operator copy', () => {
     expect(formatSelectionLabel(5)).toBe('--last-n 5 · 5 most recent primary sessions');
     expect(formatSelectionLabel(1)).toBe('--last-n 1 · 1 most recent primary sessions');
+    expect(formatSelectionLabel(defaultLensSelection(1, true))).toBe(
+      '--last-n 1 · 1 most recent primary sessions · --no-subagents',
+    );
+    expect(
+      formatSelectionLabel(defaultLensSelection(5, true, '019febfd-18d0-7ac1-9b3f')),
+    ).toMatch(/--session 019febfd-18… · --no-subagents|--session 019febfd-18/);
+  });
+});
+
+describe('buildLensArgv', () => {
+  test('default last-n dry-run', () => {
+    expect(buildLensArgv('session-postmortem', defaultLensSelection(5), { dryRun: true })).toEqual([
+      'session-postmortem',
+      '--last-n',
+      '5',
+      '--dry-run',
+      '--json',
+    ]);
+  });
+  test('no-subagents flag present', () => {
+    const args = buildLensArgv(
+      'session-postmortem',
+      defaultLensSelection(1, true),
+      { dryRun: true },
+    );
+    expect(args).toContain('--no-subagents');
+    expect(args).toContain('--last-n');
+    expect(args).toContain('1');
+  });
+  test('session target replaces last-n', () => {
+    const args = buildLensArgv(
+      'usage-story',
+      defaultLensSelection(5, true, 'sess-target-aaa'),
+      { dryRun: false },
+    );
+    expect(args).toContain('--session');
+    expect(args).toContain('sess-target-aaa');
+    expect(args).toContain('--no-subagents');
+    expect(args).not.toContain('--last-n');
+    expect(args).not.toContain('--dry-run');
+    expect(args).toContain('--json');
   });
 });
 
@@ -466,12 +649,36 @@ describe('composition / oversize helpers', () => {
     expect(line).toMatch(/scrub:.*email=1/);
     expect(line).toMatch(/home-path=2/);
   });
-  test('formatOversizeMessage + narrow hint', () => {
+  test('formatComposition includes selection descriptor when provided', () => {
+    const line = formatComposition(
+      oversizeEnv,
+      defaultLensSelection(1, true, null),
+    );
+    expect(line).toContain('--last-n 1');
+    expect(line).toContain('--no-subagents');
+  });
+  test('formatOversizeMessage + narrow hint always actionable', () => {
     expect(formatOversizeMessage(oversizeEnv)).toBe(
       'payload 1.45 MB exceeds the 100 KB cap',
     );
-    expect(formatNarrowHint(5)).toBe('‹1› likely fits — try it');
-    expect(formatNarrowHint(1)).toMatch(/still over cap/);
+    expect(formatNarrowHint(5)).toMatch(/‹1›|no-subagents/);
+    expect(formatNarrowHint(1)).toMatch(/no-subagents/);
+    expect(formatNarrowHint(defaultLensSelection(1, true))).toMatch(/pick a session|session \(t\)/);
+    expect(
+      formatNarrowHint(defaultLensSelection(1, true, 'sess-target-aaa')),
+    ).toMatch(/different lens/);
+  });
+  test('formatFitsVerdict over-cap vs sendable', () => {
+    expect(
+      formatFitsVerdict(oversizeEnv, 'refused', oversizeEnv.refusedReason),
+    ).toBe('over cap — narrow');
+    expect(
+      formatFitsVerdict(
+        { scrub: { bytes: 1500, ok: true } },
+        'dry-run',
+        'dry-run: scrub ok (1500 bytes); model not invoked',
+      ),
+    ).toBe('sendable — confirm to invoke model');
   });
   test('canSend still false for oversize refuse (two-step invariant)', () => {
     expect(canSend('refused', oversizeEnv.refusedReason)).toBe(false);
@@ -577,7 +784,7 @@ describe('SpeculumActions render', () => {
     await renderOnce();
 
     const frame = captureCharFrame();
-    expect(frame).toMatch(/not sendable|residual secret/i);
+    expect(frame).toMatch(/not sendable|residual secret|over cap/i);
     // Confirm modal should NOT offer send
     expect(frame).not.toMatch(/Send scrubbed slice to/);
 
@@ -622,6 +829,7 @@ describe('SpeculumActions render', () => {
     expect(frame).toMatch(/\[5\]|last-n 5|5 most recent primary sessions/);
     expect(frame).toMatch(/1/);
     expect(frame).toMatch(/10|‹|›/);
+    expect(frame).toMatch(/no-subagents/);
   });
 
   test('changing last-n on dry-run re-spawns with new --last-n argv', async () => {
@@ -679,6 +887,59 @@ describe('SpeculumActions render', () => {
     expect(dry!.args[nIdx + 1]).toBe('1');
   });
 
+  test('toggling no-subagents changes spawned argv', async () => {
+    const { keys, renderOnce, captureCharFrame } = await mount();
+    clearLog();
+    keys.pressKey('l', { shift: true });
+    await new Promise((r) => setTimeout(r, 60));
+    await renderOnce();
+    keys.pressKey('n'); // toggle no-subagents on picker
+    await new Promise((r) => setTimeout(r, 40));
+    await renderOnce();
+    const frame = captureCharFrame();
+    expect(frame).toMatch(/\[no-subagents\]/);
+
+    keys.pressKey('\r');
+    await new Promise((r) => setTimeout(r, 500));
+    await renderOnce();
+
+    const log = readLog();
+    const dry = log.find((e) => e.verb === 'lens' && e.args.includes('--dry-run'));
+    expect(dry).toBeDefined();
+    expect(dry!.args).toContain('--no-subagents');
+    expect(dry!.args).toContain('--last-n');
+  });
+
+  test('choosing a session target changes argv to --session (no --last-n)', async () => {
+    const { keys, renderOnce, captureCharFrame } = await mount();
+    clearLog();
+    keys.pressKey('l', { shift: true });
+    await new Promise((r) => setTimeout(r, 60));
+    await renderOnce();
+    keys.pressKey('t'); // open session pick
+    await new Promise((r) => setTimeout(r, 80));
+    await renderOnce();
+    let frame = captureCharFrame();
+    expect(frame).toMatch(/pick session|sess-target/);
+
+    keys.pressKey('\r'); // select first recent session
+    await new Promise((r) => setTimeout(r, 80));
+    await renderOnce();
+    frame = captureCharFrame();
+    expect(frame).toMatch(/--session|sess-target/);
+
+    keys.pressKey('\r'); // dry-run with session target
+    await new Promise((r) => setTimeout(r, 500));
+    await renderOnce();
+
+    const log = readLog();
+    const dry = log.find((e) => e.verb === 'lens' && e.args.includes('--dry-run'));
+    expect(dry).toBeDefined();
+    expect(dry!.args).toContain('--session');
+    expect(dry!.args).toContain('sess-target-aaa');
+    expect(dry!.args).not.toContain('--last-n');
+  });
+
   test('oversize refuse renders composition + narrow hint; no confirm', async () => {
     setOversizeDry(true);
     const { keys, renderOnce, captureCharFrame } = await mount();
@@ -696,8 +957,8 @@ describe('SpeculumActions render', () => {
     expect(frame).toMatch(/4876|turns/);
     expect(frame).toMatch(/71|subagents/);
     // actionable oversize
-    expect(frame).toMatch(/1\.45 MB|exceeds the 100 KB cap|exceeds/);
-    expect(frame).toMatch(/likely fits|narrow|‹1›/);
+    expect(frame).toMatch(/1\.45 MB|exceeds the 100 KB cap|exceeds|over cap/);
+    expect(frame).toMatch(/no-subagents|‹1›|narrow|pick a session/);
     expect(frame).not.toMatch(/Send scrubbed slice to/);
 
     // y must not live-send
@@ -707,6 +968,50 @@ describe('SpeculumActions render', () => {
     const log = readLog();
     expect(log.every((e) => e.verb !== 'lens' || e.args.includes('--dry-run'))).toBe(
       true,
+    );
+  });
+
+  test('over-cap at default → narrow last-n 1 + no-subagents → sendable (R-lens turnaround)', async () => {
+    setOversizeDry(true);
+    const { keys, renderOnce, captureCharFrame } = await mount();
+    clearLog();
+    keys.pressKey('l', { shift: true });
+    await new Promise((r) => setTimeout(r, 60));
+    await renderOnce();
+    keys.pressKey('\r');
+    await new Promise((r) => setTimeout(r, 500));
+    await renderOnce();
+
+    let frame = captureCharFrame();
+    expect(frame).toMatch(/over cap|1450141|not sendable|exceeds/i);
+    expect(frame).not.toMatch(/Send scrubbed slice to/);
+
+    // Narrow: last-n 1
+    keys.pressKey('1');
+    await new Promise((r) => setTimeout(r, 500));
+    await renderOnce();
+    // Toggle no-subagents
+    keys.pressKey('n');
+    await new Promise((r) => setTimeout(r, 500));
+    await renderOnce();
+
+    frame = captureCharFrame();
+    const log = readLog();
+    const dryRuns = log.filter((e) => e.verb === 'lens' && e.args.includes('--dry-run'));
+    expect(dryRuns.length).toBeGreaterThanOrEqual(2);
+    const last = dryRuns[dryRuns.length - 1]!;
+    expect(last.args).toContain('--no-subagents');
+    const nIdx = last.args.indexOf('--last-n');
+    expect(nIdx).toBeGreaterThanOrEqual(0);
+    expect(last.args[nIdx + 1]).toBe('1');
+
+    // Now sendable: confirm modal / sendable copy
+    expect(frame).toMatch(/sendable|Send scrubbed slice/i);
+    expect(frame).toMatch(/79082|payload|no-subagents|--last-n 1/);
+
+    // Two-step still holds: no live yet
+    expect(log.some((e) => e.verb === 'lens' && !e.args.includes('--dry-run'))).toBe(
+      false,
     );
   });
 
@@ -724,6 +1029,8 @@ describe('SpeculumActions render', () => {
     expect(frame).toMatch(/sendable|Send scrubbed slice/i);
     // composition also present on sendable path
     expect(frame).toMatch(/1500 bytes|8 turns|1 subagents|payload/);
+    // selection descriptor in composition
+    expect(frame).toMatch(/--last-n 5|last-n 5/);
 
     let log = readLog();
     expect(log.some((e) => e.verb === 'lens' && !e.args.includes('--dry-run'))).toBe(

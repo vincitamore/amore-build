@@ -13,6 +13,7 @@ import {
   formatLucernaDisplayLine,
 } from '../members/lucerna-display';
 import { runSpeculum, type SpeculumResult } from './speculum-spawn';
+import { openQueryService, type SessionListRow } from './query-service';
 
 // ── Built-in lenses (names only; registry lives in the speculum instrument) ──
 
@@ -34,6 +35,7 @@ const LAST_N_DEBOUNCE_MS = 200;
 export const LENS_CAP_BYTES = 102_400;
 const AUDIT_FETCH_N = 20;
 const AUDIT_SHOW_SLOTS = 6;
+const RECENT_SESSION_LIMIT = 16;
 const INSTALL_HINT = 'amore init --with-speculum';
 
 // ── Envelope shapes (mirror CLI --json; defensive field access) ──
@@ -100,6 +102,14 @@ export type AuditEnvelope = {
   n?: number;
   records?: AuditRecord[];
   [k: string]: unknown;
+};
+
+/** Operator selection for lens argv (last-n default, optional session target). */
+export type LensSelection = {
+  lastN: number;
+  noSubagents: boolean;
+  /** When set, replaces --last-n with --session <id>. */
+  sessionId: string | null;
 };
 
 // ── Pure helpers (exported for unit tests) ──
@@ -219,10 +229,61 @@ export function formatHumanBytes(bytes: number): string {
   return `${Math.round(bytes)} B`;
 }
 
-/** Plain selection label: `--last-n 5 · 5 most recent primary sessions`. */
-export function formatSelectionLabel(lastN: number): string {
-  const n = Number.isFinite(lastN) && lastN > 0 ? Math.floor(lastN) : DEFAULT_LAST_N;
-  return `--last-n ${n} · ${n} most recent primary sessions`;
+/** Short id for operator-facing labels. */
+export function shortSessionId(id: string): string {
+  if (!id) return '?';
+  return id.length > 12 ? `${id.slice(0, 11)}\u2026` : id;
+}
+
+export function defaultLensSelection(
+  lastN: number = DEFAULT_LAST_N,
+  noSubagents = false,
+  sessionId: string | null = null,
+): LensSelection {
+  return {
+    lastN: Number.isFinite(lastN) && lastN > 0 ? Math.floor(lastN) : DEFAULT_LAST_N,
+    noSubagents: !!noSubagents,
+    sessionId: sessionId && sessionId.length > 0 ? sessionId : null,
+  };
+}
+
+/**
+ * Plain selection label for footers / composition:
+ * `--last-n 5 · 5 most recent primary sessions` or `--session abc… · --no-subagents`.
+ */
+export function formatSelectionLabel(sel: LensSelection | number): string {
+  const s: LensSelection =
+    typeof sel === 'number' ? defaultLensSelection(sel) : sel;
+  const parts: string[] = [];
+  if (s.sessionId) {
+    parts.push(`--session ${shortSessionId(s.sessionId)}`);
+  } else {
+    const n =
+      Number.isFinite(s.lastN) && s.lastN > 0 ? Math.floor(s.lastN) : DEFAULT_LAST_N;
+    parts.push(`--last-n ${n} · ${n} most recent primary sessions`);
+  }
+  if (s.noSubagents) parts.push('--no-subagents');
+  return parts.join(' · ');
+}
+
+/** Build CLI argv for `speculum lens` (name first; includes --json). */
+export function buildLensArgv(
+  name: string,
+  sel: LensSelection,
+  opts?: { dryRun?: boolean },
+): string[] {
+  const args: string[] = [name];
+  if (sel.sessionId) {
+    args.push('--session', sel.sessionId);
+  } else {
+    const n =
+      Number.isFinite(sel.lastN) && sel.lastN > 0 ? Math.floor(sel.lastN) : DEFAULT_LAST_N;
+    args.push('--last-n', String(n));
+  }
+  if (sel.noSubagents) args.push('--no-subagents');
+  if (opts?.dryRun) args.push('--dry-run');
+  args.push('--json');
+  return args;
 }
 
 /** Step last-n within LAST_N_OPTIONS (wraps). dir -1 = previous, +1 = next. */
@@ -280,9 +341,12 @@ function scrubCountsBit(counts: ScrubCounts | null | undefined): string {
 
 /**
  * Live composition read after dry-run:
- * `payload N bytes · cap 100 KB · M turns · S subagents · scrub: secret=… …`
+ * `payload N bytes · cap 100 KB · M turns · S subagents · <selection> · scrub: …`
  */
-export function formatComposition(env: LensEnvelope | null | undefined): string {
+export function formatComposition(
+  env: LensEnvelope | null | undefined,
+  sel?: LensSelection | null,
+): string {
   if (!env) return 'composition n/a';
   const bytes = env.scrub?.bytes ?? env.audit?.payloadBytes;
   const turns = env.slice?.turnsRendered;
@@ -297,7 +361,10 @@ export function formatComposition(env: LensEnvelope | null | undefined): string 
     typeof turns === 'number' && Number.isFinite(turns) ? `${turns} turns` : 'turns n/a';
   const subBit =
     typeof subs === 'number' && Number.isFinite(subs) ? `${subs} subagents` : 'subagents n/a';
-  return `${payloadBit} · ${capBit} · ${turnsBit} · ${subBit} · ${scrubCountsBit(counts)}`;
+  const bits = [payloadBit, capBit, turnsBit, subBit];
+  if (sel) bits.push(formatSelectionLabel(sel));
+  bits.push(scrubCountsBit(counts));
+  return bits.join(' · ');
 }
 
 /** Operator-facing oversize line: `payload 1.45 MB exceeds the 100 KB cap`. */
@@ -309,10 +376,75 @@ export function formatOversizeMessage(env: LensEnvelope | null | undefined): str
   return 'payload exceeds the 100 KB cap';
 }
 
-/** Narrowing hint when over-cap; stepper re-dry-run is the remedy. */
-export function formatNarrowHint(lastN: number): string {
-  if (lastN > 1) return '‹1› likely fits — try it';
-  return 'still over cap at 1 — try a different lens or window';
+/**
+ * Narrowing hint when over-cap — always an actionable next step.
+ * Progression: lower last-n → toggle no-subagents → pick a session → different lens.
+ */
+export function formatNarrowHint(
+  lastNOrSel: number | LensSelection,
+  noSubagents?: boolean,
+  sessionId?: string | null,
+): string {
+  const sel: LensSelection =
+    typeof lastNOrSel === 'number'
+      ? defaultLensSelection(lastNOrSel, noSubagents ?? false, sessionId ?? null)
+      : lastNOrSel;
+  if (!sel.noSubagents) {
+    if (!sel.sessionId && sel.lastN > 1) {
+      return '‹1› or no-subagents (n) — try them';
+    }
+    return 'toggle no-subagents (n) — often fits';
+  }
+  if (!sel.sessionId && sel.lastN > 1) {
+    return '‹1› likely fits — try it';
+  }
+  if (!sel.sessionId) {
+    return 'pick a session (t) to target one id';
+  }
+  return 'still over cap — try a different lens';
+}
+
+/** Fits verdict line for the dry-run panel (does not replace canSend). */
+export function formatFitsVerdict(
+  env: LensEnvelope | null | undefined,
+  decision: string | null | undefined,
+  reason: string | null | undefined,
+): string {
+  if (canSend(decision, reason)) return 'sendable — confirm to invoke model';
+  if (isOversizeRefuse(reason)) return 'over cap — narrow';
+  return 'not sendable — confirm disabled';
+}
+
+/** One-line recent-session row for the in-panel picker. */
+export function formatRecentSessionLine(
+  s: SessionListRow,
+  selected: boolean,
+): string {
+  const prefix = selected ? '>' : ' ';
+  const id = shortSessionId(s.id);
+  const turns = Number.isFinite(s.turnCount) ? s.turnCount : 0;
+  const proj = (() => {
+    const p = s.projectPath || '';
+    if (!p) return '?';
+    const parts = p.replace(/\\/g, '/').split('/').filter(Boolean);
+    return parts[parts.length - 1] || p;
+  })();
+  return `${prefix}${id}  t:${turns}  ${proj}`;
+}
+
+/** Load recent primary sessions from the derived index (readonly; best-effort). */
+export function loadRecentSessions(limit = RECENT_SESSION_LIMIT): SessionListRow[] {
+  try {
+    const qs = openQueryService();
+    try {
+      const list = qs.sessionList(Math.max(limit * 2, limit), 0);
+      return list.filter((r) => r.agent !== 'subagent').slice(0, limit);
+    } finally {
+      qs.close();
+    }
+  } catch {
+    return [];
+  }
 }
 
 function formatAuditRow(r: AuditRecord): string {
@@ -422,10 +554,42 @@ function LastNStepper({
           </text>
         </box>
       </box>
+    </box>
+  );
+}
+
+/** no-subagents chip + selection summary row. */
+function SelectionChrome({
+  sel,
+  width,
+  onToggleNoSub,
+  disabled,
+}: {
+  sel: LensSelection;
+  width: number;
+  onToggleNoSub: () => void;
+  disabled?: boolean;
+}) {
+  const t = usePalette();
+  const on = sel.noSubagents;
+  return (
+    <box flexDirection="column" flexShrink={0} width={width}>
+      <box flexDirection="row" flexShrink={0} height={1} overflow="hidden">
+        <box
+          flexShrink={0}
+          marginRight={1}
+          backgroundColor={on ? t.selection : t.background}
+          onMouseDown={disabled ? undefined : onToggleNoSub}
+        >
+          <text fg={on ? t.primary : t.muted} wrapMode="none">
+            {on ? '[no-subagents]' : 'no-subagents'}
+          </text>
+        </box>
+      </box>
       <FixedClearRow
         width={width}
         color={t.muted}
-        text={formatLucernaDisplayLine(formatSelectionLabel(lastN), width)}
+        text={formatLucernaDisplayLine(formatSelectionLabel(sel), width)}
       />
     </box>
   );
@@ -453,6 +617,11 @@ export function SpeculumActions({
   const [panel, setPanel] = useState<PanelMode>('none');
   const [pickerIdx, setPickerIdx] = useState(0);
   const [lastN, setLastN] = useState<LastNOption>(DEFAULT_LAST_N);
+  const [noSubagents, setNoSubagents] = useState(false);
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [sessionPickOpen, setSessionPickOpen] = useState(false);
+  const [sessionPickIdx, setSessionPickIdx] = useState(0);
+  const [recentSessions, setRecentSessions] = useState<SessionListRow[]>([]);
   const [dryRunEnv, setDryRunEnv] = useState<LensEnvelope | null>(null);
   const [selectedLens, setSelectedLens] = useState<BuiltinLens | null>(null);
   const [confirm, setConfirm] = useState<{ msg: string; run: () => void } | null>(null);
@@ -463,6 +632,10 @@ export function SpeculumActions({
   const dryRerunTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastNRef = useRef(lastN);
   lastNRef.current = lastN;
+  const noSubRef = useRef(noSubagents);
+  noSubRef.current = noSubagents;
+  const sessionIdRef = useRef(sessionId);
+  sessionIdRef.current = sessionId;
   const panelRef = useRef(panel);
   panelRef.current = panel;
   const selectedLensRef = useRef(selectedLens);
@@ -471,6 +644,12 @@ export function SpeculumActions({
   busyRef.current = busy;
   const installedRef = useRef(installed);
   installedRef.current = installed;
+
+  const currentSel = useCallback(
+    (): LensSelection =>
+      defaultLensSelection(lastNRef.current, noSubRef.current, sessionIdRef.current),
+    [],
+  );
 
   const flash = useCallback(
     (msg: string) => {
@@ -492,6 +671,7 @@ export function SpeculumActions({
   useEffect(() => {
     if (!inputActive) {
       setConfirm(null);
+      setSessionPickOpen(false);
       if (panel === 'picker' || panel === 'dry-run') setPanel('none');
     }
   }, [inputActive, panel]);
@@ -535,6 +715,7 @@ export function SpeculumActions({
     setDryRunEnv(null);
     setSelectedLens(null);
     setConfirm(null);
+    setSessionPickOpen(false);
   }, []);
 
   const runIngest = useCallback(async () => {
@@ -555,17 +736,15 @@ export function SpeculumActions({
   }, [busy, installed, flash]);
 
   const runLensLive = useCallback(
-    async (name: BuiltinLens, n?: number) => {
+    async (name: BuiltinLens, sel?: LensSelection) => {
       if (busyRef.current || installedRef.current === false) return;
-      const useN = n ?? lastNRef.current;
+      const useSel = sel ?? currentSel();
       setBusy(`lens ${name}…`);
       try {
-        const r = await runSpeculum<LensEnvelope>('lens', [
-          name,
-          '--last-n',
-          String(useN),
-          '--json',
-        ]);
+        const r = await runSpeculum<LensEnvelope>(
+          'lens',
+          buildLensArgv(name, useSel, { dryRun: false }),
+        );
         if (!r.ok) {
           if (r.error.kind === 'not-installed') setInstalled(false);
           flash(errorFlash(r, 'lens'));
@@ -579,29 +758,28 @@ export function SpeculumActions({
         setConfirm(null);
         setPanel('none');
         setSelectedLens(null);
+        setSessionPickOpen(false);
       }
     },
-    [flash],
+    [flash, currentSel],
   );
 
   const runLensDry = useCallback(
-    async (name: BuiltinLens, n?: number) => {
+    async (name: BuiltinLens, sel?: LensSelection) => {
       if (installedRef.current === false) return;
-      const useN = n ?? lastNRef.current;
+      const useSel = sel ?? currentSel();
       const gen = ++dryGenRef.current;
       setSelectedLens(name);
       setBusy(`lens dry-run ${name}…`);
       setPanel('dry-run');
       setDryRunEnv(null);
       setConfirm(null);
+      setSessionPickOpen(false);
       try {
-        const r = await runSpeculum<LensEnvelope>('lens', [
-          name,
-          '--last-n',
-          String(useN),
-          '--dry-run',
-          '--json',
-        ]);
+        const r = await runSpeculum<LensEnvelope>(
+          'lens',
+          buildLensArgv(name, useSel, { dryRun: true }),
+        );
         if (gen !== dryGenRef.current) return; // stale — a newer selection won
         if (!r.ok) {
           if (r.error.kind === 'not-installed') setInstalled(false);
@@ -621,11 +799,11 @@ export function SpeculumActions({
           const msg = model
             ? `Send scrubbed slice to ${model}?`
             : 'Send scrubbed slice to the model the local config routes to?';
-          const nAtConfirm = useN;
+          const selAtConfirm = useSel;
           setConfirm({
             msg,
             run: () => {
-              void runLensLive(name, nAtConfirm);
+              void runLensLive(name, selAtConfirm);
             },
           });
         }
@@ -633,25 +811,73 @@ export function SpeculumActions({
         if (gen === dryGenRef.current) setBusy(null);
       }
     },
-    [flash, runLensLive],
+    [flash, runLensLive, currentSel],
   );
 
-  /** Apply a new last-n; on the dry-run panel, debounce a re-dry-run. */
-  const applyLastN = useCallback(
-    (n: LastNOption) => {
-      setLastN(n);
-      lastNRef.current = n;
+  /** Debounced re-dry-run on the dry-run panel after a selection change. */
+  const scheduleReDry = useCallback(
+    (sel: LensSelection) => {
       setConfirm(null);
       if (panelRef.current !== 'dry-run' || !selectedLensRef.current) return;
       if (dryRerunTimer.current) clearTimeout(dryRerunTimer.current);
       const lens = selectedLensRef.current;
       dryRerunTimer.current = setTimeout(() => {
         dryRerunTimer.current = null;
-        void runLensDry(lens, n);
+        void runLensDry(lens, sel);
       }, LAST_N_DEBOUNCE_MS);
     },
     [runLensDry],
   );
+
+  /** Apply a new last-n (clears session target — last-n is the no-target default). */
+  const applyLastN = useCallback(
+    (n: LastNOption) => {
+      setLastN(n);
+      lastNRef.current = n;
+      setSessionId(null);
+      sessionIdRef.current = null;
+      setSessionPickOpen(false);
+      scheduleReDry(defaultLensSelection(n, noSubRef.current, null));
+    },
+    [scheduleReDry],
+  );
+
+  const applyNoSubagents = useCallback(
+    (on: boolean) => {
+      setNoSubagents(on);
+      noSubRef.current = on;
+      scheduleReDry(defaultLensSelection(lastNRef.current, on, sessionIdRef.current));
+    },
+    [scheduleReDry],
+  );
+
+  const applySessionId = useCallback(
+    (id: string | null) => {
+      setSessionId(id);
+      sessionIdRef.current = id;
+      setSessionPickOpen(false);
+      scheduleReDry(defaultLensSelection(lastNRef.current, noSubRef.current, id));
+    },
+    [scheduleReDry],
+  );
+
+  const openSessionPick = useCallback(() => {
+    const list = loadRecentSessions(RECENT_SESSION_LIMIT);
+    setRecentSessions(list);
+    // Prefer the currently targeted id, else the dry-run envelope's first selection id.
+    const prefer =
+      sessionIdRef.current ??
+      (typeof dryRunEnv?.slice?.selectionSessionIds?.[0] === 'string'
+        ? dryRunEnv.slice.selectionSessionIds[0]
+        : null);
+    let idx = 0;
+    if (prefer) {
+      const found = list.findIndex((s) => s.id === prefer || s.id.startsWith(prefer));
+      if (found >= 0) idx = found;
+    }
+    setSessionPickIdx(idx);
+    setSessionPickOpen(true);
+  }, [dryRunEnv]);
 
   const loadAudit = useCallback(async () => {
     if (busy || installed === false) return;
@@ -708,9 +934,42 @@ export function SpeculumActions({
     const isL = (n === 'l' && shift) || seq === 'L';
     const isA = (n === 'a' && shift) || seq === 'A';
 
-    // Shared last-n stepper keys (picker + dry-run). Works even while ConfirmModal
+    // Session target picker owns navigation while open.
+    if (sessionPickOpen && (panel === 'picker' || panel === 'dry-run')) {
+      if (n === 'escape') {
+        setSessionPickOpen(false);
+        return;
+      }
+      if (n === 'up' || n === 'k') {
+        setSessionPickIdx((i) =>
+          recentSessions.length === 0
+            ? 0
+            : (i - 1 + recentSessions.length) % recentSessions.length,
+        );
+        return;
+      }
+      if (n === 'down' || n === 'j') {
+        setSessionPickIdx((i) =>
+          recentSessions.length === 0 ? 0 : (i + 1) % recentSessions.length,
+        );
+        return;
+      }
+      if (n === 'return' || n === 'enter') {
+        const row = recentSessions[sessionPickIdx];
+        if (row) applySessionId(row.id);
+        else setSessionPickOpen(false);
+        return;
+      }
+      if (n === 'c' && !shift) {
+        applySessionId(null);
+        return;
+      }
+      return;
+    }
+
+    // Shared selection keys (picker + dry-run). Works even while ConfirmModal
     // is up: re-slicing clears confirm and re-runs dry-run (y/n/esc still modal-owned).
-    const handleLastNKeys = (): boolean => {
+    const handleSelectionKeys = (): boolean => {
       if (n === 'left' || n === 'h') {
         applyLastN(stepLastN(lastN, -1));
         return true;
@@ -720,7 +979,7 @@ export function SpeculumActions({
         applyLastN(stepLastN(lastN, 1));
         return true;
       }
-      // Digit keys → direct option (0 → 10).
+      // Digit keys → direct option (0 → 10). Clears session target.
       const digit =
         n.length === 1 && n >= '0' && n <= '9'
           ? n
@@ -734,11 +993,27 @@ export function SpeculumActions({
           return true;
         }
       }
+      // n → toggle no-subagents (ConfirmModal owns bare n for cancel while open)
+      if (n === 'n' && !shift) {
+        if (confirm) return false;
+        applyNoSubagents(!noSubRef.current);
+        return true;
+      }
+      // t → open recent-session target picker
+      if (n === 't' && !shift) {
+        openSessionPick();
+        return true;
+      }
+      // c → clear session target (back to last-n)
+      if (n === 'c' && !shift && sessionIdRef.current) {
+        applySessionId(null);
+        return true;
+      }
       return false;
     };
 
     if (panel === 'picker' || panel === 'dry-run') {
-      if (handleLastNKeys()) return;
+      if (handleSelectionKeys()) return;
     }
 
     // Confirm modal owns y/n/esc while active — block other panel keys.
@@ -764,13 +1039,13 @@ export function SpeculumActions({
       }
       if (n === 'return' || n === 'enter') {
         const lens = BUILTIN_LENSES[pickerIdx]!;
-        void runLensDry(lens, lastN);
+        void runLensDry(lens, currentSel());
         return;
       }
       return;
     }
 
-    // Dry-run report: last-n re-runs dry-run; esc closes; confirm is separate modal when sendable.
+    // Dry-run report: enter re-runs dry-run; esc closes; confirm is separate modal when sendable.
     if (panel === 'dry-run') {
       if (n === 'return' || n === 'enter') {
         // Enter re-runs immediately (no debounce wait).
@@ -779,7 +1054,7 @@ export function SpeculumActions({
             clearTimeout(dryRerunTimer.current);
             dryRerunTimer.current = null;
           }
-          void runLensDry(selectedLens, lastN);
+          void runLensDry(selectedLens, currentSel());
         }
         return;
       }
@@ -796,6 +1071,11 @@ export function SpeculumActions({
       setPickerIdx(0);
       setLastN(DEFAULT_LAST_N);
       lastNRef.current = DEFAULT_LAST_N;
+      setNoSubagents(false);
+      noSubRef.current = false;
+      setSessionId(null);
+      sessionIdRef.current = null;
+      setSessionPickOpen(false);
       setDryRunEnv(null);
       setSelectedLens(null);
       setConfirm(null);
@@ -812,23 +1092,34 @@ export function SpeculumActions({
     }
   });
 
+  const selNow = defaultLensSelection(lastN, noSubagents, sessionId);
+  const envelopeSessionId =
+    typeof dryRunEnv?.slice?.selectionSessionIds?.[0] === 'string'
+      ? dryRunEnv.slice.selectionSessionIds[0]
+      : typeof dryRunEnv?.slice?.sessionId === 'string'
+        ? dryRunEnv.slice.sessionId
+        : null;
+
   const footerHint = (() => {
     if (localFlash) return localFlash;
     if (busy) return busy;
     if (installed === false) return `speculum not installed — ${INSTALL_HINT}`;
+    if (sessionPickOpen && (panel === 'picker' || panel === 'dry-run')) {
+      return 'up/dn pick session · enter target · c clear · esc back';
+    }
     if (panel === 'picker') {
-      return `up/dn · ←/→ last-n · enter dry-run · esc · ${formatSelectionLabel(lastN)}`;
+      return `up/dn · ←/→ last-n · n no-sub · t session · enter dry-run · esc · ${formatSelectionLabel(selNow)}`;
     }
     if (panel === 'dry-run') {
       const decision = lensDecision(dryRunEnv);
       const reason = lensRefuseReason(dryRunEnv);
       if (canSend(decision, reason)) {
-        return 'confirm modal: y send · n/esc cancel · ←/→ re-slice';
+        return 'confirm modal: y send · n/esc cancel · ←/→ re-slice · t session';
       }
       if (isOversizeRefuse(reason)) {
-        return `over cap · ←/→ narrow · ${formatNarrowHint(lastN)} · esc close`;
+        return `over cap · ${formatNarrowHint(selNow)} · esc close`;
       }
-      return 'slice not sendable · ←/→ re-slice · esc close';
+      return 'slice not sendable · ←/→ re-slice · n no-sub · t session · esc close';
     }
     if (panel === 'audit') return 'A close audit · i ingest · L lens';
     if (installed === null) return 'checking speculum…';
@@ -866,6 +1157,43 @@ export function SpeculumActions({
   const showDryRun = panel === 'dry-run';
   const showAudit = panel === 'audit';
   const auditSlice = auditRows.slice(-AUDIT_SHOW_SLOTS);
+  const headerRight = sessionId
+    ? `--session ${shortSessionId(sessionId)}${noSubagents ? ' · no-sub' : ''}`
+    : `--last-n ${lastN}${noSubagents ? ' · no-sub' : ''}`;
+
+  const renderSessionPick = () => (
+    <box flexDirection="column" flexShrink={0}>
+      <FixedClearRow
+        width={rowW}
+        color={t.info}
+        text={formatLucernaDisplayLine(
+          recentSessions.length > 0
+            ? `pick session (${recentSessions.length} recent)`
+            : 'no recent sessions in index',
+          rowW,
+        )}
+      />
+      {recentSessions.length === 0 ? (
+        <FixedClearRow
+          width={rowW}
+          color={t.muted}
+          text={formatLucernaDisplayLine('open index empty or unavailable · esc back', rowW)}
+        />
+      ) : (
+        recentSessions.slice(0, 8).map((s, i) => (
+          <FixedClearRow
+            key={s.id}
+            width={rowW}
+            color={i === sessionPickIdx ? t.info : t.foreground}
+            text={formatLucernaDisplayLine(
+              formatRecentSessionLine(s, i === sessionPickIdx),
+              rowW,
+            )}
+          />
+        ))
+      )}
+    </box>
+  );
 
   return (
     <box
@@ -885,21 +1213,30 @@ export function SpeculumActions({
       ) : null}
 
       {showPicker ? (
-        <Panel title="Lens picker" flexShrink={0} headerRight={`--last-n ${lastN}`}>
+        <Panel title="Lens picker" flexShrink={0} headerRight={headerRight}>
           <box flexDirection="column" flexShrink={0}>
             <LastNStepper lastN={lastN} onChange={applyLastN} width={rowW} />
-            {BUILTIN_LENSES.map((name, idx) => {
-              const selected = idx === pickerIdx;
-              const prefix = selected ? '>' : ' ';
-              return (
-                <FixedClearRow
-                  key={name}
-                  width={rowW}
-                  color={selected ? t.info : t.foreground}
-                  text={formatLucernaDisplayLine(`${prefix} ${name}`, rowW)}
-                />
-              );
-            })}
+            <SelectionChrome
+              sel={selNow}
+              width={rowW}
+              onToggleNoSub={() => applyNoSubagents(!noSubagents)}
+            />
+            {sessionPickOpen ? (
+              renderSessionPick()
+            ) : (
+              BUILTIN_LENSES.map((name, idx) => {
+                const selected = idx === pickerIdx;
+                const prefix = selected ? '>' : ' ';
+                return (
+                  <FixedClearRow
+                    key={name}
+                    width={rowW}
+                    color={selected ? t.info : t.foreground}
+                    text={formatLucernaDisplayLine(`${prefix} ${name}`, rowW)}
+                  />
+                );
+              })
+            )}
           </box>
         </Panel>
       ) : null}
@@ -908,7 +1245,7 @@ export function SpeculumActions({
         <Panel
           title={selectedLens ? `Lens dry-run · ${selectedLens}` : 'Lens dry-run'}
           flexShrink={0}
-          headerRight={`--last-n ${lastN}`}
+          headerRight={headerRight}
         >
           <box flexDirection="column" flexShrink={0}>
             <LastNStepper
@@ -917,7 +1254,15 @@ export function SpeculumActions({
               width={rowW}
               disabled={!!busy}
             />
-            {busy && !dryRunEnv ? (
+            <SelectionChrome
+              sel={selNow}
+              width={rowW}
+              onToggleNoSub={() => applyNoSubagents(!noSubagents)}
+              disabled={!!busy}
+            />
+            {sessionPickOpen ? (
+              renderSessionPick()
+            ) : busy && !dryRunEnv ? (
               <FixedClearRow
                 width={rowW}
                 color={t.info}
@@ -927,8 +1272,23 @@ export function SpeculumActions({
               <>
                 <FixedClearRow
                   width={rowW}
+                  color={t.muted}
+                  text={formatLucernaDisplayLine(
+                    envelopeSessionId
+                      ? `slice session ${shortSessionId(envelopeSessionId)}${
+                          sessionId ? '' : ' · t pick · c clear target'
+                        }`
+                      : 'slice session n/a · t pick session',
+                    rowW,
+                  )}
+                />
+                <FixedClearRow
+                  width={rowW}
                   color={t.foreground}
-                  text={formatLucernaDisplayLine(formatComposition(dryRunEnv), rowW)}
+                  text={formatLucernaDisplayLine(
+                    formatComposition(dryRunEnv, selNow),
+                    rowW,
+                  )}
                 />
                 <FixedClearRow
                   width={rowW}
@@ -949,7 +1309,7 @@ export function SpeculumActions({
                       width={rowW}
                       color={t.muted}
                       text={formatLucernaDisplayLine(
-                        `${formatSelectionLabel(lastN)} · ${formatNarrowHint(lastN)}`,
+                        `${formatSelectionLabel(selNow)} · ${formatNarrowHint(selNow)}`,
                         rowW,
                       )}
                     />
@@ -972,11 +1332,11 @@ export function SpeculumActions({
                       : t.warning
                   }
                   text={formatLucernaDisplayLine(
-                    canSend(lensDecision(dryRunEnv), lensRefuseReason(dryRunEnv))
-                      ? 'sendable — confirm to invoke model'
-                      : isOversizeRefuse(lensRefuseReason(dryRunEnv))
-                        ? 'not sendable — narrow the slice (←/→) and re-run'
-                        : 'not sendable — confirm disabled',
+                    formatFitsVerdict(
+                      dryRunEnv,
+                      lensDecision(dryRunEnv),
+                      lensRefuseReason(dryRunEnv),
+                    ),
                     rowW,
                   )}
                 />
