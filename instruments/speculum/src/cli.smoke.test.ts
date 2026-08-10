@@ -42,7 +42,7 @@ describe("CLI smoke", () => {
       expect(status.exitCode).toBe(0);
       const statusOut = JSON.parse(status.stdout.toString());
       expect(statusOut.counts.sessions).toBe(1);
-      expect(statusOut.probes.registered).toBe(8);
+      expect(statusOut.probes.registered).toBe(11);
 
       const scan = Bun.spawnSync(["bun", "run", CLI, "scan", "--json"], {
         env,
@@ -52,7 +52,7 @@ describe("CLI smoke", () => {
       expect(scan.exitCode).toBe(0);
       const scanOut = JSON.parse(scan.stdout.toString());
       expect(Array.isArray(scanOut)).toBe(true);
-      expect(scanOut.length).toBe(8);
+      expect(scanOut.length).toBe(11);
 
       const usage = Bun.spawnSync(["bun", "run", CLI, "usage", "--json"], {
         env,

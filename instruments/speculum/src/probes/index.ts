@@ -12,6 +12,9 @@ import { apologyRate } from "./apology-rate";
 import { operatorCorrection } from "./operator-correction";
 import { sensitiveContent } from "./sensitive-content";
 import { staleCorpus } from "./stale-corpus";
+import { sessionPhase } from "./session-phase";
+import { contradiction } from "./contradiction";
+import { sessionOverlap } from "./session-overlap";
 import type { Probe, ProbeOptions, ProbeResult } from "./types";
 
 export type { Probe, ProbeOptions, ProbeResult, HitDetail } from "./types";
@@ -37,6 +40,10 @@ export const PROBES: Record<string, Probe> = {
   "operator-correction": operatorCorrection,
   "sensitive-content": sensitiveContent,
   "stale-corpus": staleCorpus,
+  // WU-13 investigative probes
+  "session-phase": sessionPhase,
+  contradiction: contradiction,
+  "session-overlap": sessionOverlap,
 };
 
 export function runAllProbes(db: Db, opts: ProbeOptions = {}): ProbeResult[] {
