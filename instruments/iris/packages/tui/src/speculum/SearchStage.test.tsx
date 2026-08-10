@@ -259,7 +259,10 @@ describe('SearchStage render', () => {
     await new Promise((r) => setTimeout(r, 120));
     await renderOnce();
     const frame = captureCharFrame();
+    const idleHint = 'type to search sessions';
+    const idleCount = frame.split(idleHint).length - 1;
     expect(frame, `frame:\n${frame}`).toMatch(/type to search sessions/);
+    expect(idleCount, `idle hint must appear exactly once; frame:\n${frame}`).toBe(1);
     expect(frame).toMatch(/Search/);
   });
 
@@ -287,6 +290,9 @@ describe('SearchStage render', () => {
     expect(frame, `frame:\n${frame}`).toMatch(/sess-search-a/);
     expect(frame).toMatch(new RegExp(TOKEN));
     expect(frame).toMatch(/assistant|\[assistant\]/);
+    const idleHint = 'type to search sessions';
+    const idleCount = frame.split(idleHint).length - 1;
+    expect(idleCount, `idle hint must be absent while typing; frame:\n${frame}`).toBe(0);
   });
 
   test('Enter fires onOpenSession with sessionId + eventId', async () => {

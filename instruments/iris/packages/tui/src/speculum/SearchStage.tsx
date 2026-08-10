@@ -315,10 +315,11 @@ export function SearchStage({
         {Array.from({ length: HIT_SLOTS }, (_, i) => {
           const hit = slice[i];
           if (!hit) {
+            // Idle hint lives only on statusLine (once). Body slot 0 stays blank when idle
+            // so fixed-clear rows do not stack the same copy under the status line.
             let placeholder = emptyRow(rowW);
-            if (i === 0) {
-              if (!qTrim) placeholder = padRow(IDLE_HINT, rowW);
-              else if (pending) placeholder = padRow(PENDING, rowW);
+            if (i === 0 && qTrim) {
+              if (pending) placeholder = padRow(PENDING, rowW);
               else if (hits.length === 0) placeholder = padRow(NO_MATCH, rowW);
             }
             return (
