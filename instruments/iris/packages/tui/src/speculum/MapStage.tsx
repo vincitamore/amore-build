@@ -1,9 +1,9 @@
 /**
- * Sessions Map stage — Panel-framed density / cluster scatter of the session RECORD.
+ * Sessions Map stage — Panel-framed timeline / structure scatter of the session RECORD.
  *
- * Composition: pure `buildSessionWorld` anchors + Graph `renderView` (glyphs, cluster hue)
+ * Composition: pure one-house world builders + Graph `renderView` (glyphs, origin hue)
  * with evidence links only (parentage + event_links). Viewport chrome matches GraphView
- * (pan/zoom/fit/hit-test). Project/edge legend via shared blit geometry + click-to-toggle.
+ * (pan/zoom/fit/hit-test). Legend enumerates edge kinds + origin/agent population filters.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useKeyboard } from '@opentui/react';
@@ -52,13 +52,19 @@ import {
 import {
   buildMapLegendRows,
   buildSessionWorld,
-  filterEvidenceLinks,
-  hiddenIdsForProjects,
+  DEFAULT_ALLOWED_AGENTS,
+  DEFAULT_ALLOWED_ORIGINS,
+  filtersShortLabel,
   hitTestSession,
   legendToggleTarget,
+  modeStatusLabel,
+  neighborhoodIds,
+  selectDrawnLinks,
   sessionWorldToGraph,
+  type MapAgent,
   type MapEdgeKind,
   type MapMode,
+  type MapOrigin,
   type SessionWorld,
 } from './map-data';
 
@@ -182,7 +188,7 @@ function softCopy(state: SoftState): { title: string; lines: string[] } {
 
 /**
  * Interactive session map. Opens the readonly query-service, places sessions with
- * `buildSessionWorld`, draws via Graph `renderView` with evidence links.
+ * one-house world builders, draws via Graph `renderView` with evidence links.
  */
 /** Local map chrome against residual host: panel title/border ~3 + 2 status lines. */
 const MAP_LOCAL_CHROME = 5;
@@ -223,11 +229,17 @@ export function MapStage({
   const height = rows * 4;
 
   const [soft, setSoft] = useState<SoftState>({ kind: 'loading' });
-  const [mode, setMode] = useState<MapMode>('cluster');
+  /** density = timeline (default); cluster = structure. */
+  const [mode, setMode] = useState<MapMode>('density');
   const [viewport, setViewport] = useState<Viewport | null>(null);
   const [selected, setSelected] = useState<string | null>(initialSelected ?? null);
   const [hovered, setHovered] = useState<string | null>(null);
-  const [hiddenProjects, setHiddenProjects] = useState<Set<string>>(() => new Set());
+  const [allowedOrigins, setAllowedOrigins] = useState<Set<MapOrigin>>(
+    () => new Set(DEFAULT_ALLOWED_ORIGINS),
+  );
+  const [allowedAgents, setAllowedAgents] = useState<Set<MapAgent>>(
+    () => new Set(DEFAULT_ALLOWED_AGENTS),
+  );
   const [hiddenEdgeKinds, setHiddenEdgeKinds] = useState<Set<MapEdgeKind>>(() => new Set());
   const qsRef = useRef<QueryService | null>(null);
   const aliveRef = useRef(true);
@@ -305,7 +317,7 @@ export function MapStage({
       setSelected(null);
       setViewport(null);
       onFlashRef.current?.(
-        `map: showing ${sessions.length} of ${Math.max(total, sessions.length)} · ${links.length} links`,
+        `map: showing ${sessions.length} of ${Math.max(total, sessions.length)} · ${links.length} raw links`,
       );
     }
   }, []);
@@ -320,15 +332,26 @@ export function MapStage({
   const evidenceLinks = soft.kind === 'ready' ? soft.links : [];
   const totalSessions = soft.kind === 'ready' ? soft.total : 0;
 
+  const populationFilters = useMemo(
+    () => ({ origins: allowedOrigins, agents: allowedAgents }),
+    [allowedOrigins, allowedAgents],
+  );
+
   const sessionWorld: SessionWorld | null = useMemo(() => {
     if (!sessions) return null;
-    return buildSessionWorld(sessions, mode);
-  }, [sessions, mode]);
+    return buildSessionWorld(sessions, mode, populationFilters);
+  }, [sessions, mode, populationFilters]);
 
-  const visibleLinks = useMemo(
-    () => filterEvidenceLinks(evidenceLinks, hiddenEdgeKinds),
-    [evidenceLinks, hiddenEdgeKinds],
-  );
+  const subagentsVisible = allowedAgents.has('subagent');
+
+  const drawnLinks = useMemo(() => {
+    if (!sessionWorld) return [] as SessionMapLink[];
+    return selectDrawnLinks(sessionWorld, evidenceLinks, {
+      selected,
+      subagentsVisible,
+      hiddenEdgeKinds,
+    });
+  }, [sessionWorld, evidenceLinks, selected, subagentsVisible, hiddenEdgeKinds]);
 
   const { graph, worldNodes } = useMemo(() => {
     if (!sessionWorld) {
@@ -337,23 +360,32 @@ export function MapStage({
         worldNodes: [] as WorldNode[],
       };
     }
-    return sessionWorldToGraph(sessionWorld, visibleLinks);
-  }, [sessionWorld, visibleLinks]);
+    return sessionWorldToGraph(sessionWorld, drawnLinks);
+  }, [sessionWorld, drawnLinks]);
 
   const legend = useMemo(() => {
-    if (!sessionWorld) return [];
-    return buildMapLegendRows(sessionWorld, evidenceLinks, hiddenProjects, hiddenEdgeKinds);
-  }, [sessionWorld, evidenceLinks, hiddenProjects, hiddenEdgeKinds]);
-
-  const hiddenIds = useMemo(
-    () => (sessionWorld ? hiddenIdsForProjects(sessionWorld, hiddenProjects) : undefined),
-    [sessionWorld, hiddenProjects],
-  );
+    if (!sessions) return [];
+    return buildMapLegendRows(
+      sessions,
+      evidenceLinks,
+      allowedOrigins,
+      allowedAgents,
+      hiddenEdgeKinds,
+    );
+  }, [sessions, evidenceLinks, allowedOrigins, allowedAgents, hiddenEdgeKinds]);
 
   // Structure-invalidating mode change → reset viewport (GraphView pattern).
   const lastMode = useRef(mode);
   if (lastMode.current !== mode) {
     lastMode.current = mode;
+    if (viewport) setViewport(null);
+  }
+
+  // Population filter change → re-fit so void does not return when a mass appears/disappears.
+  const filterSig = `${[...allowedOrigins].sort().join(',')}|${[...allowedAgents].sort().join(',')}`;
+  const lastFilterSig = useRef(filterSig);
+  if (lastFilterSig.current !== filterSig) {
+    lastFilterSig.current = filterSig;
     if (viewport) setViewport(null);
   }
 
@@ -365,6 +397,14 @@ export function MapStage({
     }
   }, [soft, initialSelected]);
 
+  // Drop selection if the selected session left the population filter.
+  useEffect(() => {
+    if (!selected || !sessionWorld) return;
+    if (!sessionWorld.nodes.some((n) => n.id === selected)) {
+      setSelected(null);
+    }
+  }, [selected, sessionWorld]);
+
   const vp = useMemo(
     () => viewport ?? fitViewport(worldNodes, width, height),
     [viewport, worldNodes, width, height],
@@ -375,11 +415,24 @@ export function MapStage({
   );
   const zoomFactor = fitScale > 0 ? vp.scale / fitScale : 1;
 
-  const focusId = selected ?? hovered;
-  const focus = useMemo<FocusState | undefined>(
-    () => (focusId ? { selected: focusId, neighbors: new Set() } : undefined),
-    [focusId],
+  const neighbors = useMemo(
+    () =>
+      sessionWorld
+        ? neighborhoodIds(selected, sessionWorld, evidenceLinks)
+        : new Set<string>(),
+    [selected, sessionWorld, evidenceLinks],
   );
+
+  // Focus for dimming: selection (or hover without neighborhood) via existing FocusState.
+  const focus = useMemo<FocusState | undefined>(() => {
+    if (selected) {
+      return { selected, neighbors };
+    }
+    if (hovered) {
+      return { selected: hovered, neighbors: new Set() };
+    }
+    return undefined;
+  }, [selected, hovered, neighbors]);
 
   const { grid, nodes: screenNodes } = useMemo(
     () =>
@@ -392,11 +445,10 @@ export function MapStage({
           rows,
           mode: 'cluster',
           attention: true,
-          hiddenIds,
         },
         focus,
       ),
-    [graph, worldNodes, vp, cols, rows, focus, hiddenIds],
+    [graph, worldNodes, vp, cols, rows, focus],
   );
 
   const gridRef = useRef(grid);
@@ -422,8 +474,8 @@ export function MapStage({
   const toggleLegendKey = useCallback((label: string) => {
     const target = legendToggleTarget(label);
     if (!target) return;
-    if (target.kind === 'project') {
-      setHiddenProjects((prev) => {
+    if (target.kind === 'edge') {
+      setHiddenEdgeKinds((prev) => {
         const next = new Set(prev);
         if (next.has(target.key)) next.delete(target.key);
         else next.add(target.key);
@@ -431,12 +483,30 @@ export function MapStage({
       });
       return;
     }
-    setHiddenEdgeKinds((prev) => {
-      const next = new Set(prev);
-      if (next.has(target.key)) next.delete(target.key);
-      else next.add(target.key);
-      return next;
-    });
+    if (target.kind === 'origin') {
+      setAllowedOrigins((prev) => {
+        const next = new Set(prev);
+        if (next.has(target.key)) {
+          // Keep at least one origin so the canvas is never a silent void of all filters off.
+          if (next.size > 1) next.delete(target.key);
+        } else {
+          next.add(target.key);
+        }
+        return next;
+      });
+      return;
+    }
+    if (target.kind === 'agent') {
+      setAllowedAgents((prev) => {
+        const next = new Set(prev);
+        if (next.has(target.key)) {
+          if (next.size > 1) next.delete(target.key);
+        } else {
+          next.add(target.key);
+        }
+        return next;
+      });
+    }
   }, []);
 
   const openSelected = useCallback(
@@ -469,6 +539,7 @@ export function MapStage({
       return;
     }
     if (n === 'escape') {
+      // Esc cascade: clear selection/neighborhood (no house-focus stack).
       if (selected) setSelected(null);
       return;
     }
@@ -563,29 +634,30 @@ export function MapStage({
   );
 
   const rowW = Math.max(16, stageBox.width - 2);
-  const groupCount = sessionWorld?.groupKeys.length ?? 0;
   const selNode = selected ? sessionWorld?.nodes.find((n) => n.id === selected) : undefined;
-  const showing = sessions?.length ?? 0;
-  const linkCount = visibleLinks.length;
+  const showing = sessionWorld?.nodes.length ?? 0;
+  const linkCount = drawnLinks.length;
+  const modeLabel = modeStatusLabel(mode);
+  const filterLabel = filtersShortLabel(allowedOrigins, allowedAgents);
 
   const headerRight =
     soft.kind === 'ready'
-      ? `${showing}/${totalSessions} · ${mode}`
+      ? `${showing}/${totalSessions} · ${modeLabel}`
       : soft.kind === 'loading'
         ? 'loading'
         : soft.kind;
 
   const infoLine =
     soft.kind === 'ready'
-      ? ` showing ${showing} of ${totalSessions} · ${linkCount} links · ${mode}${groupCount ? ` (${groupCount})` : ''} · ${zoomFactor.toFixed(1)}× zoom` +
+      ? ` showing ${showing} of ${totalSessions} · ${linkCount} links · ${modeLabel} · ${filterLabel} · ${zoomFactor.toFixed(1)}× zoom` +
         (selNode
-          ? `   ◉ ${displayLabel(selNode.label)} · ${selNode.groupKey} · turns ${selNode.turnCount}`
+          ? `   ◉ ${displayLabel(selNode.label)} · turns ${selNode.turnCount} · ${selNode.origin}`
           : '')
       : ` ${softCopy(soft).title}`;
 
   const controlLine =
     soft.kind === 'ready'
-      ? ' drag pan · scroll zoom · click select · legend toggle · click·click / ⏎ open · [d]ensity/cluster · [f]it [c]enter [r]eload'
+      ? ' drag pan · scroll zoom · click select · legend filter · click·click / ⏎ open · [d] timeline/structure · [f]it [c]enter [r]eload'
       : ' r retry';
 
   const softBody =
