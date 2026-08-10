@@ -29,6 +29,7 @@ import hashlib
 import json
 import os
 import queue
+import random
 import re
 import shutil
 import sqlite3
@@ -619,8 +620,10 @@ def build_child_env(
     env["IRIS_ORG_ROOT"] = str(org_root.resolve())
     env["SPECULUM_DB"] = str(db_path.resolve())
     env["SPECULUM_HOME"] = str(spec_home.resolve())
-    # Use a scratch daemon port so nothing probes a real live instance.
-    env["IRIS_PORT"] = "3911"
+    # Scratch daemon port, UNIQUE per run so consecutive drives never collide
+    # (a stale run's daemon on a fixed port made the next run's dash probe a
+    # daemon serving a different org root and spill its error into the frame).
+    env["IRIS_PORT"] = str(random.randint(3900, 3999))
     return env
 
 
