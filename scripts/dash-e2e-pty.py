@@ -6,21 +6,30 @@ sentinel waits, frame dumps) with multi-step choreography and PASS/FAIL assertio
 
 Import reuse:
   * dump_frame — the only top-level primitive export from capture_frame.py
+  * render_frame_to_png — styled-cell JSON → review PNG (in-process)
   * All other PTY loop pieces live inside capture_frame.main() (CLI-only); this
     script mirrors those patterns in-process so one continuous session can
     S → g → w → L without relaunch. capture_frame.py is NEVER modified.
 
 Run from repo root:
   python scripts/dash-e2e-pty.py
+  python scripts/dash-e2e-pty.py --profile operator
+  python scripts/dash-e2e-pty.py --profile narrow --no-png
+  python scripts/dash-e2e-pty.py --profile tight
 
 Needs: Python 3, pyte, winpty (same as capture_frame.py), compiled dash binary.
+Optional PNG path: PIL + fontTools (same as render_frame.py).
 Flaky-by-nature: native ConPTY races + winpty title-replay keystrokes.
 """
 
 from __future__ import annotations
 
+import argparse
+import hashlib
+import json
 import os
 import queue
+import re
 import shutil
 import sqlite3
 import sys
@@ -45,7 +54,14 @@ REPO_ROOT = _SCRIPTS.parent
 DIST_DASH = REPO_ROOT / "instruments" / "iris" / "dist" / "iris-dash-windows-x64.exe"
 INSTALL_DASH = Path.home() / "amore" / "bin" / "iris-dash-windows-x64.exe"
 FRAMES_DIR = _SCRIPTS / "e2e-pty-frames"
+REVIEW_DIR = _SCRIPTS / "e2e-pty-review"
 
+# Profiles (cols, rows). Module ROWS/COLS remain the narrow defaults for docs.
+PROFILES: dict[str, tuple[int, int]] = {
+    "operator": (140, 48),
+    "narrow": (120, 36),
+    "tight": (100, 30),
+}
 ROWS = 36
 COLS = 120
 STEP_TIMEOUT = 10.0  # per-step pattern wait (brief: ~10s)
@@ -55,6 +71,19 @@ SETTLE_AFTER_SEND = 0.45
 # Typed-query letters that avoid shell/picker-bound keys (t q v j k) and
 # digit member-switch (1-9). FTS seed text below includes this token.
 SAFE_QUERY = "hello"
+
+# Choreography steps that produce frames (order fixed).
+REVIEW_STEPS = [
+    "00-boot",
+    "01-sessions",
+    "02-map",
+    "02b-microscope",
+    "02c-microscope-timeline",
+    "03-search",
+    "04-lens-picker",
+    "05-after-escape",
+]
+
 
 # ── Assertion sheet ──────────────────────────────────────────────────────────
 @dataclass
@@ -97,6 +126,26 @@ def matching_rows(frame: str, needle: str, limit: int = 4) -> str:
     return " | ".join(r.strip()[:100] for r in rows[:limit]) or "(no matching rows)"
 
 
+def resolve_profile(name: str, cols_override: int | None, rows_override: int | None) -> tuple[int, int]:
+    """Resolve cols/rows for a named profile with CLI and env overrides."""
+    if name not in PROFILES:
+        raise SystemExit(f"unknown profile {name!r}; choose from {sorted(PROFILES)}")
+    base_cols, base_rows = PROFILES[name]
+    env_cols = int(os.environ.get("IRIS_E2E_COLS", "0") or "0") or None
+    env_rows = int(os.environ.get("IRIS_E2E_ROWS", "0") or "0") or None
+    cols = cols_override or env_cols or base_cols
+    rows = rows_override or env_rows or base_rows
+    return cols, rows
+
+
+def binary_sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
 # ── Scratch environment ──────────────────────────────────────────────────────
 def resolve_binary() -> tuple[Path, str]:
     """Prefer dist/ build; fall back to installed companion. Returns (path, label)."""
@@ -111,7 +160,7 @@ def resolve_binary() -> tuple[Path, str]:
 
 
 def seed_synthetic_index(db_path: Path) -> None:
-    """v4 greenfield schema (schema.sql shape) + a couple sessions/events + FTS."""
+    """v5 greenfield schema + base 8 sessions (char asserts) + expanded canary corpus."""
     if db_path.exists():
         db_path.unlink()
     db = sqlite3.connect(str(db_path))
@@ -229,31 +278,31 @@ def seed_synthetic_index(db_path: Path) -> None:
             """
         )
         now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
-        projects = ["/work/alpha", "/work/beta", "/work/gamma"]
-        for i in range(8):
-            sid = f"e2e-sess-{i:03d}"
-            proj = projects[i % len(projects)]
-            day = f"{1 + (i % 28):02d}"
-            started = f"2026-05-{day}T10:00:00.000Z"
-            ended = f"2026-05-{day}T11:00:00.000Z"
-            agent = "primary" if i < 6 else "subagent"
-            parent = None if agent == "primary" else "e2e-sess-000"
-            title = f"Session title {i:03d}" if i < 3 else ""
+
+        def insert_session(
+            sid: str,
+            proj: str,
+            agent: str,
+            parent: str | None,
+            started: str,
+            ended: str,
+            turns: int,
+            title: str,
+            text: str,
+        ) -> int:
             db.execute(
                 """INSERT INTO sessions (
                      id, project_path, agent, parent_session, model_id,
                      started_at, ended_at, turn_count, user_msg_count,
                      tool_call_count, tool_error_count, title
                    ) VALUES (?, ?, ?, ?, 'model-x', ?, ?, ?, 1, 1, 0, ?)""",
-                (sid, proj, agent, parent, started, ended, 2 + i, title),
+                (sid, proj, agent, parent, started, ended, turns, title),
             )
             if title:
-                # v5 side store mirrors the sessions title (both shapes populated).
                 db.execute(
                     "INSERT INTO session_titles(session_id, title) VALUES (?, ?)",
                     (sid, title),
                 )
-            text = f"hello from {sid} on map stage probe"
             cur = db.execute(
                 """INSERT INTO events (
                      session_id, project_path, agent, parent_session, ts, kind,
@@ -263,8 +312,7 @@ def seed_synthetic_index(db_path: Path) -> None:
                              NULL, 0, 0, ?)""",
                 (sid, proj, agent, parent, started, text, "{}"),
             )
-            eid = cur.lastrowid
-            # FTS5 content table: rowid must match events.id for the query-service.
+            eid = int(cur.lastrowid)
             db.execute(
                 "INSERT INTO events_fts(rowid, text, tool_name, tool_input, tool_output) "
                 "VALUES (?, ?, '', '', '')",
@@ -277,6 +325,24 @@ def seed_synthetic_index(db_path: Path) -> None:
                    ) VALUES (?, ?, ?, 'model-x', 100, 50, 150, 1, 1, '{}')""",
                 (sid, proj, started),
             )
+            return eid
+
+        # ── Base 8 sessions (exact titles + behavior for existing char asserts) ──
+        projects = ["/work/alpha", "/work/beta", "/work/gamma"]
+        base_eids: list[int] = []
+        for i in range(8):
+            sid = f"e2e-sess-{i:03d}"
+            proj = projects[i % len(projects)]
+            day = f"{1 + (i % 28):02d}"
+            started = f"2026-05-{day}T10:00:00.000Z"
+            ended = f"2026-05-{day}T11:00:00.000Z"
+            agent = "primary" if i < 6 else "subagent"
+            parent = None if agent == "primary" else "e2e-sess-000"
+            title = f"Session title {i:03d}" if i < 3 else ""
+            text = f"hello from {sid} on map stage probe"
+            eid = insert_session(sid, proj, agent, parent, started, ended, 2 + i, title, text)
+            base_eids.append(eid)
+
         # Evidence edges for the REAL-links bar: sess-001 → sess-000 (GENERATED),
         # sess-002 → sess-001 (USED). Event ids are 1..8 in session order (0..7).
         for src, tgt, kind in [(2, 1, "GENERATED"), (3, 2, "USED")]:
@@ -286,6 +352,74 @@ def seed_synthetic_index(db_path: Path) -> None:
                    ) VALUES (?, ?, ?, 'seed', 1.0, 0)""",
                 (src, tgt, kind),
             )
+
+        # ── Expanded canary corpus (structural asserts; char asserts ignore) ──
+        # ≥50 additional sessions across ≥12 project_paths (incl. id-shaped
+        # experiment paths), long titles, small subagent tree, extra links.
+        extra_projects = [
+            "/work/alpha",
+            "/work/beta",
+            "/work/gamma",
+            "/work/amore",
+            "/work/arcus",
+            "/work/bare",
+            "/tmp/identity-study/A-sen-01",
+            "/tmp/identity-study/A-sen-02",
+            "/tmp/identity-study/A-sen-09",
+            "/work/e2e-sess-noise-aa",
+            "/work/e2e-sess-noise-bb",
+            "/work/canary-house",
+            "/work/probe-lab",
+            "/work/map-density",
+        ]
+        long_title_a = (
+            "Iris Microscope two-pane Redesign Title That Is Long Enough For Ellipsis"
+        )
+        long_title_b = (
+            "Picker width canary title padding past sixty characters so truncate fires"
+        )
+        parent_primary = "e2e-canary-000"
+        extra_eids: list[int] = []
+        for i in range(50):
+            sid = f"e2e-canary-{i:03d}"
+            proj = extra_projects[i % len(extra_projects)]
+            # Dates sit BEFORE the base 8 sessions (May 2026) so newest-first
+            # pickers still surface `Session title 000` for char asserts.
+            day = f"{1 + (i % 28):02d}"
+            started = f"2026-03-{day}T{10 + (i % 8):02d}:00:00.000Z"
+            ended = f"2026-03-{day}T{11 + (i % 8):02d}:00:00.000Z"
+            if i == 0:
+                agent, parent = "primary", None
+            elif i in (1, 2, 3):
+                agent, parent = "subagent", parent_primary
+            else:
+                agent, parent = "primary", None
+            if i < 6:
+                title = long_title_a if i % 2 == 0 else long_title_b
+            elif i < 12:
+                title = f"Canary long title block {i:03d} " + ("x" * 48)
+            else:
+                title = f"Canary session {i:03d}"
+            text = f"hello canary {sid} project {proj}"
+            eid = insert_session(
+                sid, proj, agent, parent, started, ended, 3 + (i % 5), title, text
+            )
+            extra_eids.append(eid)
+
+        # A handful more event_links so map edge counts stay non-zero under canary.
+        if len(extra_eids) >= 4:
+            for src, tgt, kind in [
+                (extra_eids[1], extra_eids[0], "GENERATED"),
+                (extra_eids[2], extra_eids[0], "USED"),
+                (extra_eids[3], extra_eids[1], "USED"),
+            ]:
+                db.execute(
+                    """INSERT INTO event_links(
+                         source_event_id, target_event_id, kind, method, confidence, heuristic
+                       ) VALUES (?, ?, ?, 'seed', 1.0, 0)""",
+                    (src, tgt, kind),
+                )
+
         db.execute(
             """INSERT INTO ingest_state (
                  file_path, size_bytes, mtime, byte_offset, last_ingested, forgotten
@@ -490,30 +624,381 @@ def build_child_env(
     return env
 
 
-def dump_step(step: str, text: str, screen: pyte.Screen | None = None) -> Path:
+# ── Frame dump + review PNG ──────────────────────────────────────────────────
+@dataclass
+class DumpCtx:
+    rows: int
+    cols: int
+    emit_png: bool
+    review_dir: Path
+    font_size: int = 18
+    steps_emitted: list[str] = field(default_factory=list)
+    png_errors: list[str] = field(default_factory=list)
+
+
+def dump_step(
+    step: str,
+    text: str,
+    screen: pyte.Screen | None,
+    ctx: DumpCtx,
+) -> Path:
     FRAMES_DIR.mkdir(parents=True, exist_ok=True)
-    path = FRAMES_DIR / f"{step}.txt"
-    path.write_text(text, encoding="utf-8")
+    txt_path = FRAMES_DIR / f"{step}.txt"
+    txt_path.write_text(text, encoding="utf-8")
+    json_path = FRAMES_DIR / f"{step}.json"
     if screen is not None:
-        dump_frame(screen, ROWS, COLS, str(FRAMES_DIR / f"{step}.json"))
-    print(f"  [frame] {path} ({len(text.splitlines())} lines)")
+        dump_frame(screen, ctx.rows, ctx.cols, str(json_path))
+    ctx.steps_emitted.append(step)
+    print(f"  [frame] {txt_path} ({len(text.splitlines())} lines)")
+
+    if ctx.emit_png and screen is not None and json_path.is_file():
+        try:
+            from render_frame import render_frame_to_png  # noqa: E402
+        except Exception as exc:
+            ctx.png_errors.append(f"{step}: png_pipeline_available failed: {exc}")
+            print(f"  [png]   FAIL import render_frame: {exc}")
+            return txt_path
+        ctx.review_dir.mkdir(parents=True, exist_ok=True)
+        png_path = ctx.review_dir / f"{step}.png"
+        try:
+            render_frame_to_png(
+                json_path,
+                png_path,
+                font_size=ctx.font_size,
+                quiet=True,
+            )
+            print(f"  [png]   {png_path}")
+        except Exception as exc:
+            ctx.png_errors.append(f"{step}: png_render failed: {exc}")
+            print(f"  [png]   FAIL {step}: {exc}")
+    return txt_path
+
+
+def write_manifest(
+    review_dir: Path,
+    *,
+    cols: int,
+    rows: int,
+    profile: str,
+    binary: Path,
+    bin_src: str,
+    font_size: int,
+    emit_png: bool,
+    structural: bool,
+    steps: list[str],
+) -> Path:
+    review_dir.mkdir(parents=True, exist_ok=True)
+    sha = binary_sha256(binary)
+    mtime = datetime.fromtimestamp(binary.stat().st_mtime, tz=timezone.utc).isoformat()
+    generated = datetime.now(timezone.utc).isoformat()
+    lines = [
+        "# H2 visual review — iris-dash",
+        "",
+        f"- generated: {generated}",
+        f"- cols: {cols}",
+        f"- rows: {rows}",
+        f"- profile: {profile}",
+        "- theme: horizon",
+        f"- binary: {binary}",
+        f"- binary_source: {bin_src}",
+        f"- binary_sha256: {sha[:16]}…",
+        f"- binary_mtime: {mtime}",
+        f"- font_size_png: {font_size}",
+        f"- structural: {'on' if structural else 'skipped'}",
+        f"- png: {'on' if emit_png else 'off'}",
+        "",
+        "## Steps",
+        "",
+        "| step | sentinel / note | png | structural |",
+        "|---|---|---|---|",
+    ]
+    notes = {
+        "00-boot": "Dashboard/Sessions/Attention",
+        "01-sessions": "chips + strip + footer",
+        "02-map": "g → Map",
+        "02b-microscope": "m → two-pane",
+        "02c-microscope-timeline": "enter session",
+        "03-search": "w + hello",
+        "04-lens-picker": "L",
+        "05-after-escape": "esc",
+    }
+    for step in steps:
+        png_ok = "yes" if emit_png and (review_dir / f"{step}.png").is_file() else (
+            "n/a" if not emit_png else "missing"
+        )
+        struct = "R5–R7" if step == "01-sessions" else (
+            "path leak" if structural else "skipped"
+        )
+        if step.startswith("02"):
+            # TODO(map-design): map legend/edge structural asserts deferred
+            struct = "path leak; map R1–R3 deferred"
+        lines.append(
+            f"| {step} | {notes.get(step, '')} | {png_ok} | {struct} |"
+        )
+    lines.extend(
+        [
+            "",
+            "## Operator review",
+            "",
+            "Open each PNG. Reject the change if Map legend is a noise wall,",
+            "Microscope picker is an ellipsis wall, or any stage clips footer/chrome.",
+            "Char PASS is not sufficient. Structural FAILs above are product findings.",
+            "",
+        ]
+    )
+    path = review_dir / "MANIFEST.md"
+    path.write_text("\n".join(lines), encoding="utf-8")
+    print(f"  [manifest] {path}")
     return path
 
 
+# ── Structural JSON helpers / asserts ────────────────────────────────────────
+def load_frame_json(path: Path) -> dict:
+    with path.open(encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+def row_text(frame: dict, y: int) -> str:
+    return "".join((cell.get("c") or " ") for cell in frame["cells"][y])
+
+
+def full_text(frame: dict) -> str:
+    return "\n".join(row_text(frame, y) for y in range(frame["rows"]))
+
+
+def nonblank_rows(frame: dict) -> list[tuple[int, str]]:
+    out = []
+    for y in range(frame["rows"]):
+        t = row_text(frame, y).rstrip()
+        if t.strip():
+            out.append((y, t))
+    return out
+
+
+# Map-specific legend/edge asserts (R1/R2/R3) wait on the map redesign.
+# TODO(map-design): implement map_edge_kinds_visible / legend clip / project cap
+
+
+def run_structural_asserts(
+    sheet: Sheet,
+    *,
+    frames_dir: Path,
+    review_dir: Path,
+    emit_png: bool,
+    steps: list[str],
+    png_errors: list[str],
+) -> None:
+    print("\n── structural JSON asserts ──")
+
+    # R6 — no absolute user-home path leak on any dumped frame.
+    leak_re = re.compile(r"C:\\Users\\", re.I)
+    leak_hits: list[str] = []
+    for step in steps:
+        jp = frames_dir / f"{step}.json"
+        if not jp.is_file():
+            continue
+        text = full_text(load_frame_json(jp))
+        if leak_re.search(text):
+            leak_hits.append(step)
+    sheet.check(
+        "R6_no_user_path_leak",
+        not leak_hits,
+        "clean" if not leak_hits else f"leaked in: {', '.join(leak_hits)}",
+    )
+
+    # R5 — sessions frame: five stage chips + member-footer keys co-present.
+    sess_json = frames_dir / "01-sessions.json"
+    if sess_json.is_file():
+        sess = load_frame_json(sess_json)
+        sess_text = full_text(sess)
+        chips = ("Probes", "Usage", "Microscope", "Map", "Search")
+        chips_ok = all(c in sess_text for c in chips)
+        # Member-footer stage / action keys (flexible separators / middot).
+        probes_key = bool(re.search(r"\bp\s+probes\b", sess_text, re.I))
+        ingest_key = bool(re.search(r"\bi\s+ingest\b", sess_text, re.I))
+        footer_ok = probes_key and ingest_key
+        if not (chips_ok and footer_ok):
+            # Flash can still own the member-footer line on 01-sessions; fall
+            # back to any later sessions-stage frame that co-presents both.
+            for alt in (
+                "03-search.json",
+                "05-after-escape.json",
+                "04-lens-picker.json",
+                "02-map.json",
+            ):
+                ap = frames_dir / alt
+                if not ap.is_file():
+                    continue
+                alt_text = full_text(load_frame_json(ap))
+                alt_chips = all(c in alt_text for c in chips)
+                alt_p = bool(re.search(r"\bp\s+probes\b", alt_text, re.I))
+                alt_i = bool(re.search(r"\bi\s+ingest\b", alt_text, re.I))
+                if alt_chips and alt_p and alt_i:
+                    chips_ok, probes_key, ingest_key, footer_ok = True, True, True, True
+                    sess_text = alt_text
+                    break
+        sheet.check(
+            "R5_sessions_chips_and_footer",
+            chips_ok and footer_ok,
+            (
+                f"chips={chips_ok} p_probes={probes_key} i_ingest={ingest_key}; "
+                + (matching_rows(sess_text, "Probes") if not chips_ok else "chips+footer")
+            ),
+        )
+
+        # R5b — Actions idle: at most one line advertising ingest · lens · audit.
+        # Target shape after footer consolidation: member-footer owns the band;
+        # Actions strip is silent when idle. Assert the single-band target; if
+        # current product still duplicates, FAIL with exact delta (do not patch
+        # product chrome here).
+        band_re = re.compile(
+            r"i\s+ingest\s*[·|]\s*L\s+lens\s*[·|]\s*A\s+audit",
+            re.I,
+        )
+        band_lines = [(y, t) for y, t in nonblank_rows(sess) if band_re.search(t)]
+        # Also count looser multi-key lines that advertise the same trio.
+        loose_re = re.compile(
+            r"(?=.*\bingest\b)(?=.*\blens\b)(?=.*\baudit\b)",
+            re.I,
+        )
+        loose_lines = [(y, t) for y, t in nonblank_rows(sess) if loose_re.search(t)]
+        # Prefer the strict band count when any match; else loose trio count.
+        count = len(band_lines) if band_lines else len(loose_lines)
+        r5b_ok = count <= 1
+        detail_lines = band_lines or loose_lines
+        if r5b_ok:
+            detail = f"advertising lines={count} (≤1)"
+        else:
+            preview = " || ".join(t.strip()[:90] for _, t in detail_lines[:4])
+            detail = (
+                f"advertising lines={count} (want ≤1 for single-band footer); "
+                f"rows: {preview}. "
+                "DELTA for integration: collapse Actions idle strip so only the "
+                "member-footer carries `i ingest · L lens · A audit` when Actions "
+                "is idle (Actions silent idle)."
+            )
+        sheet.check("R5b_footer_single_band", r5b_ok, detail)
+    else:
+        sheet.check("R5_sessions_chips_and_footer", False, "01-sessions.json missing")
+        sheet.check("R5b_footer_single_band", False, "01-sessions.json missing")
+
+    # R7 — PNG present for every emitted step when --png.
+    if emit_png:
+        missing = []
+        empty = []
+        for step in steps:
+            png = review_dir / f"{step}.png"
+            if not png.is_file():
+                missing.append(step)
+            elif png.stat().st_size == 0:
+                empty.append(step)
+        ok = not missing and not empty and not png_errors
+        detail = "all png present"
+        if missing:
+            detail = f"missing: {', '.join(missing)}"
+        if empty:
+            detail += f"; empty: {', '.join(empty)}"
+        if png_errors:
+            detail += f"; errors: {'; '.join(png_errors)}"
+        sheet.check("R7_png_emitted", ok, detail)
+        sheet.check(
+            "png_pipeline_available",
+            not any("png_pipeline_available" in e for e in png_errors),
+            "import ok" if not png_errors else "; ".join(png_errors),
+        )
+    else:
+        sheet.check("R7_png_emitted", True, "skipped (--no-png)")
+
+
 # ── Main drive ───────────────────────────────────────────────────────────────
-def main() -> int:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    ap = argparse.ArgumentParser(
+        description="H2: compiled-binary PTY drive of iris-dash (char + structural + PNG review)",
+    )
+    png_g = ap.add_mutually_exclusive_group()
+    png_g.add_argument(
+        "--png",
+        dest="png",
+        action="store_true",
+        default=None,
+        help="emit review PNGs (default when fonts are available)",
+    )
+    png_g.add_argument(
+        "--no-png",
+        dest="png",
+        action="store_false",
+        help="skip PNG emission",
+    )
+    ap.add_argument(
+        "--review-dir",
+        type=Path,
+        default=REVIEW_DIR,
+        help=f"directory for review PNGs + MANIFEST (default: {REVIEW_DIR})",
+    )
+    ap.add_argument(
+        "--profile",
+        choices=["operator", "narrow", "tight", "all"],
+        default="operator",
+        help="terminal size profile (default: operator 140×48)",
+    )
+    ap.add_argument("--cols", type=int, default=None, help="override cols for active profile")
+    ap.add_argument("--rows", type=int, default=None, help="override rows for active profile")
+    ap.add_argument(
+        "--font-size",
+        type=int,
+        default=18,
+        help="PNG font size (default 18 for review; docs pipeline keeps 30)",
+    )
+    ap.add_argument(
+        "--skip-structural",
+        action="store_true",
+        help="run char asserts only (debug)",
+    )
+    return ap.parse_args(argv)
+
+
+def resolve_png_default(explicit: bool | None) -> bool:
+    if explicit is not None:
+        return explicit
+    try:
+        from render_frame import font_candidates  # noqa: E402
+
+        return bool(font_candidates())
+    except Exception:
+        return False
+
+
+def run_drive(
+    *,
+    profile: str,
+    cols: int,
+    rows: int,
+    emit_png: bool,
+    review_dir: Path,
+    font_size: int,
+    skip_structural: bool,
+) -> int:
     print("=== iris dash E2E PTY (compiled binary) ===")
     binary, bin_src = resolve_binary()
-    print(f"binary: {binary}")
-    print(f"source: {bin_src}")
-    print(f"size:   {COLS}x{ROWS}")
+    print(f"binary:  {binary}")
+    print(f"source:  {bin_src}")
+    print(f"profile: {profile}  size: {cols}x{rows}")
     print(f"frames → {FRAMES_DIR}")
+    print(f"review → {review_dir}  png={'on' if emit_png else 'off'}  font={font_size}")
+    print(f"structural: {'skip' if skip_structural else 'on'}")
     print("")
 
     sheet = Sheet()
     scratch: Path | None = None
     drive: PtyDrive | None = None
     keep_scratch = False
+    ctx = DumpCtx(
+        rows=rows,
+        cols=cols,
+        emit_png=emit_png,
+        review_dir=review_dir,
+        font_size=font_size,
+    )
 
     try:
         scratch, fake_home, org_root, db_path = make_scratch()
@@ -530,11 +1015,11 @@ def main() -> int:
 
         # cwd under fake home so any path display stays under the throwaway tree.
         cwd = str(org_root)
-        drive = PtyDrive(binary, env, cwd, ROWS, COLS)
+        drive = PtyDrive(binary, env, cwd, rows, cols)
 
         # ── 0. Boot ──────────────────────────────────────────────────────────
         print("\n── 0. Boot ──")
-        # Sentinel must be on-screen at capture size (skill §5): member names at 120 cols.
+        # Sentinel: member names at ≥~110 cols; panel titles work at tight sizes.
         boot_ok, boot_text = drive.wait_for(
             lambda t: (
                 "Dashboard" in t
@@ -543,17 +1028,29 @@ def main() -> int:
                 or "Overview" in t
             ),
             timeout=BOOT_TIMEOUT,
-            label="boot chrome (Dashboard/Sessions)",
+            label="boot chrome (Dashboard/Sessions/Attention)",
         )
-        dump_step("00-boot", boot_text, drive.screen)
+        dump_step("00-boot", boot_text, drive.screen, ctx)
         sheet.check(
             "boot_chrome",
             boot_ok,
             matching_rows(boot_text, "Dash") if not boot_ok else "Dashboard/Sessions visible",
         )
         if not boot_ok:
-            # No point choreographing a dead screen — still print the sheet.
             keep_scratch = True
+            if emit_png:
+                write_manifest(
+                    review_dir,
+                    cols=cols,
+                    rows=rows,
+                    profile=profile,
+                    binary=binary,
+                    bin_src=bin_src,
+                    font_size=font_size,
+                    emit_png=emit_png,
+                    structural=not skip_structural,
+                    steps=ctx.steps_emitted,
+                )
             sheet.print_sheet()
             print(f"KEEP scratch for debug: {scratch}")
             return 1
@@ -583,7 +1080,19 @@ def main() -> int:
             timeout=STEP_TIMEOUT,
             label="status strip flavor",
         )
-        dump_step("01-sessions", sess_text, drive.screen)
+        # Member footer can be transiently replaced by a flash ("scan updated").
+        # Wait for the standing keystrip so structural R5 sees the real band.
+        footer_ok, sess_text = drive.wait_for(
+            lambda t: ("p probes" in t and "i ingest" in t)
+            or ("Probes" in t and "Search" in t and "i ingest" in t),
+            timeout=STEP_TIMEOUT,
+            label="member footer keys",
+        )
+        if not footer_ok:
+            # Extra settle if flash is still holding the footer line.
+            drive.pump(1.5)
+            sess_text = drive.frame_text()
+        dump_step("01-sessions", sess_text, drive.screen, ctx)
 
         sheet.check(
             "sessions_member",
@@ -593,11 +1102,11 @@ def main() -> int:
         sheet.check(
             "status_strip",
             bool(
-                __import__("re").search(
+                re.search(
                     r"installed · (\d[\d,]* operator|\d[\d,]* session(s| dirs))|no ingested sessions|"
                     r"speculum not installed|loading|Sessions",
                     sess_text,
-                    __import__("re").I,
+                    re.I,
                 )
             ),
             matching_rows(sess_text, "session")
@@ -619,16 +1128,15 @@ def main() -> int:
         map_ok, map_text = drive.wait_for(
             lambda t: (
                 any("\u2800" <= ch <= "\u28FF" for ch in t)
-                or __import__("re").search(r"fit|center|cluster|density|Map", t, __import__("re").I)
-                is not None
+                or re.search(r"fit|center|cluster|density|Map", t, re.I) is not None
             ),
             timeout=STEP_TIMEOUT,
             label="map glyphs/chrome",
         )
-        dump_step("02-map", map_text, drive.screen)
+        dump_step("02-map", map_text, drive.screen, ctx)
         has_braille = any("\u2800" <= ch <= "\u28FF" for ch in map_text)
         has_chrome = bool(
-            __import__("re").search(r"fit|center|cluster|density|Map", map_text, __import__("re").I)
+            re.search(r"fit|center|cluster|density|Map", map_text, re.I)
         )
         sheet.check(
             "map_renders",
@@ -640,19 +1148,19 @@ def main() -> int:
         # Map-record bars on the compiled binary: honest coverage, legend, REAL links.
         sheet.check(
             "map_showing_n_of_m",
-            bool(__import__("re").search(r"showing \d+ of \d+", map_text, __import__("re").I)),
+            bool(re.search(r"showing \d+ of \d+", map_text, re.I)),
             matching_rows(map_text, "showing"),
         )
         sheet.check(
             "map_legend",
             bool(
-                __import__("re").search(
-                    r"parentage|event links|●|═|─", map_text, __import__("re").I
+                re.search(
+                    r"parentage|event links|●|═|─", map_text, re.I
                 )
             ),
             matching_rows(map_text, "parentage") or matching_rows(map_text, "event links"),
         )
-        links_m = __import__("re").search(r"(\d+) links", map_text)
+        links_m = re.search(r"(\d+) links", map_text)
         sheet.check(
             "map_links_real",
             bool(links_m) and int(links_m.group(1)) > 0,
@@ -667,7 +1175,7 @@ def main() -> int:
             timeout=STEP_TIMEOUT,
             label="microscope two-pane cards",
         )
-        dump_step("02b-microscope", mic_text, drive.screen)
+        dump_step("02b-microscope", mic_text, drive.screen, ctx)
         sheet.check(
             "microscope_title_chrome",
             mic_ok,
@@ -676,20 +1184,20 @@ def main() -> int:
         # Seeded session titles render title-first in the picker.
         sheet.check(
             "microscope_picker_title",
-            bool(__import__("re").search(r"Session title \d{3}", mic_text)),
+            bool(re.search(r"Session title \d{3}", mic_text)),
             matching_rows(mic_text, "Session title"),
         )
         drive.send("\r")
         drive.pump(0.9)
         mic_timeline = drive.frame_text()
-        dump_step("02c-microscope-timeline", mic_timeline, drive.screen)
+        dump_step("02c-microscope-timeline", mic_timeline, drive.screen, ctx)
         sheet.check(
             "microscope_timeline_row",
             bool(
-                __import__("re").search(
+                re.search(
                     r"#\d+|tool_use|user|assistant|tool_error|no events|enter a session",
                     mic_timeline,
-                    __import__("re").I,
+                    re.I,
                 )
             ),
             matching_rows(mic_timeline, "user")
@@ -722,18 +1230,18 @@ def main() -> int:
         search_ok, search_text = drive.wait_for(
             lambda t: (
                 SAFE_QUERY in t
-                or __import__("re").search(
+                or re.search(
                     r"no matches|\d+\s*hits?|hit\b|type to search|index not found|"
                     r"corpus busy|schema|pending",
                     t,
-                    __import__("re").I,
+                    re.I,
                 )
                 is not None
             ),
             timeout=STEP_TIMEOUT,
             label="search results or honest empty",
         )
-        dump_step("03-search", search_text, drive.screen)
+        dump_step("03-search", search_text, drive.screen, ctx)
         query_captured = SAFE_QUERY in search_text
         sheet.check(
             "search_query_captured",
@@ -745,11 +1253,11 @@ def main() -> int:
         )
         # Result contract: hit row, honest empty, or soft-state copy.
         results_ok = bool(
-            __import__("re").search(
+            re.search(
                 r"no matches|\d+\s*hits?|hit\b|e2e-sess|"
                 r"type to search|index not found|corpus busy|schema|pending|MISSING",
                 search_text,
-                __import__("re").I,
+                re.I,
             )
         ) or (SAFE_QUERY in search_text and "Search" in search_text)
         sheet.check(
@@ -772,16 +1280,16 @@ def main() -> int:
         print("\n── 4. L → Lens picker ──")
         drive.send("L")
         lens_ok, lens_text = drive.wait_for(
-            lambda t: __import__("re").search(
+            lambda t: re.search(
                 r"Lens picker|session-postmortem|pattern-extraction|usage-story|--last-n",
                 t,
-                __import__("re").I,
+                re.I,
             )
             is not None,
             timeout=STEP_TIMEOUT,
             label="lens picker",
         )
-        dump_step("04-lens-picker", lens_text, drive.screen)
+        dump_step("04-lens-picker", lens_text, drive.screen, ctx)
         sheet.check(
             "lens_picker",
             lens_ok,
@@ -793,10 +1301,10 @@ def main() -> int:
         sheet.check(
             "lens_selection_row",
             bool(
-                __import__("re").search(
+                re.search(
                     r"session-postmortem|pattern-extraction|usage-story",
                     lens_text,
-                    __import__("re").I,
+                    re.I,
                 )
             ),
             matching_rows(lens_text, "session")
@@ -811,7 +1319,7 @@ def main() -> int:
         drive.send("\x1b")
         drive.pump(0.3)
         leave_text = drive.frame_text()
-        dump_step("05-after-escape", leave_text, drive.screen)
+        dump_step("05-after-escape", leave_text, drive.screen, ctx)
         sheet.check(
             "leave_escape",
             True,  # escape is best-effort; dump is the evidence
@@ -821,6 +1329,29 @@ def main() -> int:
         # Soft quit (shell q → onQuit). Avoid if title-replay already ate state.
         drive.send("q")
         drive.pump(0.4)
+
+        # ── Structural + MANIFEST ────────────────────────────────────────────
+        if not skip_structural:
+            run_structural_asserts(
+                sheet,
+                frames_dir=FRAMES_DIR,
+                review_dir=review_dir,
+                emit_png=emit_png,
+                steps=ctx.steps_emitted,
+                png_errors=ctx.png_errors,
+            )
+        write_manifest(
+            review_dir,
+            cols=cols,
+            rows=rows,
+            profile=profile,
+            binary=binary,
+            bin_src=bin_src,
+            font_size=font_size,
+            emit_png=emit_png,
+            structural=not skip_structural,
+            steps=ctx.steps_emitted,
+        )
 
     except Exception as exc:
         keep_scratch = True
@@ -852,6 +1383,41 @@ def main() -> int:
         "      H1 headless harness remains the primary gate; H2 confirms the shipped artifact."
     )
     return 0 if sheet.all_ok() else 1
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
+    emit_png = resolve_png_default(args.png)
+    if args.profile == "all":
+        # Sequential profile runs; nest review artifacts per profile.
+        rc = 0
+        for name in ("operator", "narrow", "tight"):
+            cols, rows = resolve_profile(name, args.cols, args.rows)
+            nested = args.review_dir / name
+            print(f"\n######## profile={name} {cols}x{rows} ########\n")
+            step_rc = run_drive(
+                profile=name,
+                cols=cols,
+                rows=rows,
+                emit_png=emit_png,
+                review_dir=nested,
+                font_size=args.font_size,
+                skip_structural=args.skip_structural,
+            )
+            if step_rc != 0:
+                rc = step_rc
+        return rc
+
+    cols, rows = resolve_profile(args.profile, args.cols, args.rows)
+    return run_drive(
+        profile=args.profile,
+        cols=cols,
+        rows=rows,
+        emit_png=emit_png,
+        review_dir=args.review_dir,
+        font_size=args.font_size,
+        skip_structural=args.skip_structural,
+    )
 
 
 if __name__ == "__main__":
