@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS events (
   tool_error      INTEGER,
   tool_call_id    TEXT,
   is_boilerplate  INTEGER NOT NULL DEFAULT 0,
+  sensitive       INTEGER NOT NULL DEFAULT 0,
   raw             TEXT NOT NULL
 );
 

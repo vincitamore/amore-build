@@ -13,6 +13,10 @@ export interface StatusReport {
     events: number;
     usageRows: number;
     eventsByKind: Record<string, number>;
+    /** Events with sensitive=1 (recomputed from index; not denormalized). */
+    sensitiveEvents: number;
+    /** Distinct sessions with at least one sensitive event. */
+    sensitiveSessions: number;
   };
   ingest: {
     trackedFiles: number;
@@ -55,6 +59,17 @@ export function buildStatusReport(db: Db, dbPath: string = defaultDbPath()): Sta
     eventsByKind[r.kind] = r.n;
   }
 
+  const sensitiveEvents =
+    db
+      .query<{ n: number }, []>("SELECT COUNT(*) AS n FROM events WHERE sensitive = 1")
+      .get()?.n ?? 0;
+  const sensitiveSessions =
+    db
+      .query<{ n: number }, []>(
+        "SELECT COUNT(DISTINCT session_id) AS n FROM events WHERE sensitive = 1",
+      )
+      .get()?.n ?? 0;
+
   const range = db
     .query<{ oldest: string | null; newest: string | null }, []>(
       "SELECT MIN(started_at) AS oldest, MAX(started_at) AS newest FROM sessions",
@@ -89,7 +104,7 @@ export function buildStatusReport(db: Db, dbPath: string = defaultDbPath()): Sta
   return {
     generatedAt,
     db: { path: dbPath, sizeBytes },
-    counts: { sessions, events, usageRows, eventsByKind },
+    counts: { sessions, events, usageRows, eventsByKind, sensitiveEvents, sensitiveSessions },
     ingest: {
       trackedFiles,
       forgottenFiles,
@@ -128,6 +143,9 @@ export async function statusCommand(args: string[]): Promise<void> {
       .map(([k, n]) => `${k}=${n}`)
       .join("  ");
     if (kinds) console.log(`  events by kind: ${kinds}`);
+    console.log(
+      `  sensitive: events=${report.counts.sensitiveEvents} sessions=${report.counts.sensitiveSessions}`,
+    );
     console.log(
       `  ingest: tracked=${report.ingest.trackedFiles} forgotten=${report.ingest.forgottenFiles}`,
     );

@@ -29,6 +29,7 @@ export const rageRate: Probe = (db: Db, opts: ProbeOptions = {}): ProbeResult =>
       ts: t.ts,
       evidence: result.matches.map((m) => m.word).slice(0, 5).join(", "),
       category: strongInMsg > 0 ? "strong" : "mild-or-moderate",
+      eventId: t.id,
     });
   }
 

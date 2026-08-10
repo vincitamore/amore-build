@@ -13,6 +13,14 @@ export interface HitDetail {
   ts?: string;
   evidence: string;
   category?: string;
+  /** events.id the finding came from (when the probe has a single source row). */
+  eventId?: number;
+  /** Multiple source event ids (e.g. session-aggregated sensitive hits). */
+  eventIds?: number[];
+  /** Optional quote from the source event text/channel. */
+  sourceQuote?: string;
+  /** tool_call_id when the finding is bound to a tool call. */
+  toolCallId?: string;
 }
 
 export interface ProbeResult {

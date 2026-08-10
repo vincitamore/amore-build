@@ -107,6 +107,7 @@ export const apologyRate: Probe = (db: Db, opts: ProbeOptions = {}): ProbeResult
       ts: t.ts,
       evidence: primary.evidence,
       category: primary.category,
+      eventId: t.id,
     });
   }
 

@@ -124,6 +124,7 @@ export const frustrationMarkers: Probe = (db: Db, opts: ProbeOptions = {}): Prob
       ts: t.ts,
       evidence: primary.evidence,
       category: primary.category,
+      eventId: t.id,
     });
   }
 

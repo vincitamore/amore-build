@@ -24,6 +24,7 @@ import {
   type NormalizedEvent,
   type NormalizedUsage,
 } from "./parser";
+import { matchSensitivePatterns } from "../probes/sensitive-content";
 
 // WU-04: progress callback shape (per-file / per-stage, not a pipeline).
 export type IngestPhase = "list" | "session" | "rebuild" | "done";
@@ -110,15 +111,24 @@ function setCursor(
 
 const INSERT_EVENT = `INSERT INTO events
   (session_id, project_path, agent, parent_session, ts, kind, text,
-   tool_name, tool_input, tool_output, tool_error, tool_call_id, is_boilerplate, raw)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+   tool_name, tool_input, tool_output, tool_error, tool_call_id, is_boilerplate, sensitive, raw)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 
 const INSERT_USAGE = `INSERT INTO usage
   (session_id, project_path, ts, model_id, input_tokens, output_tokens,
    cached_read_tokens, reasoning_tokens, total_tokens, num_turns, model_calls, raw)
   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 
+// WU-08: flag-only sensitive mark from the shared bank; never rewrites raw.
+function eventIsSensitive(ev: NormalizedEvent): boolean {
+  for (const blob of [ev.text, ev.tool_input, ev.tool_output]) {
+    if (blob && matchSensitivePatterns(blob).length > 0) return true;
+  }
+  return false;
+}
+
 function insertEvent(stmt: ReturnType<Db["prepare"]>, ev: NormalizedEvent): void {
+  const sensitive = eventIsSensitive(ev) ? 1 : 0;
   stmt.run(
     ev.session_id,
     ev.project_path,
@@ -133,6 +143,7 @@ function insertEvent(stmt: ReturnType<Db["prepare"]>, ev: NormalizedEvent): void
     ev.tool_error,
     ev.tool_call_id,
     ev.is_boilerplate,
+    sensitive,
     ev.raw,
   );
 }

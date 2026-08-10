@@ -22,16 +22,23 @@ export interface Migration {
   up: (db: MigrationDb) => void;
 }
 
-// WU-07: framework only — no product schema beyond greenfield v1.
-// Version 1 is established by schema.sql on fresh create. This baseline step
-// lets an existing DB whose stamp was forced below SCHEMA_VERSION walk the
-// ordered loop without re-running greenfield DDL (tables already present).
+// Version 1 is established by schema.sql on fresh create (historical). The
+// baseline step lets an existing DB whose stamp was forced below SCHEMA_VERSION
+// walk the ordered loop without re-running greenfield DDL (tables already present).
+// Version 2 adds events.sensitive (flag-only at ingest; never rewrites raw).
 export const MIGRATIONS: readonly Migration[] = [
   {
     version: 1,
     name: "v1-baseline",
     up: (_db) => {
       // no-op: greenfield shape lives in schema.sql
+    },
+  },
+  {
+    version: 2,
+    name: "v2-events-sensitive",
+    up: (db) => {
+      db.run("ALTER TABLE events ADD COLUMN sensitive INTEGER NOT NULL DEFAULT 0");
     },
   },
 ];

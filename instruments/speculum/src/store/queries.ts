@@ -5,6 +5,8 @@
 import type { Db } from "./db";
 
 export interface Turn {
+  /** events.id of the source row. */
+  id: number;
   sessionId: string;
   projectPath: string;
   role: "user" | "assistant";
@@ -55,7 +57,7 @@ function* turnsByRole(db: Db, role: "user" | "assistant", opts: TurnQueryOpts): 
   }
 
   const sql = `
-    SELECT session_id, project_path, ts, text, is_boilerplate
+    SELECT id, session_id, project_path, ts, text, is_boilerplate
     FROM events
     WHERE ${wheres.join(" AND ")}
     ORDER BY session_id, ts
@@ -63,13 +65,21 @@ function* turnsByRole(db: Db, role: "user" | "assistant", opts: TurnQueryOpts): 
 
   const rows = db
     .query<
-      { session_id: string; project_path: string; ts: string; text: string; is_boilerplate: number },
+      {
+        id: number;
+        session_id: string;
+        project_path: string;
+        ts: string;
+        text: string;
+        is_boilerplate: number;
+      },
       (string | number)[]
     >(sql)
     .iterate(...params);
 
   for (const row of rows) {
     yield {
+      id: row.id,
       sessionId: row.session_id,
       projectPath: row.project_path,
       role,
@@ -81,6 +91,8 @@ function* turnsByRole(db: Db, role: "user" | "assistant", opts: TurnQueryOpts): 
 }
 
 export interface ToolUse {
+  /** events.id of the source tool_use row. */
+  id: number;
   sessionId: string;
   projectPath: string;
   ts: string;
@@ -112,7 +124,7 @@ export function* toolUses(db: Db, opts: TurnQueryOpts = {}): Iterable<ToolUse> {
   if (!opts.includeSubagents) wheres.push("agent = 'primary'");
 
   const sql = `
-    SELECT session_id, project_path, ts, tool_name, tool_input, agent
+    SELECT id, session_id, project_path, ts, tool_name, tool_input, agent
     FROM events
     WHERE ${wheres.join(" AND ")}
     ORDER BY session_id, ts
@@ -121,6 +133,7 @@ export function* toolUses(db: Db, opts: TurnQueryOpts = {}): Iterable<ToolUse> {
   const rows = db
     .query<
       {
+        id: number;
         session_id: string;
         project_path: string;
         ts: string;
@@ -134,6 +147,7 @@ export function* toolUses(db: Db, opts: TurnQueryOpts = {}): Iterable<ToolUse> {
 
   for (const row of rows) {
     yield {
+      id: row.id,
       sessionId: row.session_id,
       projectPath: row.project_path,
       ts: row.ts,

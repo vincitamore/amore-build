@@ -161,6 +161,7 @@ export const sensitiveContent: Probe = (db: Db, opts: ProbeOptions = {}): ProbeR
   const rows = db
     .query<
       {
+        id: number;
         session_id: string;
         project_path: string;
         text: string | null;
@@ -169,7 +170,7 @@ export const sensitiveContent: Probe = (db: Db, opts: ProbeOptions = {}): ProbeR
       },
       (string | number)[]
     >(
-      `SELECT session_id, project_path, text, tool_input, tool_output FROM events
+      `SELECT id, session_id, project_path, text, tool_input, tool_output FROM events
        WHERE (text IS NOT NULL OR tool_input IS NOT NULL OR tool_output IS NOT NULL)
        ${filterSql}`,
     )
@@ -184,6 +185,8 @@ export const sensitiveContent: Probe = (db: Db, opts: ProbeOptions = {}): ProbeR
       channels: Set<SensitiveChannel>;
       /** pattern → channels it was seen on */
       patternChannels: Map<string, Set<SensitiveChannel>>;
+      /** events.id values that contributed a match */
+      eventIds: number[];
     }
   >();
 
@@ -193,9 +196,11 @@ export const sensitiveContent: Probe = (db: Db, opts: ProbeOptions = {}): ProbeR
     if (r.tool_input) channelBlobs.push({ channel: "tool_input", blob: r.tool_input });
     if (r.tool_output) channelBlobs.push({ channel: "tool_output", blob: r.tool_output });
 
+    let rowMatched = false;
     for (const { channel, blob } of channelBlobs) {
       const matches = matchSensitivePatterns(blob);
       if (matches.length === 0) continue;
+      rowMatched = true;
 
       let entry = bySession.get(r.session_id);
       if (!entry) {
@@ -204,6 +209,7 @@ export const sensitiveContent: Probe = (db: Db, opts: ProbeOptions = {}): ProbeR
           patterns: new Map(),
           channels: new Set(),
           patternChannels: new Map(),
+          eventIds: [],
         };
         bySession.set(r.session_id, entry);
       }
@@ -218,6 +224,10 @@ export const sensitiveContent: Probe = (db: Db, opts: ProbeOptions = {}): ProbeR
         ch.add(channel);
       }
     }
+    if (rowMatched) {
+      const entry = bySession.get(r.session_id);
+      if (entry && !entry.eventIds.includes(r.id)) entry.eventIds.push(r.id);
+    }
   }
 
   const totalSessions =
@@ -230,6 +240,7 @@ export const sensitiveContent: Probe = (db: Db, opts: ProbeOptions = {}): ProbeR
     patternsMatched: Array<{ pattern: string; count: number; channels: SensitiveChannel[] }>;
     channels: SensitiveChannel[];
     severity: "info" | "warning" | "alert";
+    eventIds: number[];
   }> = [];
   let alertCount = 0;
   let toolOutputOnlySessions = 0;
@@ -253,6 +264,7 @@ export const sensitiveContent: Probe = (db: Db, opts: ProbeOptions = {}): ProbeR
       patternsMatched,
       channels,
       severity,
+      eventIds: entry.eventIds,
     });
   }
 
@@ -281,7 +293,7 @@ export const sensitiveContent: Probe = (db: Db, opts: ProbeOptions = {}): ProbeR
       toolOutputOnlySessions,
     },
     hits: items.map<HitDetail>((i) => {
-      // Evidence stays human-readable; channel tags are additive (HitDetail shape unchanged).
+      // Evidence stays human-readable; channel tags are additive.
       const evidence = i.patternsMatched
         .map((p) => {
           const ch = p.channels.length > 0 ? `@${p.channels.join("+")}` : "";
@@ -292,6 +304,8 @@ export const sensitiveContent: Probe = (db: Db, opts: ProbeOptions = {}): ProbeR
         sessionId: i.sessionId,
         evidence,
         category: i.severity,
+        eventId: i.eventIds[0],
+        eventIds: i.eventIds.length > 0 ? i.eventIds : undefined,
       };
     }),
     heuristic: true,
