@@ -55,3 +55,15 @@ export function defaultReportsDir(): string {
     join(instrumentHome(), "lens-reports")
   );
 }
+
+/**
+ * Append-only forget audit log (JSONL). Sibling of the lens audit so purge
+ * records do not pollute lens hygiene metrics.
+ * Override with SPECULUM_FORGET_AUDIT_PATH.
+ */
+export function defaultForgetAuditPath(): string {
+  return (
+    process.env.SPECULUM_FORGET_AUDIT_PATH?.trim() ||
+    join(instrumentHome(), "forget-audit.jsonl")
+  );
+}

@@ -4,9 +4,15 @@
  * a later ingest will not re-index the forgotten updates.jsonl.
  *
  * Accepts a full session id or a unique prefix (brief: forget <session-prefix>).
+ *
+ * Every successful purge appends one record to the forget audit JSONL
+ * (sibling of the lens audit — never mixed into lens hygiene metrics).
  */
 
+import { appendFileSync, mkdirSync } from "node:fs";
+import { dirname } from "node:path";
 import type { Db } from "../store/db";
+import { defaultForgetAuditPath } from "../paths";
 
 export interface ForgetResult {
   ok: boolean;
@@ -20,9 +26,89 @@ export interface ForgetResult {
   message: string;
 }
 
+/** One append-only forget-audit.jsonl record. */
+export interface ForgetAuditRecord {
+  ts: string;
+  action: "forget";
+  sessionPrefix: string;
+  sessionId: string | null;
+  found: boolean;
+  eventsDeleted: number;
+  usageDeleted: number;
+  sessionRowsDeleted: number;
+  filesMarkedForgotten: number;
+  /** Source file sizes from ingest_state when available (no content hash stored). */
+  sources: Array<{ filePath: string; sizeBytes: number; mtime: string }>;
+}
+
+export interface ForgetOpts {
+  /** Override forget-audit.jsonl path (tests). Default: defaultForgetAuditPath(). */
+  auditPath?: string;
+  /** Skip ledger append (tests that only assert purge identity). */
+  skipAudit?: boolean;
+}
+
 const WILDCARD_CHARS = /[%_*]/;
 
-export function forgetSession(db: Db, sessionPrefix: string): ForgetResult {
+function collectSourceMeta(
+  db: Db,
+  sessionKey: string,
+): Array<{ filePath: string; sizeBytes: number; mtime: string }> {
+  try {
+    const rows = db
+      .query<{ file_path: string; size_bytes: number; mtime: string }, [string]>(
+        "SELECT file_path, size_bytes, mtime FROM ingest_state WHERE file_path LIKE '%' || ? || '%' ORDER BY file_path",
+      )
+      .all(sessionKey);
+    return rows.map((r) => ({
+      filePath: r.file_path,
+      sizeBytes: r.size_bytes,
+      mtime: r.mtime,
+    }));
+  } catch {
+    return [];
+  }
+}
+
+export function appendForgetAuditRecord(
+  record: ForgetAuditRecord,
+  path: string = defaultForgetAuditPath(),
+): void {
+  mkdirSync(dirname(path), { recursive: true });
+  appendFileSync(path, `${JSON.stringify(record)}\n`, "utf-8");
+}
+
+function writeAudit(
+  sessionPrefix: string,
+  result: ForgetResult,
+  sources: Array<{ filePath: string; sizeBytes: number; mtime: string }>,
+  opts: ForgetOpts,
+): void {
+  if (opts.skipAudit || !result.ok) return;
+  const record: ForgetAuditRecord = {
+    ts: new Date().toISOString(),
+    action: "forget",
+    sessionPrefix,
+    sessionId: result.found ? result.sessionId : null,
+    found: result.found,
+    eventsDeleted: result.eventsDeleted,
+    usageDeleted: result.usageDeleted,
+    sessionRowsDeleted: result.sessionRowsDeleted,
+    filesMarkedForgotten: result.filesMarkedForgotten,
+    sources,
+  };
+  try {
+    appendForgetAuditRecord(record, opts.auditPath ?? defaultForgetAuditPath());
+  } catch {
+    // Ledger is best-effort: never reverse a completed purge because audit I/O failed.
+  }
+}
+
+export function forgetSession(
+  db: Db,
+  sessionPrefix: string,
+  opts: ForgetOpts = {},
+): ForgetResult {
   if (WILDCARD_CHARS.test(sessionPrefix)) {
     return {
       ok: false,
@@ -62,13 +148,14 @@ export function forgetSession(db: Db, sessionPrefix: string): ForgetResult {
   }
 
   if (matched.length === 0) {
-    // Still mark ingest_state paths containing the prefix so re-ingest stays dark.
+    // Capture source meta before the mark so size/mtime remain accurate.
+    const sources = collectSourceMeta(db, sessionPrefix);
     const mark = db
       .prepare(
         "UPDATE ingest_state SET forgotten = 1 WHERE file_path LIKE '%' || ? || '%' AND forgotten = 0",
       )
       .run(sessionPrefix);
-    return {
+    const result: ForgetResult = {
       ok: true,
       sessionId: sessionPrefix,
       matchedSessions: [],
@@ -79,6 +166,8 @@ export function forgetSession(db: Db, sessionPrefix: string): ForgetResult {
       filesMarkedForgotten: mark.changes,
       message: `no session matching '${sessionPrefix}' in index; marked ${mark.changes} ingest_state path(s) forgotten`,
     };
+    writeAudit(sessionPrefix, result, sources, opts);
+    return result;
   }
 
   if (matched.length > 1) {
@@ -96,6 +185,9 @@ export function forgetSession(db: Db, sessionPrefix: string): ForgetResult {
   }
 
   const sessionId = matched[0]!;
+  // Capture source file sizes before forgotten flag flips.
+  const sources = collectSourceMeta(db, sessionId);
+
   const delEvents = db.prepare("DELETE FROM events WHERE session_id = ?").run(sessionId);
   const delUsage = db.prepare("DELETE FROM usage WHERE session_id = ?").run(sessionId);
   const delSession = db.prepare("DELETE FROM sessions WHERE id = ?").run(sessionId);
@@ -105,7 +197,7 @@ export function forgetSession(db: Db, sessionPrefix: string): ForgetResult {
     )
     .run(sessionId);
 
-  return {
+  const result: ForgetResult = {
     ok: true,
     sessionId,
     matchedSessions: [sessionId],
@@ -116,4 +208,7 @@ export function forgetSession(db: Db, sessionPrefix: string): ForgetResult {
     filesMarkedForgotten: markForgotten.changes,
     message: `forgot session ${sessionId}: ${delEvents.changes} event(s), ${delUsage.changes} usage row(s) deleted; ${markForgotten.changes} source file(s) marked forgotten`,
   };
+
+  writeAudit(sessionPrefix, result, sources, opts);
+  return result;
 }
