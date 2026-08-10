@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTerminalDimensions } from '@opentui/react';
 import type { RGBA } from '@opentui/core';
 import { execFile } from 'node:child_process';
@@ -17,6 +17,8 @@ import { dlog } from '../debug';
 import { usePalette } from '../ThemeProvider';
 import { type Palette } from '../theme';
 import { useHoverThrottle } from '../use-hover-throttle';
+import { useRefreshOnActive } from '../use-refresh-on-active';
+import { runSpeculum } from '../speculum/speculum-spawn';
 import { Panel } from '../components/Panel';
 import { Stat } from '../components/Stat';
 import {
@@ -24,6 +26,60 @@ import {
   formatPulseSubLine,
   pulsePanelInnerWidth,
 } from './lucerna-display';
+
+/** Subset of `speculum status --json` used by the Dashboard Speculum pulse. */
+export interface SpeculumStatusJson {
+  generatedAt?: string;
+  db?: { sizeBytes?: number };
+  counts?: { sessions?: number; events?: number; usageRows?: number };
+  ingest?: { lastIngestedAt?: string | null; forgottenFiles?: unknown };
+  probes?: { registered?: number; names?: string[] };
+  staleness?: {
+    thresholdHours?: number;
+    hoursSinceNewestSession?: number | null;
+    stale?: boolean;
+    message?: string;
+  };
+}
+
+const SPECULUM_NOT_INSTALLED_LINE = 'speculum not installed · amore init --with-speculum';
+
+/**
+ * Coarsen an ISO timestamp into a glanceable age for the Speculum pulse
+ * (`Xm ago` / `Xh ago` / `Xd ago`, or `never` when missing/unparseable).
+ */
+export function formatIngestAge(lastIngestedAt: string | null | undefined, now = Date.now()): string {
+  if (lastIngestedAt == null || lastIngestedAt === '') return 'never';
+  const ts = new Date(lastIngestedAt).getTime();
+  if (Number.isNaN(ts)) return 'never';
+  const ms = Math.max(0, now - ts);
+  const minutes = Math.floor(ms / 60_000);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
+
+/**
+ * One-line Speculum pulse copy from a successful `status --json` payload.
+ * Empty corpus stays honest (no fake ages); non-empty surfaces session count, last ingest age, stale.
+ */
+export function formatPulseLine(status: SpeculumStatusJson, now = Date.now()): string {
+  const sessions = status.counts?.sessions ?? 0;
+  if (sessions === 0) {
+    return `installed · 0 sessions · run 'speculum ingest'`;
+  }
+  const age = formatIngestAge(status.ingest?.lastIngestedAt, now);
+  const staleBit = status.staleness?.stale ? ' · stale' : '';
+  return `installed · ${sessions} sessions · last ingest ${age}${staleBit}`;
+}
+
+interface SpeculumPulseView {
+  line: string;
+  stale: boolean;
+  /** Tooltip-ish prose for non-install failures (shown muted under the pulse). */
+  errorHint?: string;
+}
 
 interface ServerStatus {
   server: { uptime: number; connectedClients: number; lastIndexed: string };
@@ -388,6 +444,41 @@ export function Dashboard({
     lastNotification: { message?: string; kind?: string; level?: string } | null;
     pendingReview?: { dreams: number; proposals: number; total: number };
   } | null>(null);
+  /** Speculum status freshness pulse — once at mount, again on re-activation. */
+  const [speculumPulse, setSpeculumPulse] = useState<SpeculumPulseView | null>(null);
+  const speculumMounted = useRef(true);
+  useEffect(() => {
+    speculumMounted.current = true;
+    return () => {
+      speculumMounted.current = false;
+    };
+  }, []);
+  const refreshSpeculum = useCallback(() => {
+    void runSpeculum<SpeculumStatusJson>('status', ['--json']).then((r) => {
+      if (!speculumMounted.current) return;
+      if (r.ok) {
+        setSpeculumPulse({
+          line: formatPulseLine(r.json),
+          stale: Boolean(r.json.staleness?.stale),
+        });
+        return;
+      }
+      if (r.error.kind === 'not-installed') {
+        setSpeculumPulse({ line: SPECULUM_NOT_INSTALLED_LINE, stale: false });
+        return;
+      }
+      // Degrade gracefully — never crash the Dashboard on spawn/parse/timeout failures.
+      const hint = r.error.stderrTail
+        ? `${r.error.message}: ${r.error.stderrTail.slice(0, 96)}`
+        : r.error.message;
+      setSpeculumPulse({ line: '—', stale: false, errorHint: hint });
+    });
+  }, []);
+  useEffect(() => {
+    refreshSpeculum();
+  }, [refreshSpeculum]);
+  useRefreshOnActive(active, refreshSpeculum);
+
   // LIVE poll while active — /api/status (docs/uptime) + lucerna pulse. Every 3s while the
   // Dashboard is shown; paused when hidden (no work behind other screens).
   useEffect(() => {
@@ -523,11 +614,22 @@ export function Dashboard({
     </Panel>
   );
 
-  // — System Pulse — present-state vitals (Forge / Git / Daemon), the fourth dashboard zone
-  //   (counts · what-needs-me · what-happened · live-vitals). Content-height box below Attention. —
-  // Pulse lives in the left column (agendaW) when wide, full width when stacked — never dims.width/3.
+  // — System Pulse — present-state vitals (Forge / Git / Daemon / Lucerna / Speculum), the fourth
+  //   dashboard zone (counts · what-needs-me · what-happened · live-vitals). Content-height box
+  //   below Attention. Pulse lives in the left column (agendaW) when wide, full width when stacked.
   const pulseColW = wide ? agendaW : dims.width - 2;
   const pulseInnerW = pulsePanelInnerWidth(pulseColW);
+  const speculumLine = speculumPulse?.line ?? '…';
+  const speculumHi = hover === 'speculum-pulse';
+  const speculumNotInstalled = speculumLine === SPECULUM_NOT_INSTALLED_LINE;
+  const speculumFailed = speculumLine === '—';
+  const speculumLineFg = speculumPulse?.stale ? t.warning : t.muted;
+  const speculumDotFg = speculumPulse?.stale
+    ? t.error
+    : speculumNotInstalled || speculumFailed || !speculumPulse
+      ? t.muted
+      : t.info;
+  const speculumRightW = Math.max(12, Math.min(48, pulseInnerW - 12));
   const pulsePanel = (
     <Panel title="Pulse" flexShrink={0} marginTop={1}>
       <box flexDirection="row">
@@ -613,6 +715,40 @@ export function Dashboard({
           {formatPulseSubLine(lucernaPulse?.lastNotification?.message, pulseInnerW)}
         </text>
       </box>
+      {/* Speculum pulse — one status line; click opens Sessions. No analytics here. */}
+      <box
+        flexDirection="row"
+        height={1}
+        flexShrink={0}
+        overflow="hidden"
+        backgroundColor={speculumHi ? t.selection : t.background}
+        onMouseOver={() => hoverTo('speculum-pulse')}
+        onMouseDown={onNavigate ? () => onNavigate('Sessions') : undefined}
+      >
+        <text fg={speculumDotFg} wrapMode="none">
+          ●
+        </text>
+        <text fg={t.foreground} wrapMode="none">
+          {' Speculum'}
+        </text>
+        <box flexGrow={1} backgroundColor={speculumHi ? t.selection : t.background} />
+        <text fg={speculumLineFg} wrapMode="none">
+          {formatLucernaDisplayLine(speculumLine, speculumRightW)}
+        </text>
+      </box>
+      {speculumPulse?.errorHint ? (
+        <box
+          height={1}
+          width={pulseInnerW}
+          flexShrink={0}
+          overflow="hidden"
+          backgroundColor={t.background}
+        >
+          <text fg={t.muted} wrapMode="none">
+            {formatPulseSubLine(speculumPulse.errorHint, pulseInnerW)}
+          </text>
+        </box>
+      ) : null}
     </Panel>
   );
 
