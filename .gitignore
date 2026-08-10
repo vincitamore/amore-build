@@ -49,3 +49,4 @@ instruments/iris/packages/tui/scripts/e2e-sessions-topology.txt
 scripts/e2e-pty-frames/
 scripts/e2e-pty-review/*
 !scripts/e2e-pty-review/README.md
+instruments/iris/packages/tui/scripts/containment-frames/
