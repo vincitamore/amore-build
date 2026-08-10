@@ -301,6 +301,73 @@ describe("runLens dry-run and fail-closed", () => {
     }
   });
 
+  test("live lens spawn isolates AMORE_HOME to the scratch tree", async () => {
+    const corpus = writeCorpus(cleanCorpus());
+    const home = tempHome();
+    const dbPath = join(home, "speculum.sqlite");
+    const auditPath = join(home, "lens-audit.jsonl");
+    const reportsDir = join(home, "reports");
+    let capturedEnv: NodeJS.ProcessEnv | undefined;
+    const envCaptureSpawn = ((
+      _bin: string,
+      argv: string[],
+      opts?: NodeJS.SpawnOptions,
+    ) => {
+      if (argv[0] === "/T" || argv.includes("/PID")) {
+        return new EventEmitter() as ReturnType<typeof SpawnFn>;
+      }
+      capturedEnv = opts?.env;
+      const fakeChild = new EventEmitter() as EventEmitter & {
+        pid: number;
+        stdout: EventEmitter;
+        stderr: EventEmitter;
+        kill: () => boolean;
+      };
+      fakeChild.pid = 333;
+      fakeChild.stdout = new EventEmitter();
+      fakeChild.stderr = new EventEmitter();
+      fakeChild.kill = () => true;
+      queueMicrotask(() => {
+        fakeChild.stdout.emit(
+          "data",
+          Buffer.from(
+            JSON.stringify({ text: "isolated postmortem", stopReason: "end_turn" }),
+          ),
+        );
+        fakeChild.emit("close", 0);
+      });
+      return fakeChild as unknown as ReturnType<typeof SpawnFn>;
+    }) as unknown as typeof SpawnFn;
+
+    try {
+      const db = openDb(dbPath);
+      ingest(db, { sessionsDir: corpus.root });
+
+      const result = await runLens(db, "session-postmortem", {
+        lastN: 1,
+        auditPath,
+        reportsDir,
+        spawnImpl: envCaptureSpawn,
+        amoreBin: "stub-amore",
+        scrubHomeDir: "C:\\Users\\Synthetic",
+      });
+      db.close();
+
+      expect(result.spawned).toBe(true);
+      expect(result.refused).toBe(false);
+      expect(capturedEnv).toBeTruthy();
+      const amoreHome = capturedEnv!.AMORE_HOME;
+      expect(typeof amoreHome).toBe("string");
+      // The headless amore's home lives under the lens scratch tree (mkdtemp
+      // prefix), never a real user home — the pollution class this isolation closes.
+      expect(amoreHome!).toMatch(/speculum-lens-/);
+      expect(capturedEnv!.GROK_HOME).toBe(amoreHome);
+    } finally {
+      corpus.cleanup();
+      cleanupHome(home);
+    }
+  });
+
   test("audit record shape has required fields", async () => {
     const corpus = writeCorpus(cleanCorpus());
     const home = tempHome();

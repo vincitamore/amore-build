@@ -152,9 +152,16 @@ def seed_synthetic_index(db_path: Path) -> None:
               turn_count       INTEGER NOT NULL,
               user_msg_count   INTEGER NOT NULL,
               tool_call_count  INTEGER NOT NULL,
-              tool_error_count INTEGER NOT NULL
+              tool_error_count INTEGER NOT NULL,
+              title            TEXT NOT NULL DEFAULT ''
             );
             CREATE INDEX idx_sessions_project ON sessions(project_path, started_at);
+
+            -- v5 side store (derived at ingest from summary.json session_summary).
+            CREATE TABLE session_titles (
+              session_id  TEXT PRIMARY KEY,
+              title       TEXT NOT NULL DEFAULT ''
+            );
 
             CREATE TABLE usage (
               id                  INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -218,7 +225,7 @@ def seed_synthetic_index(db_path: Path) -> None:
               metadata         TEXT
             );
 
-            PRAGMA user_version = 4;
+            PRAGMA user_version = 5;
             """
         )
         now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
@@ -231,14 +238,21 @@ def seed_synthetic_index(db_path: Path) -> None:
             ended = f"2026-05-{day}T11:00:00.000Z"
             agent = "primary" if i < 6 else "subagent"
             parent = None if agent == "primary" else "e2e-sess-000"
+            title = f"Session title {i:03d}" if i < 3 else ""
             db.execute(
                 """INSERT INTO sessions (
                      id, project_path, agent, parent_session, model_id,
                      started_at, ended_at, turn_count, user_msg_count,
-                     tool_call_count, tool_error_count
-                   ) VALUES (?, ?, ?, ?, 'model-x', ?, ?, ?, 1, 1, 0)""",
-                (sid, proj, agent, parent, started, ended, 2 + i),
+                     tool_call_count, tool_error_count, title
+                   ) VALUES (?, ?, ?, ?, 'model-x', ?, ?, ?, 1, 1, 0, ?)""",
+                (sid, proj, agent, parent, started, ended, 2 + i, title),
             )
+            if title:
+                # v5 side store mirrors the sessions title (both shapes populated).
+                db.execute(
+                    "INSERT INTO session_titles(session_id, title) VALUES (?, ?)",
+                    (sid, title),
+                )
             text = f"hello from {sid} on map stage probe"
             cur = db.execute(
                 """INSERT INTO events (
@@ -262,6 +276,15 @@ def seed_synthetic_index(db_path: Path) -> None:
                      input_tokens, output_tokens, total_tokens, num_turns, model_calls, raw
                    ) VALUES (?, ?, ?, 'model-x', 100, 50, 150, 1, 1, '{}')""",
                 (sid, proj, started),
+            )
+        # Evidence edges for the REAL-links bar: sess-001 → sess-000 (GENERATED),
+        # sess-002 → sess-001 (USED). Event ids are 1..8 in session order (0..7).
+        for src, tgt, kind in [(2, 1, "GENERATED"), (3, 2, "USED")]:
+            db.execute(
+                """INSERT INTO event_links(
+                     source_event_id, target_event_id, kind, method, confidence, heuristic
+                   ) VALUES (?, ?, ?, 'seed', 1.0, 0)""",
+                (src, tgt, kind),
             )
         db.execute(
             """INSERT INTO ingest_state (
@@ -462,7 +485,7 @@ def build_child_env(
     env["IRIS_ORG_ROOT"] = str(org_root.resolve())
     env["SPECULUM_DB"] = str(db_path.resolve())
     env["SPECULUM_HOME"] = str(spec_home.resolve())
-    # Keep daemon from attaching the operator's live 3853 if something probes.
+    # Use a scratch daemon port so nothing probes a real live instance.
     env["IRIS_PORT"] = "3911"
     return env
 
@@ -571,7 +594,7 @@ def main() -> int:
             "status_strip",
             bool(
                 __import__("re").search(
-                    r"installed · \d[\d,]* session(s| dirs)|no ingested sessions|"
+                    r"installed · (\d[\d,]* operator|\d[\d,]* session(s| dirs))|no ingested sessions|"
                     r"speculum not installed|loading|Sessions",
                     sess_text,
                     __import__("re").I,
@@ -614,6 +637,67 @@ def main() -> int:
             if has_braille
             else matching_rows(map_text, "Map") or matching_rows(map_text, "cluster"),
         )
+        # Map-record bars on the compiled binary: honest coverage, legend, REAL links.
+        sheet.check(
+            "map_showing_n_of_m",
+            bool(__import__("re").search(r"showing \d+ of \d+", map_text, __import__("re").I)),
+            matching_rows(map_text, "showing"),
+        )
+        sheet.check(
+            "map_legend",
+            bool(
+                __import__("re").search(
+                    r"parentage|event links|●|═|─", map_text, __import__("re").I
+                )
+            ),
+            matching_rows(map_text, "parentage") or matching_rows(map_text, "event links"),
+        )
+        links_m = __import__("re").search(r"(\d+) links", map_text)
+        sheet.check(
+            "map_links_real",
+            bool(links_m) and int(links_m.group(1)) > 0,
+            f"{links_m.group(1) if links_m else 'no'} links drawn",
+        )
+
+        # ── 2b. m → Microscope (redesigned two-pane; title-first picker) ────
+        print("\n── 2b. m → Microscope ──")
+        drive.send("m")
+        mic_ok, mic_text = drive.wait_for(
+            lambda t: "SESSIONS" in t and "TIMELINE" in t,
+            timeout=STEP_TIMEOUT,
+            label="microscope two-pane cards",
+        )
+        dump_step("02b-microscope", mic_text, drive.screen)
+        sheet.check(
+            "microscope_title_chrome",
+            mic_ok,
+            matching_rows(mic_text, "SESSIONS") or matching_rows(mic_text, "Microscope"),
+        )
+        # Seeded session titles render title-first in the picker.
+        sheet.check(
+            "microscope_picker_title",
+            bool(__import__("re").search(r"Session title \d{3}", mic_text)),
+            matching_rows(mic_text, "Session title"),
+        )
+        drive.send("\r")
+        drive.pump(0.9)
+        mic_timeline = drive.frame_text()
+        dump_step("02c-microscope-timeline", mic_timeline, drive.screen)
+        sheet.check(
+            "microscope_timeline_row",
+            bool(
+                __import__("re").search(
+                    r"#\d+|tool_use|user|assistant|tool_error|no events|enter a session",
+                    mic_timeline,
+                    __import__("re").I,
+                )
+            ),
+            matching_rows(mic_timeline, "user")
+            or matching_rows(mic_timeline, "#")
+            or matching_rows(mic_timeline, "enter a session"),
+        )
+        drive.send("\x1b")  # back to picker
+        drive.pump(0.35)
 
         # ── 3. w → Search + safe query ───────────────────────────────────────
         print(f"\n── 3. w → Search, type {SAFE_QUERY!r} ──")
@@ -623,6 +707,13 @@ def main() -> int:
             lambda t: "Search" in t or "type" in t.lower() or "search" in t.lower(),
             timeout=STEP_TIMEOUT,
             label="search stage",
+        )
+        # The idle hint renders exactly once on the compiled binary.
+        idle_text = drive.frame_text()
+        sheet.check(
+            "search_idle_hint_once",
+            idle_text.count("type to search sessions") == 1,
+            f"idle hint occurrences={idle_text.count('type to search sessions')}",
         )
         # Type letter-by-letter with small settles (search debounce 200ms).
         for ch in SAFE_QUERY:

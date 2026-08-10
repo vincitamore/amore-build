@@ -231,15 +231,23 @@ async function main(): Promise<void> {
   let sessionsFrame = captureCharFrame();
   dumpFrame('02-sessions-probes-early', sessionsFrame);
 
-  // Product copy (status.ts): "installed · N session dirs" (not bare "sessions") when split known.
-  // Accept both the mandate form and the current ready-strip wording.
+  // Product copy (status.ts): "installed · N operator" (origin-classified strip) or
+  // the legacy "session dirs" copy when the CLI predates origin counts. Accept both + soft states.
   assert(
     'status_strip',
-    /installed · \d[\d,]* session(s| dirs)|no ingested sessions|speculum not installed/i.test(
+    /installed · (\d[\d,]* operator|\d[\d,]* session(s| dirs))|no ingested sessions|speculum not installed/i.test(
       sessionsFrame,
     ),
-    matchingRows(sessionsFrame, /installed|session|speculum|ingest/i, 3).join(' | ') || undefined,
+    matchingRows(sessionsFrame, /installed|operator|session|speculum|ingest/i, 3).join(' | ') || undefined,
   );
+  // True-count bar: once origins land, the strip's headline is the operator count.
+  if (/installed · \d[\d,]* operator/.test(sessionsFrame)) {
+    assert(
+      'strip_true_operator_count',
+      true,
+      matchingRows(sessionsFrame, /installed · \d[\d,]* operator/i, 1).join(' | '),
+    );
+  }
 
   // Wait for probe board to leave "loading scan…" and show a real registry name.
   const PROBE_NAME_RE =
@@ -292,6 +300,13 @@ async function main(): Promise<void> {
     /hits\s*\(/.test(hitsFrame),
     matchingRows(hitsFrame, /hits/i, 3).join(' | ') || undefined,
   );
+  // Drill-flex bar: with the drill open at 120×40 the member footer must stay
+  // visible (the hits panel flexes to the height instead of overflowing).
+  assert(
+    'drill_footer_visible_120x40',
+    /p probes/.test(hitsFrame),
+    matchingRows(hitsFrame, /p probes|^│|drill|hits/i, 4).join(' | ') || undefined,
+  );
 
   // Close hits (escape or h again) then switch to Usage.
   await keys.pressKeys(['ESCAPE'], 40);
@@ -325,6 +340,12 @@ async function main(): Promise<void> {
     pickerChrome && frameChangedFromProbes,
     matchingRows(microPicker, /Microscope|↑|session|select|loading|corpus/i, 4).join(' | ') ||
       undefined,
+  );
+  // Two-pane chrome: titled SESSIONS/TIMELINE panes (titleColor), not a flat text row.
+  assert(
+    'microscope_title_chrome',
+    /SESSIONS/.test(microPicker) && /TIMELINE/.test(microPicker),
+    matchingRows(microPicker, /SESSIONS|TIMELINE|Microscope/i, 4).join(' | ') || undefined,
   );
 
   await keys.pressKeys(['RETURN'], 40);
@@ -363,12 +384,42 @@ async function main(): Promise<void> {
       : matchingRows(mapFrame, /fit|center|cluster|density|Map|session/i, 4).join(' | ') ||
         undefined,
   );
+  // Map-record bars: honest coverage, a legend with toggle rows, and REAL
+  // evidence links (parentage + event_links — never 0 by cap).
+  assert(
+    'map_showing_n_of_m',
+    /showing \d+ of \d+/.test(mapFrame),
+    matchingRows(mapFrame, /showing \d+ of \d+/i, 2).join(' | ') || undefined,
+  );
+  assert(
+    'map_legend',
+    /parentage|event links|●|═|─/.test(mapFrame),
+    matchingRows(mapFrame, /parentage|event links|●|═|─/i, 3).join(' | ') || undefined,
+  );
+  {
+    const linksMatch = mapFrame.match(/(\d+) links/);
+    assert(
+      'map_links_real',
+      !!linksMatch && Number(linksMatch[1]) > 0,
+      linksMatch ? `${linksMatch[1]} links drawn` : 'no "N links" token in frame',
+    );
+  }
 
   // 5. Search: w → type 'the' → assert hits or no matches → Escape
   console.log('\n── 5. Search ──');
   keys.typeText('w');
   await settle(500);
   await renderOnce();
+  // Idle-copy bar: the hint renders exactly once (not twice on stacked rows).
+  {
+    const searchIdle = captureCharFrame();
+    const occurrences = (searchIdle.match(/type to search sessions/g) ?? []).length;
+    assert(
+      'search_idle_hint_once',
+      occurrences === 1,
+      `idle hint occurrences=${occurrences} (want exactly 1)`,
+    );
+  }
   await keys.typeText('the', 30);
   await settle(600); // debounce 200 + query
   await renderOnce();
@@ -418,6 +469,37 @@ async function main(): Promise<void> {
     'lens_scrub_or_secret_or_home',
     /scrub|secret|home-path|home.path|email|password-assignment|counts n\/a/i.test(lensDry),
     matchingRows(lensDry, /scrub|secret|home|email|password|counts/i, 4).join(' | ') || undefined,
+  );
+
+  // Narrow-to-fit bar: toggle --no-subagents and the dry-run must stop being
+  // refused-when-it-shouldn't-be (the subagent chain is what pushes a selection
+  // past the payload cap; without it this corpus produces a 79 KB slice).
+  // NEVER press y — a live send stays a human decision; the modal is dismissed.
+  console.log('\n── 6b. Lens narrowing (last-n 1 + --no-subagents) ──');
+  let lensNarrow: string;
+  await keys.pressKey('1'); // digit → last-n 1 → debounced re-dry-run (still over cap: chain included)
+  lensNarrow = await settleUntil(
+    renderOnce,
+    captureCharFrame,
+    (f) => !/running dry-run/.test(f) && /over cap|sendable/.test(f),
+    { timeoutMs: 45_000, intervalMs: 1500, label: 'last-n 1 dry-run settled' },
+  );
+  await keys.pressKey('n'); // toggle --no-subagents
+  await settle(300);
+  await keys.pressKeys(['RETURN'], 40); // re-run dry-run now, not debounced
+  lensNarrow = await settleUntil(
+    renderOnce,
+    captureCharFrame,
+    (f) => /sendable — confirm to invoke model|over cap — narrow|still over cap/.test(f),
+    { timeoutMs: 45_000, intervalMs: 1500, label: 'narrowed dry-run verdict' },
+  );
+  dumpFrame('10b-lens-narrow', lensNarrow);
+  assert(
+    'lens_fits_after_narrow',
+    /sendable — confirm to invoke model/.test(lensNarrow),
+    matchingRows(lensNarrow, /sendable|over cap|payload|bytes|dry-run/i, 8).join(' | ') ||
+      matchingRows(lensNarrow, /payload|Lens|scrub|selection/i, 6).join(' | ') ||
+      undefined,
   );
 
   // Close lens panel so multi-size dumps are clean Sessions.

@@ -149,13 +149,14 @@ export function runAmoreProcess(
   cwd: string,
   wallMs: number,
   spawnImpl: typeof spawn = spawn,
+  envOverride?: NodeJS.ProcessEnv,
 ): Promise<{ code: number | null; stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
     const child = spawnImpl(bin, argv, {
       cwd,
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
-      env: process.env,
+      env: { ...process.env, ...(envOverride ?? {}) },
       detached: process.platform !== "win32",
     });
     let stdout = "";
@@ -305,12 +306,17 @@ export async function runLens(
     const start = Date.now();
     try {
       spawned = true;
+      // Home isolation (polluter fix): the headless amore writes its session
+      // files under this scratch home, never the operator's real ~/.amore.
+      const scratchHome = join(dir, "amore-home");
+      mkdirSync(scratchHome, { recursive: true });
       const { code, stdout, stderr } = await runAmoreProcess(
         bin,
         argv,
         scratch,
         wallMs,
         opts.spawnImpl,
+        { AMORE_HOME: scratchHome, GROK_HOME: scratchHome },
       );
       durationMs = Date.now() - start;
       if (code !== 0 && code !== null) {
