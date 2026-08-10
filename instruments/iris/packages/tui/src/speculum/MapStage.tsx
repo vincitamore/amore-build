@@ -3,7 +3,8 @@
  *
  * Composition: pure one-house world builders + Graph `renderView` (glyphs, origin hue)
  * with evidence links only (parentage + event_links). Viewport chrome matches GraphView
- * (pan/zoom/fit/hit-test). Legend enumerates edge kinds + origin/agent population filters.
+ * (pan/zoom/fit/hit-test). Legend is fixed React rows (not a canvas blit) so it paints
+ * reliably when nested under SessionsMember and appears in char-frame harnesses.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useKeyboard } from '@opentui/react';
@@ -35,13 +36,7 @@ import {
   type Viewport,
   type WorldPoint,
 } from '../render/viewport';
-import {
-  blitGrid,
-  drawLegend,
-  legendHitAt,
-  GRAPH_BG,
-  type DrawBuffer,
-} from '../graph-view/blit';
+import { blitGrid, GRAPH_BG, type DrawBuffer, type LegendEntry } from '../graph-view/blit';
 import {
   openQueryService,
   resolveIndexPath,
@@ -55,6 +50,7 @@ import {
   DEFAULT_ALLOWED_AGENTS,
   DEFAULT_ALLOWED_ORIGINS,
   filtersShortLabel,
+  formatMapLegendLine,
   hitTestSession,
   legendToggleTarget,
   modeStatusLabel,
@@ -74,6 +70,8 @@ const STATUS_DIM = RGBA.fromInts(120, 128, 140);
 /** Full-set fetch ceiling — well above any realistic corpus; never a soft product cap. */
 const SESSION_LIST_FETCH = 1_000_000;
 const INSTALL_RECIPE = 'amore init --with-speculum';
+/** Legend block max rows (closed vocabulary ≤ 8). */
+const LEGEND_MAX_ROWS = 8;
 
 interface MouseLike {
   x: number;
@@ -117,19 +115,64 @@ function FixedClearRow({
   text,
   width,
   color,
+  bg,
+  onMouseDown,
 }: {
   text: string;
   width: number;
   color: RGBA;
+  bg?: RGBA;
+  onMouseDown?: () => void;
 }) {
   const t = usePalette();
   const cell = text.length === width ? text : padRow(text, width);
   return (
-    <box height={1} width={width} flexShrink={0} overflow="hidden" backgroundColor={t.background}>
+    <box
+      height={1}
+      width={width}
+      flexShrink={0}
+      overflow="hidden"
+      backgroundColor={bg ?? t.background}
+      onMouseDown={onMouseDown}
+    >
       <text fg={color} wrapMode="none">
         {cell}
       </text>
     </box>
+  );
+}
+
+function rgbToRgba(c: { r: number; g: number; b: number }, dim = false): RGBA {
+  if (dim) {
+    return RGBA.fromInts(
+      Math.round(c.r * 0.45 + 30),
+      Math.round(c.g * 0.45 + 30),
+      Math.round(c.b * 0.45 + 30),
+    );
+  }
+  return RGBA.fromInts(c.r, c.g, c.b);
+}
+
+/** One fixed-slot legend row — click toggles origin/agent/edge via legendToggleTarget. */
+function MapLegendRow({
+  entry,
+  width,
+  onToggle,
+}: {
+  entry: LegendEntry;
+  width: number;
+  onToggle: (label: string) => void;
+}) {
+  const line = formatMapLegendLine(entry);
+  const color = rgbToRgba(entry.color, entry.hidden);
+  return (
+    <FixedClearRow
+      width={width}
+      color={color}
+      bg={GRAPH_BG}
+      text={padRow(line, width)}
+      onMouseDown={() => onToggle(entry.label)}
+    />
   );
 }
 
@@ -190,8 +233,12 @@ function softCopy(state: SoftState): { title: string; lines: string[] } {
  * Interactive session map. Opens the readonly query-service, places sessions with
  * one-house world builders, draws via Graph `renderView` with evidence links.
  */
-/** Local map chrome against residual host: panel title/border ~3 + 2 status lines. */
-const MAP_LOCAL_CHROME = 5;
+/**
+ * Local map chrome against residual host:
+ * panel title/border ~3 + 2 status lines + legend rows (≤ LEGEND_MAX_ROWS).
+ * Legend is React chrome (not canvas blit), so it is budgeted here.
+ */
+const MAP_BASE_CHROME = 5;
 
 export function MapStage({
   inputActive = true,
@@ -211,11 +258,12 @@ export function MapStage({
   const t = usePalette();
   const dims = useStableDimensions();
   const stageBox = stageBoxProp ?? seedStageBox(dims.width, dims.height);
+  // Seed reserves room for a full closed legend so first frames are not tight.
   const canvasSeed = {
     width: Math.max(MIN_MAP_CANVAS_COLS, stageBox.width),
     height: Math.max(
       MIN_MAP_CANVAS_ROWS,
-      stageBox.height - MAP_LOCAL_CHROME,
+      stageBox.height - MAP_BASE_CHROME - LEGEND_MAX_ROWS,
     ),
   };
   const {
@@ -453,15 +501,11 @@ export function MapStage({
 
   const gridRef = useRef(grid);
   gridRef.current = grid;
-  const legendRef = useRef(legend);
-  legendRef.current = legend;
 
+  // Canvas blit is glyphs only — legend is React fixed rows below (paints nested + char-frame).
   const draw = useCallback(
     (buffer: DrawBuffer) => {
       blitGrid(buffer, gridRef.current, 0, 0, cols, rows);
-      if (legendRef.current.length > 0) {
-        drawLegend(buffer, legendRef.current, cols, rows, 0);
-      }
     },
     [cols, rows],
   );
@@ -590,34 +634,22 @@ export function MapStage({
       const d = dragRef.current;
       dragRef.current = null;
       if (d && !d.moved && (e.button ?? 0) === 0) {
-        // Legend first (shared geometry with drawLegend) — then node hit-test.
-        const legHit = legendHitAt(legend, cols, rows, 0, e.x, e.y, 'right');
-        if (legHit) {
-          if (legHit.kind === 'toggle-parent' || legHit.kind === 'expand') {
-            toggleLegendKey(legHit.key);
-          }
-          return;
-        }
+        // Legend lives in React rows (own mouse handlers) — canvas is node hit-test only.
         const hit = hitTest(e.x, e.y);
         if (hit && hit === selected) openSelected(hit);
         else setSelected(hit);
       }
     },
-    [legend, cols, rows, hitTest, selected, openSelected, toggleLegendKey],
+    [hitTest, selected, openSelected],
   );
 
   const onMouseMove = useCallback(
     (e: MouseLike) => {
       if (dragRef.current) return;
-      // Skip hover while over the legend block so rows stay clickable without sticky hover.
-      if (legendHitAt(legend, cols, rows, 0, e.x, e.y, 'right')) {
-        setHovered((h) => (h === null ? h : null));
-        return;
-      }
       const hit = hitTest(e.x, e.y);
       setHovered((h) => (h === hit ? h : hit));
     },
-    [hitTest, legend, cols, rows],
+    [hitTest],
   );
 
   const onMouseScroll = useCallback(
@@ -674,6 +706,27 @@ export function MapStage({
       </box>
     ) : null;
 
+  const legendBlock =
+    soft.kind === 'ready' && legend.length > 0 ? (
+      <box
+        flexDirection="column"
+        flexShrink={0}
+        width="100%"
+        height={legend.length}
+        overflow="hidden"
+        backgroundColor={GRAPH_BG}
+      >
+        {legend.map((entry) => (
+          <MapLegendRow
+            key={entry.label}
+            entry={entry}
+            width={rowW}
+            onToggle={toggleLegendKey}
+          />
+        ))}
+      </box>
+    ) : null;
+
   return (
     <Panel title="Map" headerRight={headerRight} flexGrow={1} minHeight={0} active={!!inputActive}>
       {softBody ?? (
@@ -691,6 +744,7 @@ export function MapStage({
             onMouseMove={onMouseMove}
             onMouseScroll={onMouseScroll}
           />
+          {legendBlock}
           <box width="100%" height={1} flexShrink={0} overflow="hidden" backgroundColor={STATUS_BG}>
             <FixedClearRow width={rowW} color={STATUS_FG} text={padRow(infoLine.trimStart(), rowW)} />
           </box>

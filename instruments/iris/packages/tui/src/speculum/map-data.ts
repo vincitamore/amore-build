@@ -575,6 +575,18 @@ export function buildMapLegendRows(
   return rows;
 }
 
+/**
+ * Char-frame text for one map legend row: `<glyph> label (count)`.
+ * Same order/content the React fixed rows render (and H1/H2 assert).
+ */
+export function formatMapLegendLine(entry: {
+  glyph: string;
+  label: string;
+  count: number;
+}): string {
+  return `${entry.glyph} ${entry.label} (${entry.count})`;
+}
+
 export type LegendToggle =
   | { kind: 'edge'; key: MapEdgeKind }
   | { kind: 'origin'; key: MapOrigin }

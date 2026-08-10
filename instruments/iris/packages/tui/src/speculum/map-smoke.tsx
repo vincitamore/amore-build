@@ -17,6 +17,7 @@ import {
   DEFAULT_ALLOWED_AGENTS,
   DEFAULT_ALLOWED_ORIGINS,
   filterSessionsByPopulation,
+  formatMapLegendLine,
   hitTestSession,
   selectDrawnLinks,
   sessionLabel,
@@ -520,23 +521,34 @@ const hasShowing = /showing\s+\d+\s+of\s+\d+/i.test(frame);
 const hasLinks = /\d+\s+links/.test(frame);
 const hasGlyph = /[⬢●◆◉•◇]/.test(frame) || /[⠀-⣿]/.test(frame);
 const hasMode = /timeline|structure|density|cluster/.test(frame);
-const hasLegendParentage = /parentage/i.test(frame);
-const hasLegendOperator = /operator/i.test(frame);
-const hasLegendEvent = /event links/i.test(frame);
+// Legend is React fixed rows — assert full line text (not blit geometry on the border).
+const legendLines = legend.map(formatMapLegendLine);
+const hasLegendParentageLine = /[─\-]\s*parentage\s*\(\d+\)/i.test(frame) || frame.includes('parentage');
+const hasLegendOperatorLine = /[●○]\s*operator\s*\(\d+\)/i.test(frame) || /operator\s*\(\d+\)/.test(frame);
+const hasLegendEventLine = /event links\s*\(\d+\)/i.test(frame);
+const hasLegendPrimaryLine = /primary\s*\(\d+\)/i.test(frame);
 const hasASen = /A-sen-/i.test(frame);
 const hasTitleInInfo = /Alpha Primary|dream-digest|Primary Session|Deep Forge/i.test(frame);
 const hasOpPrim = /op·prim|op\+/.test(frame);
+// React legend must not paint onto the panel top border (old blit defect signature).
+const topBorderHasLegend = /^┌.*parentage/m.test(frame) || /^┌.*event links/m.test(frame);
 log(`frame title Map:${hasTitle}`, hasTitle);
 log(`frame showing N of M:${hasShowing}`, hasShowing);
 log(`frame links count:${hasLinks}`, hasLinks);
 log(`frame glyphs/density present:${hasGlyph}`, hasGlyph);
 log(`frame mode label (timeline/structure):${hasMode}`, hasMode);
-log(`frame legend parentage:${hasLegendParentage}`, hasLegendParentage);
-log(`frame legend operator:${hasLegendOperator}`, hasLegendOperator);
-log(`frame legend event links:${hasLegendEvent}`, hasLegendEvent);
+log(`frame React legend parentage line:${hasLegendParentageLine}`, hasLegendParentageLine);
+log(`frame React legend operator line:${hasLegendOperatorLine}`, hasLegendOperatorLine);
+log(`frame React legend event links line:${hasLegendEventLine}`, hasLegendEventLine);
+log(`frame React legend primary line:${hasLegendPrimaryLine}`, hasLegendPrimaryLine);
 log(`frame has no A-sen- labels:${!hasASen}`, !hasASen);
 log(`frame title in info line:${hasTitleInInfo}`, hasTitleInInfo || /◉/.test(frame));
 log(`frame filter short (op·prim):${hasOpPrim}`, hasOpPrim);
+log(`legend not on panel top border:${!topBorderHasLegend}`, !topBorderHasLegend);
+log(
+  `formatMapLegendLine matches pure legend rows (${legendLines[0]})`,
+  legendLines[0]?.includes('parentage') === true,
+);
 
 // Enter → openSession with the pre-selected id.
 await keys.pressKeys(['RETURN']);

@@ -11,6 +11,7 @@ import {
   filterEvidenceLinks,
   filterSessionsByPopulation,
   filtersShortLabel,
+  formatMapLegendLine,
   gridAnchors,
   hasNoForceEdges,
   hitTestSession,
@@ -545,6 +546,61 @@ describe('legend (§7.1–§7.3)', () => {
     const op = rows.find((r) => r.label === 'operator')!;
     const exp = rows.find((r) => r.label === 'experiment')!;
     expect(op.color).not.toEqual(exp.color);
+  });
+
+  test('formatMapLegendLine is glyph + label + count (char-frame assert surface)', () => {
+    expect(formatMapLegendLine({ glyph: '─', label: 'parentage', count: 12 })).toBe(
+      '─ parentage (12)',
+    );
+    expect(formatMapLegendLine({ glyph: '●', label: 'operator', count: 244 })).toBe(
+      '● operator (244)',
+    );
+    expect(formatMapLegendLine({ glyph: '◇', label: 'subagent', count: 0 })).toBe('◇ subagent (0)');
+  });
+
+  test('legend toggle via legendToggleTarget flips origin/agent/edge membership sets', () => {
+    // Pure state-transition proof (React rows call the same helper).
+    const origins = new Set<MapOrigin>(['operator']);
+    const agents = new Set(['primary']);
+    const edges = new Set<string>();
+
+    const toggle = (label: string) => {
+      const t = legendToggleTarget(label);
+      if (!t) return;
+      if (t.kind === 'edge') {
+        if (edges.has(t.key)) edges.delete(t.key);
+        else edges.add(t.key);
+      } else if (t.kind === 'origin') {
+        if (origins.has(t.key) && origins.size > 1) origins.delete(t.key);
+        else origins.add(t.key);
+      } else if (t.kind === 'agent') {
+        if (agents.has(t.key) && agents.size > 1) agents.delete(t.key);
+        else agents.add(t.key);
+      }
+    };
+
+    toggle('experiment');
+    expect(origins.has('experiment')).toBe(true);
+    toggle('subagent');
+    expect(agents.has('subagent')).toBe(true);
+    toggle('parentage');
+    expect(edges.has('parentage')).toBe(true);
+    toggle('parentage');
+    expect(edges.has('parentage')).toBe(false);
+
+    // Rebuilt legend reflects population/hidden flags.
+    const rows = buildMapLegendRows(
+      mixed,
+      [{ source: 'a', target: 'b', kind: 'parentage', count: 1 }],
+      origins,
+      agents as Set<'primary' | 'subagent'>,
+      edges as Set<'parentage' | 'event'>,
+    );
+    expect(rows.find((r) => r.label === 'experiment')!.hidden).toBe(false);
+    expect(rows.find((r) => r.label === 'subagent')!.hidden).toBe(false);
+    expect(rows.find((r) => r.label === 'parentage')!.hidden).toBe(false);
+    expect(rows.map(formatMapLegendLine).join('\n')).toContain('parentage');
+    expect(rows.map(formatMapLegendLine).join('\n')).toContain('operator');
   });
 });
 
