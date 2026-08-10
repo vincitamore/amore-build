@@ -40,7 +40,13 @@ export const MIGRATIONS: readonly Migration[] = [
     version: 2,
     name: "v2-events-sensitive",
     up: (db) => {
-      db.run("ALTER TABLE events ADD COLUMN sensitive INTEGER NOT NULL DEFAULT 0");
+      // Legacy v1 indexes shipped events.sensitive in their schema while
+      // stamping user_version 1; re-adding the column would fail every open
+      // with a duplicate-column error. Add only when actually absent.
+      const cols = db.query<{ name: string }, []>(`PRAGMA table_info(events)`).all();
+      if (!cols.some((c) => c.name === "sensitive")) {
+        db.run("ALTER TABLE events ADD COLUMN sensitive INTEGER NOT NULL DEFAULT 0");
+      }
     },
   },
   {
@@ -49,6 +55,9 @@ export const MIGRATIONS: readonly Migration[] = [
     up: (db) => {
       // Standalone FTS5 (rowid = events.id). External-content form was avoided:
       // bun:sqlite DELETE on empty external-content vtab can raise CORRUPT_VTAB.
+      // Derived index — rebuild anytime: drop any legacy FTS first so an index
+      // that predates this step (or carried its own FTS) lands on one shape.
+      db.run("DROP TABLE IF EXISTS events_fts");
       db.run(`
         CREATE VIRTUAL TABLE events_fts USING fts5(
           text,

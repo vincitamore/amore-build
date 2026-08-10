@@ -103,6 +103,82 @@ function seedV1Db(path: string): void {
   db.close();
 }
 
+/**
+ * Legacy v1 shape that ALREADY carries events.sensitive (it shipped in the
+ * v1 schema even though user_version was 1) — the real-world shape a live
+ * index can have, and the one the v1→v2 step must tolerate.
+ */
+function seedLegacyV1WithSensitive(path: string): void {
+  const db = new Database(path);
+  db.exec(`
+    CREATE TABLE events (
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id      TEXT NOT NULL,
+      project_path    TEXT NOT NULL,
+      agent           TEXT NOT NULL,
+      parent_session  TEXT,
+      ts              TEXT NOT NULL,
+      kind            TEXT NOT NULL,
+      text            TEXT,
+      tool_name       TEXT,
+      tool_input      TEXT,
+      tool_output     TEXT,
+      tool_error      INTEGER,
+      tool_call_id    TEXT,
+      is_boilerplate  INTEGER NOT NULL DEFAULT 0,
+      sensitive       INTEGER NOT NULL DEFAULT 0,
+      raw             TEXT NOT NULL
+    );
+    CREATE TABLE sessions (
+      id               TEXT PRIMARY KEY,
+      project_path     TEXT NOT NULL,
+      agent            TEXT NOT NULL,
+      parent_session   TEXT,
+      model_id         TEXT,
+      started_at       TEXT NOT NULL,
+      ended_at         TEXT NOT NULL,
+      turn_count       INTEGER NOT NULL,
+      user_msg_count   INTEGER NOT NULL,
+      tool_call_count  INTEGER NOT NULL,
+      tool_error_count INTEGER NOT NULL
+    );
+    CREATE TABLE usage (
+      id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id          TEXT NOT NULL,
+      project_path        TEXT NOT NULL,
+      ts                  TEXT NOT NULL,
+      model_id            TEXT,
+      input_tokens        INTEGER NOT NULL DEFAULT 0,
+      output_tokens       INTEGER NOT NULL DEFAULT 0,
+      cached_read_tokens  INTEGER NOT NULL DEFAULT 0,
+      reasoning_tokens    INTEGER NOT NULL DEFAULT 0,
+      total_tokens        INTEGER NOT NULL DEFAULT 0,
+      num_turns           INTEGER NOT NULL DEFAULT 0,
+      model_calls         INTEGER NOT NULL DEFAULT 0,
+      raw                 TEXT NOT NULL
+    );
+    CREATE TABLE ingest_state (
+      file_path     TEXT PRIMARY KEY,
+      size_bytes    INTEGER NOT NULL,
+      mtime         TEXT NOT NULL,
+      byte_offset   INTEGER NOT NULL,
+      last_ingested TEXT NOT NULL,
+      forgotten     INTEGER NOT NULL DEFAULT 0
+    );
+    -- A legacy index can also carry its own pre-existing FTS (same shaped
+    -- columns) while stamped below v3; the migration must rebuild, not clash.
+    CREATE VIRTUAL TABLE events_fts USING fts5(
+      text, tool_name, tool_input, tool_output
+    );
+    PRAGMA user_version = 1;
+  `);
+  db.run(
+    `INSERT INTO events (session_id, project_path, agent, ts, kind, text, is_boilerplate, sensitive, raw)
+     VALUES ('sess-legacy-v1', '/proj', 'primary', '2026-01-01T00:00:00.000Z', 'user', 'survive-me', 0, 0, '{}')`,
+  );
+  db.close();
+}
+
 function tableHasColumn(db: Database, table: string, column: string): boolean {
   const cols = db.query<{ name: string }, []>(`PRAGMA table_info(${table})`).all();
   return cols.some((c) => c.name === column);
@@ -227,6 +303,59 @@ describe("migrations framework", () => {
           )
           .get();
         expect(decisions?.name).toBe("decisions");
+      } finally {
+        db.close();
+      }
+    } finally {
+      scratch.cleanup();
+    }
+  });
+
+  test("v1 legacy index (sensitive already present) migrates without duplicate-column", () => {
+    const scratch = scratchDbPath();
+    try {
+      seedLegacyV1WithSensitive(scratch.path);
+      const probe = new Database(scratch.path);
+      expect(getUserVersion(probe as never)).toBe(1);
+      expect(tableHasColumn(probe, "events", "sensitive")).toBe(true);
+      probe.close();
+
+      const db = openDb(scratch.path);
+      try {
+        expect(getUserVersion(db)).toBe(SCHEMA_VERSION);
+        expect(SCHEMA_VERSION).toBe(4);
+        // Column untouched, row survives, single events row (no dupes).
+        expect(tableHasColumn(db, "events", "sensitive")).toBe(true);
+        const row = db
+          .query<{ text: string; sensitive: number }, []>(
+            "SELECT text, sensitive FROM events WHERE session_id = 'sess-legacy-v1'",
+          )
+          .get();
+        expect(row?.text).toBe("survive-me");
+        expect(row?.sensitive).toBe(0);
+        const count =
+          db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM events").get()?.n ?? 0;
+        expect(count).toBe(1);
+        // v3/v4 land too on the same walk.
+        const fts = db
+          .query<{ name: string }, []>(
+            `SELECT name FROM sqlite_master WHERE name = 'events_fts'`,
+          )
+          .get();
+        expect(fts?.name).toBe("events_fts");
+        const ftsHits =
+          db
+            .query<{ n: number }, []>(
+              `SELECT COUNT(*) AS n FROM events_fts WHERE events_fts MATCH 'survive'`,
+            )
+            .get()?.n ?? 0;
+        expect(ftsHits).toBe(1);
+        const links = db
+          .query<{ name: string }, []>(
+            `SELECT name FROM sqlite_master WHERE name = 'event_links'`,
+          )
+          .get();
+        expect(links?.name).toBe("event_links");
       } finally {
         db.close();
       }
