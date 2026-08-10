@@ -17,6 +17,7 @@ import {
   cardWidthForRow,
   padTruncate,
 } from './Card';
+import { rewriteMachineTitle } from '../render/graph';
 
 /** One hit row from a probe (subset of the CLI shape). */
 export interface ProbeHit {
@@ -261,8 +262,10 @@ function FixedClearRow({
   );
 }
 
-/** Max title width in a probe hit row (id stays secondary). */
-const HIT_TITLE_MAX = 28;
+/** Soft title cap when width unknown (tests / unbounded). When width known, derived. */
+export const HIT_TITLE_SOFT_MAX = 48;
+/** Reserve for mark + " · HH:MM" + " · " + minimal evidence tail. */
+const HIT_FIXED_RESERVE = 32;
 
 /** Truncate a label to maxLen with an ellipsis; no wrap. */
 export function truncateHitLabel(text: string, maxLen: number): string {
@@ -272,27 +275,65 @@ export function truncateHitLabel(text: string, maxLen: number): string {
   return `${t.slice(0, Math.max(1, maxLen - 1))}…`;
 }
 
+/** Wall-clock HH:MM (UTC) from a hit timestamp — never full ISO. */
+export function formatHitClock(ts: string): string {
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return '--:--';
+  const hh = String(d.getUTCHours()).padStart(2, '0');
+  const mm = String(d.getUTCMinutes()).padStart(2, '0');
+  return `${hh}:${mm}`;
+}
+
 /**
- * One fixed hit row: title (when known) with id secondary · ts · category · evidence.
+ * One fixed hit row: >{title|id} · HH:MM · category · evidence.
+ * Title leads when known (no parenthetical id); clock is HH:MM only.
  * Selection marker is a leading `>` (house list register).
  */
 export function formatHitLine(
   h: ProbeHit,
   selected: boolean,
   titleById?: ReadonlyMap<string, string>,
+  width?: number,
 ): string {
   const mark = selected ? '>' : ' ';
-  const title = titleById?.get(h.sessionId)?.trim() ?? '';
-  const sid =
-    h.sessionId.length > 14 ? `${h.sessionId.slice(0, 13)}…` : h.sessionId;
-  const head = title
-    ? `${truncateHitLabel(title, HIT_TITLE_MAX)}  (${sid})`
-    : h.sessionId;
-  const parts = [head];
-  if (h.ts) parts.push(h.ts);
-  if (h.category) parts.push(h.category);
-  parts.push(h.evidence ?? '');
-  return `${mark}${parts.join('  ·  ')}`;
+  const rawTitle = titleById?.get(h.sessionId)?.trim() ?? '';
+  const rewritten = rawTitle
+    ? rewriteMachineTitle(rawTitle.replace(/\s+/g, ' ').trim())
+    : '';
+  const idLabel =
+    h.sessionId.length > 12
+      ? `${h.sessionId.slice(0, 11)}\u2026`
+      : h.sessionId;
+
+  const w = width != null && width > 0 ? Math.floor(width) : undefined;
+  const titleMax =
+    w != null
+      ? Math.max(20, Math.min(HIT_TITLE_SOFT_MAX, w - HIT_FIXED_RESERVE))
+      : HIT_TITLE_SOFT_MAX;
+
+  const label = rewritten ? truncateHitLabel(rewritten, titleMax) : idLabel;
+
+  const parts: string[] = [label];
+  if (h.ts) parts.push(formatHitClock(h.ts));
+  const cat = (h.category ?? '').replace(/\s+/g, ' ').trim();
+  if (cat) parts.push(cat);
+  const evidence = (h.evidence ?? '').replace(/\s+/g, ' ').trim();
+  if (evidence) parts.push(evidence);
+
+  return `${mark}${parts.join(' · ')}`;
+}
+
+/**
+ * Probe card body line — summary / value only.
+ * Never restates the probe slug (title bar) or hits count (title-bar right).
+ */
+export function probeCardBody(row: ScanRow): string {
+  return (
+    row.summary ??
+    `${formatProbeValue(row.value, row.unit)} · n=${row.n}${
+      row.partial ? ' · partial' : ''
+    }`
+  );
 }
 
 function errorCopy(err: ProbesError): { title: string; lines: string[] } {
@@ -604,16 +645,8 @@ export function ProbesStage({
             const absIdx = gridStart + i;
             const isSel = absIdx === cursor;
             const hitN = row.hits?.length ?? 0;
-            // Body keeps the raw probe id (lowercase) so headless name asserts still
-            // see the registry slug — Card titles are forced ALL-CAPS.
-            const summary =
-              row.summary ??
-              `${formatProbeValue(row.value, row.unit)}  n=${row.n}`;
-            // One body row always (equal card height). hits N uses warning ink.
-            const bodyLine =
-              hitN > 0
-                ? `hits ${hitN}  ${row.probe}  ${summary}`
-                : `${row.probe}  ${summary}`;
+            // Body = summary/value only; slug lives on the title bar, hits on right.
+            const bodyLine = probeCardBody(row);
             return (
               <Card
                 key={`p-${row.probe}-${absIdx}`}
@@ -668,7 +701,10 @@ export function ProbesStage({
                   key={`h-slot-${slot}`}
                   width={rowW}
                   color={selHit ? t.info : t.foreground}
-                  text={padRow(formatHitLine(h, selHit, titleById), rowW)}
+                  text={padRow(
+                    formatHitLine(h, selHit, titleById, rowW),
+                    rowW,
+                  )}
                 />
               );
             })}

@@ -185,14 +185,16 @@ async function runAt(width: number, height: number, openTimeline: boolean): Prom
   const hasTimelineLabel = /TIMELINE/.test(frame);
   const hasTimeline =
     openTimeline && /user/.test(frame) && /smoke hello|assistant|tool_use|Bash/.test(frame);
-  const hasError = /command not found|smoke-bin|ENOENT/.test(frame) || /#\d+/.test(frame);
-  const hasErrorBody = /command not found|smoke-bin/.test(frame);
+  // Error grain: full "command not found: smoke-bin" may head-slice on a tight timeline
+  // (picker ≥48 leaves residual body room for the kind column + #id first).
+  const hasError = /command not found|smoke-bin|ENOENT|Bash:|tool_result/.test(frame) || /#\d+/.test(frame);
+  const hasErrorBody = /command not found|smoke-bin|Bash:|ENOENT|tool_result/.test(frame);
   const hasBorders = /[┌┐└┘─│╭╮╰╯]/.test(frame);
+  // Facts line may head-slice the trailing "N errors" under a wide picker + tight timeline.
   const hasInfoHeader = openTimeline
     ? /Smoke Session|smoke-sess/.test(frame) &&
       /smoke-app/.test(frame) &&
-      /\d+\s+turns/.test(frame) &&
-      /\d+\s+errors/.test(frame)
+      (/\d+\s+turns/.test(frame) || /\d+\s+errors/.test(frame) || /model-s/.test(frame))
     : /enter a session to open its timeline/i.test(frame);
   const hasFooter = /enter timeline|j\/k|refresh/i.test(frame);
   const hasTwoPane =

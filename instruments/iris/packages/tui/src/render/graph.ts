@@ -88,10 +88,16 @@ export function nodeGlyph(type?: string): string {
 // distinctive part leads, THEN truncate. Other labels pass through untouched.
 const DREAM_SLUG = /^Pipeline:\s+dream-(\d{4}-\d{2}-\d{2})T\d{2}-\d{2}-\d{2}-(.+)$/;
 const PIPELINE_PREFIX = /^Pipeline:\s+/;
-export function displayLabel(label: string, max = 18): string {
+
+/** Distinctive-part-first rewrite for machine-slug titles; no width slice. */
+export function rewriteMachineTitle(label: string): string {
   const dream = DREAM_SLUG.exec(label);
-  const s = dream ? `${dream[2]} ${dream[1]}` : label.replace(PIPELINE_PREFIX, '');
-  return s.slice(0, max);
+  if (dream) return `${dream[2]} ${dream[1]}`;
+  return label.replace(PIPELINE_PREFIX, '');
+}
+
+export function displayLabel(label: string, max = 18): string {
+  return rewriteMachineTitle(label).slice(0, max);
 }
 
 /** Every doc type that has a dedicated glyph, in a stable order (drives the type color + legend). */

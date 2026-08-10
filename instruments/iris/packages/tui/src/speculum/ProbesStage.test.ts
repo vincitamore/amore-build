@@ -11,7 +11,9 @@ import {
   budgetProbeVisibleRows,
   clampHitScroll,
   clampRowScroll,
+  formatHitClock,
   formatHitLine,
+  probeCardBody,
   formatProbeValue,
   formatWilsonRange,
   hitEventId,
@@ -132,34 +134,61 @@ afterEach(() => {
 describe('formatHitLine titles', () => {
   const hit: ProbeHit = {
     sessionId: 'sess-aaa-bbbb-cccc',
-    ts: '2026-01-01T00:00:00.000Z',
+    ts: '2026-01-01T15:55:24.630Z',
     category: 'self-correction',
     evidence: 'sorry about that',
     eventId: 42,
   };
 
-  test('without title map falls back to full session id', () => {
-    const line = formatHitLine(hit, false);
+  test('without title map falls back to short session id; no full ISO', () => {
+    const line = formatHitLine(hit, false, undefined, 112);
     expect(line.startsWith(' ')).toBe(true);
-    expect(line).toContain('sess-aaa-bbbb-cccc');
+    expect(line).toMatch(/sess-aaa-bb/);
     expect(line).toContain('sorry about that');
+    expect(line).not.toMatch(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/);
+    expect(line).toMatch(/\b15:55\b/);
   });
 
-  test('with title map: title primary, id secondary', () => {
+  test('with title map: title primary, HH:MM, no paren id, no ISO', () => {
     const titles = new Map([
       ['sess-aaa-bbbb-cccc', 'Repeat Previous Single Word Reply Request'],
     ]);
-    const line = formatHitLine(hit, true, titles);
+    const line = formatHitLine(hit, true, titles, 112);
     expect(line.startsWith('>')).toBe(true);
-    expect(line).toContain('Repeat Previous Single Word');
-    expect(line).toContain('(sess-aaa-bbbb…)');
-    expect(line.indexOf('Repeat')).toBeLessThan(line.indexOf('sess-aaa'));
+    expect(line).toContain('Repeat Previous');
+    expect(line).toMatch(/\b15:55\b/);
+    expect(line).toContain('self-correction');
+    expect(line).toContain('sorry about that');
+    expect(line).not.toMatch(/\([0-9a-f-]{8,}/i);
+    expect(line).not.toMatch(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/);
+    expect(line.indexOf('Repeat')).toBeLessThan(line.indexOf('sorry'));
+  });
+
+  test('formatHitClock is HH:MM UTC', () => {
+    expect(formatHitClock('2026-01-01T15:55:24.630Z')).toBe('15:55');
+    expect(formatHitClock('bad')).toBe('--:--');
   });
 
   test('truncateHitLabel respects max', () => {
     expect(truncateHitLabel('short', 28)).toBe('short');
     expect(truncateHitLabel('x'.repeat(40), 10).length).toBe(10);
     expect(truncateHitLabel('x'.repeat(40), 10).endsWith('…')).toBe(true);
+  });
+
+  test('probeCardBody never echoes probe slug or hits N', () => {
+    const withSummary = SCAN_FIXTURE[0]!;
+    const body = probeCardBody(withSummary);
+    expect(body).not.toContain(withSummary.probe);
+    expect(body).not.toMatch(/^hits \d+/);
+    expect(body).toBe(withSummary.summary!);
+
+    const bare: typeof withSummary = {
+      ...SCAN_FIXTURE[1]!,
+      summary: undefined,
+    };
+    const valueBody = probeCardBody(bare);
+    expect(valueBody).not.toContain(bare.probe);
+    expect(valueBody).toMatch(/n=\d/);
   });
 });
 

@@ -1,5 +1,5 @@
 import { test, expect } from 'bun:test';
-import { displayLabel, graphSignature, layoutGraph, layoutWorld, renderGraphToCanvas, type GraphData } from './graph';
+import { displayLabel, graphSignature, layoutGraph, layoutWorld, renderGraphToCanvas, rewriteMachineTitle, type GraphData } from './graph';
 
 const SQUARE: GraphData = {
   nodes: [{ id: 'a' }, { id: 'b' }, { id: 'c' }, { id: 'd' }],
@@ -159,4 +159,17 @@ test('displayLabel: operator pipeline titles drop the redundant prefix; plain la
   expect(displayLabel('Pipeline: iron-rod-platform-design')).toBe('iron-rod-platform-'.slice(0, 18));
   expect(displayLabel('KB Link Density Report')).toBe('KB Link Density Re');
   expect(displayLabel('short')).toBe('short');
+});
+
+test('rewriteMachineTitle: full distinctive form without slice', () => {
+  expect(rewriteMachineTitle('Pipeline: dream-2026-02-14T08-19-40-project-health')).toBe(
+    'project-health 2026-02-14',
+  );
+  expect(rewriteMachineTitle('Pipeline: iron-rod-platform-design')).toBe(
+    'iron-rod-platform-design',
+  );
+  expect(rewriteMachineTitle('KB Link Density Report')).toBe('KB Link Density Report');
+  expect(displayLabel('Pipeline: dream-2026-02-14T08-19-40-project-health')).toBe(
+    rewriteMachineTitle('Pipeline: dream-2026-02-14T08-19-40-project-health').slice(0, 18),
+  );
 });

@@ -28,6 +28,7 @@ import {
   type SessionListRow,
   type TurnRow,
 } from './query-service';
+import { rewriteMachineTitle } from '../render/graph';
 
 export type MicroscopeJump = {
   sessionId: string;
@@ -37,8 +38,14 @@ export type MicroscopeJump = {
 
 /** Terminal width below this stacks picker over timeline (chunked; not flexWrap). */
 export const STACK_BELOW_COLS = 100;
-/** Fixed picker column width when side-by-side (must never wrap a session row). */
-export const PICKER_COL_WIDTH = 32;
+/** Share of content width for the picker when side-by-side. */
+export const PICKER_SHARE = 0.42;
+/** Outer picker floor — titles need this much. */
+export const PICKER_MIN_OUTER = 48;
+/** Outer picker ceiling — leave timeline room on very wide terminals. */
+export const PICKER_MAX_OUTER = 64;
+/** Timeline outer floor when two-pane. */
+export const TIMELINE_MIN_OUTER = 36;
 const PANE_GAP = 1;
 /** Stage pad L/R only — nest width already removed by residual host. */
 const STAGE_PAD_COLS = 2;
@@ -127,18 +134,41 @@ export function kindColor(kind: string, t: Palette, toolError?: number | null): 
   }
 }
 
-/** Truncated summary body for a turn row (no pad). */
-export function rowText(turn: TurnRow): string {
+/** Windows drive path or UNC-ish segment; replace match with basename. */
+const WIN_ABS =
+  /(?:[A-Za-z]:|\\\\)[^\\/:*?"<>|\r\n]*(?:\\[^\\/:*?"<>|\r\n]*)+/g;
+/** Posix absolute paths with ≥2 segments. */
+const POSIX_ABS = /(?:\/[\w.+@-]+){2,}/g;
+
+/** Path → final path segment (works for / and \\ separators). */
+export function fileBasename(p: string): string {
+  const parts = p.replace(/\\/g, '/').split('/').filter(Boolean);
+  return parts[parts.length - 1] || p;
+}
+
+/** Absolute paths → basenames; relative prose untouched. */
+export function collapseAbsolutePaths(text: string): string {
+  return text
+    .replace(WIN_ABS, (m) => fileBasename(m))
+    .replace(POSIX_ABS, (m) => fileBasename(m));
+}
+
+/**
+ * Truncated summary body for a turn row (no pad).
+ * Tool rows collapse absolute paths to basenames unless fullPaths is set.
+ */
+export function rowText(turn: TurnRow, opts?: { fullPaths?: boolean }): string {
   const isErr = !!(turn.toolError || turn.kind === 'tool_error');
+  const collapse = (s: string) => (opts?.fullPaths ? s : collapseAbsolutePaths(s));
   if (isErr) {
-    const tail = (turn.text ?? '').trim().replace(/\s+/g, ' ');
+    const tail = collapse((turn.text ?? '').trim().replace(/\s+/g, ' '));
     const name = turn.toolName?.trim() || '';
     if (name && tail) return `${name}: ${tail}`;
     return name || tail || 'error';
   }
   if (turn.kind === 'tool_use' || turn.kind === 'tool_result') {
     const name = turn.toolName?.trim() || turn.kind;
-    const extra = (turn.text ?? '').trim().replace(/\s+/g, ' ');
+    const extra = collapse((turn.text ?? '').trim().replace(/\s+/g, ' '));
     return extra ? `${name} ${extra}` : name;
   }
   return (turn.text ?? '').trim().replace(/\s+/g, ' ') || turn.kind;
@@ -150,17 +180,23 @@ export function shortSessionId(id: string): string {
   return id.length > 12 ? `${id.slice(0, 11)}\u2026` : id;
 }
 
-/** Title when present; otherwise the id prefix (honest empty-title fallback). */
+/** Machine-title rewrite for picker/header labels (distinctive part first). */
+export function sessionPickerLabel(title: string): string {
+  return rewriteMachineTitle(title.replace(/\s+/g, ' ').trim());
+}
+
+/** Title when present (rewritten); otherwise the id prefix (honest empty-title fallback). */
 export function sessionDisplayTitle(s: SessionListRow): string {
   const title = (s.title ?? '').replace(/\s+/g, ' ').trim();
-  return title || shortSessionId(s.id);
+  return title ? sessionPickerLabel(title) : shortSessionId(s.id);
 }
 
 /**
  * Two-pane geometry from residual host width.
- * Wide (host + member pad ≥ STACK_BELOW_COLS): picker fixed ~32 cols, timeline
- * gets the rest. Narrow: both panes use full content width (stacked column).
- * Content width charges stage pad only — nest width is already off the host.
+ * Wide (host + member pad ≥ STACK_BELOW_COLS): picker takes a flex share with a
+ * hard min/max so real titles fit; timeline gets the rest. Narrow: both panes
+ * use full content width (stacked column). Content width charges stage pad only
+ * — nest width is already off the host.
  */
 export function paneGeometry(hostWidth: number): {
   twoPane: boolean;
@@ -174,8 +210,13 @@ export function paneGeometry(hostWidth: number): {
   if (!twoPane) {
     return { twoPane: false, contentW, pickerW: contentW, timelineW: contentW };
   }
-  const pickerW = Math.min(34, Math.max(30, PICKER_COL_WIDTH));
-  const timelineW = Math.max(16, contentW - pickerW - PANE_GAP);
+  const raw = Math.floor(contentW * PICKER_SHARE);
+  const maxAllowed = Math.min(
+    PICKER_MAX_OUTER,
+    Math.max(PICKER_MIN_OUTER, contentW - TIMELINE_MIN_OUTER - PANE_GAP),
+  );
+  const pickerW = Math.min(maxAllowed, Math.max(PICKER_MIN_OUTER, raw));
+  const timelineW = contentW - pickerW - PANE_GAP;
   return { twoPane: true, contentW, pickerW, timelineW };
 }
 
@@ -239,36 +280,66 @@ export function formatSessionTitleLine(s: SessionListRow): string {
 }
 
 /**
- * One-row session picker line: title (or id fallback) leads; id + age + counts
- * trail as secondary. Caller pad-truncates to the picker inner width.
+ * One-row session picker line. Title leads; meta is droppable under `width`.
+ * Drop order when over budget: counts, then age, then title head-slice.
+ * Id is never a secondary on titled rows (lives on the timeline open header).
+ * When `width` is omitted, emit the full logical line.
  */
 export function formatSessionLine(
   s: SessionListRow,
   selected: boolean,
   now = Date.now(),
+  width?: number,
 ): string {
   const prefix = selected ? '>' : ' ';
-  const title = (s.title ?? '').replace(/\s+/g, ' ').trim();
-  const label = title || shortSessionId(s.id);
+  const rawTitle = (s.title ?? '').replace(/\s+/g, ' ').trim();
+  const label = rawTitle ? sessionPickerLabel(rawTitle) : shortSessionId(s.id);
   const age = relAge(s.startedAt, now);
   const counts = `t:${s.turnCount} e:${s.eventCount}`;
-  if (title) {
-    return `${prefix}${label}  ${shortSessionId(s.id)}  ${age}  ${counts}`;
+  // Meta only — never re-append id when title was empty (label is already id).
+  const segs = [`  ${age}`, `  ${counts}`];
+
+  if (width == null || width <= 0) {
+    return `${prefix}${label}${segs.join('')}`;
   }
-  // Empty title: label is already the id — do not double it.
-  return `${prefix}${label}  ${age}  ${counts}`;
+
+  const budget = Math.floor(width);
+  let head = `${prefix}${label}`;
+  if (head.length > budget) {
+    return padRow(head, budget);
+  }
+  let out = head;
+  for (const seg of segs) {
+    if (out.length + seg.length <= budget) out += seg;
+    else break;
+  }
+  return out;
 }
 
 /**
  * Full fixed-width turn timeline line (clock · kind · body · #<eventId>).
  * Kind is fixed-width for column alignment; kind color is applied by the row.
+ * Tool bodies use basenames unless the row is selected and the full path fits.
  */
-export function formatTurnLine(turn: TurnRow, selected: boolean): string {
+export function formatTurnLine(
+  turn: TurnRow,
+  selected: boolean,
+  width?: number,
+): string {
   const prefix = selected ? '>' : ' ';
   const clock = formatEventTs(turn.ts);
   const kind = (turn.kind || '?').slice(0, 11).padEnd(11);
-  const body = rowText(turn);
   const idTag = `#${turn.eventId}`;
+  const fixed =
+    prefix.length + clock.length + 2 + kind.length + 1 + 2 + idTag.length;
+  const bodyBudget =
+    width != null && width > 0 ? Math.max(8, Math.floor(width) - fixed) : Infinity;
+
+  const fullBody = rowText(turn, { fullPaths: true });
+  const shortBody = rowText(turn, { fullPaths: false });
+  const body =
+    selected && fullBody.length <= bodyBudget ? fullBody : shortBody;
+
   return `${prefix}${clock}  ${kind} ${body}  ${idTag}`;
 }
 
@@ -740,7 +811,10 @@ export function MicroscopeStage({
               key={`s-${row.id}-${i}`}
               width={pickerInnerW}
               color={selected ? t.info : t.foreground}
-              text={padRow(formatSessionLine(row, selected), pickerInnerW)}
+              text={padRow(
+                formatSessionLine(row, selected, Date.now(), pickerInnerW),
+                pickerInnerW,
+              )}
             />
           );
         })}
@@ -844,7 +918,10 @@ export function MicroscopeStage({
               key={`t-${row.eventId}-${i}`}
               width={timelineInnerW}
               color={color}
-              text={padRow(formatTurnLine(row, selected), timelineInnerW)}
+              text={padRow(
+                formatTurnLine(row, selected, timelineInnerW),
+                timelineInnerW,
+              )}
             />
           );
         })}

@@ -11,6 +11,7 @@ import { toPalette } from '../theme';
 import {
   budgetSessionSlots,
   budgetTurnSlots,
+  collapseAbsolutePaths,
   formatEventTs,
   formatSessionInfo,
   formatSessionLine,
@@ -22,11 +23,13 @@ import {
   MIN_TURN_SLOTS,
   paneGeometry,
   paneInnerWidth,
-  PICKER_COL_WIDTH,
+  PICKER_MAX_OUTER,
+  PICKER_MIN_OUTER,
   projectBasename,
   relAge,
   rowText,
   sessionDisplayTitle,
+  sessionPickerLabel,
   shortSessionId,
   STACK_BELOW_COLS,
 } from './MicroscopeStage';
@@ -315,7 +318,7 @@ describe('Microscope pure helpers', () => {
     expect(kindColor('task', p)).toBe(p.info);
   });
 
-  test('rowText summarizes user/tool/error rows', () => {
+  test('rowText summarizes user/tool/error rows; collapses absolute paths', () => {
     const user: TurnRow = {
       eventId: 1,
       kind: 'user',
@@ -336,6 +339,18 @@ describe('Microscope pure helpers', () => {
     };
     expect(rowText(tool)).toBe('Read');
 
+    const pathTool: TurnRow = {
+      eventId: 4,
+      kind: 'tool_use',
+      ts: '2026-06-02T12:02:30.000Z',
+      text: 'C:\\Users\\x\\proj\\file.ts',
+      toolName: 'Read',
+      toolError: 0,
+    };
+    expect(rowText(pathTool)).toBe('Read file.ts');
+    expect(rowText(pathTool)).not.toContain('C:\\Users');
+    expect(rowText(pathTool, { fullPaths: true })).toContain('C:\\Users');
+
     const err: TurnRow = {
       eventId: 3,
       kind: 'tool_result',
@@ -347,7 +362,13 @@ describe('Microscope pure helpers', () => {
     expect(rowText(err)).toMatch(/Read.*ENOENT/);
   });
 
-  test('formatSessionLine leads with title; id+age+counts secondary', () => {
+  test('collapseAbsolutePaths basenames windows and posix paths', () => {
+    expect(collapseAbsolutePaths('C:\\Users\\x\\proj\\file.ts')).toBe('file.ts');
+    expect(collapseAbsolutePaths('/home/a/b/out.json')).toBe('out.json');
+    expect(collapseAbsolutePaths('relative/path.ts')).toBe('relative/path.ts');
+  });
+
+  test('formatSessionLine leads with title; age+counts secondary; no id on titled rows', () => {
     const now = new Date('2026-06-03T12:00:00.000Z').getTime();
     const titled = baseSession({
       id: 'sess-alpha',
@@ -358,10 +379,41 @@ describe('Microscope pure helpers', () => {
     const line = formatSessionLine(titled, true, now);
     expect(line.startsWith('>')).toBe(true);
     expect(line.startsWith('>Repeat Previous')).toBe(true);
-    expect(line).toMatch(/sess-alpha/);
     expect(line).toMatch(/t:3 e:4/);
-    // title leads before the id secondary
-    expect(line.indexOf('Repeat Previous')).toBeLessThan(line.indexOf('sess-alpha'));
+    expect(line).toMatch(/\d+[mhd] ago/);
+    // titled rows do not carry a secondary id
+    expect(line).not.toMatch(/sess-alpha/);
+  });
+
+  test('formatSessionLine width drops meta before title; pad contract', () => {
+    const now = new Date('2026-06-03T12:00:00.000Z').getTime();
+    const titled = baseSession({
+      id: 'sess-alpha',
+      title: 'U7 Lens Runnability Dash Panel',
+      turnCount: 3,
+      eventCount: 4,
+      startedAt: '2026-06-03T10:00:00.000Z',
+    });
+    const inner = paneInnerWidth(paneGeometry(140).pickerW);
+    expect(inner).toBeGreaterThanOrEqual(48);
+    const line = formatSessionLine(titled, false, now, inner);
+    expect(line.length).toBeLessThanOrEqual(inner);
+    expect(line.startsWith(' U7 Lens')).toBe(true);
+    // distinctive head visible (not mid-token ellipsis of a short title)
+    expect(line).toContain('U7 Lens');
+    // meta present when title fits
+    expect(line).toMatch(/\d+[mhd] ago|t:\d/);
+
+    const long = baseSession({
+      id: 'sess-long',
+      title: 'X'.repeat(80),
+      turnCount: 1,
+      eventCount: 1,
+    });
+    const cut = formatSessionLine(long, true, now, 40);
+    expect(cut.length).toBe(40);
+    expect(cut.endsWith('\u2026')).toBe(true);
+    expect(cut.startsWith('>XXXX')).toBe(true);
   });
 
   test('formatSessionLine falls back to id prefix when title empty', () => {
@@ -375,15 +427,18 @@ describe('Microscope pure helpers', () => {
     expect(line.match(/sess-beta/g)?.length).toBe(1);
   });
 
-  test('sessionDisplayTitle / formatSessionTitleLine prefer title', () => {
+  test('sessionDisplayTitle / formatSessionTitleLine prefer rewritten title', () => {
     const titled = baseSession({ id: 'sess-alpha', title: '  Hello World  ' });
     expect(sessionDisplayTitle(titled)).toBe('Hello World');
     expect(formatSessionTitleLine(titled)).toBe('Hello World');
     const bare = baseSession({ id: 'sess-alpha-long-id-suffix', title: '' });
     expect(sessionDisplayTitle(bare)).toBe(shortSessionId(bare.id));
+    expect(sessionPickerLabel('Pipeline: dream-2026-02-14T08-19-40-project-health')).toBe(
+      'project-health 2026-02-14',
+    );
   });
 
-  test('formatTurnLine includes selection prefix + grain', () => {
+  test('formatTurnLine includes selection prefix + grain; basename tool paths', () => {
     const turn: TurnRow = {
       eventId: 42,
       kind: 'user',
@@ -396,18 +451,40 @@ describe('Microscope pure helpers', () => {
     expect(tline).toMatch(/12:00/);
     expect(tline).toMatch(/user/);
     expect(tline).toMatch(/#42/);
+
+    const pathTurn: TurnRow = {
+      eventId: 7,
+      kind: 'tool_use',
+      ts: '2026-06-02T12:05:00.000Z',
+      text: 'C:\\Users\\x\\proj\\file.ts',
+      toolName: 'Read',
+      toolError: 0,
+    };
+    const unsel = formatTurnLine(pathTurn, false, 80);
+    expect(unsel).toContain('file.ts');
+    expect(unsel).not.toContain('C:\\Users');
+    // selected + wide budget may keep full path
+    const selWide = formatTurnLine(pathTurn, true, 200);
+    expect(selWide).toContain('C:\\Users');
   });
 
-  test('paneGeometry two-pane at host≈term−pad ≥100, stacked below; picker ~30–34', () => {
+  test('paneGeometry flex picker ≥48 outer at operator sizes; stacked below 100', () => {
     expect(STACK_BELOW_COLS).toBe(100);
     // host width = residual stage box (term − member pad); content charges stage pad only
-    const wide = paneGeometry(118); // term 120 − 2 member pad
-    expect(wide.twoPane).toBe(true);
-    expect(wide.pickerW).toBeGreaterThanOrEqual(30);
-    expect(wide.pickerW).toBeLessThanOrEqual(34);
-    expect(wide.pickerW).toBe(PICKER_COL_WIDTH);
-    expect(wide.timelineW).toBe(wide.contentW - wide.pickerW - 1);
-    expect(wide.contentW).toBe(118 - 2);
+    const op = paneGeometry(140);
+    expect(op.twoPane).toBe(true);
+    expect(op.pickerW).toBeGreaterThanOrEqual(PICKER_MIN_OUTER);
+    expect(op.pickerW).toBeLessThanOrEqual(PICKER_MAX_OUTER);
+    expect(op.pickerW + 1 + op.timelineW).toBe(op.contentW);
+    expect(paneInnerWidth(op.pickerW)).toBe(op.pickerW - 4);
+    expect(paneInnerWidth(op.pickerW)).toBeGreaterThanOrEqual(48);
+
+    const narrow = paneGeometry(118); // term 120 − 2 member pad
+    expect(narrow.twoPane).toBe(true);
+    expect(narrow.pickerW).toBeGreaterThanOrEqual(PICKER_MIN_OUTER);
+    expect(narrow.pickerW).toBeLessThanOrEqual(PICKER_MAX_OUTER);
+    expect(narrow.pickerW + 1 + narrow.timelineW).toBe(narrow.contentW);
+    expect(narrow.contentW).toBe(118 - 2);
 
     const stacked = paneGeometry(88); // term 90 − 2
     expect(stacked.twoPane).toBe(false);
@@ -417,9 +494,10 @@ describe('Microscope pure helpers', () => {
     // term 100 → host 98; host + member pad restores stack threshold
     const edge = paneGeometry(98);
     expect(edge.twoPane).toBe(true);
+    expect(edge.pickerW).toBeGreaterThanOrEqual(PICKER_MIN_OUTER);
 
     // Card inner width = outer − 4
-    expect(paneInnerWidth(32)).toBe(28);
+    expect(paneInnerWidth(48)).toBe(44);
   });
 
   test('budgetSessionSlots / budgetTurnSlots grow with residual listHostH; floors hold', () => {
@@ -567,11 +645,11 @@ describe('MicroscopeStage render', () => {
     // Error row: toolError=1 surfaces ENOENT tail + event id grain
     expect(frame).toMatch(/ENOENT/);
     expect(frame).toMatch(new RegExp(`#${errorEventId}`));
-    // Session-info: title first + facts (project / turns / errors)
+    // Session-info: title first + facts (project / turns; errors may head-slice on tight timeline)
     expect(frame).toMatch(/Repeat Previous/);
     expect(frame).toMatch(/microscope-demo/);
     expect(frame).toMatch(/\d+\s+turns/);
-    expect(frame).toMatch(/\d+\s+errors/);
+    expect(frame).toMatch(/\d+\s+errors|\d+\u2026|\d+\.\.\./);
     // Picker remains visible in two-pane
     expect(frame).toMatch(/SESSIONS/);
     expect(frame).toMatch(/TIMELINE/);
