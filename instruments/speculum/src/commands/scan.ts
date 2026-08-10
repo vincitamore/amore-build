@@ -7,10 +7,56 @@ import {
   type ProbeResult,
   type HitDetail,
 } from "../probes";
+import {
+  DEFAULT_POLICY,
+  evaluatePolicy,
+  formatPolicyReport,
+  type PolicyResult,
+  type PolicyTable,
+} from "../policy";
+import { readFileSync } from "node:fs";
 
 function opt(args: string[], name: string): string | undefined {
   const i = args.indexOf(name);
   return i >= 0 ? args[i + 1] : undefined;
+}
+
+/**
+ * Parse --policy flag. Bare `--policy` (no path, or next token is another
+ * flag) uses the built-in default table. `--policy path.json` loads a table.
+ */
+function resolvePolicyTable(args: string[]): PolicyTable | null {
+  const i = args.indexOf("--policy");
+  if (i < 0) return null;
+  const next = args[i + 1];
+  if (!next || next.startsWith("-")) {
+    return DEFAULT_POLICY;
+  }
+  return loadPolicyFile(next);
+}
+
+function loadPolicyFile(path: string): PolicyTable {
+  let raw: string;
+  try {
+    raw = readFileSync(path, "utf8");
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`failed to read policy file: ${path}\n${msg}`);
+    process.exit(1);
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`invalid policy JSON: ${path}\n${msg}`);
+    process.exit(1);
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    console.error(`policy file must be a JSON object keyed by probe name: ${path}`);
+    process.exit(1);
+  }
+  return parsed as PolicyTable;
 }
 
 /** Format one hit for TTY — fields only from HitDetail, never invented. */
@@ -85,6 +131,16 @@ function printHumanResults(results: ProbeResult[], showHits: boolean): void {
 export async function scanCommand(args: string[]): Promise<void> {
   const json = args.includes("--json");
   const showHits = args.includes("--hits") || args.includes("--verbose");
+  const policyReportOnly = args.includes("--policy-report");
+  const policyTable = resolvePolicyTable(args);
+  // --policy-report without --policy still evaluates the default table.
+  const wantPolicy = policyTable !== null || policyReportOnly;
+  const table: PolicyTable | null = wantPolicy
+    ? (policyTable ?? DEFAULT_POLICY)
+    : null;
+  // Exit 1 on violations only when --policy is present (not report-only).
+  const failOnViolations = policyTable !== null;
+
   const project = opt(args, "--project");
   const sinceStr = opt(args, "--since");
   const untilStr = opt(args, "--until");
@@ -111,20 +167,59 @@ export async function scanCommand(args: string[]): Promise<void> {
       results = runAllProbes(db, opts);
     }
 
-    // --json always: stable machine shape (includes hits[]). Do not alter.
+    let policyResult: PolicyResult | null = null;
+    if (table) {
+      policyResult = evaluatePolicy(results, table);
+    }
+
+    // --json always: stable machine shape for probes; policy is an envelope
+    // only when a policy flag is active (plain --json stays a bare array).
     if (json) {
-      console.log(JSON.stringify(results, null, 2));
+      if (policyResult) {
+        console.log(
+          JSON.stringify(
+            { probes: results, policy: policyResult },
+            null,
+            2,
+          ),
+        );
+      } else {
+        console.log(JSON.stringify(results, null, 2));
+      }
+      if (failOnViolations && policyResult && policyResult.violations > 0) {
+        process.exit(1);
+      }
       return;
     }
 
-    // Pipe default (non-TTY, no hits flag): keep auto-JSON for scripting.
-    // --hits / --verbose force human TTY-style output even when piped (tests, logs).
-    if (!process.stdout.isTTY && !showHits) {
-      console.log(JSON.stringify(results, null, 2));
+    // Pipe default (non-TTY, no hits/policy-report flag): keep auto-JSON.
+    // --hits / --verbose / --policy-report force human-style output when piped.
+    const forceHuman = showHits || policyReportOnly || failOnViolations;
+    if (!process.stdout.isTTY && !forceHuman) {
+      if (policyResult) {
+        console.log(
+          JSON.stringify(
+            { probes: results, policy: policyResult },
+            null,
+            2,
+          ),
+        );
+      } else {
+        console.log(JSON.stringify(results, null, 2));
+      }
+      if (failOnViolations && policyResult && policyResult.violations > 0) {
+        process.exit(1);
+      }
       return;
     }
 
     printHumanResults(results, showHits);
+    if (policyResult) {
+      process.stdout.write(formatPolicyReport(policyResult));
+    }
+    if (failOnViolations && policyResult && policyResult.violations > 0) {
+      process.exit(1);
+    }
   } finally {
     db.close();
   }

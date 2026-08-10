@@ -47,6 +47,9 @@ Commands:
                         --until D      ISO / YYYY-MM-DD ceiling
                         --hits         Print probe hit evidence on TTY
                         --verbose      Same as --hits
+                        --policy [path] Evaluate threshold gates (default table;
+                                        optional JSON path). Exit 1 on violations
+                        --policy-report Print policy verdict table; always exit 0
                         --json         Machine-readable (includes hits)
 
   usage                 Per-model token and turn aggregation (no prices)

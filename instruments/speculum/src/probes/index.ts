@@ -15,6 +15,18 @@ import { staleCorpus } from "./stale-corpus";
 import type { Probe, ProbeOptions, ProbeResult } from "./types";
 
 export type { Probe, ProbeOptions, ProbeResult, HitDetail } from "./types";
+export {
+  compileRuleBank,
+  compileRuleBankFromJson,
+  matchRules,
+  RULE_MATCH_MAX_BANK_SIZE,
+  RULE_MATCH_MAX_PATTERN_LENGTH,
+  RULE_MATCH_MAX_TEXT_LENGTH,
+  RuleCompileError,
+  type CompiledRule,
+  type RuleDef,
+  type RuleMatch,
+} from "./rule-match";
 
 export const PROBES: Record<string, Probe> = {
   "rage-rate": rageRate,

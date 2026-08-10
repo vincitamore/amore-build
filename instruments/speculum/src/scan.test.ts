@@ -199,3 +199,109 @@ describe("scan hits presentation", () => {
     }
   });
 });
+
+describe("scan policy gates", () => {
+  test("scan --policy exits 1 on tripwire violations", () => {
+    const corpus = writeTripwireCorpus();
+    const { home, dbPath, cleanup } = tempHome();
+    try {
+      const env = {
+        ...process.env,
+        SPECULUM_HOME: home,
+        SPECULUM_DB: dbPath,
+        SPECULUM_SESSIONS_DIR: corpus.root,
+      };
+
+      const ingest = Bun.spawnSync(["bun", "run", CLI, "ingest", "--json"], {
+        env,
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      expect(ingest.exitCode).toBe(0);
+
+      const scan = Bun.spawnSync(
+        ["bun", "run", CLI, "scan", "--policy", "--json"],
+        { env, stdout: "pipe", stderr: "pipe" },
+      );
+      expect(scan.exitCode).toBe(1);
+      const body = JSON.parse(scan.stdout.toString()) as {
+        probes: unknown[];
+        policy: { violations: number; compliant: boolean; verdicts: unknown[] };
+      };
+      expect(Array.isArray(body.probes)).toBe(true);
+      expect(body.policy.violations).toBeGreaterThan(0);
+      expect(body.policy.compliant).toBe(false);
+      expect(body.policy.verdicts.length).toBeGreaterThan(0);
+    } finally {
+      corpus.cleanup();
+      cleanup();
+    }
+  });
+
+  test("scan --policy-report annotates and exits 0", () => {
+    const corpus = writeTripwireCorpus();
+    const { home, dbPath, cleanup } = tempHome();
+    try {
+      const env = {
+        ...process.env,
+        SPECULUM_HOME: home,
+        SPECULUM_DB: dbPath,
+        SPECULUM_SESSIONS_DIR: corpus.root,
+      };
+
+      const ingest = Bun.spawnSync(["bun", "run", CLI, "ingest", "--json"], {
+        env,
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      expect(ingest.exitCode).toBe(0);
+
+      const scan = Bun.spawnSync(
+        ["bun", "run", CLI, "scan", "--policy-report"],
+        { env, stdout: "pipe", stderr: "pipe" },
+      );
+      expect(scan.exitCode).toBe(0);
+      const text = scan.stdout.toString();
+      expect(text).toContain("speculum policy");
+      expect(text).toMatch(/PASS|FAIL/);
+      expect(text).toContain("violations:");
+    } finally {
+      corpus.cleanup();
+      cleanup();
+    }
+  });
+
+  test("plain scan --json stays a bare probe array", () => {
+    const corpus = writeTripwireCorpus();
+    const { home, dbPath, cleanup } = tempHome();
+    try {
+      const env = {
+        ...process.env,
+        SPECULUM_HOME: home,
+        SPECULUM_DB: dbPath,
+        SPECULUM_SESSIONS_DIR: corpus.root,
+      };
+
+      const ingest = Bun.spawnSync(["bun", "run", CLI, "ingest", "--json"], {
+        env,
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      expect(ingest.exitCode).toBe(0);
+
+      const scan = Bun.spawnSync(["bun", "run", CLI, "scan", "--json"], {
+        env,
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      expect(scan.exitCode).toBe(0);
+      const body = JSON.parse(scan.stdout.toString());
+      expect(Array.isArray(body)).toBe(true);
+      expect(body[0].probe).toBeDefined();
+      expect(body.policy).toBeUndefined();
+    } finally {
+      corpus.cleanup();
+      cleanup();
+    }
+  });
+});

@@ -1,9 +1,13 @@
 import type { Db } from "../store/db";
 import { userTurns } from "../store/queries";
 import { wilson95 } from "../stats";
-import { evidenceFromFolded, foldWithMap } from "./normalize";
 import type { HitDetail, Probe, ProbeOptions, ProbeResult } from "./types";
 import { queryOptsFromProbe } from "./types";
+import {
+  compileRuleBank,
+  matchRules,
+  type RuleDef,
+} from "./rule-match";
 
 export type OperatorCorrectionCategory =
   | "nope-prefix"
@@ -21,65 +25,55 @@ export interface CategoryMatch {
   evidence: string;
 }
 
-interface CategoryRule {
-  category: OperatorCorrectionCategory;
-  regex: RegExp;
-  exclude?: RegExp;
-}
-
-const RULES: CategoryRule[] = [
-  { category: "nope-prefix", regex: /^[ ]*([Nn]ope|[Nn]ah)[, .]/ },
+/** Pattern bank for operator correction (shared rule-match format). */
+export const OPERATOR_CORRECTION_RULE_DEFS: RuleDef[] = [
+  { name: "nope-prefix", pattern: /^[ ]*([Nn]ope|[Nn]ah)[, .]/ },
   {
-    category: "pivot-actually-wait",
-    regex: /^[ ]*([Aa]ctually|[Aa]ctaully|[Ww]ait[, ]|[Hh]old (on|up))/,
+    name: "pivot-actually-wait",
+    pattern: /^[ ]*([Aa]ctually|[Aa]ctaully|[Ww]ait[, ]|[Hh]old (on|up))/,
     exclude:
       /\b(lets continue|before starting|while you'?re here|actually not [a-z]+,? it was|to (wrap up|wrap things up))\b/i,
   },
   {
-    category: "i-said-told",
-    regex: /\b(I (literally |already |just )?(said|told you|asked|meant)|[Ll]iterally (told|said))/,
+    name: "i-said-told",
+    pattern: /\b(I (literally |already |just )?(said|told you|asked|meant)|[Ll]iterally (told|said))/,
     exclude: /\bI meant to (give|send|tell|do|run|check|share|ask|update|attach)/i,
   },
   {
-    category: "caps-correction",
-    regex: /\b[A-Z]{2,}([ /\\-]+[A-Z]{2,}){3,}\b/,
+    name: "caps-correction",
+    pattern: /\b[A-Z]{2,}([ /\\-]+[A-Z]{2,}){3,}\b/,
   },
   {
-    category: "frustration-markers",
-    regex: /(\?\?\?|!!!|\bwtf\b|\bffs\b|\bwth\b|\bgd\b|what the (hell|fuck|heck))/i,
+    name: "frustration-markers",
+    pattern: /(\?\?\?|!!!|\bwtf\b|\bffs\b|\bwth\b|\bgd\b|what the (hell|fuck|heck))/i,
   },
   {
-    category: "still-recurrence",
-    regex: /^[ ]*[Ss]till\b|\b(its still|it'?s still|this is still) (not|broken|wrong|doing|fucked|showing)/,
+    name: "still-recurrence",
+    pattern: /^[ ]*[Ss]till\b|\b(its still|it'?s still|this is still) (not|broken|wrong|doing|fucked|showing)/,
   },
   {
-    category: "you-accusation",
-    regex:
+    name: "you-accusation",
+    pattern:
       /\byou (fail(ed|ing)?|miss(ed|ing)?|misread|didn'?t|haven'?t|forgot|lumped|skipped|ignored|hallucinat|are wrong|are blind|just (changed|did|broke|killed)|need to|should have|have to|cannot)/i,
     exclude: /\byou should be able to\b/i,
   },
   {
-    category: "interruption-apology",
-    regex: /^[ ]*[Ss]orry[, ]+(didn'?t|didnt) mean to (interrupt|interupt)/,
+    name: "interruption-apology",
+    pattern: /^[ ]*[Ss]orry[, ]+(didn'?t|didnt) mean to (interrupt|interupt)/,
   },
   {
-    category: "i-wanted-asked",
-    regex: /^[ ]*I (wanted|want|asked|need|requested|expected) you to|\bI (just )?stopped you\b/,
+    name: "i-wanted-asked",
+    pattern: /^[ ]*I (wanted|want|asked|need|requested|expected) you to|\bI (just )?stopped you\b/,
   },
 ];
 
+const OPERATOR_BANK = compileRuleBank(OPERATOR_CORRECTION_RULE_DEFS);
+
 export function detectOperatorCorrection(text: string): CategoryMatch[] {
-  const matches: CategoryMatch[] = [];
-  const foldedInfo = foldWithMap(text);
-  const folded = foldedInfo.folded;
-  for (const rule of RULES) {
-    if (rule.exclude && rule.exclude.test(folded)) continue;
-    const m = rule.regex.exec(folded);
-    if (!m) continue;
-    const raw = evidenceFromFolded(foldedInfo, m.index, m[0]!.length);
-    matches.push({ category: rule.category, evidence: raw || m[0]! });
-  }
-  return matches;
+  return matchRules(text, OPERATOR_BANK).map((m) => ({
+    category: m.name as OperatorCorrectionCategory,
+    evidence: m.evidence,
+  }));
 }
 
 export const operatorCorrection: Probe = (db: Db, opts: ProbeOptions = {}): ProbeResult => {
