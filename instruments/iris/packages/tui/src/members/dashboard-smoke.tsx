@@ -1,4 +1,6 @@
 // Headless smoke for the Dashboard member. Run: bun run src/members/dashboard-smoke.tsx
+// Requires an org-root cwd or IRIS_ORG_ROOT set (the Dashboard's regula reads resolve the org
+// root); the settle below covers Windows `git log` cold-start (~1 s) for the Recent-Commits check.
 import { createTestRenderer } from '@opentui/core/testing';
 import { createRoot } from '@opentui/react';
 import { ThemeProvider } from '../ThemeProvider';
@@ -13,7 +15,7 @@ createRoot(renderer).render(
   </ThemeProvider>,
 );
 
-await new Promise((r) => setTimeout(r, 400)); // regula reads the real tree
+await new Promise((r) => setTimeout(r, 1500)); // Windows git-log cold start can exceed 1s
 await renderOnce();
 const frame = captureCharFrame();
 console.log(frame);
