@@ -259,18 +259,18 @@ describe('probe grid navigation helpers', () => {
 
 describe('probe drill budget + hit window', () => {
   test('budgetHitSlots fills residual body height (tall/short)', () => {
-    // body residual: 30 − 8 grid − 1 header → 21 slots
-    expect(budgetHitSlots(30, 8, 1)).toBe(21);
-    // short body: 10 − 4 grid − 1 header → 5
-    expect(budgetHitSlots(10, 4, 1)).toBe(5);
-    // starved residual still floors at 1
-    expect(budgetHitSlots(6, 8, 1)).toBe(1);
+    // body residual: 30 − 10 grid − 1 header → 19 slots
+    expect(budgetHitSlots(30, 10, 1)).toBe(19);
+    // short body: 10 − 5 grid − 1 header → 4
+    expect(budgetHitSlots(10, 5, 1)).toBe(4);
+    // starved residual still floors at 1 (fit-clamp floor, not a MIN past residual)
+    expect(budgetHitSlots(6, 10, 1)).toBe(1);
     // default hits-header arg (=1)
-    expect(budgetHitSlots(30, 8)).toBe(21);
+    expect(budgetHitSlots(30, 10)).toBe(19);
   });
 
   test('budgetProbeVisibleRows: closed grows; open leaves room for hits', () => {
-    // closed board at bodyH 30 → several card rows (capped 6)
+    // closed board at bodyH 30 → several card rows (capped 6); card row H = 5
     expect(budgetProbeVisibleRows(30, false)).toBeGreaterThanOrEqual(3);
     expect(budgetProbeVisibleRows(30, false)).toBeLessThanOrEqual(6);
     // open at short body still ≥1 grid row
@@ -278,16 +278,19 @@ describe('probe drill budget + hit window', () => {
     // open at tall: grid stays compact so hits absorb height
     const tallOpen = budgetProbeVisibleRows(30, true);
     expect(tallOpen).toBeGreaterThanOrEqual(1);
-    const hitSlots = budgetHitSlots(30, tallOpen * 4, 1);
+    const hitSlots = budgetHitSlots(30, tallOpen * 5, 1);
     expect(hitSlots).toBeGreaterThanOrEqual(8);
   });
 
   test('I-PROBE-SLOTS-FIT: grid + hits stay within bodyH', () => {
     for (const bodyH of [9, 15, 20, 30, 39]) {
       const vr = budgetProbeVisibleRows(bodyH, true);
-      const gridH = vr * 4;
+      const gridH = vr * 5;
       const hits = budgetHitSlots(bodyH, gridH, 1);
-      expect(gridH + hits + 1).toBeLessThanOrEqual(bodyH + 1); // +1 soft for floors
+      // Fit-clamp: painted stack never exceeds body when residual can hold header+hit
+      if (bodyH >= gridH + 2) {
+        expect(gridH + 1 + hits).toBeLessThanOrEqual(bodyH);
+      }
       expect(hits).toBeGreaterThanOrEqual(1);
     }
   });

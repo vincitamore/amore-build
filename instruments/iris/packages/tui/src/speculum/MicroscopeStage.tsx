@@ -49,6 +49,8 @@ export const TIMELINE_MIN_OUTER = 36;
 const PANE_GAP = 1;
 /** Stage pad L/R only — nest width already removed by residual host. */
 const STAGE_PAD_COLS = 2;
+/** Panel border (2) + panel pad (2) — charged so card outers fit the panel body. */
+const PANEL_CHROME_COLS = 4;
 
 /**
  * Local stage chrome charged against residual host height:
@@ -204,7 +206,12 @@ export function paneGeometry(hostWidth: number): {
   pickerW: number;
   timelineW: number;
 } {
-  const contentW = Math.max(16, Math.floor(hostWidth) - STAGE_PAD_COLS);
+  // Stage pad + Panel border/pad so card outers never exceed the panel body
+  // (otherwise flex-shrink clips fixed-width turn rows and eats trailing #id).
+  const contentW = Math.max(
+    16,
+    Math.floor(hostWidth) - STAGE_PAD_COLS - PANEL_CHROME_COLS,
+  );
   // Stack threshold was terminal 100; host is terminal minus member pad (2).
   const twoPane = Math.floor(hostWidth) + sessionsMemberPadApprox() >= STACK_BELOW_COLS;
   if (!twoPane) {
@@ -226,17 +233,41 @@ function sessionsMemberPadApprox(): number {
 }
 
 /**
- * Picker / timeline slot counts from list-host residual height
- * (stageBox.height − MICRO_STAGE_CHROME). Floors keep 80×24 usable.
+ * Vertical chrome a bordered titled Card spends outside content rows
+ * (top border + title row + bottom border). Charged against listHost when
+ * budgeting fixed slots so the painted stack cannot exceed the host.
  */
+export const CARD_V_CHROME = 3;
+/** Gap row between stacked Sessions and Timeline cards. */
+export const STACK_GAP = 1;
+
+/**
+ * Picker / timeline slot counts from list-host residual height
+ * (stageBox.height − MICRO_STAGE_CHROME). Pure fit-clamp: never force a
+ * MIN_* floor that would overflow the host (card chrome + info rows count).
+ */
+/** Stacked list-host overhead (card chrome ×2 + optional gap + timeline info). */
+function stackedOverhead(listHostH: number): number {
+  const h = Math.max(0, Math.floor(listHostH));
+  // Drop the inter-card gap when the host cannot hold chrome + 2 content rows.
+  const needWithGap = 2 * CARD_V_CHROME + STACK_GAP + TIMELINE_INFO_ROWS + 2;
+  const gap = h >= needWithGap ? STACK_GAP : 0;
+  return 2 * CARD_V_CHROME + gap + TIMELINE_INFO_ROWS;
+}
+
 export function budgetSessionSlots(listHostH: number, twoPane: boolean): number {
-  const h = Math.max(1, Math.floor(listHostH));
-  if (twoPane) return Math.max(MIN_SESSION_SLOTS, h);
-  const residual = Math.max(
-    MIN_SESSION_SLOTS + MIN_TURN_SLOTS + TIMELINE_INFO_ROWS,
-    h,
-  );
-  return Math.max(MIN_SESSION_SLOTS, Math.floor(residual * 0.4));
+  const h = Math.max(0, Math.floor(listHostH));
+  if (twoPane) {
+    // Content rows inside one Card: host − card chrome.
+    return Math.max(1, h - CARD_V_CHROME);
+  }
+  // Stacked: two cards + gap + timeline info share the host.
+  const available = Math.max(0, h - stackedOverhead(h));
+  if (available <= 0) return 1;
+  if (available === 1) return 1;
+  // ~40% sessions, rest turns; both ≥1 and sum ≤ available.
+  const s = Math.max(1, Math.floor(available * 0.4));
+  return Math.min(s, available - 1);
 }
 
 export function budgetTurnSlots(
@@ -244,12 +275,15 @@ export function budgetTurnSlots(
   twoPane: boolean,
   sessionSlots?: number,
 ): number {
-  const h = Math.max(1, Math.floor(listHostH));
+  const h = Math.max(0, Math.floor(listHostH));
   if (twoPane) {
-    return Math.max(MIN_TURN_SLOTS, h - TIMELINE_INFO_ROWS);
+    return Math.max(1, h - CARD_V_CHROME - TIMELINE_INFO_ROWS);
   }
+  const available = Math.max(0, h - stackedOverhead(h));
   const ss = sessionSlots ?? budgetSessionSlots(h, false);
-  return Math.max(MIN_TURN_SLOTS, h - ss - TIMELINE_INFO_ROWS);
+  if (available <= 0) return 1;
+  if (available === 1) return Math.max(0, available - ss); // 0 when sessions took the only row
+  return Math.max(1, available - ss);
 }
 
 /**
@@ -337,8 +371,16 @@ export function formatTurnLine(
 
   const fullBody = rowText(turn, { fullPaths: true });
   const shortBody = rowText(turn, { fullPaths: false });
-  const body =
+  let body =
     selected && fullBody.length <= bodyBudget ? fullBody : shortBody;
+  // Clamp body so clock+kind+#id always fit the width (padRow must not eat the id).
+  if (Number.isFinite(bodyBudget) && body.length > bodyBudget) {
+    const ellipsis = '\u2026';
+    body =
+      bodyBudget <= 1
+        ? ellipsis
+        : `${body.slice(0, bodyBudget - 1)}${ellipsis}`;
+  }
 
   return `${prefix}${clock}  ${kind} ${body}  ${idTag}`;
 }
@@ -602,7 +644,7 @@ export function MicroscopeStage({
       setTurnCursor(cursor);
       // Scroll window so the target is visible (slots from live height budget).
       setTurnScroll((sc) => {
-        const win = Math.max(MIN_TURN_SLOTS, turnSlotsRef.current);
+        const win = Math.max(1, turnSlotsRef.current);
         if (cursor < sc) return cursor;
         if (cursor >= sc + win) return Math.max(0, cursor - win + 1);
         return sc;
@@ -648,6 +690,8 @@ export function MicroscopeStage({
   }, [sessions.length, sessionCursor]);
 
   useEffect(() => {
+    // slot count 0 is a legal fit-clamp at tiny hosts — do not scroll-loop.
+    if (sessionSlots <= 0) return;
     if (sessionCursor < sessionScroll) setSessionScroll(sessionCursor);
     else if (sessionCursor >= sessionScroll + sessionSlots) {
       setSessionScroll(sessionCursor - sessionSlots + 1);
@@ -659,6 +703,8 @@ export function MicroscopeStage({
   }, [turns.length, turnCursor]);
 
   useEffect(() => {
+    // slot count 0 is a legal fit-clamp at tiny hosts — do not scroll-loop.
+    if (turnSlots <= 0) return;
     if (turnCursor < turnScroll) setTurnScroll(turnCursor);
     else if (turnCursor >= turnScroll + turnSlots) {
       setTurnScroll(turnCursor - turnSlots + 1);
@@ -777,7 +823,7 @@ export function MicroscopeStage({
       );
     }
     return (
-      <box flexDirection="column" flexShrink={0}>
+      <box flexDirection="column" flexShrink={0} overflow="hidden">
         {mode === 'busy'
           ? banners.map((b, i) => (
               <FixedClearRow
@@ -864,7 +910,7 @@ export function MicroscopeStage({
   const timelineBody = useMemo(() => {
     if (!openSessionId) {
       return (
-        <box flexDirection="column" flexShrink={0}>
+        <box flexDirection="column" flexShrink={0} overflow="hidden">
           {Array.from({ length: turnSlots }, (_, i) => (
             <FixedClearRow
               key={`t-empty-${i}`}
@@ -878,7 +924,7 @@ export function MicroscopeStage({
     }
     if (turns.length === 0) {
       return (
-        <box flexDirection="column" flexShrink={0}>
+        <box flexDirection="column" flexShrink={0} overflow="hidden">
           <FixedClearRow
             width={timelineInnerW}
             color={t.muted}
@@ -896,7 +942,7 @@ export function MicroscopeStage({
       );
     }
     return (
-      <box flexDirection="column" flexShrink={0}>
+      <box flexDirection="column" flexShrink={0} overflow="hidden">
         {Array.from({ length: turnSlots }, (_, i) => {
           const row = turnSlice[i];
           if (!row) {
@@ -997,8 +1043,8 @@ export function MicroscopeStage({
       titleColor={view === 'timeline' ? t.primary : t.muted}
       selected={view === 'timeline' && !!inputActive}
       width={twoPane ? timelineW : contentW}
-      flexGrow={twoPane ? 1 : 0}
-      flexShrink={twoPane ? 1 : 0}
+      flexGrow={0}
+      flexShrink={0}
       minHeight={0}
     >
       <box flexDirection="column" flexShrink={0} backgroundColor={t.background}>

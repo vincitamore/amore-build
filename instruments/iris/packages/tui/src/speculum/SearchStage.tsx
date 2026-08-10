@@ -15,7 +15,7 @@ import {
   type QueryService,
   type SearchHit,
 } from './query-service';
-import { MIN_SEARCH_HIT_SLOTS, seedStageBox } from './sessions-layout';
+import { seedStageBox } from './sessions-layout';
 
 /** Debounce before FTS read (ms). */
 export const SEARCH_DEBOUNCE_MS = 200;
@@ -135,7 +135,8 @@ export function SearchStage({
   const dims = useStableDimensions();
   const stageBox = stageBoxProp ?? seedStageBox(dims.width, dims.height);
   const listHostH = Math.max(1, stageBox.height - SEARCH_STAGE_CHROME);
-  const hitSlots = Math.max(MIN_SEARCH_HIT_SLOTS, Math.floor(listHostH));
+  // Fit-clamp: one slot per residual row, never a MIN floor past the host.
+  const hitSlots = Math.max(1, Math.floor(listHostH));
   const inputRef = useRef<{ value?: string } | null>(null);
   const qsRef = useRef<QueryService | null>(null);
   const aliveRef = useRef(true);
@@ -332,7 +333,7 @@ export function SearchStage({
     }
 
     return (
-      <box flexDirection="column" flexShrink={0}>
+      <box flexDirection="column" flexShrink={0} overflow="hidden">
         {Array.from({ length: hitSlots }, (_, i) => {
           const hit = slice[i];
           if (!hit) {

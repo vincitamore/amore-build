@@ -19,8 +19,6 @@ import {
   formatTurnLine,
   kindColor,
   MicroscopeStage,
-  MIN_SESSION_SLOTS,
-  MIN_TURN_SLOTS,
   paneGeometry,
   paneInnerWidth,
   PICKER_MAX_OUTER,
@@ -470,7 +468,7 @@ describe('Microscope pure helpers', () => {
 
   test('paneGeometry flex picker ≥48 outer at operator sizes; stacked below 100', () => {
     expect(STACK_BELOW_COLS).toBe(100);
-    // host width = residual stage box (term − member pad); content charges stage pad only
+    // host width = residual stage box (term − member pad); content charges stage pad + panel chrome
     const op = paneGeometry(140);
     expect(op.twoPane).toBe(true);
     expect(op.pickerW).toBeGreaterThanOrEqual(PICKER_MIN_OUTER);
@@ -484,7 +482,8 @@ describe('Microscope pure helpers', () => {
     expect(narrow.pickerW).toBeGreaterThanOrEqual(PICKER_MIN_OUTER);
     expect(narrow.pickerW).toBeLessThanOrEqual(PICKER_MAX_OUTER);
     expect(narrow.pickerW + 1 + narrow.timelineW).toBe(narrow.contentW);
-    expect(narrow.contentW).toBe(118 - 2);
+    // contentW = host − stage pad(2) − panel chrome(4)
+    expect(narrow.contentW).toBe(118 - 2 - 4);
 
     const stacked = paneGeometry(88); // term 90 − 2
     expect(stacked.twoPane).toBe(false);
@@ -500,29 +499,41 @@ describe('Microscope pure helpers', () => {
     expect(paneInnerWidth(48)).toBe(44);
   });
 
-  test('budgetSessionSlots / budgetTurnSlots grow with residual listHostH; floors hold', () => {
+  test('budgetSessionSlots / budgetTurnSlots fit-clamp; never overflow host with chrome', () => {
     // 80×24 seed residual ≈ 15 → listHost ≈ 10 after MICRO_STAGE_CHROME (5)
+    // Tight host drops STACK_GAP so both lists keep ≥1 row:
+    // overhead = 2×3 + 0 + 2 = 8 → available = 2 → s=1 t=1.
     const listHostFloor = 10;
     const s80 = budgetSessionSlots(listHostFloor, false);
     const t80 = budgetTurnSlots(listHostFloor, false, s80);
-    expect(s80).toBeGreaterThanOrEqual(MIN_SESSION_SLOTS);
-    expect(t80).toBeGreaterThanOrEqual(MIN_TURN_SLOTS);
-    // stacked: session + info + turns fit the list host
-    expect(s80 + t80 + 2 /* TIMELINE_INFO_ROWS */).toBeLessThanOrEqual(
-      Math.max(listHostFloor, MIN_SESSION_SLOTS + MIN_TURN_SLOTS + 2),
-    );
+    expect(s80).toBe(1);
+    expect(t80).toBe(1);
+    // stacked paint (no gap at this host) ≤ list host
+    const stackedPaint =
+      s80 + t80 + 2 /* TIMELINE_INFO_ROWS */ + 2 * 3 /* CARD_V_CHROME */; /* gap dropped */
+    expect(stackedPaint).toBeLessThanOrEqual(listHostFloor);
 
-    // Two-pane residual listHost 29 → slots = listHost (floors apply)
+    // Two-pane residual listHost 29 → content = host − card chrome
     const sTall = budgetSessionSlots(29, true);
     const tTall = budgetTurnSlots(29, true);
-    expect(sTall).toBe(29);
-    expect(tTall).toBe(29 - 2);
+    expect(sTall).toBe(29 - 3); // CARD_V_CHROME
+    expect(tTall).toBe(29 - 3 - 2); // chrome + info
     expect(sTall).toBeGreaterThan(s80);
     expect(tTall).toBeGreaterThan(t80);
 
-    // I-MICRO-SLOTS-FIT
-    expect(sTall).toBeLessThanOrEqual(29);
-    expect(tTall + 2).toBeLessThanOrEqual(29);
+    // Fit invariant when the host can hold chrome + content (gap drops when tight)
+    for (const h of [8, 10, 12, 16, 24, 40]) {
+      const s = budgetSessionSlots(h, false);
+      const t = budgetTurnSlots(h, false, s);
+      const needWithGap = 2 * 3 + 1 + 2 + 2; // chrome + gap + info + 2 content
+      const gap = h >= needWithGap ? 1 : 0;
+      const overhead = 2 * 3 + gap + 2;
+      const paint = s + t + overhead;
+      // Below overhead+content the floor-1 path is belt-only; assert fit once host holds chrome+rows.
+      if (h >= overhead + 2) expect(paint).toBeLessThanOrEqual(h);
+      expect(s).toBeGreaterThanOrEqual(1);
+      expect(t).toBeGreaterThanOrEqual(0);
+    }
   });
 
   test('formatSessionInfo facts middot grammar; title lives on its own line', () => {
@@ -649,7 +660,8 @@ describe('MicroscopeStage render', () => {
     expect(frame).toMatch(/Repeat Previous/);
     expect(frame).toMatch(/microscope-demo/);
     expect(frame).toMatch(/\d+\s+turns/);
-    expect(frame).toMatch(/\d+\s+errors|\d+\u2026|\d+\.\.\./);
+    // errors count or a trailing ellipsis after head-slice on a tight timeline
+    expect(frame).toMatch(/\d+\s+errors|\d+\s+turns\u2026|\d+\u2026|\d+\.\.\./);
     // Picker remains visible in two-pane
     expect(frame).toMatch(/SESSIONS/);
     expect(frame).toMatch(/TIMELINE/);

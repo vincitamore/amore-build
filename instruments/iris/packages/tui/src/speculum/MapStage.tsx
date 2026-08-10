@@ -258,21 +258,22 @@ export function MapStage({
   const t = usePalette();
   const dims = useStableDimensions();
   const stageBox = stageBoxProp ?? seedStageBox(dims.width, dims.height);
-  // Seed reserves room for a full closed legend so first frames are not tight.
+  // Seed from residual host (fit-clamp). MIN_* are seed preferences only when
+  // the host can hold them — never force a canvas past the measured box.
+  const fittedCanvasH = Math.max(1, stageBox.height - MAP_BASE_CHROME - LEGEND_MAX_ROWS);
+  const fittedCanvasW = Math.max(1, stageBox.width);
   const canvasSeed = {
-    width: Math.max(MIN_MAP_CANVAS_COLS, stageBox.width),
-    height: Math.max(
-      MIN_MAP_CANVAS_ROWS,
-      stageBox.height - MAP_BASE_CHROME - LEGEND_MAX_ROWS,
-    ),
+    width: fittedCanvasW >= MIN_MAP_CANVAS_COLS ? Math.max(MIN_MAP_CANVAS_COLS, fittedCanvasW) : fittedCanvasW,
+    height: fittedCanvasH >= MIN_MAP_CANVAS_ROWS ? Math.max(MIN_MAP_CANVAS_ROWS, fittedCanvasH) : fittedCanvasH,
   };
   const {
     ref: canvasRef,
     width: canvasW,
     height: canvasH,
   } = useMeasuredSize(canvasSeed);
-  const cols = Math.max(MIN_MAP_CANVAS_COLS, canvasW);
-  const rows = Math.max(MIN_MAP_CANVAS_ROWS, canvasH);
+  // Measured path: fit-clamp only — never lift past what the box holds.
+  const cols = Math.max(1, canvasW);
+  const rows = Math.max(1, canvasH);
   const width = cols * 2;
   const height = rows * 4;
 

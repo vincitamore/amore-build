@@ -7,16 +7,29 @@
  */
 import type { MeasuredSize } from '../use-measured-size';
 
-/** Floors — 80×24 remains usable; never collapse lists to zero. */
+/**
+ * Seed / pre-measure fallbacks only — never floors of an already-measured
+ * fixed-slot budget. Measured budgets are pure fit-clamps: floor(body/row)
+ * bounded below by 1 when that many rows fit, never by a MIN that would
+ * paint past the host (OpenTUI boxes do not clip overflow by default).
+ */
 export const MIN_STAGE_BOX_H = 8;
 export const MIN_STAGE_BOX_W = 40;
+/** Pre-measure seed fallback for the microscope session picker. */
 export const MIN_SESSION_SLOTS = 4;
+/** Pre-measure seed fallback for the microscope turn timeline. */
 export const MIN_TURN_SLOTS = 4;
+/** Pre-measure seed fallback for probe hit rows (already 1 = fit-clamp floor). */
 export const MIN_HIT_SLOTS = 1;
+/** Pre-measure seed fallback for probe card-grid rows. */
 export const MIN_PROBE_GRID_ROWS = 1;
+/** Pre-measure seed fallback for map canvas rows (measured path fit-clamps). */
 export const MIN_MAP_CANVAS_ROWS = 6;
+/** Pre-measure seed fallback for map canvas cols. */
 export const MIN_MAP_CANVAS_COLS = 16;
+/** Pre-measure seed fallback for search hit rows. */
 export const MIN_SEARCH_HIT_SLOTS = 4;
+/** Pre-measure seed fallback for usage model cards. */
 export const MIN_USAGE_MODEL_SLOTS = 1;
 
 /**

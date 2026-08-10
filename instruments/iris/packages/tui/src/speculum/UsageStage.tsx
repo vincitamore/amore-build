@@ -7,7 +7,7 @@ import { useStableDimensions } from '../use-stable-dimensions';
 import type { MeasuredSize } from '../use-measured-size';
 import { useRefreshOnActive } from '../use-refresh-on-active';
 import { runSpeculum, type SpeculumResult } from './speculum-spawn';
-import { MIN_USAGE_MODEL_SLOTS, seedStageBox } from './sessions-layout';
+import { seedStageBox } from './sessions-layout';
 import {
   Card,
   CardGrid,
@@ -256,9 +256,11 @@ export function UsageStage({
   const perModel = cardsPerRow(rowW, MIN_MODEL_CARD, GRID_GAP);
   // Scroll model cards when many models overflow the residual model host.
   const modelHostH = Math.max(1, stageBox.height - USAGE_STAGE_CHROME);
+  // Fit-clamp: rows of model cards from residual host (card ~3 rows), never
+  // a MIN floor that exceeds the host. Grow-by-height on tall terminals.
   const modelSlots = Math.max(
-    MIN_USAGE_MODEL_SLOTS,
-    Math.min(6, Math.floor(Math.max(2, modelHostH) / 3) * perModel),
+    1,
+    Math.min(6, Math.floor(modelHostH / 3) * perModel),
   );
   const maxScroll = Math.max(0, modelCards.length - modelSlots);
   const modelSlice = modelCards.slice(scroll, scroll + modelSlots);
@@ -378,7 +380,7 @@ export function UsageStage({
             </box>
 
             {modelSlice.length > 0 ? (
-              <box flexDirection="column" flexShrink={0} marginTop={0}>
+              <box flexDirection="column" flexShrink={0} marginTop={0} overflow="hidden">
                 <CardGrid width={rowW} minCardWidth={MIN_MODEL_CARD} gap={GRID_GAP}>
                   {modelSlice.map((c) => (
                     <Card

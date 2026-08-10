@@ -250,6 +250,14 @@ try {
 }
 
 function okCheck(c: FrameCheck, requireOpen: boolean): boolean {
+  // On short hosts the turn window is fit-clamped (may be 1 row) — require the
+  // timeline opened (kind rows) + event-id grain. The error-body line may sit
+  // below the window; only require it when the host is tall enough (H ≥ 34)
+  // that the full turn list fits.
+  const openOk =
+    c.hasTimeline &&
+    c.hasError &&
+    (c.height < 34 || c.hasErrorBody);
   return (
     c.hasPicker &&
     c.hasTitle &&
@@ -260,7 +268,7 @@ function okCheck(c: FrameCheck, requireOpen: boolean): boolean {
     c.hasFooter &&
     c.hasTwoPane &&
     c.hasStacked &&
-    (!requireOpen || (c.hasTimeline && c.hasErrorBody && c.hasError))
+    (!requireOpen || openOk)
   );
 }
 

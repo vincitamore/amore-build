@@ -8,7 +8,7 @@ import type { MeasuredSize } from '../use-measured-size';
 import { useRefreshOnActive } from '../use-refresh-on-active';
 import { runSpeculum, type SpeculumResult } from './speculum-spawn';
 import { openQueryService } from './query-service';
-import { MIN_HIT_SLOTS, seedStageBox } from './sessions-layout';
+import { seedStageBox } from './sessions-layout';
 import {
   Card,
   CardGrid,
@@ -51,11 +51,16 @@ const INSTALL_RECIPE = 'amore init --with-speculum';
 /** Outer floor for a probe card; board is 2-up when it fits, else 1-up. */
 const MIN_PROBE_CARD = 36;
 const GRID_GAP = 1;
-/** Rough rows per card (border + title + body + margin). */
-const CARD_ROW_H = 4;
+/**
+ * Rows per card on the board: top border + title + body + bottom border +
+ * marginBottom(1) = 5. Undercounting by 1 lets the hits list paint onto the
+ * panel bottom border (OpenTUI does not clip overflow).
+ */
+const CARD_ROW_H = 5;
 /**
  * Local stage chrome charged against the residual host (not terminal height):
  * padTop 1 + panel border/title 3 + stage footer 1 + range line 1 = 6.
+ * Hit/grid budgets use body residual after this chrome; never paint past it.
  */
 export const PROBES_STAGE_CHROME = 6;
 
@@ -162,23 +167,27 @@ export function clampRowScroll(
 /**
  * Budget hit-list slots from Panel-body residual height.
  * `gridRowsH` is the card grid's claimed height; `hitsHeaderRows` is 1 when the
- * drill is open (header charged only when present). Always ≥ MIN_HIT_SLOTS.
+ * drill is open (header charged only when present). Pure fit-clamp ≥ 1 —
+ * never a MIN floor that exceeds residual.
  */
 export function budgetHitSlots(
   bodyH: number,
   gridRowsH: number,
   hitsHeaderRows: number = 1,
 ): number {
-  return Math.max(
-    MIN_HIT_SLOTS,
-    Math.floor(bodyH - Math.max(0, gridRowsH) - Math.max(0, hitsHeaderRows)),
+  const residual = Math.floor(
+    bodyH - Math.max(0, gridRowsH) - Math.max(0, hitsHeaderRows),
   );
+  // Fit-clamp: ≥1 only when residual can hold it; 0 when the host is starved
+  // (overflow:hidden belt still applies on the list box).
+  if (residual <= 0) return 1;
+  return residual;
 }
 
 /**
  * Visible card-grid rows from Panel-body residual height.
  * When the hits drill is open, leave residual height for the hits panel
- * (prefer hits growth — no hard mini-grid clamp).
+ * (prefer hits growth — fit-clamp, no hard mini-grid or hit floor).
  */
 export function budgetProbeVisibleRows(
   bodyH: number,
@@ -188,14 +197,14 @@ export function budgetProbeVisibleRows(
   const h = Math.max(1, Math.floor(bodyH));
   const crh = Math.max(1, cardRowH);
   if (!hitsOpen) {
-    return Math.max(1, Math.min(6, Math.floor(Math.max(4, h) / crh)));
+    return Math.max(1, Math.min(6, Math.floor(h / crh)));
   }
-  // Prefer hits: ~2/3 of body after header is owned by hit slots.
-  const body = Math.max(crh + 1, h - 1 /* hits header */);
-  const targetHits = Math.max(4, Math.floor((body * 2) / 3));
-  const maxGrid = Math.max(1, Math.floor((body - 1) / crh));
-  const fromTarget = Math.max(1, Math.floor((body - targetHits) / crh));
-  return Math.max(1, Math.min(maxGrid, fromTarget));
+  // Prefer hits: leave ≥1 header + ≥1 hit row; grid takes the rest (cap 6).
+  const forHitsAndHeader = 2;
+  const maxGrid = Math.max(1, Math.floor(Math.max(0, h - forHitsAndHeader) / crh));
+  // ~1/3 of body for the grid when open so hits absorb residual.
+  const targetGrid = Math.max(1, Math.floor(h / 3 / crh));
+  return Math.max(1, Math.min(6, maxGrid, targetGrid));
 }
 
 /**
@@ -500,7 +509,12 @@ export function ProbesStage({
       )
     : visibleRows;
   const gridRowsH = filledGridRows * CARD_ROW_H;
-  const hitSlots = hitsOpen ? budgetHitSlots(bodyH, gridRowsH, 1) : 1;
+  // Re-fit: after filled-grid settles, clamp hits so grid+header+hits ≤ bodyH.
+  let hitSlots = hitsOpen ? budgetHitSlots(bodyH, gridRowsH, 1) : 1;
+  if (hitsOpen) {
+    const maxHits = Math.max(1, bodyH - gridRowsH - 1);
+    hitSlots = Math.min(hitSlots, maxHits);
+  }
 
   useEffect(() => {
     if (cursor >= list.length) setCursor(Math.max(0, list.length - 1));
@@ -671,7 +685,7 @@ export function ProbesStage({
         </CardGrid>
 
         {hitsOpen && selected ? (
-          <box flexDirection="column" flexShrink={0} marginTop={0}>
+          <box flexDirection="column" flexShrink={0} marginTop={0} overflow="hidden">
             <FixedClearRow
               width={rowW}
               color={t.muted}
