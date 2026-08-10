@@ -25,7 +25,7 @@ lenses of your own; the shape below is the contract.
 - **`forget` is complete for the index.** `speculum forget <session-prefix>`
   deletes that session's rows and marks its source file forgotten so a later
   ingest will not re-index it. Source files under `~/.amore/sessions` are left
-  alone.
+  alone. Every purge is recorded in a separate `forget-audit.jsonl` ledger.
 - **The index is a derived database.** Source of truth remains the session tree;
   `speculum ingest --full` wipes and rebuilds from byte 0.
 - **Lenses are opt-in egress.** Nothing leaves the machine until you type
@@ -52,10 +52,11 @@ Compiled single-file binary: `bun run build:compile` → `dist/speculum-<os>-<ar
 
 | Command | Purpose |
 |---|---|
-| `speculum ingest` | Walk sessions, parse `updates.jsonl`, write sqlite (`--dry-run` walks only; `--full` rebuilds) |
+| `speculum ingest` | Walk sessions, parse `updates.jsonl`, write sqlite (`--dry-run` walks only; `--full` rebuilds; prints stage timings/progress) |
 | `speculum status` | Session/event counts, ingest freshness, probe registry |
-| `speculum forget <prefix>` | Purge one session from the index (disk files untouched) |
-| `speculum scan` | Run all probes (or `--probe <name>`), `--project`/`--since`/`--until` filtered |
+| `speculum doctor` | Operational health checks on the local index (db integrity, schema version, ingest freshness, probe registry) |
+| `speculum forget <prefix>` | Purge one session from the index (disk files untouched); append the purge to the `forget-audit.jsonl` ledger |
+| `speculum scan` | Run all probes (or `--probe <name>`), `--project`/`--since`/`--until` filtered; `--hits`/`--verbose` print hit evidence on the terminal |
 | `speculum usage` | Per-model token and turn totals (no prices) |
 | `speculum lenses` | List available lenses and their egress notes |
 | `speculum lens <name>` | Run a lens over a selected, scrubbed slice (`--dry-run` = selection+scrub+audit only) |
@@ -82,8 +83,9 @@ probes: `rage-rate` · `frustration-markers` · `tool-mix` · `stuck-loop` ·
 `apology-rate` · `operator-correction` · `sensitive-content` · `stale-corpus`.
 
 Each result carries a `hits` array — the evidence (session, timestamp, quote
-line) behind the finding. `scan --json` includes hits; the terminal renderer is
-for humans.
+line) behind the finding. `scan --json` always includes hits; `scan --hits` /
+`--verbose` prints them on the terminal too. `sensitive-content` scans the
+`tool_input`/`tool_output` side channels as well as operator/assistant text.
 
 ## Lenses — opt-in, scrubbed, audited
 
