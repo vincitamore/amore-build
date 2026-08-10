@@ -4,9 +4,11 @@ import type { RGBA } from '@opentui/core';
 import { usePalette } from '../ThemeProvider';
 import { Panel } from '../components/Panel';
 import { useStableDimensions } from '../use-stable-dimensions';
+import type { MeasuredSize } from '../use-measured-size';
 import { useRefreshOnActive } from '../use-refresh-on-active';
 import { runSpeculum, type SpeculumResult } from './speculum-spawn';
 import { openQueryService } from './query-service';
+import { MIN_HIT_SLOTS, seedStageBox } from './sessions-layout';
 import {
   Card,
   CardGrid,
@@ -51,16 +53,10 @@ const GRID_GAP = 1;
 /** Rough rows per card (border + title + body + margin). */
 const CARD_ROW_H = 4;
 /**
- * Non-grid chrome when the board is closed (terminal-height budget).
- * Covers stage pad, panel border/title, range label, stage footer, and the
- * Sessions member nest that hosts this stage — same envelope as before.
+ * Local stage chrome charged against the residual host (not terminal height):
+ * padTop 1 + panel border/title 3 + stage footer 1 + range line 1 = 6.
  */
-const GRID_CHROME = 14;
-/**
- * Chrome when the hits drill is open, excluding card-grid height and hit rows.
- * Adds the hits-panel header line; hit slots are budgeted from the residual.
- */
-const DRILL_CHROME = 15;
+export const PROBES_STAGE_CHROME = 6;
 
 /**
  * Min card width that keeps the board at most 2-up (house probe board).
@@ -163,37 +159,38 @@ export function clampRowScroll(
 }
 
 /**
- * Budget hit-list slots from measured terminal height.
- * `gridRowsH` is the card grid's claimed height; `chrome` is everything else
- * except the hit rows themselves (header, footer, pads, borders, nest).
- * Always ≥1 so the panel never collapses to zero slots.
+ * Budget hit-list slots from Panel-body residual height.
+ * `gridRowsH` is the card grid's claimed height; `hitsHeaderRows` is 1 when the
+ * drill is open (header charged only when present). Always ≥ MIN_HIT_SLOTS.
  */
 export function budgetHitSlots(
-  dimsHeight: number,
+  bodyH: number,
   gridRowsH: number,
-  chrome: number = DRILL_CHROME,
+  hitsHeaderRows: number = 1,
 ): number {
-  return Math.max(1, Math.floor(dimsHeight - Math.max(0, gridRowsH) - chrome));
+  return Math.max(
+    MIN_HIT_SLOTS,
+    Math.floor(bodyH - Math.max(0, gridRowsH) - Math.max(0, hitsHeaderRows)),
+  );
 }
 
 /**
- * Visible card-grid rows from measured height.
+ * Visible card-grid rows from Panel-body residual height.
  * When the hits drill is open, leave residual height for the hits panel
  * (prefer hits growth — no hard mini-grid clamp).
  */
 export function budgetProbeVisibleRows(
-  dimsHeight: number,
+  bodyH: number,
   hitsOpen: boolean,
   cardRowH: number = CARD_ROW_H,
 ): number {
-  const h = Math.max(1, dimsHeight);
+  const h = Math.max(1, Math.floor(bodyH));
   const crh = Math.max(1, cardRowH);
   if (!hitsOpen) {
-    return Math.max(1, Math.min(6, Math.floor(Math.max(4, h - GRID_CHROME) / crh)));
+    return Math.max(1, Math.min(6, Math.floor(Math.max(4, h) / crh)));
   }
-  // Residual body for grid + hit slots (hits header lives in DRILL_CHROME).
-  const body = Math.max(crh + 1, h - DRILL_CHROME);
-  // Prefer the hits panel: target ~2/3 of body (floor ≥4 when body allows).
+  // Prefer hits: ~2/3 of body after header is owned by hit slots.
+  const body = Math.max(crh + 1, h - 1 /* hits header */);
   const targetHits = Math.max(4, Math.floor((body * 2) / 3));
   const maxGrid = Math.max(1, Math.floor((body - 1) / crh));
   const fromTarget = Math.max(1, Math.floor((body - targetHits) / crh));
@@ -350,6 +347,7 @@ export function ProbesStage({
   inputActive,
   onFlash,
   onOpenSession,
+  stageBox: stageBoxProp,
 }: {
   inputActive?: boolean;
   onFlash?: (msg: string) => void;
@@ -357,9 +355,12 @@ export function ProbesStage({
     sessionId: string,
     opts?: { eventId?: string | number; ts?: string },
   ) => void;
+  /** Residual host box from SessionsMember; optional for isolated stage smokes. */
+  stageBox?: MeasuredSize;
 }) {
   const t = usePalette();
   const dims = useStableDimensions();
+  const stageBox = stageBoxProp ?? seedStageBox(dims.width, dims.height);
   const [rows, setRows] = useState<ScanRow[] | null>(null);
   const [error, setError] = useState<ProbesError | null>(null);
   const [loading, setLoading] = useState(true);
@@ -439,12 +440,13 @@ export function ProbesStage({
   const selected = list[Math.min(cursor, Math.max(0, list.length - 1))] ?? null;
   const hits = selected?.hits ?? [];
 
-  // Nested under SessionsMember: member pad (2) + stage pad (2) + panel border (2) + panel pad (2) = 8.
-  const rowW = Math.max(16, dims.width - 8);
+  // Width from residual host (stage pad L/R charged locally).
+  const rowW = Math.max(16, stageBox.width - 4);
   const minCard = probeMinCardWidth(rowW, GRID_GAP);
   const perRow = Math.min(2, cardsPerRow(rowW, minCard, GRID_GAP));
-  // Budget grid rows + hit slots from measured height (grow-by-height; no hard mini-list).
-  const visibleRows = budgetProbeVisibleRows(dims.height, hitsOpen, CARD_ROW_H);
+  // Budget grid rows + hit slots from residual host height (grow-by-height).
+  const bodyH = Math.max(1, stageBox.height - PROBES_STAGE_CHROME);
+  const visibleRows = budgetProbeVisibleRows(bodyH, hitsOpen, CARD_ROW_H);
   // When the drill is open, charge only the card rows that actually paint — a
   // short probe list leaves residual height for the hits panel, not phantom rows.
   const filledGridRows = hitsOpen
@@ -457,9 +459,7 @@ export function ProbesStage({
       )
     : visibleRows;
   const gridRowsH = filledGridRows * CARD_ROW_H;
-  const hitSlots = hitsOpen
-    ? budgetHitSlots(dims.height, gridRowsH, DRILL_CHROME)
-    : 1;
+  const hitSlots = hitsOpen ? budgetHitSlots(bodyH, gridRowsH, 1) : 1;
 
   useEffect(() => {
     if (cursor >= list.length) setCursor(Math.max(0, list.length - 1));
@@ -743,7 +743,7 @@ export function ProbesStage({
         backgroundColor={t.background}
       >
         <text fg={t.muted} wrapMode="none">
-          {padRow(footer, Math.max(16, dims.width - 2))}
+          {padRow(footer, Math.max(16, stageBox.width - 2))}
         </text>
       </box>
     </box>

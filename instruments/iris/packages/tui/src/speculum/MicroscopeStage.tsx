@@ -13,8 +13,14 @@ import { usePalette } from '../ThemeProvider';
 import type { Palette } from '../theme';
 import { Panel } from '../components/Panel';
 import { useStableDimensions } from '../use-stable-dimensions';
+import type { MeasuredSize } from '../use-measured-size';
 import { useRefreshOnActive } from '../use-refresh-on-active';
 import { Card, CARD_CHROME } from './Card';
+import {
+  MIN_SESSION_SLOTS as LAYOUT_MIN_SESSION_SLOTS,
+  MIN_TURN_SLOTS as LAYOUT_MIN_TURN_SLOTS,
+  seedStageBox,
+} from './sessions-layout';
 import {
   openQueryService,
   SUPPORTED_SCHEMA_VERSIONS,
@@ -34,20 +40,18 @@ export const STACK_BELOW_COLS = 100;
 /** Fixed picker column width when side-by-side (must never wrap a session row). */
 export const PICKER_COL_WIDTH = 32;
 const PANE_GAP = 1;
-/** Nested under SessionsMember: member pad (2) + stage pad (2) + panel border (2) + panel pad (2). */
-const NESTED_CHROME = 8;
+/** Stage pad L/R only — nest width already removed by residual host. */
+const STAGE_PAD_COLS = 2;
 
 /**
- * Vertical chrome before list slots (stage pad, outer Panel, Card title/borders,
- * footer, nest allowance). Two-pane shares height; stacked spends extra on the
- * second card + split residual.
+ * Local stage chrome charged against residual host height:
+ * padTop 1 + panel border/title 3 + stage footer 1 = 5.
  */
-export const MICRO_CHROME_TWO_PANE = 11;
-export const MICRO_CHROME_STACKED = 12;
+export const MICRO_STAGE_CHROME = 5;
 /** Session-info rows above the turn stream (title + facts, or empty prompt). */
 export const TIMELINE_INFO_ROWS = 2;
-export const MIN_SESSION_SLOTS = 4;
-export const MIN_TURN_SLOTS = 4;
+export const MIN_SESSION_SLOTS = LAYOUT_MIN_SESSION_SLOTS;
+export const MIN_TURN_SLOTS = LAYOUT_MIN_TURN_SLOTS;
 /** Prior fixed floors — used as fallbacks before first measure. */
 export const DEFAULT_SESSION_SLOTS = 8;
 export const DEFAULT_TURN_SLOTS = 12;
@@ -153,19 +157,20 @@ export function sessionDisplayTitle(s: SessionListRow): string {
 }
 
 /**
- * Two-pane geometry from terminal width.
- * Wide (≥ STACK_BELOW_COLS): picker fixed ~32 cols, timeline gets the rest
- * (panel content budget = dims − NESTED_CHROME; house Panel −6 nested rule).
- * Narrow: both panes use full content width (stacked column).
+ * Two-pane geometry from residual host width.
+ * Wide (host + member pad ≥ STACK_BELOW_COLS): picker fixed ~32 cols, timeline
+ * gets the rest. Narrow: both panes use full content width (stacked column).
+ * Content width charges stage pad only — nest width is already off the host.
  */
-export function paneGeometry(termWidth: number): {
+export function paneGeometry(hostWidth: number): {
   twoPane: boolean;
   contentW: number;
   pickerW: number;
   timelineW: number;
 } {
-  const contentW = Math.max(16, Math.floor(termWidth) - NESTED_CHROME);
-  const twoPane = Math.floor(termWidth) >= STACK_BELOW_COLS;
+  const contentW = Math.max(16, Math.floor(hostWidth) - STAGE_PAD_COLS);
+  // Stack threshold was terminal 100; host is terminal minus member pad (2).
+  const twoPane = Math.floor(hostWidth) + sessionsMemberPadApprox() >= STACK_BELOW_COLS;
   if (!twoPane) {
     return { twoPane: false, contentW, pickerW: contentW, timelineW: contentW };
   }
@@ -174,34 +179,36 @@ export function paneGeometry(termWidth: number): {
   return { twoPane: true, contentW, pickerW, timelineW };
 }
 
+/** Member pad cols (matches sessions-layout; inlined to avoid circular export noise). */
+function sessionsMemberPadApprox(): number {
+  return 2;
+}
+
 /**
- * Picker / timeline slot counts from measured terminal height.
- * Taller terminal → more rows; floors keep 80×24 usable without overflow.
+ * Picker / timeline slot counts from list-host residual height
+ * (stageBox.height − MICRO_STAGE_CHROME). Floors keep 80×24 usable.
  */
-export function budgetSessionSlots(termH: number, twoPane: boolean): number {
-  const h = Math.max(1, Math.floor(termH));
-  if (twoPane) {
-    return Math.max(MIN_SESSION_SLOTS, h - MICRO_CHROME_TWO_PANE);
-  }
+export function budgetSessionSlots(listHostH: number, twoPane: boolean): number {
+  const h = Math.max(1, Math.floor(listHostH));
+  if (twoPane) return Math.max(MIN_SESSION_SLOTS, h);
   const residual = Math.max(
     MIN_SESSION_SLOTS + MIN_TURN_SLOTS + TIMELINE_INFO_ROWS,
-    h - MICRO_CHROME_STACKED,
+    h,
   );
   return Math.max(MIN_SESSION_SLOTS, Math.floor(residual * 0.4));
 }
 
 export function budgetTurnSlots(
-  termH: number,
+  listHostH: number,
   twoPane: boolean,
   sessionSlots?: number,
 ): number {
-  const h = Math.max(1, Math.floor(termH));
+  const h = Math.max(1, Math.floor(listHostH));
   if (twoPane) {
-    return Math.max(MIN_TURN_SLOTS, h - MICRO_CHROME_TWO_PANE - TIMELINE_INFO_ROWS);
+    return Math.max(MIN_TURN_SLOTS, h - TIMELINE_INFO_ROWS);
   }
   const ss = sessionSlots ?? budgetSessionSlots(h, false);
-  const residual = h - MICRO_CHROME_STACKED - ss - TIMELINE_INFO_ROWS;
-  return Math.max(MIN_TURN_SLOTS, residual);
+  return Math.max(MIN_TURN_SLOTS, h - ss - TIMELINE_INFO_ROWS);
 }
 
 /**
@@ -320,6 +327,7 @@ export function MicroscopeStage({
   jump,
   jumpKey,
   path,
+  stageBox: stageBoxProp,
 }: {
   inputActive?: boolean;
   onFlash?: (msg: string) => void;
@@ -329,9 +337,12 @@ export function MicroscopeStage({
   jumpKey?: number;
   /** Explicit index path (test seam; wins over env resolution). */
   path?: string;
+  /** Residual host box from SessionsMember; optional for isolated stage smokes. */
+  stageBox?: MeasuredSize;
 }) {
   const t = usePalette();
   const dims = useStableDimensions();
+  const stageBox = stageBoxProp ?? seedStageBox(dims.width, dims.height);
   const svcRef = useRef<QueryService | null>(null);
   const aliveRef = useRef(true);
   const onFlashRef = useRef(onFlash);
@@ -349,9 +360,10 @@ export function MicroscopeStage({
   const [turnCursor, setTurnCursor] = useState(0);
   const [turnScroll, setTurnScroll] = useState(0);
 
-  const { twoPane, contentW, pickerW, timelineW } = paneGeometry(dims.width);
-  const sessionSlots = budgetSessionSlots(dims.height, twoPane);
-  const turnSlots = budgetTurnSlots(dims.height, twoPane, sessionSlots);
+  const { twoPane, contentW, pickerW, timelineW } = paneGeometry(stageBox.width);
+  const listHostH = Math.max(1, stageBox.height - MICRO_STAGE_CHROME);
+  const sessionSlots = budgetSessionSlots(listHostH, twoPane);
+  const turnSlots = budgetTurnSlots(listHostH, twoPane, sessionSlots);
   const pickerInnerW = paneInnerWidth(pickerW);
   const timelineInnerW = paneInnerWidth(timelineW);
   // Live slot counts for openTimeline / jump scroll (avoid stale closures).
@@ -980,7 +992,7 @@ export function MicroscopeStage({
         backgroundColor={t.background}
       >
         <text fg={t.muted} wrapMode="none">
-          {padRow(footer, Math.max(16, dims.width - 2))}
+          {padRow(footer, Math.max(16, stageBox.width - 2))}
         </text>
       </box>
     </box>

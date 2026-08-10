@@ -8,6 +8,7 @@ import { usePalette } from '../ThemeProvider';
 import { Panel } from '../components/Panel';
 import { useFlash } from '../components/use-flash';
 import { useStableDimensions } from '../use-stable-dimensions';
+import { useMeasuredSize } from '../use-measured-size';
 import { tickRender } from '../debug';
 import { useRefreshOnActive } from '../use-refresh-on-active';
 import { formatLucernaDisplayLine } from './lucerna-display';
@@ -17,6 +18,7 @@ import { SpeculumActions } from '../speculum/SpeculumActions';
 import { MicroscopeStage } from '../speculum/MicroscopeStage';
 import { MapStage } from '../speculum/MapStage';
 import { SearchStage } from '../speculum/SearchStage';
+import { seedStageBox } from '../speculum/sessions-layout';
 import {
   fetchStatusState,
   type DerivedSessionsState,
@@ -96,6 +98,9 @@ export function SessionsMember({
 }) {
   const t = usePalette();
   const dims = useStableDimensions();
+  const seed = seedStageBox(dims.width, dims.height);
+  const { ref: stageHostRef, width: stageW, height: stageH } = useMeasuredSize(seed);
+  const stageBox = { width: stageW, height: stageH };
   const [status, setStatus] = useState<DerivedSessionsState | null>(null);
   const [stage, setStage] = useState<StageId>('probes');
   const [actionsCapture, setActionsCapture] = useState(false);
@@ -193,9 +198,14 @@ export function SessionsMember({
   const stageActive = (id: StageId) => stage === id;
   const stageChipColor = (id: StageId) => (stageActive(id) ? t.info : t.muted);
 
+  // Member footer owns stage keys + global i/L/A when Actions is idle.
+  // While Actions captures (lens/audit/confirm), drop i/L/A so they are not duplicated.
+  // Flash always wins the footer row.
   const footerHint = flash
     ? flash
-    : 'p probes · u usage · m microscope · g map · w search · tab cycle · i ingest · L lens · A audit';
+    : actionsCapture
+      ? 'p probes · u usage · m microscope · g map · w search · tab'
+      : 'p probes · u usage · m microscope · g map · w search · tab · i ingest · L lens · A audit';
 
   return (
     <box
@@ -224,79 +234,94 @@ export function SessionsMember({
       </box>
 
       {/*
-        Keep both stages mounted; hide the inactive one. Toggle visibility — never
-        mount/unmount on stage switch (OpenTUI teardown is unsafe).
+        One parent-constrained host measures residual height. Keep all stages
+        mounted; hide the inactive one (height 0) — never mount/unmount on switch.
       */}
       <box
+        ref={stageHostRef as never}
         flexDirection="column"
-        flexGrow={stage === 'probes' ? 1 : 0}
-        flexShrink={stage === 'probes' ? 1 : 0}
-        height={stage === 'probes' ? undefined : 0}
+        flexGrow={1}
+        flexShrink={1}
         minHeight={0}
+        width="100%"
         overflow="hidden"
       >
-        <ProbesStage
-          inputActive={!!inputActive && stage === 'probes' && !actionsCapture}
-          onFlash={setFlash}
-          onOpenSession={onOpenSession}
-        />
-      </box>
-      <box
-        flexDirection="column"
-        flexGrow={stage === 'usage' ? 1 : 0}
-        flexShrink={stage === 'usage' ? 1 : 0}
-        height={stage === 'usage' ? undefined : 0}
-        minHeight={0}
-        overflow="hidden"
-      >
-        <UsageStage
-          inputActive={!!inputActive && stage === 'usage' && !actionsCapture}
-          onFlash={setFlash}
-        />
-      </box>
-      <box
-        flexDirection="column"
-        flexGrow={stage === 'microscope' ? 1 : 0}
-        flexShrink={stage === 'microscope' ? 1 : 0}
-        height={stage === 'microscope' ? undefined : 0}
-        minHeight={0}
-        overflow="hidden"
-      >
-        <MicroscopeStage
-          inputActive={!!inputActive && stage === 'microscope' && !actionsCapture}
-          onFlash={setFlash}
-          jump={focus}
-          jumpKey={focusKey}
-        />
-      </box>
-      <box
-        flexDirection="column"
-        flexGrow={stage === 'map' ? 1 : 0}
-        flexShrink={stage === 'map' ? 1 : 0}
-        height={stage === 'map' ? undefined : 0}
-        minHeight={0}
-        overflow="hidden"
-      >
-        <MapStage
-          inputActive={!!inputActive && stage === 'map' && !actionsCapture}
-          onFlash={setFlash}
-          onOpenSession={onOpenSession}
-        />
-      </box>
-      <box
-        flexDirection="column"
-        flexGrow={stage === 'search' ? 1 : 0}
-        flexShrink={stage === 'search' ? 1 : 0}
-        height={stage === 'search' ? undefined : 0}
-        minHeight={0}
-        overflow="hidden"
-      >
-        <SearchStage
-          inputActive={!!inputActive && stage === 'search' && !actionsCapture}
-          onFlash={setFlash}
-          onCapture={setSearchCapture}
-          onOpenSession={onOpenSession}
-        />
+        <box
+          flexDirection="column"
+          flexGrow={stage === 'probes' ? 1 : 0}
+          flexShrink={stage === 'probes' ? 1 : 0}
+          height={stage === 'probes' ? undefined : 0}
+          minHeight={0}
+          overflow="hidden"
+        >
+          <ProbesStage
+            inputActive={!!inputActive && stage === 'probes' && !actionsCapture}
+            onFlash={setFlash}
+            onOpenSession={onOpenSession}
+            stageBox={stageBox}
+          />
+        </box>
+        <box
+          flexDirection="column"
+          flexGrow={stage === 'usage' ? 1 : 0}
+          flexShrink={stage === 'usage' ? 1 : 0}
+          height={stage === 'usage' ? undefined : 0}
+          minHeight={0}
+          overflow="hidden"
+        >
+          <UsageStage
+            inputActive={!!inputActive && stage === 'usage' && !actionsCapture}
+            onFlash={setFlash}
+            stageBox={stageBox}
+          />
+        </box>
+        <box
+          flexDirection="column"
+          flexGrow={stage === 'microscope' ? 1 : 0}
+          flexShrink={stage === 'microscope' ? 1 : 0}
+          height={stage === 'microscope' ? undefined : 0}
+          minHeight={0}
+          overflow="hidden"
+        >
+          <MicroscopeStage
+            inputActive={!!inputActive && stage === 'microscope' && !actionsCapture}
+            onFlash={setFlash}
+            jump={focus}
+            jumpKey={focusKey}
+            stageBox={stageBox}
+          />
+        </box>
+        <box
+          flexDirection="column"
+          flexGrow={stage === 'map' ? 1 : 0}
+          flexShrink={stage === 'map' ? 1 : 0}
+          height={stage === 'map' ? undefined : 0}
+          minHeight={0}
+          overflow="hidden"
+        >
+          <MapStage
+            inputActive={!!inputActive && stage === 'map' && !actionsCapture}
+            onFlash={setFlash}
+            onOpenSession={onOpenSession}
+            stageBox={stageBox}
+          />
+        </box>
+        <box
+          flexDirection="column"
+          flexGrow={stage === 'search' ? 1 : 0}
+          flexShrink={stage === 'search' ? 1 : 0}
+          height={stage === 'search' ? undefined : 0}
+          minHeight={0}
+          overflow="hidden"
+        >
+          <SearchStage
+            inputActive={!!inputActive && stage === 'search' && !actionsCapture}
+            onFlash={setFlash}
+            onCapture={setSearchCapture}
+            onOpenSession={onOpenSession}
+            stageBox={stageBox}
+          />
+        </box>
       </box>
 
       <SpeculumActions

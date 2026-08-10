@@ -229,28 +229,38 @@ describe('probe grid navigation helpers', () => {
 });
 
 describe('probe drill budget + hit window', () => {
-  test('budgetHitSlots fills residual height (tall/short)', () => {
-    // tall: 44 − 8 grid − 15 chrome → 21 slots
-    expect(budgetHitSlots(44, 8, 15)).toBe(21);
-    // short: 24 − 4 grid − 15 chrome → 5 slots (still > hard 4)
-    expect(budgetHitSlots(24, 4, 15)).toBe(5);
+  test('budgetHitSlots fills residual body height (tall/short)', () => {
+    // body residual: 30 − 8 grid − 1 header → 21 slots
+    expect(budgetHitSlots(30, 8, 1)).toBe(21);
+    // short body: 10 − 4 grid − 1 header → 5
+    expect(budgetHitSlots(10, 4, 1)).toBe(5);
     // starved residual still floors at 1
-    expect(budgetHitSlots(10, 8, 15)).toBe(1);
-    // default chrome arg
-    expect(budgetHitSlots(44, 8)).toBe(21);
+    expect(budgetHitSlots(6, 8, 1)).toBe(1);
+    // default hits-header arg (=1)
+    expect(budgetHitSlots(30, 8)).toBe(21);
   });
 
   test('budgetProbeVisibleRows: closed grows; open leaves room for hits', () => {
-    // closed board at 44 → several card rows (capped 6)
-    expect(budgetProbeVisibleRows(44, false)).toBeGreaterThanOrEqual(3);
-    expect(budgetProbeVisibleRows(44, false)).toBeLessThanOrEqual(6);
-    // open at short terminal still ≥1 grid row
-    expect(budgetProbeVisibleRows(24, true)).toBe(1);
-    // open at tall: grid stays compact so hits absorb height (not a hard min(2))
-    const tallOpen = budgetProbeVisibleRows(44, true);
+    // closed board at bodyH 30 → several card rows (capped 6)
+    expect(budgetProbeVisibleRows(30, false)).toBeGreaterThanOrEqual(3);
+    expect(budgetProbeVisibleRows(30, false)).toBeLessThanOrEqual(6);
+    // open at short body still ≥1 grid row
+    expect(budgetProbeVisibleRows(10, true)).toBe(1);
+    // open at tall: grid stays compact so hits absorb height
+    const tallOpen = budgetProbeVisibleRows(30, true);
     expect(tallOpen).toBeGreaterThanOrEqual(1);
-    const hitSlots = budgetHitSlots(44, tallOpen * 4, 15);
+    const hitSlots = budgetHitSlots(30, tallOpen * 4, 1);
     expect(hitSlots).toBeGreaterThanOrEqual(8);
+  });
+
+  test('I-PROBE-SLOTS-FIT: grid + hits stay within bodyH', () => {
+    for (const bodyH of [9, 15, 20, 30, 39]) {
+      const vr = budgetProbeVisibleRows(bodyH, true);
+      const gridH = vr * 4;
+      const hits = budgetHitSlots(bodyH, gridH, 1);
+      expect(gridH + hits + 1).toBeLessThanOrEqual(bodyH + 1); // +1 soft for floors
+      expect(hits).toBeGreaterThanOrEqual(1);
+    }
   });
 
   test('clampHitScroll follows the cursor into the window', () => {

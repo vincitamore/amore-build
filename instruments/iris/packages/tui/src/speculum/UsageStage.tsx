@@ -4,8 +4,10 @@ import type { RGBA } from '@opentui/core';
 import { usePalette } from '../ThemeProvider';
 import { Panel } from '../components/Panel';
 import { useStableDimensions } from '../use-stable-dimensions';
+import type { MeasuredSize } from '../use-measured-size';
 import { useRefreshOnActive } from '../use-refresh-on-active';
 import { runSpeculum, type SpeculumResult } from './speculum-spawn';
+import { MIN_USAGE_MODEL_SLOTS, seedStageBox } from './sessions-layout';
 import {
   Card,
   CardGrid,
@@ -14,6 +16,12 @@ import {
   cardWidthForRow,
   padTruncate,
 } from './Card';
+
+/**
+ * Local stage chrome against residual host (pad + panel + totals block + note + footer).
+ * Model region budgets from residual − this constant only.
+ */
+export const USAGE_STAGE_CHROME = 11;
 
 export interface UsageTokens {
   input: number;
@@ -191,12 +199,16 @@ function errorCopy(err: UsageError): { lines: string[] } {
 export function UsageStage({
   inputActive,
   onFlash,
+  stageBox: stageBoxProp,
 }: {
   inputActive?: boolean;
   onFlash?: (msg: string) => void;
+  /** Residual host box from SessionsMember; optional for isolated stage smokes. */
+  stageBox?: MeasuredSize;
 }) {
   const t = usePalette();
   const dims = useStableDimensions();
+  const stageBox = stageBoxProp ?? seedStageBox(dims.width, dims.height);
   const [data, setData] = useState<UsageJson | null>(null);
   const [error, setError] = useState<UsageError | null>(null);
   const [loading, setLoading] = useState(true);
@@ -237,14 +249,17 @@ export function UsageStage({
     void load();
   });
 
-  // Nested under SessionsMember: same chrome stack as ProbesStage → -8.
-  const rowW = Math.max(16, dims.width - 8);
+  const rowW = Math.max(16, stageBox.width - 4);
   const cards = useMemo(() => (data ? buildUsageCards(data) : []), [data]);
   const totalCards = useMemo(() => cards.filter((c) => c.kind === 'total'), [cards]);
   const modelCards = useMemo(() => cards.filter((c) => c.kind === 'model'), [cards]);
   const perModel = cardsPerRow(rowW, MIN_MODEL_CARD, GRID_GAP);
-  // Scroll model cards when many models overflow the pane.
-  const modelSlots = Math.max(1, Math.min(6, Math.floor(Math.max(2, dims.height - 16) / 3) * perModel));
+  // Scroll model cards when many models overflow the residual model host.
+  const modelHostH = Math.max(1, stageBox.height - USAGE_STAGE_CHROME);
+  const modelSlots = Math.max(
+    MIN_USAGE_MODEL_SLOTS,
+    Math.min(6, Math.floor(Math.max(2, modelHostH) / 3) * perModel),
+  );
   const maxScroll = Math.max(0, modelCards.length - modelSlots);
   const modelSlice = modelCards.slice(scroll, scroll + modelSlots);
   const totalPer = cardsPerRow(rowW, MIN_STAT_CARD, GRID_GAP);
@@ -394,7 +409,7 @@ export function UsageStage({
         backgroundColor={t.background}
       >
         <text fg={t.muted} wrapMode="none">
-          {padRow(footer, Math.max(16, dims.width - 2))}
+          {padRow(footer, Math.max(16, stageBox.width - 2))}
         </text>
       </box>
     </box>

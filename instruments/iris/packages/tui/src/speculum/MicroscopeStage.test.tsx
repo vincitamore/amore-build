@@ -398,42 +398,53 @@ describe('Microscope pure helpers', () => {
     expect(tline).toMatch(/#42/);
   });
 
-  test('paneGeometry two-pane at ≥100, stacked below; picker ~30–34', () => {
+  test('paneGeometry two-pane at host≈term−pad ≥100, stacked below; picker ~30–34', () => {
     expect(STACK_BELOW_COLS).toBe(100);
-    const wide = paneGeometry(120);
+    // host width = residual stage box (term − member pad); content charges stage pad only
+    const wide = paneGeometry(118); // term 120 − 2 member pad
     expect(wide.twoPane).toBe(true);
     expect(wide.pickerW).toBeGreaterThanOrEqual(30);
     expect(wide.pickerW).toBeLessThanOrEqual(34);
     expect(wide.pickerW).toBe(PICKER_COL_WIDTH);
     expect(wide.timelineW).toBe(wide.contentW - wide.pickerW - 1);
-    expect(wide.contentW).toBe(120 - 8);
+    expect(wide.contentW).toBe(118 - 2);
 
-    const stacked = paneGeometry(90);
+    const stacked = paneGeometry(88); // term 90 − 2
     expect(stacked.twoPane).toBe(false);
     expect(stacked.pickerW).toBe(stacked.contentW);
     expect(stacked.timelineW).toBe(stacked.contentW);
 
-    const edge = paneGeometry(100);
+    // term 100 → host 98; host + member pad restores stack threshold
+    const edge = paneGeometry(98);
     expect(edge.twoPane).toBe(true);
 
     // Card inner width = outer − 4
     expect(paneInnerWidth(32)).toBe(28);
   });
 
-  test('budgetSessionSlots / budgetTurnSlots grow with height; floors hold at 80×24', () => {
-    const s80 = budgetSessionSlots(24, false);
-    const t80 = budgetTurnSlots(24, false, s80);
+  test('budgetSessionSlots / budgetTurnSlots grow with residual listHostH; floors hold', () => {
+    // 80×24 seed residual ≈ 15 → listHost ≈ 10 after MICRO_STAGE_CHROME (5)
+    const listHostFloor = 10;
+    const s80 = budgetSessionSlots(listHostFloor, false);
+    const t80 = budgetTurnSlots(listHostFloor, false, s80);
     expect(s80).toBeGreaterThanOrEqual(MIN_SESSION_SLOTS);
     expect(t80).toBeGreaterThanOrEqual(MIN_TURN_SLOTS);
-    // stacked body (sess + info + turns) + chrome must fit 24
-    expect(s80 + t80 + 2 /* info */ + 12 /* MICRO_CHROME_STACKED */).toBeLessThanOrEqual(24);
+    // stacked: session + info + turns fit the list host
+    expect(s80 + t80 + 2 /* TIMELINE_INFO_ROWS */).toBeLessThanOrEqual(
+      Math.max(listHostFloor, MIN_SESSION_SLOTS + MIN_TURN_SLOTS + 2),
+    );
 
-    const s120 = budgetSessionSlots(40, true);
-    const t120 = budgetTurnSlots(40, true);
-    expect(s120).toBeGreaterThan(s80);
-    expect(t120).toBeGreaterThan(t80);
-    expect(s120).toBe(40 - 11);
-    expect(t120).toBe(40 - 11 - 2);
+    // Two-pane residual listHost 29 → slots = listHost (floors apply)
+    const sTall = budgetSessionSlots(29, true);
+    const tTall = budgetTurnSlots(29, true);
+    expect(sTall).toBe(29);
+    expect(tTall).toBe(29 - 2);
+    expect(sTall).toBeGreaterThan(s80);
+    expect(tTall).toBeGreaterThan(t80);
+
+    // I-MICRO-SLOTS-FIT
+    expect(sTall).toBeLessThanOrEqual(29);
+    expect(tTall + 2).toBeLessThanOrEqual(29);
   });
 
   test('formatSessionInfo facts middot grammar; title lives on its own line', () => {

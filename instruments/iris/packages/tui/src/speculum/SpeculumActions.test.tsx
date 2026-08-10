@@ -699,9 +699,12 @@ describe('SpeculumActions render', () => {
     await renderOnce();
     const log = readLog();
     expect(log.some((e) => e.verb === 'ingest' && e.args.includes('--json'))).toBe(true);
+    // Idle Actions paints zero chrome; flash rides the member footer via onFlash.
     expect(flashes.some((f) => f.includes('ingested 3 sessions'))).toBe(true);
+    await renderOnce();
     const frame = captureCharFrame();
-    expect(frame).toMatch(/ingested 3 sessions/);
+    // Idle strip must not paint the global actions line.
+    expect(frame).not.toMatch(/i ingest\s*·\s*L lens\s*·\s*A audit/);
   });
 
   test('lens picker then dry-run panel renders scrub report', async () => {

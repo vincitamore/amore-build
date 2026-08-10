@@ -6,11 +6,18 @@
  * (pan/zoom/fit/hit-test). Project/edge legend via shared blit geometry + click-to-toggle.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useKeyboard, useTerminalDimensions } from '@opentui/react';
+import { useKeyboard } from '@opentui/react';
 import { RGBA } from '@opentui/core';
 import { usePalette } from '../ThemeProvider';
 import { Panel } from '../components/Panel';
 import { useRefreshOnActive } from '../use-refresh-on-active';
+import { useStableDimensions } from '../use-stable-dimensions';
+import { useMeasuredSize, type MeasuredSize } from '../use-measured-size';
+import {
+  MIN_MAP_CANVAS_COLS,
+  MIN_MAP_CANVAS_ROWS,
+  seedStageBox,
+} from './sessions-layout';
 import {
   displayLabel,
   renderView,
@@ -177,23 +184,41 @@ function softCopy(state: SoftState): { title: string; lines: string[] } {
  * Interactive session map. Opens the readonly query-service, places sessions with
  * `buildSessionWorld`, draws via Graph `renderView` with evidence links.
  */
+/** Local map chrome against residual host: panel title/border ~3 + 2 status lines. */
+const MAP_LOCAL_CHROME = 5;
+
 export function MapStage({
   inputActive = true,
   onFlash,
   onOpenSession,
   initialSelected,
+  stageBox: stageBoxProp,
 }: {
   inputActive?: boolean;
   onFlash?: (msg: string) => void;
   onOpenSession?: (sessionId: string, opts?: { eventId?: string | number; ts?: string }) => void;
   /** Seed selection (smokes / jump restore). */
   initialSelected?: string;
+  /** Residual host box from SessionsMember; optional for isolated stage smokes. */
+  stageBox?: MeasuredSize;
 }) {
   const t = usePalette();
-  const dims = useTerminalDimensions();
-  // Nested under SessionsMember: member pad + panel border/pad ≈ 8–10; 2 status rows live inside the body.
-  const cols = Math.max(16, dims.width - 10);
-  const rows = Math.max(6, dims.height - 12 - 2); // room for panel title + outer chrome + 2 status
+  const dims = useStableDimensions();
+  const stageBox = stageBoxProp ?? seedStageBox(dims.width, dims.height);
+  const canvasSeed = {
+    width: Math.max(MIN_MAP_CANVAS_COLS, stageBox.width),
+    height: Math.max(
+      MIN_MAP_CANVAS_ROWS,
+      stageBox.height - MAP_LOCAL_CHROME,
+    ),
+  };
+  const {
+    ref: canvasRef,
+    width: canvasW,
+    height: canvasH,
+  } = useMeasuredSize(canvasSeed);
+  const cols = Math.max(MIN_MAP_CANVAS_COLS, canvasW);
+  const rows = Math.max(MIN_MAP_CANVAS_ROWS, canvasH);
   const width = cols * 2;
   const height = rows * 4;
 
@@ -537,7 +562,7 @@ export function MapStage({
     [vp, width, height, sub],
   );
 
-  const rowW = Math.max(16, dims.width - 8);
+  const rowW = Math.max(16, stageBox.width - 2);
   const groupCount = sessionWorld?.groupKeys.length ?? 0;
   const selNode = selected ? sessionWorld?.nodes.find((n) => n.id === selected) : undefined;
   const showing = sessions?.length ?? 0;
@@ -582,6 +607,7 @@ export function MapStage({
       {softBody ?? (
         <box flexDirection="column" flexGrow={1} width="100%" minHeight={0}>
           <box
+            ref={canvasRef as never}
             flexGrow={1}
             width="100%"
             minHeight={0}

@@ -1101,6 +1101,8 @@ export function SpeculumActions({
         : null;
 
   const footerHint = (() => {
+    // Context strip only while a panel/confirm/busy is open — idle has zero chrome
+    // (global i/L/A live on the member footer once).
     if (localFlash) return localFlash;
     if (busy) return busy;
     if (installed === false) return `speculum not installed — ${INSTALL_HINT}`;
@@ -1114,17 +1116,21 @@ export function SpeculumActions({
       const decision = lensDecision(dryRunEnv);
       const reason = lensRefuseReason(dryRunEnv);
       if (canSend(decision, reason)) {
-        return 'confirm modal: y send · n/esc cancel · ←/→ re-slice · t session';
+        return 'confirm: y send · n/esc cancel · ←/→ re-slice · t session';
       }
       if (isOversizeRefuse(reason)) {
         return `over cap · ${formatNarrowHint(selNow)} · esc close`;
       }
       return 'slice not sendable · ←/→ re-slice · n no-sub · t session · esc close';
     }
-    if (panel === 'audit') return 'A close audit · i ingest · L lens';
-    if (installed === null) return 'checking speculum…';
-    return 'i ingest · L lens · A audit';
+    if (panel === 'audit') return 'A close audit · ↑↓ scroll';
+    return '';
   })();
+
+  // Idle + installed: no strip (keyboard still lives on this component).
+  // Flash for idle work lands on the member footer via onFlash.
+  const contextOpen =
+    panel !== 'none' || !!busy || !!confirm || installed === false;
 
   // ── not-installed ──
   if (installed === false) {
@@ -1160,6 +1166,19 @@ export function SpeculumActions({
   const headerRight = sessionId
     ? `--session ${shortSessionId(sessionId)}${noSubagents ? ' · no-sub' : ''}`
     : `--last-n ${lastN}${noSubagents ? ' · no-sub' : ''}`;
+
+  // Idle path: zero chrome (no margin, no footer strip). Confirm stays available
+  // if it ever mounts without a panel (capture already includes confirm).
+  if (!contextOpen) {
+    return (
+      <ConfirmModal
+        active={false}
+        message=""
+        onConfirm={() => {}}
+        onCancel={() => {}}
+      />
+    );
+  }
 
   const renderSessionPick = () => (
     <box flexDirection="column" flexShrink={0}>

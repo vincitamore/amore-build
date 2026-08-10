@@ -8,17 +8,23 @@ import type { RGBA } from '@opentui/core';
 import { usePalette } from '../ThemeProvider';
 import { Panel } from '../components/Panel';
 import { useStableDimensions } from '../use-stable-dimensions';
+import type { MeasuredSize } from '../use-measured-size';
 import {
   openQueryService,
   SUPPORTED_SCHEMA_VERSIONS,
   type QueryService,
   type SearchHit,
 } from './query-service';
+import { MIN_SEARCH_HIT_SLOTS, seedStageBox } from './sessions-layout';
 
 /** Debounce before FTS read (ms). */
 export const SEARCH_DEBOUNCE_MS = 200;
 
-const HIT_SLOTS = 8;
+/**
+ * Local stage chrome against residual host:
+ * padTop 1 + panel 3 + input 1 + status 1 + stage footer 1 = 7.
+ */
+export const SEARCH_STAGE_CHROME = 7;
 const IDLE_HINT = 'type to search sessions';
 const NO_MATCH = 'no matches';
 const PENDING = 'pending…';
@@ -33,6 +39,8 @@ export type SearchStageProps = {
     sessionId: string,
     opts?: { eventId?: string | number; ts?: string },
   ) => void;
+  /** Residual host box from SessionsMember; optional for isolated stage smokes. */
+  stageBox?: MeasuredSize;
 };
 
 /** Trim; empty / whitespace → '' (skip FTS). */
@@ -121,9 +129,13 @@ export function SearchStage({
   onCapture,
   onFlash,
   onOpenSession,
+  stageBox: stageBoxProp,
 }: SearchStageProps) {
   const t = usePalette();
   const dims = useStableDimensions();
+  const stageBox = stageBoxProp ?? seedStageBox(dims.width, dims.height);
+  const listHostH = Math.max(1, stageBox.height - SEARCH_STAGE_CHROME);
+  const hitSlots = Math.max(MIN_SEARCH_HIT_SLOTS, Math.floor(listHostH));
   const inputRef = useRef<{ value?: string } | null>(null);
   const qsRef = useRef<QueryService | null>(null);
   const aliveRef = useRef(true);
@@ -247,8 +259,8 @@ export function SearchStage({
 
   useEffect(() => {
     if (cursor < scroll) setScroll(cursor);
-    else if (cursor >= scroll + HIT_SLOTS) setScroll(cursor - HIT_SLOTS + 1);
-  }, [cursor, scroll]);
+    else if (cursor >= scroll + hitSlots) setScroll(cursor - hitSlots + 1);
+  }, [cursor, scroll, hitSlots]);
 
   const openHit = useCallback((hit: SearchHit | undefined) => {
     if (!hit) return;
@@ -275,9 +287,8 @@ export function SearchStage({
     // Printable keys fall through to the focused <input>.
   });
 
-  // Nested under SessionsMember: member pad (2) + stage pad (2) + panel border (2) + panel pad (2) = 8.
-  const rowW = Math.max(16, dims.width - 8);
-  const slice = hits.slice(scroll, scroll + HIT_SLOTS);
+  const rowW = Math.max(16, stageBox.width - 4);
+  const slice = hits.slice(scroll, scroll + hitSlots);
   const qTrim = parseQuery(query);
 
   const statusLine = useMemo(() => {
@@ -322,7 +333,7 @@ export function SearchStage({
 
     return (
       <box flexDirection="column" flexShrink={0}>
-        {Array.from({ length: HIT_SLOTS }, (_, i) => {
+        {Array.from({ length: hitSlots }, (_, i) => {
           const hit = slice[i];
           if (!hit) {
             // Idle hint lives only on statusLine (once). Body slot 0 stays blank when idle
@@ -363,6 +374,7 @@ export function SearchStage({
     schemaVersion,
     busy,
     hits.length,
+    hitSlots,
     slice,
     scroll,
     cursor,
@@ -422,7 +434,7 @@ export function SearchStage({
         backgroundColor={t.background}
       >
         <text fg={t.muted} wrapMode="none">
-          {padRow(footer, Math.max(16, dims.width - 2))}
+          {padRow(footer, Math.max(16, stageBox.width - 2))}
         </text>
       </box>
     </box>
