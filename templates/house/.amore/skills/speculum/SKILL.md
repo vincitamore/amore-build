@@ -60,6 +60,8 @@ Compiled single-file binary: `bun run build:compile` → `dist/speculum-<os>-<ar
 | `speculum usage` | Per-model token and turn totals (no prices) |
 | `speculum search <query>` | Sparse FTS5 search over the index (BM25 + recency RRF); `--limit`/`--since`/`--until`/`--project`/`--session`/`--fts-only`; `--json` |
 | `speculum export <surface>` | Snapshot a surface (scan/status/usage/session) as `json`/`csv`/`md` with a metadata envelope + sensitive warning |
+| `speculum graph` | Query-time graph over the derived index: `summary`/`neighbors`/`path`/`degree`/`state-at` |
+| `speculum decisions` | Derived heuristic decisions + chain/impact over typed event links (method banner on every row) |
 | `speculum lenses` | List available lenses and their egress notes |
 | `speculum lens <name>` | Run a lens over a selected, scrubbed slice (`--dry-run` = selection+scrub+audit only) |
 | `speculum audit [-n N]` | Tail the append-only lens audit log |
