@@ -7,6 +7,9 @@ import { createTestRenderer } from '@opentui/core/testing';
 import { createRoot } from '@opentui/react';
 import { ThemeProvider } from '../ThemeProvider';
 import {
+  budgetHitSlots,
+  budgetProbeVisibleRows,
+  clampHitScroll,
   clampRowScroll,
   formatProbeValue,
   formatWilsonRange,
@@ -15,6 +18,7 @@ import {
   probeCardRight,
   probeVisibleRange,
   ProbesStage,
+  type ProbeHit,
   type ScanRow,
 } from './ProbesStage';
 
@@ -188,6 +192,43 @@ describe('probe grid navigation helpers', () => {
   });
 });
 
+describe('probe drill budget + hit window', () => {
+  test('budgetHitSlots fills residual height (tall/short)', () => {
+    // tall: 44 − 8 grid − 15 chrome → 21 slots
+    expect(budgetHitSlots(44, 8, 15)).toBe(21);
+    // short: 24 − 4 grid − 15 chrome → 5 slots (still > hard 4)
+    expect(budgetHitSlots(24, 4, 15)).toBe(5);
+    // starved residual still floors at 1
+    expect(budgetHitSlots(10, 8, 15)).toBe(1);
+    // default chrome arg
+    expect(budgetHitSlots(44, 8)).toBe(21);
+  });
+
+  test('budgetProbeVisibleRows: closed grows; open leaves room for hits', () => {
+    // closed board at 44 → several card rows (capped 6)
+    expect(budgetProbeVisibleRows(44, false)).toBeGreaterThanOrEqual(3);
+    expect(budgetProbeVisibleRows(44, false)).toBeLessThanOrEqual(6);
+    // open at short terminal still ≥1 grid row
+    expect(budgetProbeVisibleRows(24, true)).toBe(1);
+    // open at tall: grid stays compact so hits absorb height (not a hard min(2))
+    const tallOpen = budgetProbeVisibleRows(44, true);
+    expect(tallOpen).toBeGreaterThanOrEqual(1);
+    const hitSlots = budgetHitSlots(44, tallOpen * 4, 15);
+    expect(hitSlots).toBeGreaterThanOrEqual(8);
+  });
+
+  test('clampHitScroll follows the cursor into the window', () => {
+    // 10 hits, 4 slots
+    expect(clampHitScroll(0, 0, 4, 10)).toBe(0);
+    expect(clampHitScroll(3, 0, 4, 10)).toBe(0);
+    expect(clampHitScroll(4, 0, 4, 10)).toBe(1); // cursor past window end
+    expect(clampHitScroll(9, 0, 4, 10)).toBe(6);
+    expect(clampHitScroll(1, 5, 4, 10)).toBe(1); // cursor above window → jump back
+    expect(clampHitScroll(0, 0, 4, 2)).toBe(0); // fewer hits than slots
+    expect(clampHitScroll(5, 10, 4, 10)).toBe(5); // scroll clamped to max
+  });
+});
+
 describe('ProbesStage render', () => {
   test('renders probe cards from scan fixture', async () => {
     const bin = writeFakeBin(
@@ -338,5 +379,95 @@ describe('ProbesStage render', () => {
 
     expect(frame, `frame:\n${frame}`).toMatch(/nonzero|exited 3/i);
     expect(frame).toMatch(/r to retry|r retry/i);
+  });
+
+  test('drill flex: tall terminal shows ≥8 hit rows; short fits footer', async () => {
+    const manyHits: ProbeHit[] = Array.from({ length: 12 }, (_, i) => ({
+      sessionId: `hit-sess-${String(i).padStart(2, '0')}`,
+      ts: `2026-01-0${(i % 9) + 1}T00:00:00.000Z`,
+      category: 'self-correction',
+      evidence: `evidence row ${i}`,
+      eventId: 100 + i,
+    }));
+    const tallFixture: ScanRow[] = [
+      {
+        ...SCAN_FIXTURE[0]!,
+        hits: manyHits,
+      },
+      SCAN_FIXTURE[1]!,
+    ];
+    const bin = writeFakeBin(
+      [
+        `const verb = process.argv[2];`,
+        `if (verb === 'scan') {`,
+        `  console.log(JSON.stringify(${JSON.stringify(tallFixture)}));`,
+        `  process.exit(0);`,
+        `}`,
+        `process.exit(2);`,
+        ``,
+      ].join('\n'),
+    );
+    process.env.SPECULUM_BIN = bin;
+
+    // --- tall: 110×44 — hits panel must show more than the old hard 4 ---
+    {
+      const { renderer, renderOnce, captureCharFrame, mockInput } = await createTestRenderer({
+        width: 110,
+        height: 44,
+      });
+      destroy = () => renderer.destroy();
+      const root = createRoot(renderer);
+      root.render(
+        createElement(
+          ThemeProvider,
+          { initial: 'horizon' },
+          createElement(ProbesStage, { inputActive: true }),
+        ),
+      );
+      await new Promise((r) => setTimeout(r, 600));
+      await renderOnce();
+      await mockInput.pressEnter();
+      await new Promise((r) => setTimeout(r, 80));
+      await renderOnce();
+      const tall = captureCharFrame();
+      expect(tall, `tall drill:\n${tall}`).toMatch(/hits\s*\(\s*12\s*\)/);
+      // Count distinct hit session rows painted (fixed-slot window).
+      const hitRowCount = (tall.match(/hit-sess-\d+/g) ?? []).length;
+      expect(hitRowCount, `expected ≥8 hit rows in tall frame, got ${hitRowCount}:\n${tall}`).toBeGreaterThanOrEqual(8);
+      expect(tall).toMatch(/↑↓ hit|enter open session|h\/esc close/i);
+      renderer.destroy();
+      destroy = undefined;
+    }
+
+    // --- short: 80×24 — drill fits without clipping the stage footer ---
+    {
+      const { renderer, renderOnce, captureCharFrame, mockInput } = await createTestRenderer({
+        width: 80,
+        height: 24,
+      });
+      destroy = () => renderer.destroy();
+      const root = createRoot(renderer);
+      root.render(
+        createElement(
+          ThemeProvider,
+          { initial: 'horizon' },
+          createElement(ProbesStage, { inputActive: true }),
+        ),
+      );
+      await new Promise((r) => setTimeout(r, 600));
+      await renderOnce();
+      await mockInput.pressEnter();
+      await new Promise((r) => setTimeout(r, 80));
+      await renderOnce();
+      const short = captureCharFrame();
+      expect(short, `short drill:\n${short}`).toMatch(/hits\s*\(/);
+      // Footer chrome must remain visible (not overflow-clipped off the buffer).
+      expect(short, `short drill missing footer:\n${short}`).toMatch(
+        /↑↓ hit|enter open|h\/esc close|r refresh/i,
+      );
+      // captureCharFrame may append a trailing newline → H+1 split parts; count content.
+      const lines = short.replace(/\n+$/, '').split('\n');
+      expect(lines.length).toBeLessThanOrEqual(24);
+    }
   });
 });

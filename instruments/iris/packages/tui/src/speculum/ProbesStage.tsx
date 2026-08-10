@@ -47,9 +47,19 @@ const INSTALL_RECIPE = 'amore init --with-speculum';
 /** Outer floor for a probe card; board is 2-up when it fits, else 1-up. */
 const MIN_PROBE_CARD = 36;
 const GRID_GAP = 1;
-const HIT_SLOTS = 4;
 /** Rough rows per card (border + title + body + margin). */
 const CARD_ROW_H = 4;
+/**
+ * Non-grid chrome when the board is closed (terminal-height budget).
+ * Covers stage pad, panel border/title, range label, stage footer, and the
+ * Sessions member nest that hosts this stage — same envelope as before.
+ */
+const GRID_CHROME = 14;
+/**
+ * Chrome when the hits drill is open, excluding card-grid height and hit rows.
+ * Adds the hits-panel header line; hit slots are budgeted from the residual.
+ */
+const DRILL_CHROME = 15;
 
 /**
  * Min card width that keeps the board at most 2-up (house probe board).
@@ -149,6 +159,62 @@ export function clampRowScroll(
   if (row < rowScroll) return row;
   if (row >= rowScroll + vr) return row - vr + 1;
   return Math.max(0, rowScroll);
+}
+
+/**
+ * Budget hit-list slots from measured terminal height.
+ * `gridRowsH` is the card grid's claimed height; `chrome` is everything else
+ * except the hit rows themselves (header, footer, pads, borders, nest).
+ * Always ≥1 so the panel never collapses to zero slots.
+ */
+export function budgetHitSlots(
+  dimsHeight: number,
+  gridRowsH: number,
+  chrome: number = DRILL_CHROME,
+): number {
+  return Math.max(1, Math.floor(dimsHeight - Math.max(0, gridRowsH) - chrome));
+}
+
+/**
+ * Visible card-grid rows from measured height.
+ * When the hits drill is open, leave residual height for the hits panel
+ * (prefer hits growth — no hard mini-grid clamp).
+ */
+export function budgetProbeVisibleRows(
+  dimsHeight: number,
+  hitsOpen: boolean,
+  cardRowH: number = CARD_ROW_H,
+): number {
+  const h = Math.max(1, dimsHeight);
+  const crh = Math.max(1, cardRowH);
+  if (!hitsOpen) {
+    return Math.max(1, Math.min(6, Math.floor(Math.max(4, h - GRID_CHROME) / crh)));
+  }
+  // Residual body for grid + hit slots (hits header lives in DRILL_CHROME).
+  const body = Math.max(crh + 1, h - DRILL_CHROME);
+  // Prefer the hits panel: target ~2/3 of body (floor ≥4 when body allows).
+  const targetHits = Math.max(4, Math.floor((body * 2) / 3));
+  const maxGrid = Math.max(1, Math.floor((body - 1) / crh));
+  const fromTarget = Math.max(1, Math.floor((body - targetHits) / crh));
+  return Math.max(1, Math.min(maxGrid, fromTarget));
+}
+
+/**
+ * Keep the hit cursor inside the hit-scroll window (cursor-following).
+ * Pure — unit-tested without mounting OpenTUI.
+ */
+export function clampHitScroll(
+  hitCursor: number,
+  hitScroll: number,
+  hitSlots: number,
+  hitCount: number,
+): number {
+  const slots = Math.max(1, hitSlots);
+  const maxScroll = Math.max(0, hitCount - slots);
+  let s = Math.max(0, Math.min(maxScroll, hitScroll));
+  if (hitCursor < s) s = hitCursor;
+  else if (hitCursor >= s + slots) s = hitCursor - slots + 1;
+  return Math.max(0, Math.min(maxScroll, s));
 }
 
 /** Resolve the eventId jump grain from a probe hit. */
@@ -274,6 +340,7 @@ export function ProbesStage({
   const [cursor, setCursor] = useState(0);
   const [hitsOpen, setHitsOpen] = useState(false);
   const [hitCursor, setHitCursor] = useState(0);
+  const [hitScroll, setHitScroll] = useState(0);
   const [rowScroll, setRowScroll] = useState(0);
   const aliveRef = useRef(true);
   const onFlashRef = useRef(onFlash);
@@ -299,6 +366,7 @@ export function ProbesStage({
       setCursor((c) => Math.min(c, Math.max(0, data.length - 1)));
       setHitsOpen(false);
       setHitCursor(0);
+      setHitScroll(0);
       onFlashRef.current?.('scan updated');
     } else {
       setRows(null);
@@ -324,11 +392,23 @@ export function ProbesStage({
   const rowW = Math.max(16, dims.width - 8);
   const minCard = probeMinCardWidth(rowW, GRID_GAP);
   const perRow = Math.min(2, cardsPerRow(rowW, minCard, GRID_GAP));
-  // Budget visible card-rows from terminal height so short panes still scroll honestly.
-  // When the hits panel is open, clamp the grid so the fixed hit slots stay on-screen.
-  const visibleRows = hitsOpen
-    ? Math.max(1, Math.min(2, Math.floor(Math.max(4, dims.height - 18) / CARD_ROW_H)))
-    : Math.max(1, Math.min(6, Math.floor(Math.max(4, dims.height - 14) / CARD_ROW_H)));
+  // Budget grid rows + hit slots from measured height (grow-by-height; no hard mini-list).
+  const visibleRows = budgetProbeVisibleRows(dims.height, hitsOpen, CARD_ROW_H);
+  // When the drill is open, charge only the card rows that actually paint — a
+  // short probe list leaves residual height for the hits panel, not phantom rows.
+  const filledGridRows = hitsOpen
+    ? Math.max(
+        1,
+        Math.min(
+          visibleRows,
+          Math.max(1, Math.ceil(list.length / Math.max(1, perRow))),
+        ),
+      )
+    : visibleRows;
+  const gridRowsH = filledGridRows * CARD_ROW_H;
+  const hitSlots = hitsOpen
+    ? budgetHitSlots(dims.height, gridRowsH, DRILL_CHROME)
+    : 1;
 
   useEffect(() => {
     if (cursor >= list.length) setCursor(Math.max(0, list.length - 1));
@@ -339,9 +419,15 @@ export function ProbesStage({
   }, [cursor, visibleRows, perRow]);
 
   useEffect(() => {
-    // Changing the selected probe resets the hits panel selection.
+    // Changing the selected probe resets the hits panel selection + scroll.
     setHitCursor(0);
+    setHitScroll(0);
   }, [cursor]);
+
+  useEffect(() => {
+    if (!hitsOpen) return;
+    setHitScroll((s) => clampHitScroll(hitCursor, s, hitSlots, hits.length));
+  }, [hitsOpen, hitCursor, hitSlots, hits.length]);
 
   const openSelectedHit = useCallback(() => {
     const h = hits[hitCursor];
@@ -411,6 +497,7 @@ export function ProbesStage({
     if (n === 'return' || n === 'enter' || n === 'h') {
       setHitsOpen(true);
       setHitCursor(0);
+      setHitScroll(0);
       return;
     }
   });
@@ -511,22 +598,23 @@ export function ProbesStage({
                 rowW,
               )}
             />
-            {Array.from({ length: HIT_SLOTS }, (_, i) => {
-              const h = hits[i];
+            {Array.from({ length: hitSlots }, (_, slot) => {
+              const absIdx = hitScroll + slot;
+              const h = hits[absIdx];
               if (!h) {
                 return (
                   <FixedClearRow
-                    key={`h-${i}`}
+                    key={`h-slot-${slot}`}
                     width={rowW}
                     color={t.muted}
                     text={emptyRow(rowW)}
                   />
                 );
               }
-              const selHit = i === hitCursor;
+              const selHit = absIdx === hitCursor;
               return (
                 <FixedClearRow
-                  key={`h-${i}-${h.sessionId}`}
+                  key={`h-slot-${slot}`}
                   width={rowW}
                   color={selHit ? t.info : t.foreground}
                   text={padRow(formatHitLine(h, selHit), rowW)}
@@ -556,6 +644,8 @@ export function ProbesStage({
     selected,
     hits,
     hitCursor,
+    hitScroll,
+    hitSlots,
   ]);
 
   const headerRight = error

@@ -1,5 +1,6 @@
 // Headless smoke for ProbesStage + UsageStage against a fake SPECULUM_BIN.
 // Run: bun run src/speculum/stages-smoke.tsx
+// Drill-flex leg: SMOKE_H=44 (default) expects ≥8 painted hit rows; SMOKE_H=24 checks fit.
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -12,6 +13,14 @@ import { UsageStage } from './UsageStage';
 const W = Number(process.env.SMOKE_W ?? 110);
 const H = Number(process.env.SMOKE_H ?? 44);
 
+const MANY_HITS = Array.from({ length: 12 }, (_, i) => ({
+  sessionId: `smoke-hit-${String(i).padStart(2, '0')}`,
+  ts: `2026-01-0${(i % 9) + 1}T12:00:00.000Z`,
+  category: 'self-correction',
+  evidence: `apologies evidence row ${i}`,
+  eventId: 7 + i,
+}));
+
 const SCAN = [
   {
     probe: 'apology-rate',
@@ -23,15 +32,7 @@ const SCAN = [
     unit: 'msg',
     summary: '4 self-corrections / 50 assistant messages [heuristic]',
     data: {},
-    hits: [
-      {
-        sessionId: 'smoke-sess',
-        ts: '2026-01-02T12:00:00.000Z',
-        category: 'self-correction',
-        evidence: 'apologies for the confusion on that step',
-        eventId: 7,
-      },
-    ],
+    hits: MANY_HITS,
     heuristic: true,
   },
   {
@@ -122,6 +123,7 @@ function BothStages() {
   );
 }
 
+// --- leg 1: Probes + Usage coexistence (existing asserts) ---
 const { renderer, renderOnce, captureCharFrame, mockInput } = await createTestRenderer({
   width: W,
   height: H,
@@ -147,19 +149,59 @@ const hasTokens = /1\.5K|2\.5K|4\.3K|4\.2K/.test(frame);
 const hasBorders = /[┌┐└┘─│]/.test(frame);
 const hasTurns = /TURNS|Turns/i.test(frame);
 
-// Drill: Enter opens hits row for the selected probe.
+// Drill: Enter opens hits for the selected probe (header copy shape).
 await mockInput.pressEnter();
 await new Promise((r) => setTimeout(r, 100));
 await renderOnce();
 frame = captureCharFrame();
-const hasDrill = /hits\s*\(/.test(frame) && /smoke-sess/.test(frame);
+const hasDrill = /hits\s*\(/.test(frame) && /smoke-hit-/.test(frame);
 
+console.log('--- coexistence frame ---');
 console.log(frame);
 console.log(
   `\napology:${hasApology} heuristic:${hasHeuristic} summary:${hasSummary} range:${hasRange} note:${hasUsageNote} model:${hasModel} tokens:${hasTokens} turns:${hasTurns} borders:${hasBorders} drill:${hasDrill}`,
 );
 
 renderer.destroy();
+
+// --- leg 2: full-height Probes drill-flex (budgeted hit slots fill residual) ---
+const {
+  renderer: r2,
+  renderOnce: once2,
+  captureCharFrame: cap2,
+  mockInput: keys2,
+} = await createTestRenderer({
+  width: W,
+  height: H,
+});
+createRoot(r2).render(
+  <ThemeProvider initial="horizon">
+    <box flexDirection="column" width={W} height={H}>
+      <ProbesStage inputActive />
+    </box>
+  </ThemeProvider>,
+);
+
+await new Promise((r) => setTimeout(r, 800));
+await once2();
+await keys2.pressEnter();
+await new Promise((r) => setTimeout(r, 100));
+await once2();
+const drillFrame = cap2();
+const hitRowCount = (drillFrame.match(/smoke-hit-\d+/g) ?? []).length;
+const hasDrillHeader = /hits\s*\(\s*12\s*\)/.test(drillFrame);
+const hasFooter = /↑↓ hit|enter open session|h\/esc close|r refresh/i.test(drillFrame);
+// Tall defaults (H≥40): show more than the old hard 4. Short (H≤28): fit footer, ≥1 row.
+const flexOk =
+  hasDrillHeader &&
+  hasFooter &&
+  (H >= 40 ? hitRowCount >= 8 : hitRowCount >= 1);
+
+console.log('--- drill-flex frame ---');
+console.log(drillFrame);
+console.log(`\ndrillFlex header:${hasDrillHeader} footer:${hasFooter} hitRows:${hitRowCount} H:${H} ok:${flexOk}`);
+
+r2.destroy();
 if (prevBin === undefined) delete process.env.SPECULUM_BIN;
 else process.env.SPECULUM_BIN = prevBin;
 try {
@@ -168,14 +210,14 @@ try {
   // best-effort
 }
 
-const ok =
+// Coexistence split is 20+24 — only assert Usage when the terminal is tall enough.
+const coexistenceOk =
   hasApology &&
   hasHeuristic &&
   hasSummary &&
   hasRange &&
-  hasUsageNote &&
-  hasModel &&
-  hasTokens &&
   hasBorders &&
-  hasDrill;
+  hasDrill &&
+  (H < 40 || (hasUsageNote && hasModel && hasTokens && hasTurns));
+const ok = coexistenceOk && flexOk;
 process.exit(ok ? 0 : 1);
