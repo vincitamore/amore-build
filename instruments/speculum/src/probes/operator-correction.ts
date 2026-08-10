@@ -1,6 +1,7 @@
 import type { Db } from "../store/db";
 import { userTurns } from "../store/queries";
 import { wilson95 } from "../stats";
+import { evidenceFromFolded, foldWithMap } from "./normalize";
 import type { HitDetail, Probe, ProbeOptions, ProbeResult } from "./types";
 import { queryOptsFromProbe } from "./types";
 
@@ -69,11 +70,14 @@ const RULES: CategoryRule[] = [
 
 export function detectOperatorCorrection(text: string): CategoryMatch[] {
   const matches: CategoryMatch[] = [];
+  const foldedInfo = foldWithMap(text);
+  const folded = foldedInfo.folded;
   for (const rule of RULES) {
-    if (rule.exclude && rule.exclude.test(text)) continue;
-    const m = rule.regex.exec(text);
+    if (rule.exclude && rule.exclude.test(folded)) continue;
+    const m = rule.regex.exec(folded);
     if (!m) continue;
-    matches.push({ category: rule.category, evidence: m[0]! });
+    const raw = evidenceFromFolded(foldedInfo, m.index, m[0]!.length);
+    matches.push({ category: rule.category, evidence: raw || m[0]! });
   }
   return matches;
 }

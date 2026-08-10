@@ -1,6 +1,7 @@
 import type { Db } from "../store/db";
 import { userTurns } from "../store/queries";
 import { wilson95 } from "../stats";
+import { evidenceFromFolded, foldWithMap } from "./normalize";
 import type { HitDetail, Probe, ProbeOptions, ProbeResult } from "./types";
 import { queryOptsFromProbe } from "./types";
 
@@ -60,26 +61,46 @@ function detectStillPersistence(text: string): string | null {
 
 export function detectFrustrationMarkers(text: string): FrustrationMarkerMatch[] {
   const matches: FrustrationMarkerMatch[] = [];
+  const foldedInfo = foldWithMap(text);
+  const folded = foldedInfo.folded;
 
-  const capsSpan = findCapsSpan(text);
-  if (capsSpan) matches.push({ category: "caps-span-filtered", evidence: capsSpan });
-
-  const stripped = text.replace(/https?:\/\/[^\s)]+/g, "").replace(/```[\s\S]*?```/g, "");
-  if (/\?\?/.test(stripped)) {
-    const m = /[^\n]*\?\?[^\n]*/.exec(stripped);
-    if (m) matches.push({ category: "doubled-question", evidence: m[0]!.slice(0, 80).trim() });
+  const capsSpan = findCapsSpan(folded);
+  if (capsSpan) {
+    const idx = folded.indexOf(capsSpan);
+    const evidence =
+      idx >= 0 ? evidenceFromFolded(foldedInfo, idx, capsSpan.length) : capsSpan;
+    matches.push({ category: "caps-span-filtered", evidence });
   }
 
-  const stillEvidence = detectStillPersistence(text);
-  if (stillEvidence) matches.push({ category: "still-persistence", evidence: stillEvidence });
+  const stripped = folded.replace(/https?:\/\/[^\s)]+/g, "").replace(/```[\s\S]*?```/g, "");
+  if (/\?\?/.test(stripped)) {
+    const m = /[^\n]*\?\?[^\n]*/.exec(stripped);
+    if (m) {
+      const ev = m[0]!.slice(0, 80).trim();
+      const idx = folded.indexOf(ev);
+      const evidence = idx >= 0 ? evidenceFromFolded(foldedInfo, idx, ev.length) : ev;
+      matches.push({ category: "doubled-question", evidence });
+    }
+  }
 
-  if (/\bwth\b/i.test(text)) {
+  const stillEvidence = detectStillPersistence(folded);
+  if (stillEvidence) {
+    const idx = folded.indexOf(stillEvidence);
+    const evidence =
+      idx >= 0 ? evidenceFromFolded(foldedInfo, idx, stillEvidence.length) : stillEvidence;
+    matches.push({ category: "still-persistence", evidence });
+  }
+
+  if (/\bwth\b/i.test(folded)) {
     matches.push({ category: "wth-acronym", evidence: "wth" });
   }
 
   const mincedRe = /\bwhat the (heck|hell)\b/i;
-  const mm = mincedRe.exec(text);
-  if (mm) matches.push({ category: "minced-oath", evidence: mm[0]! });
+  const mm = mincedRe.exec(folded);
+  if (mm) {
+    const evidence = evidenceFromFolded(foldedInfo, mm.index, mm[0]!.length);
+    matches.push({ category: "minced-oath", evidence: evidence || mm[0]! });
+  }
 
   return matches;
 }

@@ -1,3 +1,5 @@
+import { normalizeForProbe } from "../normalize";
+
 export interface DetectionResult {
   count: number;
   matches: Match[];
@@ -86,7 +88,8 @@ const WORD_MAP = new Map(WORDLIST.map((w) => [w.word.toLowerCase(), w]));
 export function detect(text: string): DetectionResult {
   const matches: Match[] = [];
   const seen = new Set<number>();
-  const lower = text.toLowerCase();
+  // Match buffer only; evidence for rage-rate is wordlist tokens, not text slices.
+  const lower = normalizeForProbe(text).toLowerCase();
 
   DEFAULT_PATTERN.lastIndex = 0;
   let m: RegExpExecArray | null;
