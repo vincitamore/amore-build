@@ -1,5 +1,6 @@
 // Headless smoke for MicroscopeStage against a synthetic SPECULUM_DB index.
 // Run: bun run src/speculum/microscope-smoke.tsx
+// Size override: SMOKE_W / SMOKE_H (defaults 120×40). Asserts 80×24 + 120×40.
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -10,7 +11,7 @@ import { ThemeProvider } from '../ThemeProvider';
 import { MicroscopeStage, paneGeometry } from './MicroscopeStage';
 
 const W = Number(process.env.SMOKE_W ?? 120);
-const H = Number(process.env.SMOKE_H ?? 34);
+const H = Number(process.env.SMOKE_H ?? 40);
 
 const SYNTHETIC_DDL = `
 CREATE TABLE events (
@@ -42,7 +43,8 @@ CREATE TABLE sessions (
   turn_count       INTEGER NOT NULL,
   user_msg_count   INTEGER NOT NULL,
   tool_call_count  INTEGER NOT NULL,
-  tool_error_count INTEGER NOT NULL
+  tool_error_count INTEGER NOT NULL,
+  title            TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE usage (
   id                  INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -83,14 +85,15 @@ function seed(): void {
   const db = new Database(dbPath);
   try {
     db.exec(SYNTHETIC_DDL);
-    db.run('PRAGMA user_version = 4');
+    db.run('PRAGMA user_version = 5');
     db.run(
       `INSERT INTO sessions (
          id, project_path, agent, parent_session, model_id,
-         started_at, ended_at, turn_count, user_msg_count, tool_call_count, tool_error_count
+         started_at, ended_at, turn_count, user_msg_count, tool_call_count, tool_error_count, title
        ) VALUES (
          'smoke-sess', '/proj/smoke-app', 'primary', NULL, 'model-s',
-         '2026-06-02T12:00:00.000Z', '2026-06-02T13:00:00.000Z', 2, 1, 1, 1
+         '2026-06-02T12:00:00.000Z', '2026-06-02T13:00:00.000Z', 2, 1, 1, 1,
+         'Smoke Session Title'
        )`,
     );
     const insert = (
@@ -137,70 +140,104 @@ seed();
 const prevDb = process.env.SPECULUM_DB;
 process.env.SPECULUM_DB = dbPath;
 
-// ── Pass 1: wide two-pane (default 120×34) ───────────────────────────────────
-const wide = await createTestRenderer({ width: W, height: H });
-const keys = createMockKeys(wide.renderer);
+type FrameCheck = {
+  label: string;
+  width: number;
+  height: number;
+  frame: string;
+  hasPicker: boolean;
+  hasTitle: boolean;
+  hasSessionsLabel: boolean;
+  hasTimelineLabel: boolean;
+  hasTimeline: boolean;
+  hasErrorBody: boolean;
+  hasError: boolean;
+  hasBorders: boolean;
+  hasInfoHeader: boolean;
+  hasFooter: boolean;
+  hasTwoPane: boolean;
+  hasStacked: boolean;
+};
 
-createRoot(wide.renderer).render(
-  <ThemeProvider initial="horizon">
-    <MicroscopeStage inputActive path={dbPath} />
-  </ThemeProvider>,
-);
-
-await new Promise((r) => setTimeout(r, 300));
-await wide.renderOnce();
-let frame = wide.captureCharFrame();
-// Picker is ~32 cols when two-pane — project basename may ellipsis; id is the pin.
-const hasPicker = /smoke-sess/.test(frame);
-const hasSessionsLabel = /SESSIONS/.test(frame);
-const geoWide = paneGeometry(W);
-const expectsTwoPane = geoWide.twoPane;
-
-await keys.pressKeys(['RETURN']);
-await new Promise((r) => setTimeout(r, 150));
-await wide.renderOnce();
-frame = wide.captureCharFrame();
-console.log('── wide ──');
-console.log(frame);
-
-const hasTimeline = /user/.test(frame) && /smoke hello|assistant|tool_use|Bash/.test(frame);
-const hasError = /command not found|smoke-bin|ENOENT/.test(frame) || /#\d+/.test(frame);
-const hasErrorBody = /command not found|smoke-bin/.test(frame);
-const hasBorders = /[┌┐└┘─│]/.test(frame);
-const hasInfoHeader =
-  /smoke-sess/.test(frame) &&
-  /smoke-app/.test(frame) &&
-  /\d+\s+turns/.test(frame) &&
-  /\d+\s+errors/.test(frame);
-// Two-pane: picker chrome + timeline content both present after open
-const hasTwoPane =
-  !expectsTwoPane || (hasSessionsLabel && hasPicker && hasTimeline && hasInfoHeader);
-
-wide.renderer.destroy();
-
-// ── Pass 2: stacked-narrow (~80) when wide default is two-pane ───────────────
-let hasStacked = true;
-if (expectsTwoPane) {
-  const NW = 80;
-  const narrow = await createTestRenderer({ width: NW, height: H });
-  createRoot(narrow.renderer).render(
+async function runAt(width: number, height: number, openTimeline: boolean): Promise<FrameCheck> {
+  const r = await createTestRenderer({ width, height });
+  const keys = createMockKeys(r.renderer);
+  createRoot(r.renderer).render(
     <ThemeProvider initial="horizon">
       <MicroscopeStage inputActive path={dbPath} />
     </ThemeProvider>,
   );
-  await new Promise((r) => setTimeout(r, 300));
-  await narrow.renderOnce();
-  const nFrame = narrow.captureCharFrame();
-  console.log('\n── narrow (stacked) ──');
-  console.log(nFrame);
-  const geoN = paneGeometry(NW);
-  hasStacked =
-    geoN.twoPane === false &&
-    /smoke-sess/.test(nFrame) &&
-    /SESSIONS/.test(nFrame) &&
-    /enter a session to open its timeline/i.test(nFrame);
-  narrow.renderer.destroy();
+  await new Promise((res) => setTimeout(res, 300));
+  await r.renderOnce();
+  let frame = r.captureCharFrame();
+
+  if (openTimeline) {
+    await keys.pressKeys(['RETURN']);
+    await new Promise((res) => setTimeout(res, 150));
+    await r.renderOnce();
+    frame = r.captureCharFrame();
+  }
+
+  const geo = paneGeometry(width);
+  const hasPicker = /smoke-sess|Smoke Session/.test(frame);
+  const hasTitle = /Smoke Session/.test(frame);
+  const hasSessionsLabel = /SESSIONS/.test(frame);
+  const hasTimelineLabel = /TIMELINE/.test(frame);
+  const hasTimeline =
+    openTimeline && /user/.test(frame) && /smoke hello|assistant|tool_use|Bash/.test(frame);
+  const hasError = /command not found|smoke-bin|ENOENT/.test(frame) || /#\d+/.test(frame);
+  const hasErrorBody = /command not found|smoke-bin/.test(frame);
+  const hasBorders = /[┌┐└┘─│╭╮╰╯]/.test(frame);
+  const hasInfoHeader = openTimeline
+    ? /Smoke Session|smoke-sess/.test(frame) &&
+      /smoke-app/.test(frame) &&
+      /\d+\s+turns/.test(frame) &&
+      /\d+\s+errors/.test(frame)
+    : /enter a session to open its timeline/i.test(frame);
+  const hasFooter = /enter timeline|j\/k|refresh/i.test(frame);
+  const hasTwoPane =
+    !geo.twoPane || (hasSessionsLabel && hasPicker && (!openTimeline || hasTimeline) && hasInfoHeader);
+  const hasStacked = geo.twoPane || (hasSessionsLabel && hasPicker && hasInfoHeader);
+
+  r.renderer.destroy();
+  return {
+    label: `${width}×${height}${openTimeline ? ' open' : ' idle'}`,
+    width,
+    height,
+    frame,
+    hasPicker,
+    hasTitle,
+    hasSessionsLabel,
+    hasTimelineLabel,
+    hasTimeline: openTimeline ? hasTimeline : true,
+    hasErrorBody: openTimeline ? hasErrorBody : true,
+    hasError: openTimeline ? hasError : true,
+    hasBorders,
+    hasInfoHeader,
+    hasFooter,
+    hasTwoPane,
+    hasStacked,
+  };
 }
+
+// ── Pass 1: wide two-pane 120×40 (operator on-device size) ───────────────────
+const wideOpen = await runAt(W >= 100 ? W : 120, H >= 34 ? H : 40, true);
+console.log(`── ${wideOpen.label} ──`);
+console.log(wideOpen.frame);
+
+// ── Pass 2: narrow stacked 80×24 (operator on-device size) ───────────────────
+const narrowIdle = await runAt(80, 24, false);
+console.log(`\n── ${narrowIdle.label} ──`);
+console.log(narrowIdle.frame);
+
+const narrowOpen = await runAt(80, 24, true);
+console.log(`\n── ${narrowOpen.label} ──`);
+console.log(narrowOpen.frame);
+
+// ── Pass 3: wide idle (chrome + empty prompt, no double copy) ───────────────
+const wideIdle = await runAt(120, 40, false);
+console.log(`\n── ${wideIdle.label} ──`);
+console.log(wideIdle.frame);
 
 if (prevDb === undefined) delete process.env.SPECULUM_DB;
 else process.env.SPECULUM_DB = prevDb;
@@ -210,16 +247,33 @@ try {
   // best-effort
 }
 
-console.log(
-  `\npicker:${hasPicker} timeline:${hasTimeline} info:${hasInfoHeader} twoPane:${hasTwoPane} stacked:${hasStacked} error:${hasErrorBody} grain:${hasError} borders:${hasBorders}`,
-);
+function okCheck(c: FrameCheck, requireOpen: boolean): boolean {
+  return (
+    c.hasPicker &&
+    c.hasTitle &&
+    c.hasSessionsLabel &&
+    c.hasTimelineLabel &&
+    c.hasBorders &&
+    c.hasInfoHeader &&
+    c.hasFooter &&
+    c.hasTwoPane &&
+    c.hasStacked &&
+    (!requireOpen || (c.hasTimeline && c.hasErrorBody && c.hasError))
+  );
+}
 
-const ok =
-  hasPicker &&
-  hasTimeline &&
-  hasErrorBody &&
-  hasBorders &&
-  hasInfoHeader &&
-  hasTwoPane &&
-  hasStacked;
+const results = [
+  ['wideOpen', okCheck(wideOpen, true), wideOpen],
+  ['wideIdle', okCheck(wideIdle, false), wideIdle],
+  ['narrowIdle', okCheck(narrowIdle, false), narrowIdle],
+  ['narrowOpen', okCheck(narrowOpen, true), narrowOpen],
+] as const;
+
+for (const [name, ok, c] of results) {
+  console.log(
+    `${name}: ok=${ok} picker:${c.hasPicker} title:${c.hasTitle} SESSIONS:${c.hasSessionsLabel} TIMELINE:${c.hasTimelineLabel} timeline:${c.hasTimeline} info:${c.hasInfoHeader} footer:${c.hasFooter} twoPane:${c.hasTwoPane} error:${c.hasErrorBody} grain:${c.hasError} borders:${c.hasBorders}`,
+  );
+}
+
+const ok = results.every(([, pass]) => pass);
 process.exit(ok ? 0 : 1);

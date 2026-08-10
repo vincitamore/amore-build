@@ -9,23 +9,30 @@ import { createRoot } from '@opentui/react';
 import { ThemeProvider } from '../ThemeProvider';
 import { toPalette } from '../theme';
 import {
+  budgetSessionSlots,
+  budgetTurnSlots,
   formatEventTs,
   formatSessionInfo,
   formatSessionLine,
+  formatSessionTitleLine,
   formatTurnLine,
   kindColor,
   MicroscopeStage,
+  MIN_SESSION_SLOTS,
+  MIN_TURN_SLOTS,
   paneGeometry,
+  paneInnerWidth,
   PICKER_COL_WIDTH,
   projectBasename,
   relAge,
   rowText,
+  sessionDisplayTitle,
   shortSessionId,
   STACK_BELOW_COLS,
 } from './MicroscopeStage';
 import type { SessionListRow, TurnRow } from './query-service';
 
-/** Minimal schema matching tables the query-service reads (version 4). */
+/** Schema with sessions.title (v5) so title fixtures exercise the real read path. */
 const SYNTHETIC_DDL = `
 CREATE TABLE events (
   id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -56,7 +63,8 @@ CREATE TABLE sessions (
   turn_count       INTEGER NOT NULL,
   user_msg_count   INTEGER NOT NULL,
   tool_call_count  INTEGER NOT NULL,
-  tool_error_count INTEGER NOT NULL
+  tool_error_count INTEGER NOT NULL,
+  title            TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE usage (
   id                  INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -96,18 +104,36 @@ let badVersionDbPath: string;
 let errorEventId: number;
 let destroy: (() => void) | undefined;
 
+function baseSession(partial: Partial<SessionListRow> & { id: string }): SessionListRow {
+  return {
+    id: partial.id,
+    projectPath: partial.projectPath ?? '/proj/microscope-demo',
+    agent: partial.agent ?? 'primary',
+    parentSession: partial.parentSession !== undefined ? partial.parentSession : null,
+    modelId: partial.modelId !== undefined ? partial.modelId : 'm',
+    startedAt: partial.startedAt ?? '2026-06-02T12:00:00.000Z',
+    endedAt: partial.endedAt ?? '2026-06-02T13:00:00.000Z',
+    turnCount: partial.turnCount ?? 3,
+    userMsgCount: partial.userMsgCount ?? 1,
+    toolCallCount: partial.toolCallCount ?? 2,
+    toolErrorCount: partial.toolErrorCount ?? 1,
+    eventCount: partial.eventCount ?? 4,
+    title: partial.title ?? '',
+  };
+}
+
 function seedGoodIndex(path: string): number {
   const db = new Database(path);
   let errId = 0;
   try {
     db.exec(SYNTHETIC_DDL);
-    db.run('PRAGMA user_version = 4');
+    db.run('PRAGMA user_version = 5');
 
     db.run(
       `INSERT INTO sessions (
          id, project_path, agent, parent_session, model_id,
-         started_at, ended_at, turn_count, user_msg_count, tool_call_count, tool_error_count
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         started_at, ended_at, turn_count, user_msg_count, tool_call_count, tool_error_count, title
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         'sess-alpha',
         '/proj/microscope-demo',
@@ -120,13 +146,14 @@ function seedGoodIndex(path: string): number {
         1,
         2,
         1,
+        'Repeat Previous Single Word Reply Request',
       ],
     );
     db.run(
       `INSERT INTO sessions (
          id, project_path, agent, parent_session, model_id,
-         started_at, ended_at, turn_count, user_msg_count, tool_call_count, tool_error_count
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         started_at, ended_at, turn_count, user_msg_count, tool_call_count, tool_error_count, title
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         'sess-beta',
         '/proj/other',
@@ -139,6 +166,7 @@ function seedGoodIndex(path: string): number {
         1,
         0,
         0,
+        '', // empty title → id fallback
       ],
     );
 
@@ -211,7 +239,7 @@ function seedEmptyIndex(path: string): void {
   const db = new Database(path);
   try {
     db.exec(SYNTHETIC_DDL);
-    db.run('PRAGMA user_version = 4');
+    db.run('PRAGMA user_version = 5');
   } finally {
     db.close();
   }
@@ -319,27 +347,43 @@ describe('Microscope pure helpers', () => {
     expect(rowText(err)).toMatch(/Read.*ENOENT/);
   });
 
-  test('formatSessionLine / formatTurnLine include selection prefix + grain', () => {
-    const s: SessionListRow = {
+  test('formatSessionLine leads with title; id+age+counts secondary', () => {
+    const now = new Date('2026-06-03T12:00:00.000Z').getTime();
+    const titled = baseSession({
       id: 'sess-alpha',
-      projectPath: '/proj/microscope-demo',
-      agent: 'primary',
-      parentSession: null,
-      modelId: 'm',
-      startedAt: '2026-06-02T12:00:00.000Z',
-      endedAt: '2026-06-02T13:00:00.000Z',
+      title: 'Repeat Previous Single Word Reply Request',
       turnCount: 3,
-      userMsgCount: 1,
-      toolCallCount: 2,
-      toolErrorCount: 1,
       eventCount: 4,
-    };
-    const line = formatSessionLine(s, true, new Date('2026-06-03T12:00:00.000Z').getTime());
+    });
+    const line = formatSessionLine(titled, true, now);
     expect(line.startsWith('>')).toBe(true);
+    expect(line.startsWith('>Repeat Previous')).toBe(true);
     expect(line).toMatch(/sess-alpha/);
     expect(line).toMatch(/t:3 e:4/);
-    expect(line).toMatch(/microscope-demo/);
+    // title leads before the id secondary
+    expect(line.indexOf('Repeat Previous')).toBeLessThan(line.indexOf('sess-alpha'));
+  });
 
+  test('formatSessionLine falls back to id prefix when title empty', () => {
+    const now = new Date('2026-06-03T12:00:00.000Z').getTime();
+    const bare = baseSession({ id: 'sess-beta', title: '' });
+    const line = formatSessionLine(bare, false, now);
+    expect(line.startsWith(' ')).toBe(true);
+    expect(line).toMatch(/sess-beta/);
+    expect(line).toMatch(/t:3 e:4/);
+    // id appears once as the label (no title·id double)
+    expect(line.match(/sess-beta/g)?.length).toBe(1);
+  });
+
+  test('sessionDisplayTitle / formatSessionTitleLine prefer title', () => {
+    const titled = baseSession({ id: 'sess-alpha', title: '  Hello World  ' });
+    expect(sessionDisplayTitle(titled)).toBe('Hello World');
+    expect(formatSessionTitleLine(titled)).toBe('Hello World');
+    const bare = baseSession({ id: 'sess-alpha-long-id-suffix', title: '' });
+    expect(sessionDisplayTitle(bare)).toBe(shortSessionId(bare.id));
+  });
+
+  test('formatTurnLine includes selection prefix + grain', () => {
     const turn: TurnRow = {
       eventId: 42,
       kind: 'user',
@@ -371,35 +415,62 @@ describe('Microscope pure helpers', () => {
 
     const edge = paneGeometry(100);
     expect(edge.twoPane).toBe(true);
+
+    // Card inner width = outer − 4
+    expect(paneInnerWidth(32)).toBe(28);
   });
 
-  test('formatSessionInfo uses middot grammar (id · project · age · turns · errors)', () => {
-    const s: SessionListRow = {
+  test('budgetSessionSlots / budgetTurnSlots grow with height; floors hold at 80×24', () => {
+    const s80 = budgetSessionSlots(24, false);
+    const t80 = budgetTurnSlots(24, false, s80);
+    expect(s80).toBeGreaterThanOrEqual(MIN_SESSION_SLOTS);
+    expect(t80).toBeGreaterThanOrEqual(MIN_TURN_SLOTS);
+    // stacked body (sess + info + turns) + chrome must fit 24
+    expect(s80 + t80 + 2 /* info */ + 12 /* MICRO_CHROME_STACKED */).toBeLessThanOrEqual(24);
+
+    const s120 = budgetSessionSlots(40, true);
+    const t120 = budgetTurnSlots(40, true);
+    expect(s120).toBeGreaterThan(s80);
+    expect(t120).toBeGreaterThan(t80);
+    expect(s120).toBe(40 - 11);
+    expect(t120).toBe(40 - 11 - 2);
+  });
+
+  test('formatSessionInfo facts middot grammar; title lives on its own line', () => {
+    const titled = baseSession({
       id: 'sess-alpha-long-id-suffix',
+      title: 'Named Session',
       projectPath: '/proj/microscope-demo',
-      agent: 'primary',
-      parentSession: null,
-      modelId: 'm',
+      modelId: 'model-x',
       startedAt: '2026-06-02T12:00:00.000Z',
-      endedAt: '2026-06-02T13:00:00.000Z',
       turnCount: 100,
-      userMsgCount: 1,
-      toolCallCount: 2,
       toolErrorCount: 3,
-      eventCount: 4,
-    };
+    });
     const now = new Date('2026-06-02T14:00:00.000Z').getTime();
-    const info = formatSessionInfo(s, now);
+    expect(formatSessionTitleLine(titled)).toBe('Named Session');
+    const info = formatSessionInfo(titled, now);
     expect(info).toBe(
-      `${shortSessionId(s.id)} · microscope-demo · 2h ago · 100 turns · 3 errors`,
+      `${shortSessionId(titled.id)} · microscope-demo · model-x · 2h ago · 100 turns · 3 errors`,
     );
     expect(info).toMatch(/·/);
     expect(info).not.toMatch(/\n/);
+
+    const bare = baseSession({
+      id: 'sess-beta',
+      title: '',
+      projectPath: '/proj/other',
+      modelId: null,
+      turnCount: 1,
+      toolErrorCount: 0,
+      startedAt: '2026-06-02T12:00:00.000Z',
+    });
+    // empty title: id is the title line; facts omit the doubled id
+    expect(formatSessionInfo(bare, now)).toBe('other · 2h ago · 1 turns · 0 errors');
   });
 });
 
 describe('MicroscopeStage render', () => {
-  test('two-pane at 120: picker AND timeline chrome visible', async () => {
+  test('two-pane at 120: picker titles + Sessions/Timeline chrome', async () => {
     const { renderer, renderOnce, captureCharFrame } = await createTestRenderer({
       width: 120,
       height: 34,
@@ -418,11 +489,15 @@ describe('MicroscopeStage render', () => {
     await renderOnce();
     const frame = captureCharFrame();
 
-    expect(frame, `frame:\n${frame}`).toMatch(/sess-alpha/);
+    // Title-first picker (session_summary title lands as the row label)
+    expect(frame, `frame:\n${frame}`).toMatch(/Repeat Previous/);
+    // Empty-title session falls back to id
     expect(frame).toMatch(/sess-beta/);
-    // Picker is ~32 cols — project basenames truncate; ids + SESSIONS label are the chrome pin
+    // Card chrome (ALL-CAPS via Card)
     expect(frame).toMatch(/SESSIONS/);
-    // Info header placeholder until a session is opened (right pane)
+    expect(frame).toMatch(/TIMELINE/);
+    expect(frame).toMatch(/Microscope/);
+    // Info header placeholder until a session is opened
     expect(frame).toMatch(/enter a session to open its timeline/i);
     // Footer two-pane-aware select path
     expect(frame).toMatch(/enter timeline/i);
@@ -448,12 +523,12 @@ describe('MicroscopeStage render', () => {
     const frame = captureCharFrame();
 
     expect(paneGeometry(90).twoPane).toBe(false);
-    expect(frame, `frame:\n${frame}`).toMatch(/sess-alpha/);
+    expect(frame, `frame:\n${frame}`).toMatch(/Repeat Previous|sess-alpha/);
     expect(frame).toMatch(/SESSIONS/);
     expect(frame).toMatch(/enter a session to open its timeline/i);
   });
 
-  test('Enter opens timeline with kind rows + info header + error grain', async () => {
+  test('Enter opens timeline with kind rows + title header + error grain', async () => {
     const { renderer, renderOnce, captureCharFrame } = await createTestRenderer({
       width: 120,
       height: 34,
@@ -481,13 +556,14 @@ describe('MicroscopeStage render', () => {
     // Error row: toolError=1 surfaces ENOENT tail + event id grain
     expect(frame).toMatch(/ENOENT/);
     expect(frame).toMatch(new RegExp(`#${errorEventId}`));
-    // Session-info header (middot grammar)
-    expect(frame).toMatch(/sess-alpha/);
+    // Session-info: title first + facts (project / turns / errors)
+    expect(frame).toMatch(/Repeat Previous/);
     expect(frame).toMatch(/microscope-demo/);
     expect(frame).toMatch(/\d+\s+turns/);
     expect(frame).toMatch(/\d+\s+errors/);
     // Picker remains visible in two-pane
     expect(frame).toMatch(/SESSIONS/);
+    expect(frame).toMatch(/TIMELINE/);
     expect(frame).toMatch(/sess-beta/);
   });
 
@@ -530,10 +606,10 @@ describe('MicroscopeStage render', () => {
     await renderOnce();
     const frame = captureCharFrame();
 
-    expect(frame, `frame:\n${frame}`).toMatch(/sess-alpha/);
+    expect(frame, `frame:\n${frame}`).toMatch(/sess-alpha|Repeat Previous/);
     expect(frame).toMatch(/ENOENT/);
     expect(frame).toMatch(new RegExp(`#${errorEventId}`));
-    // Session-info header shows opened session + project
+    // Session-info header shows opened session title + project
     expect(frame).toMatch(/microscope-demo/);
     expect(frame).toMatch(/\d+\s+turns/);
   });
@@ -589,7 +665,7 @@ describe('MicroscopeStage render', () => {
     frame = captureCharFrame();
     // Still on two-pane with both sessions; jump did not flash a re-open
     expect(frame, `frame:\n${frame}`).toMatch(/sess-beta/);
-    expect(frame).toMatch(/sess-alpha/);
+    expect(frame).toMatch(/sess-alpha|Repeat Previous/);
   });
 
   test('schema-mismatch fixture renders honest version banner', async () => {
