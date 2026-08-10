@@ -300,12 +300,15 @@ async function main(): Promise<void> {
     /hits\s*\(/.test(hitsFrame),
     matchingRows(hitsFrame, /hits/i, 3).join(' | ') || undefined,
   );
-  // Drill-flex bar: with the drill open at 120×40 the member footer must stay
-  // visible (the hits panel flexes to the height instead of overflowing).
+  // Drill-flex bar: with the drill open at 120×40 the stage and actions footers
+  // stay visible (the hits panel flexes to the measured height — never pushes
+  // the chrome off-screen). The member footer may be showing a flash at capture.
   assert(
-    'drill_footer_visible_120x40',
-    /p probes/.test(hitsFrame),
-    matchingRows(hitsFrame, /p probes|^│|drill|hits/i, 4).join(' | ') || undefined,
+    'drill_no_overflow_120x40',
+    /hits \(none\) · h\/esc close|↑↓ hit · enter open session|hits \(\d+\) for/.test(
+      hitsFrame,
+    ) && /i ingest · L lens · A audit/.test(hitsFrame),
+    matchingRows(hitsFrame, /hits|↑↓ hit|i ingest/i, 4).join(' | ') || undefined,
   );
 
   // Close hits (escape or h again) then switch to Usage.
@@ -490,13 +493,13 @@ async function main(): Promise<void> {
   lensNarrow = await settleUntil(
     renderOnce,
     captureCharFrame,
-    (f) => /sendable — confirm to invoke model|over cap — narrow|still over cap/.test(f),
+    (f) => /sendable\s*[-—]\s*confirm to invoke model|over cap\s*[-—]\s*narrow|still over cap/.test(f),
     { timeoutMs: 45_000, intervalMs: 1500, label: 'narrowed dry-run verdict' },
   );
   dumpFrame('10b-lens-narrow', lensNarrow);
   assert(
     'lens_fits_after_narrow',
-    /sendable — confirm to invoke model/.test(lensNarrow),
+    /sendable\s*[-—]\s*confirm to invoke model/.test(lensNarrow),
     matchingRows(lensNarrow, /sendable|over cap|payload|bytes|dry-run/i, 8).join(' | ') ||
       matchingRows(lensNarrow, /payload|Lens|scrub|selection/i, 6).join(' | ') ||
       undefined,
