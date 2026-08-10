@@ -196,7 +196,7 @@ describe("search backend", () => {
     const db = openDb(":memory:");
     try {
       expect(getUserVersion(db)).toBe(SCHEMA_VERSION);
-      expect(SCHEMA_VERSION).toBe(3);
+      expect(SCHEMA_VERSION).toBe(4);
 
       const fts = db
         .query<{ name: string }, []>(
@@ -339,8 +339,8 @@ describe("search backend", () => {
   });
 });
 
-describe("v2→v3 migration keeps rows and builds FTS", () => {
-  test("existing v2 DB migrates to v3; search finds pre-migration text", () => {
+describe("v2→current migration keeps rows and builds FTS", () => {
+  test("existing v2 DB migrates to SCHEMA_VERSION; search finds pre-migration text", () => {
     const scratch = scratchDbPath();
     try {
       seedV2Db(scratch.path);
@@ -356,8 +356,8 @@ describe("v2→v3 migration keeps rows and builds FTS", () => {
 
       const db = openDb(scratch.path);
       try {
-        expect(getUserVersion(db)).toBe(3);
-        expect(SCHEMA_VERSION).toBe(3);
+        expect(getUserVersion(db)).toBe(SCHEMA_VERSION);
+        expect(SCHEMA_VERSION).toBe(4);
         const row = db
           .query<{ text: string }, []>(
             "SELECT text FROM events WHERE session_id = 'sess-v2'",
@@ -464,13 +464,13 @@ describe("ingest / forget maintain FTS", () => {
 });
 
 describe("schema version pin", () => {
-  test("SCHEMA_VERSION is 3 after WU-11", () => {
-    expect(SCHEMA_VERSION).toBe(3);
+  test("SCHEMA_VERSION is 4 after WU-14", () => {
+    expect(SCHEMA_VERSION).toBe(4);
     const db = openDb(":memory:");
     try {
-      expect(getUserVersion(db)).toBe(3);
-      // Reopen path should be no-op at v3
-      setUserVersion(db, 3);
+      expect(getUserVersion(db)).toBe(SCHEMA_VERSION);
+      // Stamp current; reopen path is a no-op when already at SCHEMA_VERSION
+      setUserVersion(db, SCHEMA_VERSION);
       expect(getUserVersion(db)).toBe(SCHEMA_VERSION);
     } finally {
       db.close();

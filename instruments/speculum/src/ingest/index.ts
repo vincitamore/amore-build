@@ -30,6 +30,7 @@ import {
   type NormalizedUsage,
 } from "./parser";
 import { matchSensitivePatterns } from "../probes/sensitive-content";
+import { rebuildEventLinksAndDecisions } from "../decisions";
 
 // WU-04: progress callback shape (per-file / per-stage, not a pipeline).
 export type IngestPhase = "list" | "session" | "rebuild" | "done";
@@ -587,6 +588,9 @@ export function ingest(db: Db, opts: IngestOptions = {}): IngestStats {
       emit("rebuild", sessionsTotal, sessionsTotal);
       const tRebuild0 = Date.now();
       rebuildSessions(db);
+      // WU-14: re-derive event_links + decisions after events/sessions settle.
+      // Single ordered scan → wipe + bulk insert; never hand-maintained.
+      rebuildEventLinksAndDecisions(db);
       stats.rebuildMs = Date.now() - tRebuild0;
     }
   };

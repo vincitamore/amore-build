@@ -80,3 +80,44 @@ CREATE VIRTUAL TABLE IF NOT EXISTS events_fts USING fts5(
   tool_input,
   tool_output
 );
+
+-- Typed event links (derived; rebuilt on every ingest post-pass, never hand-maintained).
+-- kind: GENERATED | USED | PRECEDENT_FOR (| CAUSED | INFLUENCED when clear)
+-- method: tool_call_id | artifact_path | plan_text_match | ...
+-- heuristic=1 means method is non-deterministic; always surface the method banner.
+CREATE TABLE IF NOT EXISTS event_links (
+  id               INTEGER PRIMARY KEY AUTOINCREMENT,
+  source_event_id  INTEGER NOT NULL,
+  target_event_id  INTEGER NOT NULL,
+  kind             TEXT NOT NULL,
+  method           TEXT NOT NULL,
+  confidence       REAL NOT NULL DEFAULT 1.0,
+  heuristic        INTEGER NOT NULL DEFAULT 0,
+  UNIQUE(source_event_id, target_event_id, kind)
+);
+
+CREATE INDEX IF NOT EXISTS idx_event_links_source ON event_links(source_event_id);
+CREATE INDEX IF NOT EXISTS idx_event_links_target ON event_links(target_event_id);
+CREATE INDEX IF NOT EXISTS idx_event_links_kind ON event_links(kind);
+
+-- Heuristic decisions distilled from events (derived; rebuilt on ingest post-pass).
+-- Not a compliance product. method is a required heuristic banner.
+CREATE TABLE IF NOT EXISTS decisions (
+  id               TEXT PRIMARY KEY,
+  session_id       TEXT NOT NULL,
+  project_path     TEXT NOT NULL,
+  ts               TEXT NOT NULL,
+  category         TEXT NOT NULL,
+  scenario         TEXT,
+  reasoning        TEXT,
+  outcome          TEXT,
+  confidence       REAL,
+  decision_maker   TEXT,
+  source_event_id  INTEGER,
+  method           TEXT NOT NULL,
+  metadata         TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_decisions_session ON decisions(session_id, ts);
+CREATE INDEX IF NOT EXISTS idx_decisions_category ON decisions(category);
+CREATE INDEX IF NOT EXISTS idx_decisions_source ON decisions(source_event_id);

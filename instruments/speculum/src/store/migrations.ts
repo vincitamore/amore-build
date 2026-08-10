@@ -26,7 +26,8 @@ export interface Migration {
 // baseline step lets an existing DB whose stamp was forced below SCHEMA_VERSION
 // walk the ordered loop without re-running greenfield DDL (tables already present).
 // Version 2 adds events.sensitive (flag-only at ingest; never rewrites raw).
-// Version 3 adds events_fts (FTS5 external-content over events text/tool fields).
+// Version 3 adds events_fts (FTS5 standalone over events text/tool fields).
+// Version 4 adds event_links + decisions (derived; rebuilt on every ingest post-pass).
 export const MIGRATIONS: readonly Migration[] = [
   {
     version: 1,
@@ -61,6 +62,58 @@ export const MIGRATIONS: readonly Migration[] = [
         INSERT INTO events_fts(rowid, text, tool_name, tool_input, tool_output)
         SELECT id, text, tool_name, tool_input, tool_output FROM events
       `);
+    },
+  },
+  {
+    version: 4,
+    name: "v4-event-links-decisions",
+    up: (db) => {
+      // Derived tables: empty shells; ingest post-pass re-derives rows.
+      db.run(`
+        CREATE TABLE IF NOT EXISTS event_links (
+          id               INTEGER PRIMARY KEY AUTOINCREMENT,
+          source_event_id  INTEGER NOT NULL,
+          target_event_id  INTEGER NOT NULL,
+          kind             TEXT NOT NULL,
+          method           TEXT NOT NULL,
+          confidence       REAL NOT NULL DEFAULT 1.0,
+          heuristic        INTEGER NOT NULL DEFAULT 0,
+          UNIQUE(source_event_id, target_event_id, kind)
+        )
+      `);
+      db.run(
+        "CREATE INDEX IF NOT EXISTS idx_event_links_source ON event_links(source_event_id)",
+      );
+      db.run(
+        "CREATE INDEX IF NOT EXISTS idx_event_links_target ON event_links(target_event_id)",
+      );
+      db.run("CREATE INDEX IF NOT EXISTS idx_event_links_kind ON event_links(kind)");
+      db.run(`
+        CREATE TABLE IF NOT EXISTS decisions (
+          id               TEXT PRIMARY KEY,
+          session_id       TEXT NOT NULL,
+          project_path     TEXT NOT NULL,
+          ts               TEXT NOT NULL,
+          category         TEXT NOT NULL,
+          scenario         TEXT,
+          reasoning        TEXT,
+          outcome          TEXT,
+          confidence       REAL,
+          decision_maker   TEXT,
+          source_event_id  INTEGER,
+          method           TEXT NOT NULL,
+          metadata         TEXT
+        )
+      `);
+      db.run(
+        "CREATE INDEX IF NOT EXISTS idx_decisions_session ON decisions(session_id, ts)",
+      );
+      db.run(
+        "CREATE INDEX IF NOT EXISTS idx_decisions_category ON decisions(category)",
+      );
+      db.run(
+        "CREATE INDEX IF NOT EXISTS idx_decisions_source ON decisions(source_event_id)",
+      );
     },
   },
 ];

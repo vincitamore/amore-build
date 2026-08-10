@@ -14,6 +14,8 @@ import { lensesCommand } from "./commands/lenses";
 import { auditCommand } from "./commands/audit";
 import { searchCommand } from "./commands/search";
 import { exportCommand } from "./commands/export";
+import { graphCommand } from "./commands/graph";
+import { decisionsCommand } from "./commands/decisions";
 import { defaultAuditPath } from "./paths";
 import { versionLine } from "./version";
 
@@ -87,15 +89,26 @@ Commands:
                         --session <id> (session surface)
                         --json         Alias for --format json
 
+  graph                 Query-time graph over the derived index
+                        summary | neighbors | path | degree | state-at
+                        --session ID  --project P  --at ISO  --json
+
+  decisions             Derived decisions + chain/impact over event_links
+                        list | chain | impact | summary
+                        --session ID  --category C  --since D  --json
+                        HEURISTIC — method banner on every row
+
   --help, -h            Show this message
   --version, -V, version  Print package version and exit
 
 Privacy (dual posture): ingest, status, doctor, forget, scan, search, export,
-and usage NEVER egress — local only. The ONLY egress is opt-in lens: each \`speculum lens\`
-command sends a scrubbed slice to the model the local amore configuration routes
-to. Scrub fails closed; every invocation is audited. Audit log: ${defaultAuditPath()}
+graph, decisions, and usage NEVER egress — local only. The ONLY egress is opt-in
+lens: each \`speculum lens\` command sends a scrubbed slice to the model the local
+amore configuration routes to. Scrub fails closed; every invocation is audited.
+Audit log: ${defaultAuditPath()}
 
-Probe rates are heuristic — pattern banks are unvalidated on this corpus.
+Probe rates and extracted decisions are heuristic — pattern banks are unvalidated
+on this corpus; every decision/link method field is a required banner.
 `);
 }
 
@@ -112,6 +125,8 @@ const COMMANDS: Record<string, (args: string[]) => Promise<void>> = {
   usage: usageCommand,
   search: searchCommand,
   export: exportCommand,
+  graph: graphCommand,
+  decisions: decisionsCommand,
   lens: lensCommand,
   lenses: lensesCommand,
   audit: auditCommand,

@@ -113,18 +113,25 @@ describe("migrations framework", () => {
     const db = openDb(":memory:");
     try {
       expect(getUserVersion(db)).toBe(SCHEMA_VERSION);
-      expect(SCHEMA_VERSION).toBe(3);
+      expect(SCHEMA_VERSION).toBe(4);
       expect(isFreshDb(db)).toBe(false);
 
       const tables = db
         .query<{ name: string }, []>(
           `SELECT name FROM sqlite_master
-           WHERE type = 'table' AND name IN ('events', 'sessions', 'usage', 'ingest_state')
+           WHERE type = 'table' AND name IN ('events', 'sessions', 'usage', 'ingest_state', 'event_links', 'decisions')
            ORDER BY name`,
         )
         .all()
         .map((r) => r.name);
-      expect(tables).toEqual(["events", "ingest_state", "sessions", "usage"]);
+      expect(tables).toEqual([
+        "decisions",
+        "event_links",
+        "events",
+        "ingest_state",
+        "sessions",
+        "usage",
+      ]);
       expect(tableHasColumn(db, "events", "sensitive")).toBe(true);
       const fts = db
         .query<{ name: string }, []>(
@@ -182,7 +189,7 @@ describe("migrations framework", () => {
       const db = openDb(scratch.path);
       try {
         expect(getUserVersion(db)).toBe(SCHEMA_VERSION);
-        expect(SCHEMA_VERSION).toBe(3);
+        expect(SCHEMA_VERSION).toBe(4);
         expect(tableHasColumn(db, "events", "sensitive")).toBe(true);
         const row = db
           .query<{ text: string; sensitive: number }, []>(
@@ -207,6 +214,131 @@ describe("migrations framework", () => {
             )
             .get()?.n ?? 0;
         expect(ftsHits).toBe(1);
+        // v4 tables present after migration
+        const links = db
+          .query<{ name: string }, []>(
+            `SELECT name FROM sqlite_master WHERE name = 'event_links'`,
+          )
+          .get();
+        expect(links?.name).toBe("event_links");
+        const decisions = db
+          .query<{ name: string }, []>(
+            `SELECT name FROM sqlite_master WHERE name = 'decisions'`,
+          )
+          .get();
+        expect(decisions?.name).toBe("decisions");
+      } finally {
+        db.close();
+      }
+    } finally {
+      scratch.cleanup();
+    }
+  });
+
+  test("v3→v4 migration adds event_links + decisions and preserves rows", () => {
+    const scratch = scratchDbPath();
+    try {
+      // Seed a v3-shaped DB (sensitive + fts, no links/decisions).
+      const seed = new Database(scratch.path);
+      seed.exec(`
+        CREATE TABLE events (
+          id              INTEGER PRIMARY KEY AUTOINCREMENT,
+          session_id      TEXT NOT NULL,
+          project_path    TEXT NOT NULL,
+          agent           TEXT NOT NULL,
+          parent_session  TEXT,
+          ts              TEXT NOT NULL,
+          kind            TEXT NOT NULL,
+          text            TEXT,
+          tool_name       TEXT,
+          tool_input      TEXT,
+          tool_output     TEXT,
+          tool_error      INTEGER,
+          tool_call_id    TEXT,
+          is_boilerplate  INTEGER NOT NULL DEFAULT 0,
+          sensitive       INTEGER NOT NULL DEFAULT 0,
+          raw             TEXT NOT NULL
+        );
+        CREATE TABLE sessions (
+          id               TEXT PRIMARY KEY,
+          project_path     TEXT NOT NULL,
+          agent            TEXT NOT NULL,
+          parent_session   TEXT,
+          model_id         TEXT,
+          started_at       TEXT NOT NULL,
+          ended_at         TEXT NOT NULL,
+          turn_count       INTEGER NOT NULL,
+          user_msg_count   INTEGER NOT NULL,
+          tool_call_count  INTEGER NOT NULL,
+          tool_error_count INTEGER NOT NULL
+        );
+        CREATE TABLE usage (
+          id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+          session_id          TEXT NOT NULL,
+          project_path        TEXT NOT NULL,
+          ts                  TEXT NOT NULL,
+          model_id            TEXT,
+          input_tokens        INTEGER NOT NULL DEFAULT 0,
+          output_tokens       INTEGER NOT NULL DEFAULT 0,
+          cached_read_tokens  INTEGER NOT NULL DEFAULT 0,
+          reasoning_tokens    INTEGER NOT NULL DEFAULT 0,
+          total_tokens        INTEGER NOT NULL DEFAULT 0,
+          num_turns           INTEGER NOT NULL DEFAULT 0,
+          model_calls         INTEGER NOT NULL DEFAULT 0,
+          raw                 TEXT NOT NULL
+        );
+        CREATE TABLE ingest_state (
+          file_path     TEXT PRIMARY KEY,
+          size_bytes    INTEGER NOT NULL,
+          mtime         TEXT NOT NULL,
+          byte_offset   INTEGER NOT NULL,
+          last_ingested TEXT NOT NULL,
+          forgotten     INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE VIRTUAL TABLE events_fts USING fts5(
+          text, tool_name, tool_input, tool_output
+        );
+        PRAGMA user_version = 3;
+      `);
+      seed.run(
+        `INSERT INTO events (session_id, project_path, agent, ts, kind, text, is_boilerplate, sensitive, raw)
+         VALUES ('sess-v3', '/proj', 'primary', '2026-01-01T00:00:00.000Z', 'user', 'v3-survive', 0, 0, '{}')`,
+      );
+      seed.close();
+
+      const db = openDb(scratch.path);
+      try {
+        expect(getUserVersion(db)).toBe(4);
+        const row = db
+          .query<{ text: string }, []>(
+            "SELECT text FROM events WHERE session_id = 'sess-v3'",
+          )
+          .get();
+        expect(row?.text).toBe("v3-survive");
+        const n =
+          db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM events").get()?.n ?? 0;
+        expect(n).toBe(1);
+        expect(
+          db
+            .query<{ name: string }, []>(
+              `SELECT name FROM sqlite_master WHERE name = 'event_links'`,
+            )
+            .get()?.name,
+        ).toBe("event_links");
+        expect(
+          db
+            .query<{ name: string }, []>(
+              `SELECT name FROM sqlite_master WHERE name = 'decisions'`,
+            )
+            .get()?.name,
+        ).toBe("decisions");
+        // Empty shells until ingest post-pass
+        expect(
+          db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM event_links").get()?.n,
+        ).toBe(0);
+        expect(
+          db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM decisions").get()?.n,
+        ).toBe(0);
       } finally {
         db.close();
       }
