@@ -64,6 +64,10 @@ jobs:
         timeout-minutes: 10
         run: bun install --frozen-lockfile
 
+      - name: typecheck (clean)
+        timeout-minutes: 10
+        run: bun run typecheck
+
       - name: bun test (0 fail)
         timeout-minutes: 15
         run: bun test

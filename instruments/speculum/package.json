@@ -11,6 +11,7 @@
     "start": "bun run src/cli.ts",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
+    "check": "bun run typecheck && bun test",
     "build:compile": "bun run scripts/build-compile.ts"
   },
   "devDependencies": {
