@@ -25,6 +25,17 @@ import {
   type NormalizedUsage,
 } from "./parser";
 
+// WU-04: progress callback shape (per-file / per-stage, not a pipeline).
+export type IngestPhase = "list" | "session" | "rebuild" | "done";
+
+export interface IngestProgress {
+  phase: IngestPhase;
+  sessionsDone: number;
+  sessionsTotal: number;
+  eventsAppended: number;
+  pct: number;
+}
+
 export interface IngestOptions {
   /** Force re-read every updates.jsonl from byte 0 (after wipe of those sessions). */
   full?: boolean;
@@ -37,6 +48,9 @@ export interface IngestOptions {
    * Used for live-shape validation and CLI --dry-run.
    */
   dryRun?: boolean;
+  // WU-04
+  /** Optional progress callback (per session / stage). */
+  onProgress?: (p: IngestProgress) => void;
 }
 
 export interface IngestStats {
@@ -52,6 +66,11 @@ export interface IngestStats {
   errors: number;
   durationMs: number;
   dryRun: boolean;
+  // WU-04: named stage timings (ms)
+  listMs: number;
+  parseMs: number;
+  writeMs: number;
+  rebuildMs: number;
 }
 
 interface FileCursor {
@@ -353,6 +372,8 @@ export function ingest(db: Db, opts: IngestOptions = {}): IngestStats {
   const root = opts.sessionsDir ?? sessionsRoot();
   const dryRun = opts.dryRun === true;
   const full = opts.full === true;
+  // WU-04
+  const onProgress = opts.onProgress;
 
   const stats: IngestStats = {
     sessionDirsScanned: 0,
@@ -367,19 +388,52 @@ export function ingest(db: Db, opts: IngestOptions = {}): IngestStats {
     errors: 0,
     durationMs: 0,
     dryRun,
+    // WU-04
+    listMs: 0,
+    parseMs: 0,
+    writeMs: 0,
+    rebuildMs: 0,
+  };
+
+  // WU-04: progress emitter (no-op when callback absent)
+  const emit = (
+    phase: IngestPhase,
+    sessionsDone: number,
+    sessionsTotal: number,
+  ): void => {
+    if (!onProgress) return;
+    const pct =
+      phase === "done"
+        ? 100
+        : sessionsTotal > 0
+          ? Math.min(100, Math.floor((sessionsDone / sessionsTotal) * 100))
+          : 0;
+    onProgress({
+      phase,
+      sessionsDone,
+      sessionsTotal,
+      eventsAppended: stats.eventsAppended,
+      pct,
+    });
   };
 
   if (!existsSync(root)) {
     stats.durationMs = Date.now() - started;
+    emit("done", 0, 0);
     return stats;
   }
 
+  // WU-04: list stage
+  const tList0 = Date.now();
   let sessions = listSessionDirs(root);
   if (typeof opts.limit === "number" && opts.limit >= 0) {
     sessions = sessions.slice(0, opts.limit);
   }
 
   const parentMap = buildParentMap(sessions);
+  stats.listMs = Date.now() - tList0;
+  const sessionsTotal = sessions.length;
+  emit("list", 0, sessionsTotal);
 
   const insertEventStmt = dryRun ? null : db.prepare(INSERT_EVENT);
   const insertUsageStmt = dryRun ? null : db.prepare(INSERT_USAGE);
@@ -429,6 +483,8 @@ export function ingest(db: Db, opts: IngestOptions = {}): IngestStats {
         cursor = getCursor(db, s.updatesPath);
         if (cursor?.forgotten === 1) {
           stats.sessionDirsSkippedForgotten++;
+          // WU-04
+          emit("session", stats.sessionDirsScanned, sessionsTotal);
           continue;
         }
       }
@@ -440,6 +496,8 @@ export function ingest(db: Db, opts: IngestOptions = {}): IngestStats {
           const mtimeIso = new Date(st.mtimeMs).toISOString();
           if (cursor.size_bytes === st.size && cursor.mtime === mtimeIso) {
             stats.sessionDirsSkippedUnchanged++;
+            // WU-04
+            emit("session", stats.sessionDirsScanned, sessionsTotal);
             continue;
           }
           if (cursor.size_bytes <= st.size) {
@@ -448,6 +506,8 @@ export function ingest(db: Db, opts: IngestOptions = {}): IngestStats {
           // shrunk → startOffset 0
         } catch {
           stats.errors++;
+          // WU-04
+          emit("session", stats.sessionDirsScanned, sessionsTotal);
           continue;
         }
       }
@@ -459,12 +519,17 @@ export function ingest(db: Db, opts: IngestOptions = {}): IngestStats {
       }
 
       try {
+        // WU-04: parse stage accumulator
+        const tParse0 = Date.now();
         const parsed = parseUpdatesFromOffset(s.updatesPath, startOffset, ctx);
+        stats.parseMs += Date.now() - tParse0;
         stats.linesSeen += parsed.linesSeen;
         stats.linesParsed += parsed.linesParsed;
         stats.linesSkipped += parsed.linesSkipped;
 
         if (!dryRun && insertEventStmt && insertUsageStmt) {
+          // WU-04: write stage accumulator
+          const tWrite0 = Date.now();
           for (const ev of parsed.events) {
             insertEvent(insertEventStmt, ev);
             stats.eventsAppended++;
@@ -476,6 +541,7 @@ export function ingest(db: Db, opts: IngestOptions = {}): IngestStats {
             stats.usageRowsAppended++;
           }
           setCursor(db, s.updatesPath, parsed.sizeBytes, parsed.mtimeIso, parsed.bytesProcessed);
+          stats.writeMs += Date.now() - tWrite0;
         } else {
           stats.eventsAppended += parsed.events.length;
           stats.usageRowsAppended += parsed.usage.length;
@@ -484,15 +550,25 @@ export function ingest(db: Db, opts: IngestOptions = {}): IngestStats {
       } catch {
         stats.errors++;
       }
+      // WU-04
+      emit("session", stats.sessionDirsScanned, sessionsTotal);
     }
 
-    if (!dryRun) rebuildSessions(db);
+    if (!dryRun) {
+      // WU-04: rebuild stage
+      emit("rebuild", sessionsTotal, sessionsTotal);
+      const tRebuild0 = Date.now();
+      rebuildSessions(db);
+      stats.rebuildMs = Date.now() - tRebuild0;
+    }
   };
 
   if (tx) tx(processAll);
   else processAll();
 
   stats.durationMs = Date.now() - started;
+  // WU-04
+  emit("done", sessionsTotal, sessionsTotal);
   return stats;
 }
 

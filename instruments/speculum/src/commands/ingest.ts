@@ -1,5 +1,5 @@
 import { openDb } from "../store/db";
-import { ingest, type IngestStats } from "../ingest";
+import { ingest, type IngestProgress, type IngestStats } from "../ingest";
 import { sessionsRoot } from "../paths";
 
 function flag(args: string[], name: string): boolean {
@@ -19,6 +19,11 @@ export async function ingestCommand(args: string[]): Promise<void> {
   const limit = limitStr ? Number(limitStr) : undefined;
   const sessionsDir = opt(args, "--sessions-dir") ?? sessionsRoot();
 
+  // WU-04: live progress only on interactive TTY when not dumping JSON.
+  // Non-TTY and --json already suppress human output via printStats.
+  const onProgress =
+    !json && process.stderr.isTTY ? makeProgressPrinter() : undefined;
+
   // Dry-run still opens an ephemeral in-memory DB only if we need schema helpers;
   // ingest with dryRun never writes. We pass a real openDb only when not dry-run.
   if (dryRun) {
@@ -29,6 +34,7 @@ export async function ingestCommand(args: string[]): Promise<void> {
         full,
         sessionsDir,
         limit: Number.isFinite(limit) ? limit : undefined,
+        onProgress,
       });
       printStats(stats, json, true);
     } finally {
@@ -43,11 +49,29 @@ export async function ingestCommand(args: string[]): Promise<void> {
       full,
       sessionsDir,
       limit: Number.isFinite(limit) ? limit : undefined,
+      onProgress,
     });
     printStats(stats, json, false);
   } finally {
     db.close();
   }
+}
+
+// WU-04
+function makeProgressPrinter(): (p: IngestProgress) => void {
+  return (p: IngestProgress) => {
+    if (p.phase === "done") {
+      process.stderr.write(`\r${" ".repeat(72)}\r`);
+      return;
+    }
+    const line =
+      p.phase === "list"
+        ? `  ingest listing ${p.sessionsTotal} session dir(s)…`
+        : p.phase === "rebuild"
+          ? `  ingest rebuild sessions…`
+          : `  ingest ${p.sessionsDone}/${p.sessionsTotal} (${p.pct}%)  events=${p.eventsAppended}`;
+    process.stderr.write(`\r${line.padEnd(72)}`);
+  };
 }
 
 function printStats(stats: IngestStats, json: boolean, dry: boolean): void {
@@ -67,6 +91,10 @@ function printStats(stats: IngestStats, json: boolean, dry: boolean): void {
   console.log(`  usage rows ${dry ? "would append" : "appended"}:  ${stats.usageRowsAppended}`);
   console.log(`  errors:                   ${stats.errors}`);
   console.log(`  duration:                 ${stats.durationMs}ms`);
+  // WU-04
+  console.log(
+    `  stages:                   list ${stats.listMs}ms · parse ${stats.parseMs}ms · write ${stats.writeMs}ms · rebuild ${stats.rebuildMs}ms`,
+  );
   if (dry) console.log("  (no writes — dry run)");
   console.log("");
 }
