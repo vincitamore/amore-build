@@ -26,6 +26,7 @@ export interface Migration {
 // baseline step lets an existing DB whose stamp was forced below SCHEMA_VERSION
 // walk the ordered loop without re-running greenfield DDL (tables already present).
 // Version 2 adds events.sensitive (flag-only at ingest; never rewrites raw).
+// Version 3 adds events_fts (FTS5 external-content over events text/tool fields).
 export const MIGRATIONS: readonly Migration[] = [
   {
     version: 1,
@@ -39,6 +40,27 @@ export const MIGRATIONS: readonly Migration[] = [
     name: "v2-events-sensitive",
     up: (db) => {
       db.run("ALTER TABLE events ADD COLUMN sensitive INTEGER NOT NULL DEFAULT 0");
+    },
+  },
+  {
+    version: 3,
+    name: "v3-events-fts",
+    up: (db) => {
+      // Standalone FTS5 (rowid = events.id). External-content form was avoided:
+      // bun:sqlite DELETE on empty external-content vtab can raise CORRUPT_VTAB.
+      db.run(`
+        CREATE VIRTUAL TABLE events_fts USING fts5(
+          text,
+          tool_name,
+          tool_input,
+          tool_output
+        )
+      `);
+      // Backfill from existing events (derived index — safe to rebuild anytime).
+      db.run(`
+        INSERT INTO events_fts(rowid, text, tool_name, tool_input, tool_output)
+        SELECT id, text, tool_name, tool_input, tool_output FROM events
+      `);
     },
   },
 ];

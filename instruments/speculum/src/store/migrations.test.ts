@@ -113,7 +113,7 @@ describe("migrations framework", () => {
     const db = openDb(":memory:");
     try {
       expect(getUserVersion(db)).toBe(SCHEMA_VERSION);
-      expect(SCHEMA_VERSION).toBe(2);
+      expect(SCHEMA_VERSION).toBe(3);
       expect(isFreshDb(db)).toBe(false);
 
       const tables = db
@@ -126,6 +126,12 @@ describe("migrations framework", () => {
         .map((r) => r.name);
       expect(tables).toEqual(["events", "ingest_state", "sessions", "usage"]);
       expect(tableHasColumn(db, "events", "sensitive")).toBe(true);
+      const fts = db
+        .query<{ name: string }, []>(
+          `SELECT name FROM sqlite_master WHERE name = 'events_fts'`,
+        )
+        .get();
+      expect(fts?.name).toBe("events_fts");
     } finally {
       db.close();
     }
@@ -164,7 +170,7 @@ describe("migrations framework", () => {
     }
   });
 
-  test("v1→v2 migration adds sensitive column and preserves rows", () => {
+  test("v1→current migration adds sensitive + FTS and preserves rows", () => {
     const scratch = scratchDbPath();
     try {
       seedV1Db(scratch.path);
@@ -175,8 +181,8 @@ describe("migrations framework", () => {
 
       const db = openDb(scratch.path);
       try {
-        expect(getUserVersion(db)).toBe(2);
-        expect(SCHEMA_VERSION).toBe(2);
+        expect(getUserVersion(db)).toBe(SCHEMA_VERSION);
+        expect(SCHEMA_VERSION).toBe(3);
         expect(tableHasColumn(db, "events", "sensitive")).toBe(true);
         const row = db
           .query<{ text: string; sensitive: number }, []>(
@@ -188,6 +194,19 @@ describe("migrations framework", () => {
         const count =
           db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM events").get()?.n ?? 0;
         expect(count).toBe(1);
+        const fts = db
+          .query<{ name: string }, []>(
+            `SELECT name FROM sqlite_master WHERE name = 'events_fts'`,
+          )
+          .get();
+        expect(fts?.name).toBe("events_fts");
+        const ftsHits =
+          db
+            .query<{ n: number }, []>(
+              `SELECT COUNT(*) AS n FROM events_fts WHERE events_fts MATCH 'survive'`,
+            )
+            .get()?.n ?? 0;
+        expect(ftsHits).toBe(1);
       } finally {
         db.close();
       }

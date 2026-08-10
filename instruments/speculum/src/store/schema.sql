@@ -70,3 +70,13 @@ CREATE TABLE IF NOT EXISTS ingest_state (
   last_ingested TEXT NOT NULL,
   forgotten     INTEGER NOT NULL DEFAULT 0
 );
+
+-- Sparse FTS5 index over event text/tool fields (rowid = events.id).
+-- Standalone (not external-content): kept in sync by ingest/forget; rebuildable.
+-- Re-derived on ingest; cleared on forget / ingest --full. Not source of truth.
+CREATE VIRTUAL TABLE IF NOT EXISTS events_fts USING fts5(
+  text,
+  tool_name,
+  tool_input,
+  tool_output
+);

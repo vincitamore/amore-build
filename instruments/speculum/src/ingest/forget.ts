@@ -12,6 +12,7 @@
 import { appendFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import type { Db } from "../store/db";
+import { deleteSessionFromFts } from "../store/search";
 import { defaultForgetAuditPath } from "../paths";
 
 export interface ForgetResult {
@@ -187,6 +188,9 @@ export function forgetSession(
   const sessionId = matched[0]!;
   // Capture source file sizes before forgotten flag flips.
   const sources = collectSourceMeta(db, sessionId);
+
+  // WU-11: drop FTS rows for this session before events DELETE.
+  deleteSessionFromFts(db, sessionId);
 
   const delEvents = db.prepare("DELETE FROM events WHERE session_id = ?").run(sessionId);
   const delUsage = db.prepare("DELETE FROM usage WHERE session_id = ?").run(sessionId);

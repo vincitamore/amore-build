@@ -14,6 +14,11 @@ import {
 import { join } from "node:path";
 import type { Db } from "../store/db";
 import { decodeCwdDirName } from "../store/db";
+import {
+  clearEventsFts,
+  deleteSessionFromFts,
+  upsertEventFts,
+} from "../store/search";
 import { sessionsRoot } from "../paths";
 import {
   coalesceMessageChunks,
@@ -127,9 +132,9 @@ function eventIsSensitive(ev: NormalizedEvent): boolean {
   return false;
 }
 
-function insertEvent(stmt: ReturnType<Db["prepare"]>, ev: NormalizedEvent): void {
+function insertEvent(stmt: ReturnType<Db["prepare"]>, ev: NormalizedEvent): number {
   const sensitive = eventIsSensitive(ev) ? 1 : 0;
-  stmt.run(
+  const info = stmt.run(
     ev.session_id,
     ev.project_path,
     ev.agent,
@@ -146,6 +151,7 @@ function insertEvent(stmt: ReturnType<Db["prepare"]>, ev: NormalizedEvent): void
     sensitive,
     ev.raw,
   );
+  return Number(info.lastInsertRowid);
 }
 
 function insertUsage(stmt: ReturnType<Db["prepare"]>, u: NormalizedUsage): void {
@@ -456,6 +462,8 @@ export function ingest(db: Db, opts: IngestOptions = {}): IngestStats {
     db.run("DELETE FROM sessions");
     // Reset byte offsets so every non-forgotten file re-reads from 0.
     db.run("UPDATE ingest_state SET byte_offset = 0, size_bytes = 0 WHERE forgotten = 0");
+    // WU-11: clear FTS with the events wipe so --full rebuilds the sparse index too.
+    clearEventsFts(db);
   }
 
   const tx = dryRun
@@ -525,6 +533,8 @@ export function ingest(db: Db, opts: IngestOptions = {}): IngestStats {
 
       if (!dryRun && startOffset === 0 && cursor && !full) {
         // Re-read from start: wipe prior rows for this session.
+        // WU-11: drop FTS rows for this session before events DELETE.
+        deleteSessionFromFts(db, s.sessionId);
         db.prepare("DELETE FROM events WHERE session_id = ?").run(s.sessionId);
         db.prepare("DELETE FROM usage WHERE session_id = ?").run(s.sessionId);
       }
@@ -542,7 +552,14 @@ export function ingest(db: Db, opts: IngestOptions = {}): IngestStats {
           // WU-04: write stage accumulator
           const tWrite0 = Date.now();
           for (const ev of parsed.events) {
-            insertEvent(insertEventStmt, ev);
+            const eventId = insertEvent(insertEventStmt, ev);
+            // WU-11: keep events_fts in sync with each inserted event row.
+            upsertEventFts(db, eventId, {
+              text: ev.text,
+              tool_name: ev.tool_name,
+              tool_input: ev.tool_input,
+              tool_output: ev.tool_output,
+            });
             stats.eventsAppended++;
           }
           for (const u of parsed.usage) {
