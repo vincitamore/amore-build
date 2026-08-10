@@ -16,11 +16,13 @@ import { KnowledgeMember } from '../members/KnowledgeMember';
 import { FilesMember } from '../members/FilesMember';
 import { ForgeMember } from '../members/ForgeMember';
 import { LucernaMember } from '../members/LucernaMember';
+import { SessionsMember } from '../members/SessionsMember';
 import { DocView } from '../components/DocView';
 import { SearchOverlay } from '../SearchOverlay';
 import { ThemePicker } from '../ThemePicker';
 import { usePalette } from '../ThemeProvider';
 import { dlog } from '../debug';
+import type { SessionFocus } from '../speculum/status';
 import { MemberBar } from './MemberBar';
 
 const TYPE_OF: Record<string, string> = { Tasks: 'task', Inbox: 'inbox', Reminders: 'reminder', Knowledge: 'knowledge' };
@@ -38,13 +40,15 @@ const MKnowledge = memo(KnowledgeMember);
 const MFiles = memo(FilesMember);
 const MForge = memo(ForgeMember);
 const MLucerna = memo(LucernaMember);
+const MSessions = memo(SessionsMember);
 // GraphView + the global DocView are also kept-mounted and were the ACTUAL churn source (their
 // child GraphConfigModal / MarkdownView re-rendered on every Shell re-render). Memoize them too so
 // they go quiet unless their own props change.
 const MGraphView = memo(GraphView);
 const MDocView = memo(DocView);
 
-const MEMBERS = ['Dashboard', 'Tasks', 'Inbox', 'Reminders', 'Knowledge', 'Files', 'Forge', 'Lucerna', 'Graph'] as const;
+// Sessions is last (10th). Digits 1-9 keep members 0..8; Sessions is letter-key only (`S`).
+const MEMBERS = ['Dashboard', 'Tasks', 'Inbox', 'Reminders', 'Knowledge', 'Files', 'Forge', 'Lucerna', 'Graph', 'Sessions'] as const;
 
 /**
  * Initial member index for launch presets.
@@ -72,7 +76,9 @@ export function resolveInitialMemberIndex(
     if (fromEnv && fromEnv.trim()) name = fromEnv.trim();
   }
   if (!name) return 0;
-  const idx = MEMBERS.findIndex((m) => m.toLowerCase() === name!.toLowerCase());
+  // Case-insensitive match; accept singular "session" as Sessions (CLI convenience).
+  const needle = name.toLowerCase() === 'session' ? 'sessions' : name.toLowerCase();
+  const idx = MEMBERS.findIndex((m) => m.toLowerCase() === needle);
   return idx >= 0 ? idx : 0;
 }
 
@@ -176,6 +182,19 @@ export function Shell({ onQuit }: { onQuit?: () => void }) {
     const i = MEMBERS.indexOf(info.member as (typeof MEMBERS)[number]);
     if (i >= 0) setActive(i);
   }, []);
+  // Session jump spine: shell owns focus + navigate-to-Sessions. The full Focus union lands with
+  // exploration stages; this is the seam (`navigate` + `openSession`). No Map/Search glyph
+  // callers yet — openSession is kept ready for later wiring. Consume-once jump is honored by
+  // SessionsMember (it flashes until the session picker exists).
+  const [sessionFocus, setSessionFocus] = useState<SessionFocus | null>(null);
+  const [sessionFocusNonce, setSessionFocusNonce] = useState(0);
+  const openSession = useCallback((sessionId: string, opts?: { eventId?: string | number; ts?: string }) => {
+    setSessionFocus({ sessionId, eventId: opts?.eventId, ts: opts?.ts });
+    setSessionFocusNonce((k) => k + 1);
+    setActive(MEMBERS.indexOf('Sessions'));
+  }, []);
+  // Retained for Map/Search prop-wiring (no callers yet).
+  void openSession;
   const [daemonReady, setDaemonReady] = useState<string | null>(null);
   // Non-null when the graph fell back to synthetic demo data (daemon unreachable, or empty index)
   // — surfaced as a muted status banner so the fallback is never silent (the stale-daemon trap).
@@ -379,6 +398,9 @@ export function Shell({ onQuit }: { onQuit?: () => void }) {
       return setPicker(true);
     }
     if (n === 'q') return onQuit?.();
+    // Sessions letter-key (digits 1-9 keep members 0..8; Sessions has no digit).
+    // Free in the shell guard region: shell uses v t q / 1-9 ctrl+n/p; no bare `s`.
+    if (n === 's') return setActive(MEMBERS.indexOf('Sessions'));
     if (key.ctrl && n === 'n') return setActive((a) => (a + 1) % MEMBERS.length);
     if (key.ctrl && n === 'p') return setActive((a) => (a - 1 + MEMBERS.length) % MEMBERS.length);
     if (/^[1-9]$/.test(n)) {
@@ -437,6 +459,15 @@ export function Shell({ onQuit }: { onQuit?: () => void }) {
         return <MForge inputActive={on} onCapture={cap} daemonUrl={daemonReady} />;
       case 'Lucerna':
         return <MLucerna inputActive={on} onCapture={cap} daemonUrl={daemonReady} />;
+      case 'Sessions':
+        return (
+          <MSessions
+            inputActive={on}
+            onCapture={cap}
+            focus={sessionFocus}
+            focusKey={sessionFocusNonce}
+          />
+        );
       default:
         return <MDashboard active={on} daemonUrl={daemonReady} onNavigate={navigate} onOpen={openDoc} />;
     }
