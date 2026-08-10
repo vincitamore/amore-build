@@ -1162,9 +1162,11 @@ def run_drive(
         )
         links_m = re.search(r"(\d+) links", map_text)
         sheet.check(
-            "map_links_real",
-            bool(links_m) and int(links_m.group(1)) > 0,
-            f"{links_m.group(1) if links_m else 'no'} links drawn",
+            "map_links_honest",
+            bool(links_m)
+            and bool(re.search(r"parentage", map_text, re.I))
+            and bool(re.search(r"event links", map_text, re.I)),
+            f"{links_m.group(1) if links_m else 'no'} links (0 is the honest default) · legend edge kinds",
         )
 
         # ── 2b. m → Microscope (redesigned two-pane; title-first picker) ────

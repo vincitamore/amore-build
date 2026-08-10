@@ -47,3 +47,5 @@ instruments/iris/packages/*/dist/
 instruments/iris/packages/tui/scripts/e2e-frames/
 instruments/iris/packages/tui/scripts/e2e-sessions-topology.txt
 scripts/e2e-pty-frames/
+scripts/e2e-pty-review/*
+!scripts/e2e-pty-review/README.md

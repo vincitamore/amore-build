@@ -251,7 +251,7 @@ async function main(): Promise<void> {
 
   // Wait for probe board to leave "loading scan…" and show a real registry name.
   const PROBE_NAME_RE =
-    /session-phase|contradiction|session-overlap|apology-rate|stuck-loop/;
+    /session-phase|contradiction|session-overlap|apology-rate|stuck-loop/i;
   sessionsFrame = await settleUntil(
     renderOnce,
     captureCharFrame,
@@ -300,15 +300,18 @@ async function main(): Promise<void> {
     /hits\s*\(/.test(hitsFrame),
     matchingRows(hitsFrame, /hits/i, 3).join(' | ') || undefined,
   );
-  // Drill-flex bar: with the drill open at 120×40 the stage and actions footers
-  // stay visible (the hits panel flexes to the measured height — never pushes
-  // the chrome off-screen). The member footer may be showing a flash at capture.
+  // Drill-flex bar: the hits panel + stage footer are visible at 120×40, and the
+  // global ingestion/lens/audit grammar appears AT MOST ONCE (the member footer
+  // owns it; the Actions strip is silent when idle — the single-band rule).
   assert(
     'drill_no_overflow_120x40',
     /hits \(none\) · h\/esc close|↑↓ hit · enter open session|hits \(\d+\) for/.test(
       hitsFrame,
-    ) && /i ingest · L lens · A audit/.test(hitsFrame),
-    matchingRows(hitsFrame, /hits|↑↓ hit|i ingest/i, 4).join(' | ') || undefined,
+    ) &&
+      (/p probes\s*·\s*u usage/.test(hitsFrame) ||
+        /i ingest\s*·\s*L lens\s*·\s*A audit/.test(hitsFrame)) &&
+      (hitsFrame.match(/i ingest\s*·\s*L lens\s*·\s*A audit/g) ?? []).length <= 1,
+    matchingRows(hitsFrame, /hits|↑↓ hit|i ingest|p probes/i, 6).join(' | ') || undefined,
   );
 
   // Close hits (escape or h again) then switch to Usage.
@@ -387,26 +390,35 @@ async function main(): Promise<void> {
       : matchingRows(mapFrame, /fit|center|cluster|density|Map|session/i, 4).join(' | ') ||
         undefined,
   );
-  // Map-record bars: honest coverage, a legend with toggle rows, and REAL
-  // evidence links (parentage + event_links — never 0 by cap).
+  // One-house map bars: honest coverage, closed legend with pinned edge kinds,
+  // and NEVER session-folder labels (the wall-of-(1) regression).
   assert(
     'map_showing_n_of_m',
     /showing \d+ of \d+/.test(mapFrame),
     matchingRows(mapFrame, /showing \d+ of \d+/i, 2).join(' | ') || undefined,
   );
   assert(
-    'map_legend',
-    /parentage|event links|●|═|─/.test(mapFrame),
-    matchingRows(mapFrame, /parentage|event links|●|═|─/i, 3).join(' | ') || undefined,
+    'map_legend_closed',
+    /parentage/.test(mapFrame) && /event links/.test(mapFrame) && /operator/.test(mapFrame),
+    matchingRows(mapFrame, /parentage|event links|operator|●|═|─/i, 4).join(' | ') || undefined,
   );
   {
+    // Zero drawn edges is the HONEST default (population filters on); the real
+    // record's structure is surfaced by the legend edge-kind totals.
     const linksMatch = mapFrame.match(/(\d+) links/);
     assert(
-      'map_links_real',
-      !!linksMatch && Number(linksMatch[1]) > 0,
-      linksMatch ? `${linksMatch[1]} links drawn` : 'no "N links" token in frame',
+      'map_links_honest',
+      !!linksMatch && /parentage/.test(mapFrame) && /event links/.test(mapFrame),
+      linksMatch
+        ? `${linksMatch[1]} links (0 is the honest default) · legend carries the edge kinds`
+        : 'no "N links" token in frame',
     );
   }
+  assert(
+    'map_no_session_folder_labels',
+    !/A-sen-|chat-mode-/.test(mapFrame),
+    matchingRows(mapFrame, /A-sen-|chat-mode-|op·prim/i, 3).join(' | ') || 'no folder labels',
+  );
 
   // 5. Search: w → type 'the' → assert hits or no matches → Escape
   console.log('\n── 5. Search ──');
