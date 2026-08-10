@@ -26,6 +26,13 @@ export type MicroscopeJump = {
 
 const SESSION_SLOTS = 8;
 const TURN_SLOTS = 12;
+/** Terminal width below this stacks picker over timeline (chunked; not flexWrap). */
+export const STACK_BELOW_COLS = 100;
+/** Fixed picker column width when side-by-side (must never wrap a session row). */
+export const PICKER_COL_WIDTH = 32;
+const PANE_GAP = 1;
+/** Nested under SessionsMember: member pad (2) + stage pad (2) + panel border (2) + panel pad (2). */
+const NESTED_CHROME = 8;
 const EMPTY_INDEX_COPY = "no speculum index — run 'speculum ingest'";
 const EMPTY_CORPUS_COPY = "no ingested sessions — run 'speculum ingest'";
 
@@ -112,10 +119,50 @@ export function rowText(turn: TurnRow): string {
   return (turn.text ?? '').trim().replace(/\s+/g, ' ') || turn.kind;
 }
 
+/** Short session id prefix for chrome (ellipsis after 12). */
+export function shortSessionId(id: string): string {
+  if (!id) return '?';
+  return id.length > 12 ? `${id.slice(0, 11)}\u2026` : id;
+}
+
+/**
+ * Two-pane geometry from terminal width.
+ * Wide (≥ STACK_BELOW_COLS): picker fixed ~32 cols, timeline gets the rest
+ * (panel content budget = dims − NESTED_CHROME; house Panel −6 nested rule).
+ * Narrow: both panes use full content width (stacked column).
+ */
+export function paneGeometry(termWidth: number): {
+  twoPane: boolean;
+  contentW: number;
+  pickerW: number;
+  timelineW: number;
+} {
+  const contentW = Math.max(16, Math.floor(termWidth) - NESTED_CHROME);
+  const twoPane = Math.floor(termWidth) >= STACK_BELOW_COLS;
+  if (!twoPane) {
+    return { twoPane: false, contentW, pickerW: contentW, timelineW: contentW };
+  }
+  const pickerW = Math.min(34, Math.max(30, PICKER_COL_WIDTH));
+  const timelineW = Math.max(16, contentW - pickerW - PANE_GAP);
+  return { twoPane: true, contentW, pickerW, timelineW };
+}
+
+/**
+ * One-row session-info header above the timeline.
+ * House middot register (same family as Map status lines): id · project · age · N turns · N errors.
+ * Never wraps — caller pad-truncates to the timeline panel width.
+ */
+export function formatSessionInfo(s: SessionListRow, now = Date.now()): string {
+  const id = shortSessionId(s.id);
+  const proj = projectBasename(s.projectPath);
+  const age = relAge(s.startedAt, now);
+  return `${id} · ${proj} · ${age} · ${s.turnCount} turns · ${s.toolErrorCount} errors`;
+}
+
 /** Full fixed-width session picker line. */
 export function formatSessionLine(s: SessionListRow, selected: boolean, now = Date.now()): string {
   const prefix = selected ? '>' : ' ';
-  const id = s.id.length > 12 ? `${s.id.slice(0, 11)}\u2026` : s.id;
+  const id = shortSessionId(s.id);
   const age = relAge(s.startedAt, now);
   const counts = `t:${s.turnCount} e:${s.eventCount}`;
   const proj = projectBasename(s.projectPath);
@@ -478,10 +525,14 @@ export function MicroscopeStage({
     }
   });
 
-  // Nested under SessionsMember: member pad (2) + stage pad (2) + panel border (2) + panel pad (2) = 8.
-  const rowW = Math.max(16, dims.width - 8);
+  const { twoPane, contentW, pickerW, timelineW } = paneGeometry(dims.width);
   const sessionSlice = sessions.slice(sessionScroll, sessionScroll + SESSION_SLOTS);
   const turnSlice = turns.slice(turnScroll, turnScroll + TURN_SLOTS);
+
+  const openSession = useMemo(
+    () => (openSessionId ? sessions.find((s) => s.id === openSessionId) ?? null : null),
+    [openSessionId, sessions],
+  );
 
   const banners = useMemo(() => {
     const lines: { text: string; color: RGBA }[] = [];
@@ -503,12 +554,19 @@ export function MicroscopeStage({
     return lines;
   }, [mode, schemaVersion, t]);
 
+  const softOnly = mode === 'missing' || mode === 'schema' || mode === 'loading';
+
   const pickerBody = useMemo(() => {
-    if (mode === 'missing' || mode === 'schema' || mode === 'loading') {
+    if (softOnly) {
       return (
         <box flexDirection="column" flexShrink={0}>
           {banners.map((b, i) => (
-            <FixedClearRow key={`b-${i}`} width={rowW} color={b.color} text={padRow(b.text, rowW)} />
+            <FixedClearRow
+              key={`b-${i}`}
+              width={pickerW}
+              color={b.color}
+              text={padRow(b.text, pickerW)}
+            />
           ))}
         </box>
       );
@@ -517,10 +575,15 @@ export function MicroscopeStage({
       return (
         <box flexDirection="column" flexShrink={0}>
           {banners.map((b, i) => (
-            <FixedClearRow key={`b-${i}`} width={rowW} color={b.color} text={padRow(b.text, rowW)} />
+            <FixedClearRow
+              key={`b-${i}`}
+              width={pickerW}
+              color={b.color}
+              text={padRow(b.text, pickerW)}
+            />
           ))}
           {Array.from({ length: SESSION_SLOTS - 1 }, (_, i) => (
-            <FixedClearRow key={`e-${i}`} width={rowW} color={t.muted} text={emptyRow(rowW)} />
+            <FixedClearRow key={`e-${i}`} width={pickerW} color={t.muted} text={emptyRow(pickerW)} />
           ))}
         </box>
       );
@@ -531,9 +594,9 @@ export function MicroscopeStage({
           ? banners.map((b, i) => (
               <FixedClearRow
                 key={`busy-${i}`}
-                width={rowW}
+                width={pickerW}
                 color={b.color}
-                text={padRow(b.text, rowW)}
+                text={padRow(b.text, pickerW)}
               />
             ))
           : null}
@@ -543,12 +606,12 @@ export function MicroscopeStage({
             return (
               <FixedClearRow
                 key={`s-${i}`}
-                width={rowW}
+                width={pickerW}
                 color={t.muted}
                 text={
                   i === 0 && sessions.length === 0
-                    ? padRow(EMPTY_CORPUS_COPY, rowW)
-                    : emptyRow(rowW)
+                    ? padRow(EMPTY_CORPUS_COPY, pickerW)
+                    : emptyRow(pickerW)
                 }
               />
             );
@@ -558,18 +621,19 @@ export function MicroscopeStage({
           return (
             <FixedClearRow
               key={`s-${row.id}-${i}`}
-              width={rowW}
+              width={pickerW}
               color={selected ? t.info : t.foreground}
-              text={padRow(formatSessionLine(row, selected), rowW)}
+              text={padRow(formatSessionLine(row, selected), pickerW)}
             />
           );
         })}
       </box>
     );
   }, [
+    softOnly,
     mode,
     banners,
-    rowW,
+    pickerW,
     t,
     sessionSlice,
     sessions.length,
@@ -578,25 +642,35 @@ export function MicroscopeStage({
     view,
   ]);
 
+  const infoHeaderText = useMemo(() => {
+    if (openSession) return formatSessionInfo(openSession);
+    if (mode === 'ready') return 'enter a session to open its timeline';
+    return '';
+  }, [openSession, mode]);
+
+  // Content follows openSessionId (master-detail); `view` only owns keyboard focus.
+  // Empty prompt lives in the info header only — body stays blank slots (no double copy).
   const timelineBody = useMemo(() => {
-    if (view !== 'timeline' || !openSessionId) {
+    if (!openSessionId) {
       return (
-        <FixedClearRow
-          width={rowW}
-          color={t.muted}
-          text={padRow(
-            mode === 'ready' ? 'enter a session to open its timeline' : '',
-            rowW,
-          )}
-        />
+        <box flexDirection="column" flexShrink={0}>
+          {Array.from({ length: TURN_SLOTS }, (_, i) => (
+            <FixedClearRow
+              key={`t-empty-${i}`}
+              width={timelineW}
+              color={t.muted}
+              text={emptyRow(timelineW)}
+            />
+          ))}
+        </box>
       );
     }
     if (turns.length === 0) {
       return (
         <FixedClearRow
-          width={rowW}
+          width={timelineW}
           color={t.muted}
-          text={padRow('no events in session', rowW)}
+          text={padRow('no events in session', timelineW)}
         />
       );
     }
@@ -606,24 +680,30 @@ export function MicroscopeStage({
           const row = turnSlice[i];
           if (!row) {
             return (
-              <FixedClearRow key={`t-${i}`} width={rowW} color={t.muted} text={emptyRow(rowW)} />
+              <FixedClearRow
+                key={`t-${i}`}
+                width={timelineW}
+                color={t.muted}
+                text={emptyRow(timelineW)}
+              />
             );
           }
           const absIdx = turnScroll + i;
-          const selected = absIdx === turnCursor;
+          // Highlight turn cursor only while timeline owns focus.
+          const selected = view === 'timeline' && absIdx === turnCursor;
           const color = selected ? t.info : kindColor(row.kind, t, row.toolError);
           return (
             <FixedClearRow
               key={`t-${row.eventId}-${i}`}
-              width={rowW}
+              width={timelineW}
               color={color}
-              text={padRow(formatTurnLine(row, selected), rowW)}
+              text={padRow(formatTurnLine(row, selected), timelineW)}
             />
           );
         })}
       </box>
     );
-  }, [view, openSessionId, turns.length, turnSlice, turnScroll, turnCursor, rowW, t, mode]);
+  }, [view, openSessionId, turns.length, turnSlice, turnScroll, turnCursor, timelineW, t]);
 
   const headerRight =
     mode === 'loading'
@@ -640,12 +720,77 @@ export function MicroscopeStage({
                 ? `${sessions.length} sess · ${turns.length} evt`
                 : `${sessions.length} sessions`;
 
+  // Footer is two-pane-aware but keeps E2E tokens (↑↓ / select / enter timeline / j/k).
   const footer =
     mode === 'missing' || mode === 'schema'
       ? 'r refresh'
       : view === 'timeline'
-        ? '↑↓ j/k turns · esc picker · r refresh'
-        : '↑↓ select · enter timeline · r refresh';
+        ? twoPane
+          ? '↑↓ j/k turns · esc sessions · r refresh'
+          : '↑↓ j/k turns · esc picker · r refresh'
+        : twoPane
+          ? '↑↓ select · enter timeline · r refresh'
+          : '↑↓ select · enter timeline · r refresh';
+
+  const pickerColumn = (
+    <box
+      flexDirection="column"
+      flexShrink={0}
+      width={pickerW}
+      overflow="hidden"
+      backgroundColor={t.background}
+    >
+      <FixedClearRow
+        width={pickerW}
+        color={t.muted}
+        text={padRow('SESSIONS', pickerW)}
+      />
+      {pickerBody}
+    </box>
+  );
+
+  const timelineColumn = (
+    <box
+      flexDirection="column"
+      flexGrow={1}
+      flexShrink={1}
+      minWidth={0}
+      width={twoPane ? timelineW : contentW}
+      overflow="hidden"
+      backgroundColor={t.background}
+    >
+      <FixedClearRow
+        width={timelineW}
+        color={openSession ? t.foreground : t.muted}
+        text={padRow(infoHeaderText, timelineW)}
+      />
+      {timelineBody}
+    </box>
+  );
+
+  const stageBody = softOnly ? (
+    <box flexDirection="column" flexShrink={0}>
+      {banners.map((b, i) => (
+        <FixedClearRow
+          key={`soft-${i}`}
+          width={contentW}
+          color={b.color}
+          text={padRow(b.text, contentW)}
+        />
+      ))}
+    </box>
+  ) : twoPane ? (
+    <box flexDirection="row" flexShrink={0} overflow="hidden" backgroundColor={t.background}>
+      {pickerColumn}
+      <box width={PANE_GAP} flexShrink={0} backgroundColor={t.background} />
+      {timelineColumn}
+    </box>
+  ) : (
+    <box flexDirection="column" flexShrink={0} backgroundColor={t.background}>
+      {pickerColumn}
+      {timelineColumn}
+    </box>
+  );
 
   return (
     <box
@@ -664,25 +809,7 @@ export function MicroscopeStage({
         minHeight={0}
         active={!!inputActive}
       >
-        <box flexDirection="column" flexShrink={0}>
-          <FixedClearRow
-            width={rowW}
-            color={t.muted}
-            text={padRow('sessions', rowW)}
-          />
-          {pickerBody}
-          <FixedClearRow
-            width={rowW}
-            color={t.muted}
-            text={padRow(
-              openSessionId
-                ? `timeline ${openSessionId.length > 24 ? `${openSessionId.slice(0, 23)}\u2026` : openSessionId}`
-                : 'timeline',
-              rowW,
-            )}
-          />
-          {timelineBody}
-        </box>
+        {stageBody}
       </Panel>
       <box
         flexDirection="row"

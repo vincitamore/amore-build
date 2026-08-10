@@ -10,13 +10,18 @@ import { ThemeProvider } from '../ThemeProvider';
 import { toPalette } from '../theme';
 import {
   formatEventTs,
+  formatSessionInfo,
   formatSessionLine,
   formatTurnLine,
   kindColor,
   MicroscopeStage,
+  paneGeometry,
+  PICKER_COL_WIDTH,
   projectBasename,
   relAge,
   rowText,
+  shortSessionId,
+  STACK_BELOW_COLS,
 } from './MicroscopeStage';
 import type { SessionListRow, TurnRow } from './query-service';
 
@@ -348,10 +353,53 @@ describe('Microscope pure helpers', () => {
     expect(tline).toMatch(/user/);
     expect(tline).toMatch(/#42/);
   });
+
+  test('paneGeometry two-pane at ≥100, stacked below; picker ~30–34', () => {
+    expect(STACK_BELOW_COLS).toBe(100);
+    const wide = paneGeometry(120);
+    expect(wide.twoPane).toBe(true);
+    expect(wide.pickerW).toBeGreaterThanOrEqual(30);
+    expect(wide.pickerW).toBeLessThanOrEqual(34);
+    expect(wide.pickerW).toBe(PICKER_COL_WIDTH);
+    expect(wide.timelineW).toBe(wide.contentW - wide.pickerW - 1);
+    expect(wide.contentW).toBe(120 - 8);
+
+    const stacked = paneGeometry(90);
+    expect(stacked.twoPane).toBe(false);
+    expect(stacked.pickerW).toBe(stacked.contentW);
+    expect(stacked.timelineW).toBe(stacked.contentW);
+
+    const edge = paneGeometry(100);
+    expect(edge.twoPane).toBe(true);
+  });
+
+  test('formatSessionInfo uses middot grammar (id · project · age · turns · errors)', () => {
+    const s: SessionListRow = {
+      id: 'sess-alpha-long-id-suffix',
+      projectPath: '/proj/microscope-demo',
+      agent: 'primary',
+      parentSession: null,
+      modelId: 'm',
+      startedAt: '2026-06-02T12:00:00.000Z',
+      endedAt: '2026-06-02T13:00:00.000Z',
+      turnCount: 100,
+      userMsgCount: 1,
+      toolCallCount: 2,
+      toolErrorCount: 3,
+      eventCount: 4,
+    };
+    const now = new Date('2026-06-02T14:00:00.000Z').getTime();
+    const info = formatSessionInfo(s, now);
+    expect(info).toBe(
+      `${shortSessionId(s.id)} · microscope-demo · 2h ago · 100 turns · 3 errors`,
+    );
+    expect(info).toMatch(/·/);
+    expect(info).not.toMatch(/\n/);
+  });
 });
 
 describe('MicroscopeStage render', () => {
-  test('picker rows render session ids + project basename', async () => {
+  test('two-pane at 120: picker AND timeline chrome visible', async () => {
     const { renderer, renderOnce, captureCharFrame } = await createTestRenderer({
       width: 120,
       height: 34,
@@ -372,11 +420,40 @@ describe('MicroscopeStage render', () => {
 
     expect(frame, `frame:\n${frame}`).toMatch(/sess-alpha/);
     expect(frame).toMatch(/sess-beta/);
-    expect(frame).toMatch(/microscope-demo|other/);
-    expect(frame).toMatch(/sessions/i);
+    // Picker is ~32 cols — project basenames truncate; ids + SESSIONS label are the chrome pin
+    expect(frame).toMatch(/SESSIONS/);
+    // Info header placeholder until a session is opened (right pane)
+    expect(frame).toMatch(/enter a session to open its timeline/i);
+    // Footer two-pane-aware select path
+    expect(frame).toMatch(/enter timeline/i);
   });
 
-  test('Enter opens timeline with kind rows + error event marked', async () => {
+  test('stacked at 90: sessions still list; no side-by-side requirement', async () => {
+    const { renderer, renderOnce, captureCharFrame } = await createTestRenderer({
+      width: 90,
+      height: 34,
+    });
+    destroy = () => renderer.destroy();
+    const root = createRoot(renderer);
+    root.render(
+      createElement(
+        ThemeProvider,
+        { initial: 'horizon' },
+        createElement(MicroscopeStage, { inputActive: true, path: goodDbPath }),
+      ),
+    );
+
+    await new Promise((r) => setTimeout(r, 200));
+    await renderOnce();
+    const frame = captureCharFrame();
+
+    expect(paneGeometry(90).twoPane).toBe(false);
+    expect(frame, `frame:\n${frame}`).toMatch(/sess-alpha/);
+    expect(frame).toMatch(/SESSIONS/);
+    expect(frame).toMatch(/enter a session to open its timeline/i);
+  });
+
+  test('Enter opens timeline with kind rows + info header + error grain', async () => {
     const { renderer, renderOnce, captureCharFrame } = await createTestRenderer({
       width: 120,
       height: 34,
@@ -404,6 +481,14 @@ describe('MicroscopeStage render', () => {
     // Error row: toolError=1 surfaces ENOENT tail + event id grain
     expect(frame).toMatch(/ENOENT/);
     expect(frame).toMatch(new RegExp(`#${errorEventId}`));
+    // Session-info header (middot grammar)
+    expect(frame).toMatch(/sess-alpha/);
+    expect(frame).toMatch(/microscope-demo/);
+    expect(frame).toMatch(/\d+\s+turns/);
+    expect(frame).toMatch(/\d+\s+errors/);
+    // Picker remains visible in two-pane
+    expect(frame).toMatch(/SESSIONS/);
+    expect(frame).toMatch(/sess-beta/);
   });
 
   test('jump prop jumpKey change selects + opens + highlights eventId', async () => {
@@ -448,8 +533,63 @@ describe('MicroscopeStage render', () => {
     expect(frame, `frame:\n${frame}`).toMatch(/sess-alpha/);
     expect(frame).toMatch(/ENOENT/);
     expect(frame).toMatch(new RegExp(`#${errorEventId}`));
-    // Timeline section header shows the opened session
-    expect(frame).toMatch(/timeline\s+sess-alpha/i);
+    // Session-info header shows opened session + project
+    expect(frame).toMatch(/microscope-demo/);
+    expect(frame).toMatch(/\d+\s+turns/);
+  });
+
+  test('jump consume-once: same jumpKey does not re-open after land', async () => {
+    const { renderer, renderOnce, captureCharFrame } = await createTestRenderer({
+      width: 120,
+      height: 34,
+    });
+    destroy = () => renderer.destroy();
+    const keys = createMockKeys(renderer);
+    const root = createRoot(renderer);
+
+    const jump = { sessionId: 'sess-alpha', eventId: errorEventId };
+    root.render(
+      createElement(
+        ThemeProvider,
+        { initial: 'horizon' },
+        createElement(MicroscopeStage, {
+          inputActive: true,
+          path: goodDbPath,
+          jump,
+          jumpKey: 1,
+        }),
+      ),
+    );
+    await new Promise((r) => setTimeout(r, 200));
+    await renderOnce();
+    let frame = captureCharFrame();
+    expect(frame, `frame:\n${frame}`).toMatch(new RegExp(`#${errorEventId}`));
+
+    // Leave timeline focus, move picker cursor down toward sess-beta
+    await keys.pressKeys(['ESCAPE']);
+    await keys.pressKeys(['ARROW_DOWN']);
+    await new Promise((r) => setTimeout(r, 80));
+    await renderOnce();
+
+    // Re-render with the SAME jumpKey — must not re-fire openTimeline
+    root.render(
+      createElement(
+        ThemeProvider,
+        { initial: 'horizon' },
+        createElement(MicroscopeStage, {
+          inputActive: true,
+          path: goodDbPath,
+          jump,
+          jumpKey: 1,
+        }),
+      ),
+    );
+    await new Promise((r) => setTimeout(r, 120));
+    await renderOnce();
+    frame = captureCharFrame();
+    // Still on two-pane with both sessions; jump did not flash a re-open
+    expect(frame, `frame:\n${frame}`).toMatch(/sess-beta/);
+    expect(frame).toMatch(/sess-alpha/);
   });
 
   test('schema-mismatch fixture renders honest version banner', async () => {

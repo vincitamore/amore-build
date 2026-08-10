@@ -7,7 +7,7 @@ import { Database } from 'bun:sqlite';
 import { createTestRenderer, createMockKeys } from '@opentui/core/testing';
 import { createRoot } from '@opentui/react';
 import { ThemeProvider } from '../ThemeProvider';
-import { MicroscopeStage } from './MicroscopeStage';
+import { MicroscopeStage, paneGeometry } from './MicroscopeStage';
 
 const W = Number(process.env.SMOKE_W ?? 120);
 const H = Number(process.env.SMOKE_H ?? 34);
@@ -137,39 +137,71 @@ seed();
 const prevDb = process.env.SPECULUM_DB;
 process.env.SPECULUM_DB = dbPath;
 
-const { renderer, renderOnce, captureCharFrame } = await createTestRenderer({
-  width: W,
-  height: H,
-});
-const keys = createMockKeys(renderer);
+// ── Pass 1: wide two-pane (default 120×34) ───────────────────────────────────
+const wide = await createTestRenderer({ width: W, height: H });
+const keys = createMockKeys(wide.renderer);
 
-createRoot(renderer).render(
+createRoot(wide.renderer).render(
   <ThemeProvider initial="horizon">
     <MicroscopeStage inputActive path={dbPath} />
   </ThemeProvider>,
 );
 
 await new Promise((r) => setTimeout(r, 300));
-await renderOnce();
-let frame = captureCharFrame();
-const hasPicker = /smoke-sess/.test(frame) && /smoke-app/.test(frame);
+await wide.renderOnce();
+let frame = wide.captureCharFrame();
+// Picker is ~32 cols when two-pane — project basename may ellipsis; id is the pin.
+const hasPicker = /smoke-sess/.test(frame);
+const hasSessionsLabel = /SESSIONS/.test(frame);
+const geoWide = paneGeometry(W);
+const expectsTwoPane = geoWide.twoPane;
 
 await keys.pressKeys(['RETURN']);
 await new Promise((r) => setTimeout(r, 150));
-await renderOnce();
-frame = captureCharFrame();
+await wide.renderOnce();
+frame = wide.captureCharFrame();
+console.log('── wide ──');
 console.log(frame);
 
 const hasTimeline = /user/.test(frame) && /smoke hello|assistant|tool_use|Bash/.test(frame);
 const hasError = /command not found|smoke-bin|ENOENT/.test(frame) || /#\d+/.test(frame);
 const hasErrorBody = /command not found|smoke-bin/.test(frame);
 const hasBorders = /[┌┐└┘─│]/.test(frame);
+const hasInfoHeader =
+  /smoke-sess/.test(frame) &&
+  /smoke-app/.test(frame) &&
+  /\d+\s+turns/.test(frame) &&
+  /\d+\s+errors/.test(frame);
+// Two-pane: picker chrome + timeline content both present after open
+const hasTwoPane =
+  !expectsTwoPane || (hasSessionsLabel && hasPicker && hasTimeline && hasInfoHeader);
 
-console.log(
-  `\npicker:${hasPicker} timeline:${hasTimeline} error:${hasErrorBody} grain:${hasError} borders:${hasBorders}`,
-);
+wide.renderer.destroy();
 
-renderer.destroy();
+// ── Pass 2: stacked-narrow (~80) when wide default is two-pane ───────────────
+let hasStacked = true;
+if (expectsTwoPane) {
+  const NW = 80;
+  const narrow = await createTestRenderer({ width: NW, height: H });
+  createRoot(narrow.renderer).render(
+    <ThemeProvider initial="horizon">
+      <MicroscopeStage inputActive path={dbPath} />
+    </ThemeProvider>,
+  );
+  await new Promise((r) => setTimeout(r, 300));
+  await narrow.renderOnce();
+  const nFrame = narrow.captureCharFrame();
+  console.log('\n── narrow (stacked) ──');
+  console.log(nFrame);
+  const geoN = paneGeometry(NW);
+  hasStacked =
+    geoN.twoPane === false &&
+    /smoke-sess/.test(nFrame) &&
+    /SESSIONS/.test(nFrame) &&
+    /enter a session to open its timeline/i.test(nFrame);
+  narrow.renderer.destroy();
+}
+
 if (prevDb === undefined) delete process.env.SPECULUM_DB;
 else process.env.SPECULUM_DB = prevDb;
 try {
@@ -178,5 +210,16 @@ try {
   // best-effort
 }
 
-const ok = hasPicker && hasTimeline && hasErrorBody && hasBorders;
+console.log(
+  `\npicker:${hasPicker} timeline:${hasTimeline} info:${hasInfoHeader} twoPane:${hasTwoPane} stacked:${hasStacked} error:${hasErrorBody} grain:${hasError} borders:${hasBorders}`,
+);
+
+const ok =
+  hasPicker &&
+  hasTimeline &&
+  hasErrorBody &&
+  hasBorders &&
+  hasInfoHeader &&
+  hasTwoPane &&
+  hasStacked;
 process.exit(ok ? 0 : 1);
