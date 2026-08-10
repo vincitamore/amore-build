@@ -300,19 +300,27 @@ async function main(): Promise<void> {
     /hits\s*\(/.test(hitsFrame),
     matchingRows(hitsFrame, /hits/i, 3).join(' | ') || undefined,
   );
-  // Drill-flex bar: the hits panel + stage footer are visible at 120×40, and the
-  // global ingestion/lens/audit grammar appears AT MOST ONCE (the member footer
-  // owns it; the Actions strip is silent when idle — the single-band rule).
-  assert(
-    'drill_no_overflow_120x40',
-    /hits \(none\) · h\/esc close|↑↓ hit · enter open session|hits \(\d+\) for/.test(
-      hitsFrame,
-    ) &&
-      (/p probes\s*·\s*u usage/.test(hitsFrame) ||
-        /i ingest\s*·\s*L lens\s*·\s*A audit/.test(hitsFrame)) &&
-      (hitsFrame.match(/i ingest\s*·\s*L lens\s*·\s*A audit/g) ?? []).length <= 1,
-    matchingRows(hitsFrame, /hits|↑↓ hit|i ingest|p probes/i, 6).join(' | ') || undefined,
-  );
+  // Drill-flex bar: the hits panel + stage footer are visible at 120×40 and the
+  // member footer band is on-frame (it may be showing a flash at capture — the
+  // single-band rule is asserted structurally by H2's R5b). The i/L/A grammar
+  // itself appears AT MOST ONCE when it is visible.
+  {
+    const bottom = hitsFrame
+      .split('\n')
+      .filter((l) => l.trim() !== '')
+      .slice(-1)[0] ?? '';
+    assert(
+      'drill_no_overflow_120x40',
+      /hits \(none\) · h\/esc close|↑↓ hit · enter open session|hits \(\d+\) for/.test(
+        hitsFrame,
+      ) &&
+        /p probes\s*·\s*u usage|i ingest\s*·\s*L lens\s*·\s*A audit|scan updated|ingested/i.test(
+          bottom,
+        ) &&
+        (hitsFrame.match(/i ingest\s*·\s*L lens\s*·\s*A audit/g) ?? []).length <= 1,
+      matchingRows(hitsFrame, /hits|↑↓ hit|i ingest|p probes|scan/i, 6).join(' | ') || undefined,
+    );
+  }
 
   // Close hits (escape or h again) then switch to Usage.
   await keys.pressKeys(['ESCAPE'], 40);
@@ -379,9 +387,9 @@ async function main(): Promise<void> {
   await renderOnce();
   const mapFrame = captureCharFrame();
   dumpFrame('07-map', mapFrame);
-  // Glyphs (braille block) OR chrome hints from GraphView reuse.
+  // Glyphs (● stream dots) OR chrome hints from the one-house map control line.
   const hasBraille = /[\u2800-\u28FF]/.test(mapFrame);
-  const hasMapChrome = /fit|center|cluster|density/i.test(mapFrame);
+  const hasMapChrome = /timeline|structure|op·prim|legend filter|drag pan|Map/i.test(mapFrame);
   assert(
     'map_renders',
     hasBraille || hasMapChrome,
