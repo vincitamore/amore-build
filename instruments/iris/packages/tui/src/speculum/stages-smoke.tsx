@@ -10,7 +10,7 @@ import { ProbesStage } from './ProbesStage';
 import { UsageStage } from './UsageStage';
 
 const W = Number(process.env.SMOKE_W ?? 110);
-const H = Number(process.env.SMOKE_H ?? 30);
+const H = Number(process.env.SMOKE_H ?? 44);
 
 const SCAN = [
   {
@@ -29,6 +29,7 @@ const SCAN = [
         ts: '2026-01-02T12:00:00.000Z',
         category: 'self-correction',
         evidence: 'apologies for the confusion on that step',
+        eventId: 7,
       },
     ],
     heuristic: true,
@@ -108,20 +109,20 @@ const prevBin = process.env.SPECULUM_BIN;
 process.env.SPECULUM_BIN = bin;
 
 function BothStages() {
-  // Column split at 110×30: Probes board on top, Usage totals+models below.
+  // Column split: Probes card grid on top, Usage stat cards below.
   return (
     <box flexDirection="column" width={W} height={H}>
-      <box height={10} flexShrink={0}>
+      <box height={20} flexShrink={0}>
         <ProbesStage inputActive />
       </box>
-      <box height={20} flexShrink={0}>
+      <box height={24} flexShrink={0}>
         <UsageStage inputActive />
       </box>
     </box>
   );
 }
 
-const { renderer, renderOnce, captureCharFrame } = await createTestRenderer({
+const { renderer, renderOnce, captureCharFrame, mockInput } = await createTestRenderer({
   width: W,
   height: H,
 });
@@ -133,18 +134,29 @@ createRoot(renderer).render(
 
 await new Promise((r) => setTimeout(r, 800));
 await renderOnce();
-const frame = captureCharFrame();
-console.log(frame);
+let frame = captureCharFrame();
 
-const hasApology = /apology-rate/.test(frame);
-const hasHeuristic = /\[heuristic\]/.test(frame);
+// Card titles (ALL-CAPS) + summary body + usage note/model.
+const hasApology = /apology-rate|APOLOGY-RATE/i.test(frame);
+const hasHeuristic = /\[heuristic\]|hits\s+\d+/i.test(frame);
+const hasSummary = /self-corrections|4 self/i.test(frame);
+const hasRange = /probes\s+\d+–\d+\s+of\s+\d+/i.test(frame);
 const hasUsageNote = /Token and turn counts only|No price table/.test(frame);
-const hasModel = /smoke-model/.test(frame);
+const hasModel = /smoke-model|SMOKE-MODEL/i.test(frame);
 const hasTokens = /1\.5K|2\.5K|4\.3K|4\.2K/.test(frame);
 const hasBorders = /[┌┐└┘─│]/.test(frame);
+const hasTurns = /TURNS|Turns/i.test(frame);
 
+// Drill: Enter opens hits row for the selected probe.
+await mockInput.pressEnter();
+await new Promise((r) => setTimeout(r, 100));
+await renderOnce();
+frame = captureCharFrame();
+const hasDrill = /hits\s*\(/.test(frame) && /smoke-sess/.test(frame);
+
+console.log(frame);
 console.log(
-  `\napology:${hasApology} heuristic:${hasHeuristic} note:${hasUsageNote} model:${hasModel} tokens:${hasTokens} borders:${hasBorders}`,
+  `\napology:${hasApology} heuristic:${hasHeuristic} summary:${hasSummary} range:${hasRange} note:${hasUsageNote} model:${hasModel} tokens:${hasTokens} turns:${hasTurns} borders:${hasBorders} drill:${hasDrill}`,
 );
 
 renderer.destroy();
@@ -156,5 +168,14 @@ try {
   // best-effort
 }
 
-const ok = hasApology && hasHeuristic && hasUsageNote && hasModel && hasTokens && hasBorders;
+const ok =
+  hasApology &&
+  hasHeuristic &&
+  hasSummary &&
+  hasRange &&
+  hasUsageNote &&
+  hasModel &&
+  hasTokens &&
+  hasBorders &&
+  hasDrill;
 process.exit(ok ? 0 : 1);

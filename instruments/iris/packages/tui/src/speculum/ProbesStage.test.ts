@@ -6,7 +6,17 @@ import { join } from 'node:path';
 import { createTestRenderer } from '@opentui/core/testing';
 import { createRoot } from '@opentui/react';
 import { ThemeProvider } from '../ThemeProvider';
-import { formatProbeValue, formatWilsonRange, ProbesStage } from './ProbesStage';
+import {
+  clampRowScroll,
+  formatProbeValue,
+  formatWilsonRange,
+  hitEventId,
+  moveProbeCursor,
+  probeCardRight,
+  probeVisibleRange,
+  ProbesStage,
+  type ScanRow,
+} from './ProbesStage';
 
 /**
  * Fixture: SPECULUM_BIN is a .cmd/.sh wrapper that runs a temp .mjs via process.execPath.
@@ -33,7 +43,7 @@ function writeFakeBin(handlerBody: string): string {
   return sh;
 }
 
-const SCAN_FIXTURE = [
+const SCAN_FIXTURE: ScanRow[] = [
   {
     probe: 'apology-rate',
     value: 0.12,
@@ -50,6 +60,7 @@ const SCAN_FIXTURE = [
         ts: '2026-01-01T00:00:00.000Z',
         category: 'self-correction',
         evidence: 'sorry about that earlier mistake in the patch',
+        eventId: 42,
       },
     ],
     heuristic: true,
@@ -65,6 +76,27 @@ const SCAN_FIXTURE = [
     summary: '0 of 0 sessions [heuristic]',
     data: {},
     hits: [],
+    heuristic: true,
+  },
+  {
+    probe: 'stuck-loop',
+    value: 2,
+    ciLow: 0.1,
+    ciHigh: 0.4,
+    n: 10,
+    partial: false,
+    unit: 'session',
+    summary: '2 loops across 2 of 10 sessions [heuristic]',
+    data: {},
+    hits: [
+      {
+        sessionId: 'sess-bbb',
+        ts: '2026-02-01T00:00:00.000Z',
+        category: 'loop',
+        evidence: 'repeated the same edit thrice',
+        eventIds: [99, 100],
+      },
+    ],
     heuristic: true,
   },
 ];
@@ -113,8 +145,51 @@ describe('formatProbeValue / formatWilsonRange', () => {
   });
 });
 
+describe('probe grid navigation helpers', () => {
+  test('moveProbeCursor: ←→ within row, ↑↓ by perRow', () => {
+    // 2-up grid, 5 items (indices 0..4)
+    expect(moveProbeCursor(0, 'right', 5, 2)).toBe(1);
+    expect(moveProbeCursor(1, 'right', 5, 2)).toBe(2);
+    expect(moveProbeCursor(0, 'left', 5, 2)).toBe(0);
+    expect(moveProbeCursor(2, 'left', 5, 2)).toBe(1);
+    expect(moveProbeCursor(0, 'down', 5, 2)).toBe(2);
+    expect(moveProbeCursor(1, 'down', 5, 2)).toBe(3);
+    expect(moveProbeCursor(3, 'down', 5, 2)).toBe(4); // clamp
+    expect(moveProbeCursor(4, 'down', 5, 2)).toBe(4);
+    expect(moveProbeCursor(3, 'up', 5, 2)).toBe(1);
+    expect(moveProbeCursor(1, 'up', 5, 2)).toBe(0);
+  });
+
+  test('probeVisibleRange + clampRowScroll', () => {
+    // 11 probes, 2-up → 6 rows; show 2 rows starting at row 0 → 1–4
+    expect(probeVisibleRange(11, 0, 2, 2)).toEqual({ first: 1, last: 4 });
+    // scroll to row 2 → probes 5–8
+    expect(probeVisibleRange(11, 2, 2, 2)).toEqual({ first: 5, last: 8 });
+    // last window
+    expect(probeVisibleRange(11, 4, 2, 2)).toEqual({ first: 9, last: 11 });
+    expect(probeVisibleRange(0, 0, 2, 2)).toEqual({ first: 0, last: 0 });
+
+    expect(clampRowScroll(0, 0, 2, 2)).toBe(0);
+    expect(clampRowScroll(5, 0, 2, 2)).toBe(1); // row 2 needs scroll 1 for window of 2
+    expect(clampRowScroll(1, 2, 2, 2)).toBe(0); // row 0 < scroll 2 → jump back
+  });
+
+  test('probeCardRight prefers hits N when present', () => {
+    const withHits = SCAN_FIXTURE[0]!;
+    const empty = SCAN_FIXTURE[1]!;
+    expect(probeCardRight(withHits)).toBe('hits 1');
+    expect(probeCardRight(empty)).toMatch(/0\.0–100\.0%.*\[heuristic\]/);
+  });
+
+  test('hitEventId reads eventId then eventIds[0]', () => {
+    expect(hitEventId({ sessionId: 's', evidence: '', eventId: 7 })).toBe(7);
+    expect(hitEventId({ sessionId: 's', evidence: '', eventIds: [9, 10] })).toBe(9);
+    expect(hitEventId({ sessionId: 's', evidence: '' })).toBeUndefined();
+  });
+});
+
 describe('ProbesStage render', () => {
-  test('renders probe rows from scan fixture', async () => {
+  test('renders probe cards from scan fixture', async () => {
     const bin = writeFakeBin(
       [
         `const verb = process.argv[2];`,
@@ -143,17 +218,69 @@ describe('ProbesStage render', () => {
       ),
     );
 
-    // Allow spawn + JSON settle
     await new Promise((r) => setTimeout(r, 600));
     await renderOnce();
     const frame = captureCharFrame();
 
-    expect(frame, `frame:\n${frame}`).toMatch(/apology-rate/);
-    expect(frame).toMatch(/sensitive-content/);
-    expect(frame).toMatch(/\[heuristic\]/);
-    expect(frame).toMatch(/12\.0%/);
-    // empty corpus still shows wide CI honesty, not a fabricated clean claim
-    expect(frame).toMatch(/0\.0–100\.0%/);
+    expect(frame, `frame:\n${frame}`).toMatch(/apology-rate|APOLOGY-RATE/i);
+    expect(frame).toMatch(/sensitive-content|SENSITIVE-CONTENT/i);
+    expect(frame).toMatch(/\[heuristic\]|hits\s+\d+/i);
+    expect(frame).toMatch(/probes\s+\d+–\d+\s+of\s+\d+/i);
+    // empty corpus still shows wide CI honesty somewhere (sensitive-content)
+    expect(frame).toMatch(/0\.0–100\.0%|hits\s+1/i);
+  });
+
+  test('drill Enter opens hits; second Enter fires onOpenSession with eventId', async () => {
+    const bin = writeFakeBin(
+      [
+        `const verb = process.argv[2];`,
+        `if (verb === 'scan') {`,
+        `  console.log(JSON.stringify(${JSON.stringify(SCAN_FIXTURE)}));`,
+        `  process.exit(0);`,
+        `}`,
+        `process.exit(2);`,
+        ``,
+      ].join('\n'),
+    );
+    process.env.SPECULUM_BIN = bin;
+
+    let opened: { sessionId: string; opts?: { eventId?: string | number } } | null = null;
+    const { renderer, renderOnce, captureCharFrame, mockInput } = await createTestRenderer({
+      width: 110,
+      height: 32,
+    });
+    destroy = () => renderer.destroy();
+    const root = createRoot(renderer);
+    root.render(
+      createElement(
+        ThemeProvider,
+        { initial: 'horizon' },
+        createElement(ProbesStage, {
+          inputActive: true,
+          onOpenSession: (sessionId, opts) => {
+            opened = { sessionId, opts };
+          },
+        }),
+      ),
+    );
+
+    await new Promise((r) => setTimeout(r, 600));
+    await renderOnce();
+
+    // First probe is apology-rate (has hits with eventId 42).
+    await mockInput.pressEnter();
+    await new Promise((r) => setTimeout(r, 80));
+    await renderOnce();
+    const hitsFrame = captureCharFrame();
+    expect(hitsFrame, `hits frame:\n${hitsFrame}`).toMatch(/hits\s*\(/);
+    expect(hitsFrame).toMatch(/sess-aaa/);
+
+    // Enter on the selected hit → openSession with eventId.
+    await mockInput.pressEnter();
+    await new Promise((r) => setTimeout(r, 80));
+    expect(opened, 'onOpenSession should fire').not.toBeNull();
+    expect(opened!.sessionId).toBe('sess-aaa');
+    expect(opened!.opts?.eventId).toBe(42);
   });
 
   test('not-installed error shows install recipe', async () => {

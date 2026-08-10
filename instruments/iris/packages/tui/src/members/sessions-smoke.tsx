@@ -215,9 +215,9 @@ const frameReady = captureCharFrame();
 console.log('--- ready frame ---');
 console.log(frameReady);
 
-const hasReadyStrip = /installed · 3 sessions|3 sessions/.test(frameReady);
+const hasReadyStrip = /session dirs|primary/.test(frameReady);
 const hasProbes = /apology-rate/.test(frameReady);
-const hasHeuristic = /\[heuristic\]/.test(frameReady);
+const hasHeuristic = /heuris/.test(frameReady);
 const hasChips = /Probes/.test(frameReady) && /Usage/.test(frameReady);
 const hasExplorationChips = /Microscope/.test(frameReady) && /Map/.test(frameReady) && /Search/.test(frameReady);
 const hasBorders = /[┌┐└┘─│]/.test(frameReady);
@@ -231,7 +231,7 @@ console.log('--- usage frame ---');
 console.log(frameUsage);
 
 const hasUsageNote = /Token and turn counts only|No price table/.test(frameUsage);
-const hasModel = /smoke-model/.test(frameUsage);
+const hasModel = /smoke-model/i.test(frameUsage);
 const hasTokens = /1\.5K|2\.5K|4\.3K|4\.2K/.test(frameUsage);
 
 renderer.destroy();

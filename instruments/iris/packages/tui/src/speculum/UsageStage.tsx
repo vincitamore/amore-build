@@ -3,10 +3,17 @@ import { useKeyboard } from '@opentui/react';
 import type { RGBA } from '@opentui/core';
 import { usePalette } from '../ThemeProvider';
 import { Panel } from '../components/Panel';
-import { Stat } from '../components/Stat';
 import { useStableDimensions } from '../use-stable-dimensions';
 import { useRefreshOnActive } from '../use-refresh-on-active';
 import { runSpeculum, type SpeculumResult } from './speculum-spawn';
+import {
+  Card,
+  CardGrid,
+  cardInnerWidth,
+  cardsPerRow,
+  cardWidthForRow,
+  padTruncate,
+} from './Card';
 
 export interface UsageTokens {
   input: number;
@@ -36,8 +43,12 @@ export interface UsageJson {
 
 export type UsageError = Extract<SpeculumResult<unknown>, { ok: false }>['error'];
 
-const MODEL_SLOTS = 4;
 const INSTALL_RECIPE = 'amore init --with-speculum';
+/** House 6/3/2-up for totals: min outer so 120→6, ~68→3, narrow→2/1. */
+const MIN_STAT_CARD = 16;
+/** Models need a wider floor so ids stay readable (2/1-up). */
+const MIN_MODEL_CARD = 28;
+const GRID_GAP = 1;
 
 /** Compact token counts: 1.2K / 3.4M style. */
 export function formatTokens(n: number): string {
@@ -49,15 +60,63 @@ export function formatTokens(n: number): string {
   return `${sign}${Math.round(abs)}`;
 }
 
+export interface UsageStatCard {
+  key: string;
+  title: string;
+  value: string;
+  kind: 'total' | 'model';
+  detail?: string;
+}
+
+/** Build the stat + model card list (pure — unit-tested). Price-free. */
+export function buildUsageCards(data: UsageJson): UsageStatCard[] {
+  const totals = data.totals;
+  const tokens = totals.tokens;
+  const cards: UsageStatCard[] = [
+    { key: 'turns', title: 'Turns', value: String(totals.turns), kind: 'total' },
+    { key: 'sessions', title: 'Sessions', value: String(totals.sessions), kind: 'total' },
+    { key: 'input', title: 'Input', value: formatTokens(tokens.input), kind: 'total' },
+    { key: 'output', title: 'Output', value: formatTokens(tokens.output), kind: 'total' },
+    {
+      key: 'cached',
+      title: 'Cached-read',
+      value: formatTokens(tokens.cachedRead),
+      kind: 'total',
+    },
+    {
+      key: 'reasoning',
+      title: 'Reasoning',
+      value: formatTokens(tokens.reasoning),
+      kind: 'total',
+    },
+    { key: 'total', title: 'Total', value: formatTokens(tokens.total), kind: 'total' },
+  ];
+  for (const m of data.models ?? []) {
+    const id = m.model || '(unknown)';
+    const turns = m.turns ?? 0;
+    const tok = m.tokens?.total ?? 0;
+    const inn = m.tokens?.input;
+    const out = m.tokens?.output;
+    let detail = `turns=${turns}  tok=${formatTokens(tok)}`;
+    if (inn != null || out != null) {
+      detail += `  (in=${formatTokens(inn ?? 0)} out=${formatTokens(out ?? 0)})`;
+    }
+    cards.push({
+      key: `m-${id}`,
+      title: id,
+      value: formatTokens(tok),
+      kind: 'model',
+      detail,
+    });
+  }
+  return cards;
+}
+
 function padRow(text: string, width: number): string {
   if (width <= 0) return '';
   const ellipsis = '\u2026';
   const s = text.length <= width ? text : `${text.slice(0, Math.max(1, width - 1))}${ellipsis}`;
   return s.length >= width ? s.slice(0, width) : s.padEnd(width, ' ');
-}
-
-function emptyRow(width: number): string {
-  return width > 0 ? ' '.repeat(width) : '';
 }
 
 function FixedClearRow({
@@ -96,7 +155,30 @@ function errorCopy(err: UsageError): { lines: string[] } {
       ],
     };
   }
+  const msg = err.message ?? '';
   const tail = err.stderrTail?.trim() || err.stdoutTail?.trim() || '';
+  if (/not found|no such|missing|ENOENT|no index|no corpus/i.test(`${msg} ${tail}`)) {
+    return {
+      lines: [
+        'No derived session index found for usage.',
+        "run 'speculum ingest'",
+        'r to retry',
+      ],
+    };
+  }
+  if (/schema|version|unsupported/i.test(`${msg} ${tail}`)) {
+    return {
+      lines: [
+        'schema mismatch — upgrade index or re-ingest with a matching CLI.',
+        'r to retry',
+      ],
+    };
+  }
+  if (/busy|locked|database is locked|SQLITE_BUSY/i.test(`${msg} ${tail}`)) {
+    return {
+      lines: ['corpus busy — wait for ingest, then r to retry.'],
+    };
+  }
   return {
     lines: [
       `${err.kind}: ${err.message}`,
@@ -104,19 +186,6 @@ function errorCopy(err: UsageError): { lines: string[] } {
       'r to retry',
     ],
   };
-}
-
-function formatModelLine(m: UsageModelRow): string {
-  const id = m.model || '(unknown)';
-  const turns = m.turns ?? 0;
-  const tok = m.tokens?.total ?? 0;
-  const inn = m.tokens?.input;
-  const out = m.tokens?.output;
-  const bits = [`${id}`, `turns=${turns}`, `tok=${formatTokens(tok)}`];
-  if (inn != null || out != null) {
-    bits.push(`(in=${formatTokens(inn ?? 0)} out=${formatTokens(out ?? 0)})`);
-  }
-  return bits.join('  ');
 }
 
 export function UsageStage({
@@ -168,10 +237,21 @@ export function UsageStage({
     void load();
   });
 
-  const models = data?.models ?? [];
-  // Cap model slots by terminal height so totals + note stay visible in short panes.
-  const modelSlots = Math.max(1, Math.min(MODEL_SLOTS, Math.max(1, dims.height - 14)));
-  const maxScroll = Math.max(0, models.length - modelSlots);
+  // Nested under SessionsMember: same chrome stack as ProbesStage → -8.
+  const rowW = Math.max(16, dims.width - 8);
+  const cards = useMemo(() => (data ? buildUsageCards(data) : []), [data]);
+  const totalCards = useMemo(() => cards.filter((c) => c.kind === 'total'), [cards]);
+  const modelCards = useMemo(() => cards.filter((c) => c.kind === 'model'), [cards]);
+  const perModel = cardsPerRow(rowW, MIN_MODEL_CARD, GRID_GAP);
+  // Scroll model cards when many models overflow the pane.
+  const modelSlots = Math.max(1, Math.min(6, Math.floor(Math.max(2, dims.height - 16) / 3) * perModel));
+  const maxScroll = Math.max(0, modelCards.length - modelSlots);
+  const modelSlice = modelCards.slice(scroll, scroll + modelSlots);
+  const totalPer = cardsPerRow(rowW, MIN_STAT_CARD, GRID_GAP);
+  const totalW = cardWidthForRow(rowW, Math.min(totalPer, Math.max(1, totalCards.length || 1)), GRID_GAP);
+  const modelW = cardWidthForRow(rowW, Math.min(perModel, Math.max(1, modelSlice.length || 1)), GRID_GAP);
+  const totalInner = cardInnerWidth(totalW);
+  const modelInner = cardInnerWidth(modelW);
 
   useKeyboard((key: { name?: string }) => {
     if (!inputActive) return;
@@ -182,19 +262,13 @@ export function UsageStage({
     }
     if (error || !data) return;
     if (n === 'up') {
-      setScroll((s) => Math.max(0, s - 1));
+      setScroll((s) => Math.max(0, s - perModel));
       return;
     }
     if (n === 'down') {
-      setScroll((s) => Math.min(maxScroll, s + 1));
+      setScroll((s) => Math.min(maxScroll, s + perModel));
     }
   });
-
-  // Nested under SessionsMember: same chrome stack as ProbesStage → -8, not Lucerna's -6.
-  const rowW = Math.max(16, dims.width - 8);
-  const totals = data?.totals;
-  const tokens = totals?.tokens;
-  const modelSlice = models.slice(scroll, scroll + modelSlots);
 
   const windowLabel = useMemo(() => {
     if (!data) return '';
@@ -211,7 +285,7 @@ export function UsageStage({
 
   const footer = error
     ? `r retry · ${error.kind}`
-    : models.length > modelSlots
+    : modelCards.length > modelSlots
       ? 'up/dn scroll models · r refresh'
       : 'r refresh';
 
@@ -249,57 +323,66 @@ export function UsageStage({
           </box>
         ) : null}
 
-        {data && totals && tokens ? (
+        {data ? (
           <box flexDirection="column" flexGrow={1} flexShrink={1} minHeight={0}>
-            {/* One Stat row when wide enough; keeps totals + models visible in short panes. */}
-            <box flexDirection="row" flexShrink={0}>
-              <Stat value={String(totals.turns)} label="Turns" color={t.primary} />
-              <Stat value={String(totals.sessions)} label="Sessions" color={t.info} />
-              <Stat value={formatTokens(tokens.input)} label="Input" color={t.success} />
-              <Stat value={formatTokens(tokens.output)} label="Output" color={t.warning} />
-              <Stat value={formatTokens(tokens.cachedRead)} label="Cached" color={t.muted} />
-              <Stat value={formatTokens(tokens.reasoning)} label="Reason" color={t.secondary} />
-              <Stat value={formatTokens(tokens.total)} label="Total" color={t.accent} />
-            </box>
+            <CardGrid width={rowW} minCardWidth={MIN_STAT_CARD} gap={GRID_GAP}>
+              {totalCards.map((c) => (
+                <Card key={c.key} title={c.title} width={totalW} marginBottom={1}>
+                  <box height={1} flexShrink={0} overflow="hidden">
+                    <text fg={t.primary} wrapMode="none">
+                      {padTruncate(c.value, totalInner)}
+                    </text>
+                  </box>
+                </Card>
+              ))}
+            </CardGrid>
 
+            {/* Note is essential chrome — pin it, never let models push it off. */}
             <box flexDirection="column" flexShrink={0} marginTop={1}>
               <FixedClearRow
                 width={rowW}
                 color={t.muted}
                 text={padRow(data.note || 'Token and turn counts only.', rowW)}
               />
-              <FixedClearRow
-                width={rowW}
-                color={t.muted}
-                text={padRow(
-                  models.length === 0
-                    ? 'by model: (none — ingest sessions with turn_completed events)'
-                    : `by model (${models.length})`,
-                  rowW,
-                )}
-              />
-              {Array.from({ length: modelSlots }, (_, i) => {
-                const m = modelSlice[i];
-                if (!m) {
-                  return (
-                    <FixedClearRow
-                      key={`m-${i}`}
-                      width={rowW}
-                      color={t.muted}
-                      text={emptyRow(rowW)}
-                    />
-                  );
-                }
-                return (
-                  <FixedClearRow
-                    key={`m-${i}-${m.model}`}
-                    width={rowW}
-                    color={t.foreground}
-                    text={padRow(`  ${formatModelLine(m)}`, rowW)}
-                  />
-                );
-              })}
+              {(data.models?.length ?? 0) === 0 ? (
+                <FixedClearRow
+                  width={rowW}
+                  color={t.muted}
+                  text={padRow(
+                    'by model: (none — ingest sessions with turn_completed events)',
+                    rowW,
+                  )}
+                />
+              ) : (
+                <FixedClearRow
+                  width={rowW}
+                  color={t.muted}
+                  text={padRow(`by model (${modelCards.length})`, rowW)}
+                />
+              )}
             </box>
+
+            {modelSlice.length > 0 ? (
+              <box flexDirection="column" flexShrink={0} marginTop={0}>
+                <CardGrid width={rowW} minCardWidth={MIN_MODEL_CARD} gap={GRID_GAP}>
+                  {modelSlice.map((c) => (
+                    <Card
+                      key={c.key}
+                      title={c.title}
+                      right={c.value}
+                      width={modelW}
+                      marginBottom={1}
+                    >
+                      <box height={1} flexShrink={0} overflow="hidden">
+                        <text fg={t.foreground} wrapMode="none">
+                          {padTruncate(c.detail ?? c.value, modelInner)}
+                        </text>
+                      </box>
+                    </Card>
+                  ))}
+                </CardGrid>
+              </box>
+            ) : null}
           </box>
         ) : null}
       </Panel>

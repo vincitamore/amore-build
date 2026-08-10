@@ -225,6 +225,7 @@ export function SessionsMember({
         <ProbesStage
           inputActive={!!inputActive && stage === 'probes' && !actionsCapture}
           onFlash={setFlash}
+          onOpenSession={onOpenSession}
         />
       </box>
       <box

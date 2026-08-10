@@ -6,6 +6,14 @@ import { Panel } from '../components/Panel';
 import { useStableDimensions } from '../use-stable-dimensions';
 import { useRefreshOnActive } from '../use-refresh-on-active';
 import { runSpeculum, type SpeculumResult } from './speculum-spawn';
+import {
+  Card,
+  CardGrid,
+  cardInnerWidth,
+  cardsPerRow,
+  cardWidthForRow,
+  padTruncate,
+} from './Card';
 
 /** One hit row from a probe (subset of the CLI shape). */
 export interface ProbeHit {
@@ -13,6 +21,9 @@ export interface ProbeHit {
   ts?: string;
   evidence: string;
   category?: string;
+  /** WU-08 jump grain when the CLI attaches it. */
+  eventId?: string | number;
+  eventIds?: Array<string | number>;
 }
 
 /** One probe row from `speculum scan --json` (bare array). */
@@ -32,9 +43,23 @@ export interface ScanRow {
 
 export type ProbesError = Extract<SpeculumResult<unknown>, { ok: false }>['error'];
 
-const BOARD_SLOTS = 6;
-const HIT_SLOTS = 3;
 const INSTALL_RECIPE = 'amore init --with-speculum';
+/** Outer floor for a probe card; board is 2-up when it fits, else 1-up. */
+const MIN_PROBE_CARD = 36;
+const GRID_GAP = 1;
+const HIT_SLOTS = 4;
+/** Rough rows per card (border + title + body + margin). */
+const CARD_ROW_H = 4;
+
+/**
+ * Min card width that keeps the board at most 2-up (house probe board).
+ * Floor is MIN_PROBE_CARD so a narrow strip collapses to 1-up.
+ */
+export function probeMinCardWidth(rowWidth: number, gap = GRID_GAP): number {
+  // cardsPerRow = floor((w+g)/(min+g)); force ≤2 → min > (w+g)/3 − g
+  const forceTwo = Math.floor((rowWidth + gap) / 3) - gap + 1;
+  return Math.max(MIN_PROBE_CARD, forceTwo);
+}
 
 /**
  * Format a probe's primary value.
@@ -58,6 +83,80 @@ export function formatProbeValue(value: number, unit: 'session' | 'msg'): string
 /** Wilson CI as a percent span — keeps [0,1] honesty for empty corpus. */
 export function formatWilsonRange(ciLow: number, ciHigh: number): string {
   return `${(ciLow * 100).toFixed(1)}–${(ciHigh * 100).toFixed(1)}%`;
+}
+
+/** Card title-bar right annotation: hits count when present, else CI + heuristic tag. */
+export function probeCardRight(row: ScanRow): string {
+  const hitN = row.hits?.length ?? 0;
+  if (hitN > 0) return `hits ${hitN}`;
+  const ci = formatWilsonRange(row.ciLow, row.ciHigh);
+  return row.heuristic ? `${ci} [heuristic]` : ci;
+}
+
+/**
+ * Linear grid cursor move. ↑↓ step by per-row count; ←→ within the linear list.
+ * Pure helper — unit-tested without mounting OpenTUI.
+ */
+export function moveProbeCursor(
+  cursor: number,
+  dir: 'up' | 'down' | 'left' | 'right',
+  count: number,
+  perRow: number,
+): number {
+  if (count <= 0) return 0;
+  const max = count - 1;
+  const c = Math.max(0, Math.min(max, cursor));
+  const pr = Math.max(1, perRow);
+  switch (dir) {
+    case 'left':
+      return Math.max(0, c - 1);
+    case 'right':
+      return Math.min(max, c + 1);
+    case 'up':
+      return Math.max(0, c - pr);
+    case 'down':
+      return Math.min(max, c + pr);
+    default:
+      return c;
+  }
+}
+
+/** Visible probe index range for the scroll window (1-based for chrome). */
+export function probeVisibleRange(
+  count: number,
+  rowScroll: number,
+  visibleRows: number,
+  perRow: number,
+): { first: number; last: number } {
+  if (count <= 0) return { first: 0, last: 0 };
+  const pr = Math.max(1, perRow);
+  const vr = Math.max(1, visibleRows);
+  const start = Math.min(count - 1, Math.max(0, rowScroll) * pr);
+  const end = Math.min(count, start + vr * pr);
+  return { first: start + 1, last: end };
+}
+
+/** Keep the cursor's row inside the visible row window. */
+export function clampRowScroll(
+  cursor: number,
+  rowScroll: number,
+  visibleRows: number,
+  perRow: number,
+): number {
+  const pr = Math.max(1, perRow);
+  const vr = Math.max(1, visibleRows);
+  const row = Math.floor(Math.max(0, cursor) / pr);
+  if (row < rowScroll) return row;
+  if (row >= rowScroll + vr) return row - vr + 1;
+  return Math.max(0, rowScroll);
+}
+
+/** Resolve the eventId jump grain from a probe hit. */
+export function hitEventId(h: ProbeHit): string | number | undefined {
+  if (h.eventId != null && h.eventId !== '') return h.eventId;
+  const first = h.eventIds?.[0];
+  if (first != null && first !== '') return first;
+  return undefined;
 }
 
 function padRow(text: string, width: number): string {
@@ -98,22 +197,13 @@ function FixedClearRow({
   );
 }
 
-function formatHitLine(h: ProbeHit): string {
+function formatHitLine(h: ProbeHit, selected: boolean): string {
+  const mark = selected ? '>' : ' ';
   const parts = [`${h.sessionId}`];
   if (h.ts) parts.push(h.ts);
   if (h.category) parts.push(h.category);
   parts.push(h.evidence ?? '');
-  return parts.join('  ');
-}
-
-function formatProbeLine(row: ScanRow, selected: boolean): string {
-  const prefix = selected ? '>' : ' ';
-  const val = formatProbeValue(row.value, row.unit);
-  const ci = formatWilsonRange(row.ciLow, row.ciHigh);
-  const hits = row.hits && row.hits.length > 0 ? ` hits:${row.hits.length}` : '';
-  const banner = row.heuristic ? ' [heuristic]' : '';
-  const summary = row.summary ? `  ${row.summary}` : '';
-  return `${prefix}${row.probe}  ${val}  ${ci}${hits}${banner}${summary}`;
+  return `${mark}${parts.join('  ·  ')}`;
 }
 
 function errorCopy(err: ProbesError): { title: string; lines: string[] } {
@@ -127,7 +217,35 @@ function errorCopy(err: ProbesError): { title: string; lines: string[] } {
       ],
     };
   }
+  const msg = err.message ?? '';
   const tail = err.stderrTail?.trim() || err.stdoutTail?.trim() || '';
+  // Soft-state honesty when the CLI reports a missing / locked / schema-skew index.
+  if (/not found|no such|missing|ENOENT|no index|no corpus/i.test(`${msg} ${tail}`)) {
+    return {
+      title: 'index missing',
+      lines: [
+        'No derived session index found for scan.',
+        "run 'speculum ingest'",
+        'r to retry',
+      ],
+    };
+  }
+  if (/schema|version|unsupported/i.test(`${msg} ${tail}`)) {
+    return {
+      title: 'schema mismatch',
+      lines: [
+        'Index schema is not supported by this scan path.',
+        'Upgrade the dash or re-ingest with a matching speculum CLI.',
+        'r to retry',
+      ],
+    };
+  }
+  if (/busy|locked|database is locked|SQLITE_BUSY/i.test(`${msg} ${tail}`)) {
+    return {
+      title: 'corpus busy',
+      lines: ['Session index is locked (ingest in progress).', 'Wait, then r to retry.'],
+    };
+  }
   const lines = [
     `${err.kind}: ${err.message}`,
     ...(tail ? [tail.slice(-200)] : []),
@@ -139,9 +257,14 @@ function errorCopy(err: ProbesError): { title: string; lines: string[] } {
 export function ProbesStage({
   inputActive,
   onFlash,
+  onOpenSession,
 }: {
   inputActive?: boolean;
   onFlash?: (msg: string) => void;
+  onOpenSession?: (
+    sessionId: string,
+    opts?: { eventId?: string | number; ts?: string },
+  ) => void;
 }) {
   const t = usePalette();
   const dims = useStableDimensions();
@@ -150,10 +273,13 @@ export function ProbesStage({
   const [loading, setLoading] = useState(true);
   const [cursor, setCursor] = useState(0);
   const [hitsOpen, setHitsOpen] = useState(false);
-  const [scroll, setScroll] = useState(0);
+  const [hitCursor, setHitCursor] = useState(0);
+  const [rowScroll, setRowScroll] = useState(0);
   const aliveRef = useRef(true);
   const onFlashRef = useRef(onFlash);
   onFlashRef.current = onFlash;
+  const onOpenRef = useRef(onOpenSession);
+  onOpenRef.current = onOpenSession;
 
   useEffect(() => {
     aliveRef.current = true;
@@ -171,6 +297,8 @@ export function ProbesStage({
       setRows(data);
       setError(null);
       setCursor((c) => Math.min(c, Math.max(0, data.length - 1)));
+      setHitsOpen(false);
+      setHitCursor(0);
       onFlashRef.current?.('scan updated');
     } else {
       setRows(null);
@@ -192,15 +320,44 @@ export function ProbesStage({
   const selected = list[Math.min(cursor, Math.max(0, list.length - 1))] ?? null;
   const hits = selected?.hits ?? [];
 
+  // Nested under SessionsMember: member pad (2) + stage pad (2) + panel border (2) + panel pad (2) = 8.
+  const rowW = Math.max(16, dims.width - 8);
+  const minCard = probeMinCardWidth(rowW, GRID_GAP);
+  const perRow = Math.min(2, cardsPerRow(rowW, minCard, GRID_GAP));
+  // Budget visible card-rows from terminal height so short panes still scroll honestly.
+  // When the hits panel is open, clamp the grid so the fixed hit slots stay on-screen.
+  const visibleRows = hitsOpen
+    ? Math.max(1, Math.min(2, Math.floor(Math.max(4, dims.height - 18) / CARD_ROW_H)))
+    : Math.max(1, Math.min(6, Math.floor(Math.max(4, dims.height - 14) / CARD_ROW_H)));
+
   useEffect(() => {
     if (cursor >= list.length) setCursor(Math.max(0, list.length - 1));
   }, [list.length, cursor]);
 
   useEffect(() => {
-    // Keep selection inside the visible board window.
-    if (cursor < scroll) setScroll(cursor);
-    else if (cursor >= scroll + BOARD_SLOTS) setScroll(cursor - BOARD_SLOTS + 1);
-  }, [cursor, scroll]);
+    setRowScroll((s) => clampRowScroll(cursor, s, visibleRows, perRow));
+  }, [cursor, visibleRows, perRow]);
+
+  useEffect(() => {
+    // Changing the selected probe resets the hits panel selection.
+    setHitCursor(0);
+  }, [cursor]);
+
+  const openSelectedHit = useCallback(() => {
+    const h = hits[hitCursor];
+    if (!h) {
+      onFlashRef.current?.('hits (none)');
+      return;
+    }
+    const eid = hitEventId(h);
+    onOpenRef.current?.(h.sessionId, {
+      eventId: eid,
+      ts: h.ts,
+    });
+    onFlashRef.current?.(
+      eid != null ? `open ${h.sessionId.slice(0, 12)} #${eid}` : `open ${h.sessionId.slice(0, 12)}`,
+    );
+  }, [hits, hitCursor]);
 
   useKeyboard((key: { name?: string }) => {
     if (!inputActive) return;
@@ -210,27 +367,60 @@ export function ProbesStage({
       return;
     }
     if (error || !rows) return;
+
+    if (hitsOpen) {
+      if (n === 'escape' || n === 'h') {
+        setHitsOpen(false);
+        return;
+      }
+      if (n === 'up') {
+        setHitCursor((c) => Math.max(0, c - 1));
+        return;
+      }
+      if (n === 'down') {
+        setHitCursor((c) => Math.min(Math.max(0, hits.length - 1), c + 1));
+        return;
+      }
+      if (n === 'return' || n === 'enter') {
+        if (hits.length === 0) {
+          onFlashRef.current?.('hits (none)');
+          return;
+        }
+        openSelectedHit();
+        return;
+      }
+      return;
+    }
+
     if (n === 'up') {
-      setCursor((c) => Math.max(0, c - 1));
+      setCursor((c) => moveProbeCursor(c, 'up', list.length, perRow));
       return;
     }
     if (n === 'down') {
-      setCursor((c) => Math.min(Math.max(0, list.length - 1), c + 1));
+      setCursor((c) => moveProbeCursor(c, 'down', list.length, perRow));
+      return;
+    }
+    if (n === 'left') {
+      setCursor((c) => moveProbeCursor(c, 'left', list.length, perRow));
+      return;
+    }
+    if (n === 'right') {
+      setCursor((c) => moveProbeCursor(c, 'right', list.length, perRow));
       return;
     }
     if (n === 'return' || n === 'enter' || n === 'h') {
-      setHitsOpen((o) => !o);
+      setHitsOpen(true);
+      setHitCursor(0);
       return;
-    }
-    if (n === 'escape' && hitsOpen) {
-      setHitsOpen(false);
     }
   });
 
-  // Nested under SessionsMember: member pad (2) + stage pad (2) + panel border (2) + panel pad (2) = 8.
-  // (Lucerna's -6 is top-level; nested stages must account for the member's extra pad.)
-  const rowW = Math.max(16, dims.width - 8);
-  const slice = list.slice(scroll, scroll + BOARD_SLOTS);
+  const range = probeVisibleRange(list.length, rowScroll, visibleRows, perRow);
+  const gridStart = Math.max(0, (range.first || 1) - 1);
+  const gridEnd = range.last;
+  const visibleList = list.slice(gridStart, gridEnd);
+  const cardW = cardWidthForRow(rowW, Math.min(perRow, Math.max(1, visibleList.length || 1)), GRID_GAP);
+  const innerW = cardInnerWidth(cardW);
 
   const body = useMemo(() => {
     if (loading && !rows && !error) {
@@ -253,36 +443,62 @@ export function ProbesStage({
         </box>
       );
     }
+    if (list.length === 0) {
+      return (
+        <FixedClearRow width={rowW} color={t.muted} text={padRow('no probes returned', rowW)} />
+      );
+    }
+
+    const rangeLabel =
+      list.length === 0
+        ? 'probes 0 of 0'
+        : `probes ${range.first}–${range.last} of ${list.length}`;
+
     return (
-      <box flexDirection="column" flexShrink={0}>
-        {Array.from({ length: BOARD_SLOTS }, (_, i) => {
-          const row = slice[i];
-          if (!row) {
+      <box flexDirection="column" flexGrow={1} flexShrink={1} minHeight={0}>
+        <FixedClearRow
+          width={rowW}
+          color={t.muted}
+          text={padRow(`${rangeLabel} · ↑↓←→ select · enter drill`, rowW)}
+        />
+        <CardGrid width={rowW} minCardWidth={minCard} gap={GRID_GAP}>
+          {visibleList.map((row, i) => {
+            const absIdx = gridStart + i;
+            const isSel = absIdx === cursor;
+            const hitN = row.hits?.length ?? 0;
+            // Body keeps the raw probe id (lowercase) so headless name asserts still
+            // see the registry slug — Card titles are forced ALL-CAPS.
+            const summary =
+              row.summary ??
+              `${formatProbeValue(row.value, row.unit)}  n=${row.n}`;
+            // One body row always (equal card height). hits N uses warning ink.
+            const bodyLine =
+              hitN > 0
+                ? `hits ${hitN}  ${row.probe}  ${summary}`
+                : `${row.probe}  ${summary}`;
             return (
-              <FixedClearRow
-                key={`p-${i}`}
-                width={rowW}
-                color={t.muted}
-                text={
-                  i === 0 && list.length === 0
-                    ? padRow('no probes returned', rowW)
-                    : emptyRow(rowW)
-                }
-              />
+              <Card
+                key={`p-${row.probe}-${absIdx}`}
+                title={row.probe}
+                right={probeCardRight(row)}
+                selected={isSel}
+                width={cardW}
+                marginBottom={1}
+                onMouseDown={() => {
+                  setCursor(absIdx);
+                  setHitsOpen(false);
+                }}
+              >
+                <box height={1} flexShrink={0} overflow="hidden">
+                  <text fg={hitN > 0 ? t.warning : t.muted} wrapMode="none">
+                    {padTruncate(bodyLine, innerW)}
+                  </text>
+                </box>
+              </Card>
             );
-          }
-          const absIdx = scroll + i;
-          const selectedRow = absIdx === cursor;
-          const color = selectedRow ? t.info : t.foreground;
-          return (
-            <FixedClearRow
-              key={`p-${row.probe}-${i}`}
-              width={rowW}
-              color={color}
-              text={padRow(formatProbeLine(row, selectedRow), rowW)}
-            />
-          );
-        })}
+          })}
+        </CardGrid>
+
         {hitsOpen && selected ? (
           <box flexDirection="column" flexShrink={0} marginTop={0}>
             <FixedClearRow
@@ -307,12 +523,13 @@ export function ProbesStage({
                   />
                 );
               }
+              const selHit = i === hitCursor;
               return (
                 <FixedClearRow
                   key={`h-${i}-${h.sessionId}`}
                   width={rowW}
-                  color={t.foreground}
-                  text={padRow(`  ${formatHitLine(h)}`, rowW)}
+                  color={selHit ? t.info : t.foreground}
+                  text={padRow(formatHitLine(h, selHit), rowW)}
                 />
               );
             })}
@@ -325,14 +542,20 @@ export function ProbesStage({
     rows,
     error,
     rowW,
+    minCard,
     t,
-    slice,
     list.length,
-    scroll,
+    range.first,
+    range.last,
+    visibleList,
+    gridStart,
     cursor,
+    cardW,
+    innerW,
     hitsOpen,
     selected,
     hits,
+    hitCursor,
   ]);
 
   const headerRight = error
@@ -346,8 +569,10 @@ export function ProbesStage({
   const footer = error
     ? `r retry · ${error.kind}`
     : hitsOpen
-      ? 'up/dn · enter/h close hits · r refresh'
-      : 'up/dn · enter/h hits · r refresh';
+      ? hits.length > 0
+        ? '↑↓ hit · enter open session · h/esc close · r refresh'
+        : 'hits (none) · h/esc close · r refresh'
+      : '↑↓←→ select · enter/h drill · r refresh';
 
   return (
     <box
@@ -358,7 +583,14 @@ export function ProbesStage({
       paddingTop={1}
       backgroundColor={t.background}
     >
-      <Panel title="Probes" headerRight={headerRight} flexGrow={1} flexShrink={1} minHeight={0} active={!!inputActive}>
+      <Panel
+        title="Probes"
+        headerRight={headerRight}
+        flexGrow={1}
+        flexShrink={1}
+        minHeight={0}
+        active={!!inputActive}
+      >
         {body}
       </Panel>
       <box

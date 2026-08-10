@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { createTestRenderer } from '@opentui/core/testing';
 import { createRoot } from '@opentui/react';
 import { ThemeProvider } from '../ThemeProvider';
-import { formatTokens, UsageStage } from './UsageStage';
+import { buildUsageCards, formatTokens, UsageStage, type UsageJson } from './UsageStage';
 
 let tmp: string;
 let prevBin: string | undefined;
@@ -28,7 +28,7 @@ function writeFakeBin(handlerBody: string): string {
   return sh;
 }
 
-const USAGE_FIXTURE = {
+const USAGE_FIXTURE: UsageJson = {
   window: { since: null, until: null },
   models: [
     {
@@ -58,9 +58,9 @@ const USAGE_FIXTURE = {
   note: 'Token and turn counts only. No price table in v1 — provider prices vary per user.',
 };
 
-const USAGE_EMPTY_MODELS = {
+const USAGE_EMPTY_MODELS: UsageJson = {
   window: { since: null, until: null },
-  models: [] as unknown[],
+  models: [],
   totals: {
     turns: 0,
     sessions: 0,
@@ -101,8 +101,23 @@ describe('formatTokens', () => {
   });
 });
 
+describe('buildUsageCards', () => {
+  test('emits 7 totals + one card per model, price-free', () => {
+    const cards = buildUsageCards(USAGE_FIXTURE);
+    expect(cards.filter((c) => c.kind === 'total')).toHaveLength(7);
+    expect(cards.map((c) => c.title)).toContain('Turns');
+    expect(cards.map((c) => c.title)).toContain('Cached-read');
+    expect(cards.map((c) => c.title)).toContain('Total');
+    const models = cards.filter((c) => c.kind === 'model');
+    expect(models).toHaveLength(1);
+    expect(models[0]!.title).toBe('gpt-test-1');
+    expect(models[0]!.value).toBe('5.2K');
+    expect(JSON.stringify(cards)).not.toMatch(/\$\d/);
+  });
+});
+
 describe('UsageStage render', () => {
-  test('renders totals + note + model row from usage fixture', async () => {
+  test('renders totals + note + model card from usage fixture', async () => {
     const bin = writeFakeBin(
       [
         `const verb = process.argv[2];`,
@@ -137,9 +152,10 @@ describe('UsageStage render', () => {
 
     expect(frame, `frame:\n${frame}`).toMatch(/Token and turn counts only/);
     expect(frame).toMatch(/No price table/);
-    expect(frame).toMatch(/gpt-test-1/);
+    expect(frame).toMatch(/gpt-test-1|GPT-TEST-1/i);
     expect(frame).toMatch(/1\.2K/);
-    expect(frame).toMatch(/3\.4K/);
+    expect(frame).toMatch(/3\.4K|5\.2K/);
+    expect(frame).toMatch(/TURNS|Turns/i);
     // price-free: no currency chrome
     expect(frame).not.toMatch(/\$\d/);
   });
@@ -172,7 +188,7 @@ describe('UsageStage render', () => {
     const frame = captureCharFrame();
 
     expect(frame, `frame:\n${frame}`).toMatch(/Token and turn counts only/);
-    expect(frame).toMatch(/none|no usage|by model/i);
+    expect(frame).toMatch(/none|no usage|by model|TURNS/i);
   });
 
   test('not-installed error shows install recipe', async () => {
