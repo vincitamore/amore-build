@@ -205,6 +205,32 @@ describe('formatReadyStripDetail', () => {
       'installed · 1699 session dirs · 412 primary · 1287 subagent · last ingest 1h ago',
     );
   });
+
+  test('with origins → operator headline + honest split (no session dirs)', () => {
+    expect(
+      formatReadyStripDetail({
+        sessions: 1699,
+        primarySessions: 1537,
+        subagentSessions: 162,
+        origins: { operator: 12, experiment: 1600, harness: 80, unknown: 7 },
+        lastIngestedAt: '2026-06-01T11:00:00.000Z',
+        now,
+      }),
+    ).toBe(
+      'installed · 12 operator · 1600 experiment · 80 harness · 7 unknown · 1537 primary · 162 subagent · last ingest 1h ago',
+    );
+  });
+
+  test('origins with zero unknown omits unknown segment', () => {
+    expect(
+      formatReadyStripDetail({
+        sessions: 100,
+        origins: { operator: 7, experiment: 80, harness: 13, unknown: 0 },
+        lastIngestedAt: '2026-06-01T11:00:00.000Z',
+        now,
+      }),
+    ).toBe('installed · 7 operator · 80 experiment · 13 harness · last ingest 1h ago');
+  });
 });
 
 describe('formatIngestAge', () => {

@@ -14,9 +14,27 @@ export type SessionFocus = {
   ts?: string;
 };
 
+/** Per-origin row/root counts from `speculum status --json` (optional until companion refresh). */
+export type OriginBucketJson = { rows?: number; roots?: number };
+
+export type OriginsJson = {
+  operator?: OriginBucketJson;
+  experiment?: OriginBucketJson;
+  harness?: OriginBucketJson;
+  unknown?: OriginBucketJson;
+};
+
 /** Subset of `speculum status --json` used by derivation + strip flavor. */
 export type StatusJson = {
-  counts?: { sessions?: number; events?: number; usageRows?: number };
+  counts?: {
+    sessions?: number;
+    events?: number;
+    usageRows?: number;
+    /** Optional: some status builds nest origins under counts; prefer top-level. */
+    origins?: OriginsJson;
+  };
+  /** Session origin split (operator / experiment / harness / unknown). */
+  origins?: OriginsJson;
   ingest?: { lastIngestedAt?: string | null };
   staleness?: {
     thresholdHours?: number;
@@ -25,6 +43,40 @@ export type StatusJson = {
     message?: string;
   };
 };
+
+/** Normalized origin row counts used by the strip. */
+export type OriginsCounts = {
+  operator: number;
+  experiment: number;
+  harness: number;
+  unknown: number;
+};
+
+/** Coerce optional JSON origins into finite row counts; null when absent. */
+export function readOriginsCounts(
+  origins: OriginsJson | null | undefined,
+): OriginsCounts | null {
+  if (!origins || typeof origins !== 'object') return null;
+  const n = (b: OriginBucketJson | undefined): number => {
+    const v = b?.rows;
+    return typeof v === 'number' && Number.isFinite(v) ? v : 0;
+  };
+  // Require at least one class key so empty `{}` is not treated as a real split.
+  if (
+    origins.operator == null &&
+    origins.experiment == null &&
+    origins.harness == null &&
+    origins.unknown == null
+  ) {
+    return null;
+  }
+  return {
+    operator: n(origins.operator),
+    experiment: n(origins.experiment),
+    harness: n(origins.harness),
+    unknown: n(origins.unknown),
+  };
+}
 
 export type StatusResultInput = {
   ok: boolean;
@@ -40,6 +92,8 @@ export type DerivedSessionsState = {
   primarySessions?: number;
   /** Present when the query-service split is available (schemaOK index). */
   subagentSessions?: number;
+  /** Present when status --json carries origins (defensive optional). */
+  origins?: OriginsCounts;
   detail?: string;
 };
 
@@ -66,14 +120,18 @@ export function formatIngestAge(
 }
 
 /**
- * Ready-state strip line. When primary/subagent split is known, surface it;
- * otherwise report total as session dirs (not "sessions") so the flat count
- * is not mistaken for primary-only.
+ * Ready-state strip line. When origins are known, the headline number is the
+ * **operator** row count with the honest origin split. When primary/subagent
+ * split is known, surface it. Fallback (no origins): total as session dirs
+ * so a flat count is not mistaken for primary-only.
+ *
+ * Keep on one row — `formatLucernaDisplayLine` truncates, never wraps.
  */
 export function formatReadyStripDetail(opts: {
   sessions: number;
   primarySessions?: number;
   subagentSessions?: number;
+  origins?: OriginsCounts | null;
   lastIngestedAt?: string | null;
   stale?: boolean;
   now?: number;
@@ -85,6 +143,27 @@ export function formatReadyStripDetail(opts: {
     typeof opts.subagentSessions === 'number' &&
     Number.isFinite(opts.primarySessions) &&
     Number.isFinite(opts.subagentSessions);
+  const o = opts.origins ?? null;
+  const hasOrigins =
+    o != null &&
+    Number.isFinite(o.operator) &&
+    Number.isFinite(o.experiment) &&
+    Number.isFinite(o.harness);
+
+  if (hasOrigins && o) {
+    let originBit =
+      `${o.operator} operator · ${o.experiment} experiment · ${o.harness} harness`;
+    if (o.unknown > 0) originBit += ` · ${o.unknown} unknown`;
+    if (hasSplit) {
+      return (
+        `installed · ${originBit} · ` +
+        `${opts.primarySessions} primary · ${opts.subagentSessions} subagent` +
+        ` · last ingest ${age}${staleBit}`
+      );
+    }
+    return `installed · ${originBit} · last ingest ${age}${staleBit}`;
+  }
+
   if (hasSplit) {
     return (
       `installed · ${opts.sessions} session dirs · ` +
@@ -120,11 +199,19 @@ export function deriveSessionsState(result: StatusResultInput): DerivedSessionsS
     return { state: 'empty', sessions: 0, detail: EMPTY_DETAIL };
   }
 
+  // Defensive: accept top-level origins or a nested counts.origins if present.
+  const origins =
+    readOriginsCounts(result.json?.origins) ??
+    readOriginsCounts(result.json?.counts?.origins) ??
+    undefined;
+
   return {
     state: 'ready',
     sessions,
+    origins,
     detail: formatReadyStripDetail({
       sessions,
+      origins,
       lastIngestedAt: result.json?.ingest?.lastIngestedAt,
       stale: Boolean(result.json?.staleness?.stale),
     }),
@@ -153,15 +240,19 @@ export function enrichWithSessionSplit(
       }
       const primarySessions = st.primarySessions;
       const subagentSessions = st.subagentSessions;
+      // Origins come from CLI status JSON (not the query-service); preserve them.
+      const origins = derived.origins;
       return {
         state: 'ready',
         sessions,
         primarySessions,
         subagentSessions,
+        origins,
         detail: formatReadyStripDetail({
           sessions,
           primarySessions,
           subagentSessions,
+          origins,
           lastIngestedAt: st.lastIngestedAt ?? undefined,
           stale: st.stale,
         }),

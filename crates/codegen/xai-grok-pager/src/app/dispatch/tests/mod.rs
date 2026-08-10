@@ -505,15 +505,35 @@ pub(super) fn end_turn() -> Action {
         prompt_id: None,
     })
 }
-/// Plant a Build session under the process `grok_home()` (OnceLock-cached;
-/// do not rely on setting `GROK_HOME` mid-process). Caller must remove `sess_dir`.
-fn plant_local_build_session(cwd: &std::path::Path, session_id: &str) -> std::path::PathBuf {
+/// RAII plant of a Build session under the process `grok_home()` (OnceLock-
+/// cached; do not rely on setting `GROK_HOME` / `AMORE_HOME` mid-process).
+///
+/// On drop: removes the session directory and, when empty, the encoded cwd
+/// parent — so unit tests do not leave harness cwd dirs in the operator's
+/// real sessions tree.
+struct PlantedLocalSession {
+    sess_dir: std::path::PathBuf,
+    cwd_dir: std::path::PathBuf,
+}
+
+impl Drop for PlantedLocalSession {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.sess_dir);
+        // Only remove the cwd parent when empty (never wipe sibling sessions).
+        let _ = std::fs::remove_dir(&self.cwd_dir);
+    }
+}
+
+/// Plant a Build session under the process `grok_home()`. Prefer holding the
+/// returned guard so Drop cleans the session and an empty cwd parent.
+fn plant_local_build_session(cwd: &std::path::Path, session_id: &str) -> PlantedLocalSession {
     let home = xai_grok_shell::util::grok_home::grok_home();
     let encoded = xai_grok_shell::util::grok_home::encode_cwd_dirname(&cwd.to_string_lossy());
-    let sess_dir = home.join("sessions").join(encoded).join(session_id);
+    let cwd_dir = home.join("sessions").join(encoded);
+    let sess_dir = cwd_dir.join(session_id);
     std::fs::create_dir_all(&sess_dir).expect("plant session dir");
     std::fs::write(sess_dir.join("summary.json"), b"{}").expect("plant summary");
-    sess_dir
+    PlantedLocalSession { sess_dir, cwd_dir }
 }
 /// Extract the in-flight auth request sequence, panicking if the auth
 /// state is not `Authenticating`.

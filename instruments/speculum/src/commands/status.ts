@@ -2,6 +2,7 @@ import { statSync } from "node:fs";
 import { openDb, type Db } from "../store/db";
 import { PROBES } from "../probes";
 import { defaultDbPath } from "../paths";
+import { buildOriginsReport, type OriginsReport } from "../cwd-class";
 
 const STALE_THRESHOLD_HOURS = 24;
 
@@ -18,6 +19,12 @@ export interface StatusReport {
     /** Distinct sessions with at least one sensitive event. */
     sensitiveSessions: number;
   };
+  /**
+   * Session rows / distinct project_path roots by cwd origin
+   * (operator · experiment · harness · unknown). Additive field —
+   * existing consumers ignore it.
+   */
+  origins: OriginsReport;
   ingest: {
     trackedFiles: number;
     forgottenFiles: number;
@@ -101,10 +108,18 @@ export function buildStatusReport(db: Db, dbPath: string = defaultDbPath()): Sta
     message = "no ingested sessions — run 'speculum ingest'";
   }
 
+  const originRows = db
+    .query<{ project_path: string; agent: string }, []>(
+      "SELECT project_path, agent FROM sessions",
+    )
+    .all();
+  const origins = buildOriginsReport(originRows);
+
   return {
     generatedAt,
     db: { path: dbPath, sizeBytes },
     counts: { sessions, events, usageRows, eventsByKind, sensitiveEvents, sensitiveSessions },
+    origins,
     ingest: {
       trackedFiles,
       forgottenFiles,
@@ -138,6 +153,11 @@ export async function statusCommand(args: string[]): Promise<void> {
     console.log(`  db: ${report.db.path} (${report.db.sizeBytes} bytes)`);
     console.log(
       `  sessions: ${report.counts.sessions}  events: ${report.counts.events}  usage rows: ${report.counts.usageRows}`,
+    );
+    const o = report.origins;
+    console.log(
+      `  origins: ${o.operator.rows} operator · ${o.experiment.rows} experiment · ${o.harness.rows} harness · ${o.unknown.rows} unknown` +
+        `  (roots: ${o.operator.roots}/${o.experiment.roots}/${o.harness.roots}/${o.unknown.roots})`,
     );
     const kinds = Object.entries(report.counts.eventsByKind)
       .map(([k, n]) => `${k}=${n}`)

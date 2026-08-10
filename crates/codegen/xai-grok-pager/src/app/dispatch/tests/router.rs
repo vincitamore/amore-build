@@ -1653,12 +1653,12 @@ fn chat_mode_refuses_local_build_disk_load() {
         std::process::id()
     ));
     let session_id = format!("build-disk-{}", std::process::id());
-    let sess_dir = plant_local_build_session(&cwd, &session_id);
+    // Guard cleans session + empty cwd parent on drop (no real-home residue).
+    let _planted = plant_local_build_session(&cwd, &session_id);
     let mut app = test_app();
     app.cwd = cwd;
     app.chat_mode = true;
     let effects = dispatch(Action::LoadSession(session_id, None, false), &mut app);
-    let _ = std::fs::remove_dir_all(&sess_dir);
     assert!(
         effects.is_empty(),
         "local Build under --chat must refuse, got {effects:?}"
@@ -1673,12 +1673,11 @@ fn chat_mode_refuses_local_build_disk_load() {
 fn chat_mode_allows_conversation_entry_even_if_local_path() {
     let cwd = PathBuf::from(format!("/tmp/chat-mode-conv-ok-{}", std::process::id()));
     let session_id = format!("conv-also-local-{}", std::process::id());
-    let sess_dir = plant_local_build_session(&cwd, &session_id);
+    let _planted = plant_local_build_session(&cwd, &session_id);
     let mut app = test_app();
     app.cwd = cwd;
     app.chat_mode = true;
     let effects = dispatch(Action::LoadSession(session_id, None, true), &mut app);
-    let _ = std::fs::remove_dir_all(&sess_dir);
     assert!(matches!(
         &effects[..],
         [Effect::LoadSession {

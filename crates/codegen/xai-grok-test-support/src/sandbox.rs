@@ -325,6 +325,9 @@ fn baseline_env_from_parent(
     for (key, value) in [
         ("HOME", home),
         ("USERPROFILE", home),
+        // Primary Amore home + legacy GROK_HOME — both point at the sandbox
+        // so child spawns never write sessions into the operator's real home.
+        ("AMORE_HOME", grok_home),
         ("GROK_HOME", grok_home),
         ("TMPDIR", temp),
         ("TMP", temp),
@@ -468,7 +471,8 @@ fn diagnostic_value_is_sensitive(key: &OsStr) -> bool {
         || is_endpoint_key(&key)
         || matches!(
             key.to_ascii_uppercase().as_str(),
-            "HOME" | "USERPROFILE" | "GROK_HOME" | "TMPDIR" | "TMP" | "TEMP" | "GIT_CONFIG_GLOBAL"
+            "HOME" | "USERPROFILE" | "AMORE_HOME" | "GROK_HOME" | "TMPDIR" | "TMP" | "TEMP"
+                | "GIT_CONFIG_GLOBAL"
         )
 }
 
@@ -691,6 +695,10 @@ mod tests {
             .mock_url("http://127.0.0.1:43123/v1")
             .build();
         assert_eq!(env_value(&sandbox, "HOME"), Some(sandbox.home().into()));
+        assert_eq!(
+            env_value(&sandbox, "AMORE_HOME"),
+            Some(sandbox.grok_home().into())
+        );
         assert_eq!(
             env_value(&sandbox, "GROK_HOME"),
             Some(sandbox.grok_home().into())
