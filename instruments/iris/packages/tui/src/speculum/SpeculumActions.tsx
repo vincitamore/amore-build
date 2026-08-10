@@ -2,7 +2,7 @@
  * Governed side-effect surface for the Sessions member.
  * All side-effects shell the speculum CLI via runSpeculum — never local writers.
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useKeyboard } from '@opentui/react';
 import { usePalette } from '../ThemeProvider';
 import { Panel } from '../components/Panel';
@@ -24,7 +24,14 @@ export const BUILTIN_LENSES = [
 
 export type BuiltinLens = (typeof BUILTIN_LENSES)[number];
 
-const DEFAULT_LAST_N = 5;
+/** Steppable last-n values for lens selection (default 5). */
+export const LAST_N_OPTIONS = [1, 2, 3, 5, 10] as const;
+export type LastNOption = (typeof LAST_N_OPTIONS)[number];
+
+export const DEFAULT_LAST_N: LastNOption = 5;
+const LAST_N_DEBOUNCE_MS = 200;
+/** Lens payload cap shown in composition (matches CLI fail-closed cap). */
+export const LENS_CAP_BYTES = 102_400;
 const AUDIT_FETCH_N = 20;
 const AUDIT_SHOW_SLOTS = 6;
 const INSTALL_HINT = 'amore init --with-speculum';
@@ -46,6 +53,15 @@ export type IngestEnvelope = {
   [k: string]: unknown;
 };
 
+export type LensSlice = {
+  sessionId?: string | null;
+  project?: string | null;
+  turnsRendered?: number;
+  subagentCount?: number;
+  selectionSessionIds?: string[];
+  [k: string]: unknown;
+};
+
 export type LensEnvelope = {
   lens?: string;
   refused?: boolean;
@@ -58,6 +74,7 @@ export type LensEnvelope = {
     bytes?: number;
     refuseReason?: string | null;
   };
+  slice?: LensSlice;
   audit?: {
     decision?: string;
     reason?: string | null;
@@ -186,6 +203,118 @@ export function formatLensFlash(env: LensEnvelope | null | undefined, live: bool
   return live ? `lens ${decision}${scrubBit}` : `dry-run ${decision}${scrubBit}`;
 }
 
+/** Human size for operator copy (MB uses 1e6 so 1450141 → "1.45 MB"). */
+export function formatHumanBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 0) return 'n/a';
+  if (bytes >= 1_000_000) {
+    const mb = bytes / 1_000_000;
+    const s = mb >= 10 ? mb.toFixed(1) : mb.toFixed(2);
+    return `${s.replace(/\.?0+$/, '')} MB`;
+  }
+  if (bytes >= 1000) {
+    const kb = bytes / 1024;
+    const rounded = Math.round(kb);
+    return `${rounded} KB`;
+  }
+  return `${Math.round(bytes)} B`;
+}
+
+/** Plain selection label: `--last-n 5 · 5 most recent primary sessions`. */
+export function formatSelectionLabel(lastN: number): string {
+  const n = Number.isFinite(lastN) && lastN > 0 ? Math.floor(lastN) : DEFAULT_LAST_N;
+  return `--last-n ${n} · ${n} most recent primary sessions`;
+}
+
+/** Step last-n within LAST_N_OPTIONS (wraps). dir -1 = previous, +1 = next. */
+export function stepLastN(current: number, dir: -1 | 1): LastNOption {
+  const opts = LAST_N_OPTIONS as readonly number[];
+  let idx = opts.indexOf(current);
+  if (idx < 0) {
+    // Snap to nearest option.
+    idx = opts.reduce(
+      (best, n, i) => (Math.abs(n - current) < Math.abs(opts[best]! - current) ? i : best),
+      0,
+    );
+  }
+  const next = (idx + dir + opts.length) % opts.length;
+  return LAST_N_OPTIONS[next]!;
+}
+
+/** Map a digit key to a last-n option; `0` → 10. */
+export function lastNFromDigit(digit: string): LastNOption | null {
+  if (digit === '0') return 10;
+  const n = Number.parseInt(digit, 10);
+  if (!Number.isFinite(n)) return null;
+  if ((LAST_N_OPTIONS as readonly number[]).includes(n)) return n as LastNOption;
+  return null;
+}
+
+/** True when the refuse reason is the oversize / payload-cap path. */
+export function isOversizeRefuse(reason: string | null | undefined): boolean {
+  if (reason == null || reason === '') return false;
+  return /exceeds\s+(?:the\s+)?(?:lens\s+)?cap|payload\s+\d[\d_]*\s*bytes\s+exceeds/i.test(
+    reason,
+  );
+}
+
+function scrubCountsBit(counts: ScrubCounts | null | undefined): string {
+  if (!counts || typeof counts !== 'object') return 'scrub: n/a';
+  const parts: string[] = [];
+  for (const key of ['secret', 'email', 'home-path', 'password-assignment'] as const) {
+    const v = counts[key];
+    if (typeof v === 'number') parts.push(`${key}=${v}`);
+  }
+  for (const [k, v] of Object.entries(counts)) {
+    if (
+      k === 'secret' ||
+      k === 'email' ||
+      k === 'home-path' ||
+      k === 'password-assignment'
+    ) {
+      continue;
+    }
+    if (typeof v === 'number') parts.push(`${k}=${v}`);
+  }
+  return parts.length > 0 ? `scrub: ${parts.join(' ')}` : 'scrub: n/a';
+}
+
+/**
+ * Live composition read after dry-run:
+ * `payload N bytes · cap 100 KB · M turns · S subagents · scrub: secret=… …`
+ */
+export function formatComposition(env: LensEnvelope | null | undefined): string {
+  if (!env) return 'composition n/a';
+  const bytes = env.scrub?.bytes ?? env.audit?.payloadBytes;
+  const turns = env.slice?.turnsRendered;
+  const subs = env.slice?.subagentCount;
+  const counts = env.scrub?.counts ?? env.audit?.scrubCounts;
+  const payloadBit =
+    typeof bytes === 'number' && Number.isFinite(bytes)
+      ? `payload ${bytes} bytes`
+      : 'payload n/a';
+  const capBit = `cap ${Math.round(LENS_CAP_BYTES / 1024)} KB`;
+  const turnsBit =
+    typeof turns === 'number' && Number.isFinite(turns) ? `${turns} turns` : 'turns n/a';
+  const subBit =
+    typeof subs === 'number' && Number.isFinite(subs) ? `${subs} subagents` : 'subagents n/a';
+  return `${payloadBit} · ${capBit} · ${turnsBit} · ${subBit} · ${scrubCountsBit(counts)}`;
+}
+
+/** Operator-facing oversize line: `payload 1.45 MB exceeds the 100 KB cap`. */
+export function formatOversizeMessage(env: LensEnvelope | null | undefined): string {
+  const bytes = env?.scrub?.bytes ?? env?.audit?.payloadBytes;
+  if (typeof bytes === 'number' && Number.isFinite(bytes)) {
+    return `payload ${formatHumanBytes(bytes)} exceeds the 100 KB cap`;
+  }
+  return 'payload exceeds the 100 KB cap';
+}
+
+/** Narrowing hint when over-cap; stepper re-dry-run is the remedy. */
+export function formatNarrowHint(lastN: number): string {
+  if (lastN > 1) return '‹1› likely fits — try it';
+  return 'still over cap at 1 — try a different lens or window';
+}
+
 function formatAuditRow(r: AuditRecord): string {
   const ts = typeof r.ts === 'string' ? r.ts.slice(11, 19) : '??:??:??';
   const lens = typeof r.lens === 'string' ? r.lens : '?';
@@ -240,6 +369,68 @@ function FixedClearRow({
   );
 }
 
+/** last-n stepper: chips + ‹ ›, keyboard ←/→ / digits and click. */
+function LastNStepper({
+  lastN,
+  onChange,
+  width,
+  disabled,
+}: {
+  lastN: number;
+  onChange: (n: LastNOption) => void;
+  width: number;
+  disabled?: boolean;
+}) {
+  const t = usePalette();
+  const chip = (n: LastNOption) => {
+    const on = n === lastN;
+    return (
+      <box
+        key={n}
+        flexShrink={0}
+        marginRight={1}
+        backgroundColor={on ? t.selection : t.background}
+        onMouseDown={disabled ? undefined : () => onChange(n)}
+      >
+        <text fg={on ? t.primary : t.muted} wrapMode="none">
+          {on ? `[${n}]` : `${n}`}
+        </text>
+      </box>
+    );
+  };
+  return (
+    <box flexDirection="column" flexShrink={0} width={width}>
+      <box flexDirection="row" flexShrink={0} height={1} overflow="hidden">
+        <box
+          flexShrink={0}
+          marginRight={1}
+          backgroundColor={t.background}
+          onMouseDown={disabled ? undefined : () => onChange(stepLastN(lastN, -1))}
+        >
+          <text fg={t.muted} wrapMode="none">
+            ‹
+          </text>
+        </box>
+        {LAST_N_OPTIONS.map((n) => chip(n))}
+        <box
+          flexShrink={0}
+          backgroundColor={t.background}
+          onMouseDown={disabled ? undefined : () => onChange(stepLastN(lastN, 1))}
+        >
+          <text fg={t.muted} wrapMode="none">
+            ›
+          </text>
+        </box>
+      </box>
+      <FixedClearRow
+        width={width}
+        color={t.muted}
+        text={formatLucernaDisplayLine(formatSelectionLabel(lastN), width)}
+      />
+    </box>
+  );
+}
+
 // ── Component ──
 
 type PanelMode = 'none' | 'picker' | 'dry-run' | 'audit';
@@ -261,11 +452,25 @@ export function SpeculumActions({
   const [busy, setBusy] = useState<string | null>(null);
   const [panel, setPanel] = useState<PanelMode>('none');
   const [pickerIdx, setPickerIdx] = useState(0);
+  const [lastN, setLastN] = useState<LastNOption>(DEFAULT_LAST_N);
   const [dryRunEnv, setDryRunEnv] = useState<LensEnvelope | null>(null);
   const [selectedLens, setSelectedLens] = useState<BuiltinLens | null>(null);
   const [confirm, setConfirm] = useState<{ msg: string; run: () => void } | null>(null);
   const [auditRows, setAuditRows] = useState<AuditRecord[]>([]);
   const [localFlash, setLocalFlash] = useState<string | null>(null);
+
+  const dryGenRef = useRef(0);
+  const dryRerunTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastNRef = useRef(lastN);
+  lastNRef.current = lastN;
+  const panelRef = useRef(panel);
+  panelRef.current = panel;
+  const selectedLensRef = useRef(selectedLens);
+  selectedLensRef.current = selectedLens;
+  const busyRef = useRef(busy);
+  busyRef.current = busy;
+  const installedRef = useRef(installed);
+  installedRef.current = installed;
 
   const flash = useCallback(
     (msg: string) => {
@@ -312,7 +517,20 @@ export function SpeculumActions({
     };
   }, []);
 
+  // Clear pending re-dry-run timer on unmount.
+  useEffect(
+    () => () => {
+      if (dryRerunTimer.current) clearTimeout(dryRerunTimer.current);
+    },
+    [],
+  );
+
   const closePanels = useCallback(() => {
+    if (dryRerunTimer.current) {
+      clearTimeout(dryRerunTimer.current);
+      dryRerunTimer.current = null;
+    }
+    dryGenRef.current += 1; // invalidate in-flight dry-run
     setPanel('none');
     setDryRunEnv(null);
     setSelectedLens(null);
@@ -337,14 +555,15 @@ export function SpeculumActions({
   }, [busy, installed, flash]);
 
   const runLensLive = useCallback(
-    async (name: BuiltinLens) => {
-      if (busy || installed === false) return;
+    async (name: BuiltinLens, n?: number) => {
+      if (busyRef.current || installedRef.current === false) return;
+      const useN = n ?? lastNRef.current;
       setBusy(`lens ${name}…`);
       try {
         const r = await runSpeculum<LensEnvelope>('lens', [
           name,
           '--last-n',
-          String(DEFAULT_LAST_N),
+          String(useN),
           '--json',
         ]);
         if (!r.ok) {
@@ -362,12 +581,14 @@ export function SpeculumActions({
         setSelectedLens(null);
       }
     },
-    [busy, installed, flash],
+    [flash],
   );
 
   const runLensDry = useCallback(
-    async (name: BuiltinLens) => {
-      if (busy || installed === false) return;
+    async (name: BuiltinLens, n?: number) => {
+      if (installedRef.current === false) return;
+      const useN = n ?? lastNRef.current;
+      const gen = ++dryGenRef.current;
       setSelectedLens(name);
       setBusy(`lens dry-run ${name}…`);
       setPanel('dry-run');
@@ -377,10 +598,11 @@ export function SpeculumActions({
         const r = await runSpeculum<LensEnvelope>('lens', [
           name,
           '--last-n',
-          String(DEFAULT_LAST_N),
+          String(useN),
           '--dry-run',
           '--json',
         ]);
+        if (gen !== dryGenRef.current) return; // stale — a newer selection won
         if (!r.ok) {
           if (r.error.kind === 'not-installed') setInstalled(false);
           flash(errorFlash(r, 'lens dry-run'));
@@ -399,18 +621,36 @@ export function SpeculumActions({
           const msg = model
             ? `Send scrubbed slice to ${model}?`
             : 'Send scrubbed slice to the model the local config routes to?';
+          const nAtConfirm = useN;
           setConfirm({
             msg,
             run: () => {
-              void runLensLive(name);
+              void runLensLive(name, nAtConfirm);
             },
           });
         }
       } finally {
-        setBusy(null);
+        if (gen === dryGenRef.current) setBusy(null);
       }
     },
-    [busy, installed, flash, runLensLive],
+    [flash, runLensLive],
+  );
+
+  /** Apply a new last-n; on the dry-run panel, debounce a re-dry-run. */
+  const applyLastN = useCallback(
+    (n: LastNOption) => {
+      setLastN(n);
+      lastNRef.current = n;
+      setConfirm(null);
+      if (panelRef.current !== 'dry-run' || !selectedLensRef.current) return;
+      if (dryRerunTimer.current) clearTimeout(dryRerunTimer.current);
+      const lens = selectedLensRef.current;
+      dryRerunTimer.current = setTimeout(() => {
+        dryRerunTimer.current = null;
+        void runLensDry(lens, n);
+      }, LAST_N_DEBOUNCE_MS);
+    },
+    [runLensDry],
   );
 
   const loadAudit = useCallback(async () => {
@@ -460,8 +700,6 @@ export function SpeculumActions({
 
   useKeyboard((key: { name?: string; sequence?: string; shift?: boolean; ctrl?: boolean }) => {
     if (!inputActive) return;
-    // Confirm modal owns y/n/esc while active.
-    if (confirm) return;
     if (busy) return;
 
     const n = (key.name ?? '').toLowerCase().replace('arrow', '');
@@ -469,6 +707,42 @@ export function SpeculumActions({
     const shift = !!key.shift;
     const isL = (n === 'l' && shift) || seq === 'L';
     const isA = (n === 'a' && shift) || seq === 'A';
+
+    // Shared last-n stepper keys (picker + dry-run). Works even while ConfirmModal
+    // is up: re-slicing clears confirm and re-runs dry-run (y/n/esc still modal-owned).
+    const handleLastNKeys = (): boolean => {
+      if (n === 'left' || n === 'h') {
+        applyLastN(stepLastN(lastN, -1));
+        return true;
+      }
+      if (n === 'right' || (n === 'l' && !shift && seq !== 'L')) {
+        // bare `l` (not shift-L) steps last-n while panel owns the keyboard
+        applyLastN(stepLastN(lastN, 1));
+        return true;
+      }
+      // Digit keys → direct option (0 → 10).
+      const digit =
+        n.length === 1 && n >= '0' && n <= '9'
+          ? n
+          : seq.length === 1 && seq >= '0' && seq <= '9'
+            ? seq
+            : null;
+      if (digit) {
+        const mapped = lastNFromDigit(digit);
+        if (mapped != null) {
+          applyLastN(mapped);
+          return true;
+        }
+      }
+      return false;
+    };
+
+    if (panel === 'picker' || panel === 'dry-run') {
+      if (handleLastNKeys()) return;
+    }
+
+    // Confirm modal owns y/n/esc while active — block other panel keys.
+    if (confirm) return;
 
     if (n === 'escape') {
       if (panel !== 'none') {
@@ -490,14 +764,25 @@ export function SpeculumActions({
       }
       if (n === 'return' || n === 'enter') {
         const lens = BUILTIN_LENSES[pickerIdx]!;
-        void runLensDry(lens);
+        void runLensDry(lens, lastN);
         return;
       }
       return;
     }
 
-    // Dry-run report: esc closes; confirm is separate modal when sendable.
+    // Dry-run report: last-n re-runs dry-run; esc closes; confirm is separate modal when sendable.
     if (panel === 'dry-run') {
+      if (n === 'return' || n === 'enter') {
+        // Enter re-runs immediately (no debounce wait).
+        if (selectedLens) {
+          if (dryRerunTimer.current) {
+            clearTimeout(dryRerunTimer.current);
+            dryRerunTimer.current = null;
+          }
+          void runLensDry(selectedLens, lastN);
+        }
+        return;
+      }
       return;
     }
 
@@ -509,6 +794,8 @@ export function SpeculumActions({
     }
     if (isL) {
       setPickerIdx(0);
+      setLastN(DEFAULT_LAST_N);
+      lastNRef.current = DEFAULT_LAST_N;
       setDryRunEnv(null);
       setSelectedLens(null);
       setConfirm(null);
@@ -529,12 +816,19 @@ export function SpeculumActions({
     if (localFlash) return localFlash;
     if (busy) return busy;
     if (installed === false) return `speculum not installed — ${INSTALL_HINT}`;
-    if (panel === 'picker') return 'up/dn · enter dry-run · esc · selection --last-n 5';
+    if (panel === 'picker') {
+      return `up/dn · ←/→ last-n · enter dry-run · esc · ${formatSelectionLabel(lastN)}`;
+    }
     if (panel === 'dry-run') {
       const decision = lensDecision(dryRunEnv);
       const reason = lensRefuseReason(dryRunEnv);
-      if (canSend(decision, reason)) return 'confirm modal: y send · n/esc cancel';
-      return 'slice not sendable · esc close';
+      if (canSend(decision, reason)) {
+        return 'confirm modal: y send · n/esc cancel · ←/→ re-slice';
+      }
+      if (isOversizeRefuse(reason)) {
+        return `over cap · ←/→ narrow · ${formatNarrowHint(lastN)} · esc close`;
+      }
+      return 'slice not sendable · ←/→ re-slice · esc close';
     }
     if (panel === 'audit') return 'A close audit · i ingest · L lens';
     if (installed === null) return 'checking speculum…';
@@ -591,16 +885,9 @@ export function SpeculumActions({
       ) : null}
 
       {showPicker ? (
-        <Panel title="Lens picker" flexShrink={0} headerRight={`--last-n ${DEFAULT_LAST_N}`}>
+        <Panel title="Lens picker" flexShrink={0} headerRight={`--last-n ${lastN}`}>
           <box flexDirection="column" flexShrink={0}>
-            <FixedClearRow
-              width={rowW}
-              color={t.muted}
-              text={formatLucernaDisplayLine(
-                `selection: last ${DEFAULT_LAST_N} primary sessions`,
-                rowW,
-              )}
-            />
+            <LastNStepper lastN={lastN} onChange={applyLastN} width={rowW} />
             {BUILTIN_LENSES.map((name, idx) => {
               const selected = idx === pickerIdx;
               const prefix = selected ? '>' : ' ';
@@ -621,9 +908,15 @@ export function SpeculumActions({
         <Panel
           title={selectedLens ? `Lens dry-run · ${selectedLens}` : 'Lens dry-run'}
           flexShrink={0}
-          headerRight={`--last-n ${DEFAULT_LAST_N}`}
+          headerRight={`--last-n ${lastN}`}
         >
           <box flexDirection="column" flexShrink={0}>
+            <LastNStepper
+              lastN={lastN}
+              onChange={applyLastN}
+              width={rowW}
+              disabled={!!busy}
+            />
             {busy && !dryRunEnv ? (
               <FixedClearRow
                 width={rowW}
@@ -635,16 +928,42 @@ export function SpeculumActions({
                 <FixedClearRow
                   width={rowW}
                   color={t.foreground}
-                  text={formatLucernaDisplayLine(formatScrubSummary(dryRunEnv), rowW)}
+                  text={formatLucernaDisplayLine(formatComposition(dryRunEnv), rowW)}
                 />
                 <FixedClearRow
                   width={rowW}
                   color={t.muted}
-                  text={formatLucernaDisplayLine(
-                    `reason: ${lensRefuseReason(dryRunEnv) ?? '—'}`,
-                    rowW,
-                  )}
+                  text={formatLucernaDisplayLine(formatScrubSummary(dryRunEnv), rowW)}
                 />
+                {isOversizeRefuse(lensRefuseReason(dryRunEnv)) ? (
+                  <>
+                    <FixedClearRow
+                      width={rowW}
+                      color={t.warning}
+                      text={formatLucernaDisplayLine(
+                        formatOversizeMessage(dryRunEnv),
+                        rowW,
+                      )}
+                    />
+                    <FixedClearRow
+                      width={rowW}
+                      color={t.muted}
+                      text={formatLucernaDisplayLine(
+                        `${formatSelectionLabel(lastN)} · ${formatNarrowHint(lastN)}`,
+                        rowW,
+                      )}
+                    />
+                  </>
+                ) : (
+                  <FixedClearRow
+                    width={rowW}
+                    color={t.muted}
+                    text={formatLucernaDisplayLine(
+                      `reason: ${lensRefuseReason(dryRunEnv) ?? '—'}`,
+                      rowW,
+                    )}
+                  />
+                )}
                 <FixedClearRow
                   width={rowW}
                   color={
@@ -655,7 +974,9 @@ export function SpeculumActions({
                   text={formatLucernaDisplayLine(
                     canSend(lensDecision(dryRunEnv), lensRefuseReason(dryRunEnv))
                       ? 'sendable — confirm to invoke model'
-                      : 'not sendable — confirm disabled',
+                      : isOversizeRefuse(lensRefuseReason(dryRunEnv))
+                        ? 'not sendable — narrow the slice (←/→) and re-run'
+                        : 'not sendable — confirm disabled',
                     rowW,
                   )}
                 />
