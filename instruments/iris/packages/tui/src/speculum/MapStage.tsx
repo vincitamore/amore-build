@@ -498,11 +498,11 @@ export function MapStage({
             onMouseMove={onMouseMove}
             onMouseScroll={onMouseScroll}
           />
-          <box width="100%" height={1} flexShrink={0} backgroundColor={STATUS_BG}>
-            <text fg={STATUS_FG}>{infoLine}</text>
+          <box width="100%" height={1} flexShrink={0} overflow="hidden" backgroundColor={STATUS_BG}>
+            <FixedClearRow width={rowW} color={STATUS_FG} text={padRow(infoLine.trimStart(), rowW)} />
           </box>
-          <box width="100%" height={1} flexShrink={0} backgroundColor={GRAPH_BG}>
-            <text fg={STATUS_DIM}>{controlLine}</text>
+          <box width="100%" height={1} flexShrink={0} overflow="hidden" backgroundColor={GRAPH_BG}>
+            <FixedClearRow width={rowW} color={STATUS_DIM} text={padRow(controlLine, rowW)} />
           </box>
         </box>
       )}
