@@ -56,7 +56,7 @@ Compiled single-file binary: `bun run build:compile` → `dist/speculum-<os>-<ar
 | `speculum status` | Session/event counts, ingest freshness, probe registry |
 | `speculum doctor` | Operational health checks on the local index (db integrity, schema version, ingest freshness, probe registry) |
 | `speculum forget <prefix>` | Purge one session from the index (disk files untouched); append the purge to the `forget-audit.jsonl` ledger |
-| `speculum scan` | Run all probes (or `--probe <name>`), `--project`/`--since`/`--until` filtered; `--hits`/`--verbose` print hit evidence on the terminal |
+| `speculum scan` | Run all probes (or `--probe <name>`), `--project`/`--since`/`--until` filtered; `--hits`/`--verbose` print hit evidence; `--policy [path]` exits 1 on threshold violations, `--policy-report` annotates |
 | `speculum usage` | Per-model token and turn totals (no prices) |
 | `speculum lenses` | List available lenses and their egress notes |
 | `speculum lens <name>` | Run a lens over a selected, scrubbed slice (`--dry-run` = selection+scrub+audit only) |
@@ -82,10 +82,12 @@ Treat the numbers as investigative signals, not measured precision. Shipped
 probes: `rage-rate` · `frustration-markers` · `tool-mix` · `stuck-loop` ·
 `apology-rate` · `operator-correction` · `sensitive-content` · `stale-corpus`.
 
-Each result carries a `hits` array — the evidence (session, timestamp, quote
-line) behind the finding. `scan --json` always includes hits; `scan --hits` /
-`--verbose` prints them on the terminal too. `sensitive-content` scans the
-`tool_input`/`tool_output` side channels as well as operator/assistant text.
+Each result carries a `hits` array — the evidence (session, event id,
+timestamp, quote line) behind the finding. `scan --json` always includes hits;
+`scan --hits` / `--verbose` prints them on the terminal too.
+`sensitive-content` scans the `tool_input`/`tool_output` side channels as well
+as operator/assistant text; events flagged sensitive at ingest are counted by
+`status`.
 
 ## Lenses — opt-in, scrubbed, audited
 
