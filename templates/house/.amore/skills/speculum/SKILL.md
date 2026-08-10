@@ -58,6 +58,8 @@ Compiled single-file binary: `bun run build:compile` → `dist/speculum-<os>-<ar
 | `speculum forget <prefix>` | Purge one session from the index (disk files untouched); append the purge to the `forget-audit.jsonl` ledger |
 | `speculum scan` | Run all probes (or `--probe <name>`), `--project`/`--since`/`--until` filtered; `--hits`/`--verbose` print hit evidence; `--policy [path]` exits 1 on threshold violations, `--policy-report` annotates |
 | `speculum usage` | Per-model token and turn totals (no prices) |
+| `speculum search <query>` | Sparse FTS5 search over the index (BM25 + recency RRF); `--limit`/`--since`/`--until`/`--project`/`--session`/`--fts-only`; `--json` |
+| `speculum export <surface>` | Snapshot a surface (scan/status/usage/session) as `json`/`csv`/`md` with a metadata envelope + sensitive warning |
 | `speculum lenses` | List available lenses and their egress notes |
 | `speculum lens <name>` | Run a lens over a selected, scrubbed slice (`--dry-run` = selection+scrub+audit only) |
 | `speculum audit [-n N]` | Tail the append-only lens audit log |
@@ -80,7 +82,8 @@ Every probe returns a rate or count with a **Wilson 95% confidence interval**
 and is labeled **heuristic**: the pattern banks are unvalidated on your corpus.
 Treat the numbers as investigative signals, not measured precision. Shipped
 probes: `rage-rate` · `frustration-markers` · `tool-mix` · `stuck-loop` ·
-`apology-rate` · `operator-correction` · `sensitive-content` · `stale-corpus`.
+`apology-rate` · `operator-correction` · `sensitive-content` · `stale-corpus` ·
+`session-phase` · `contradiction` · `session-overlap`.
 
 Each result carries a `hits` array — the evidence (session, event id,
 timestamp, quote line) behind the finding. `scan --json` always includes hits;
