@@ -2,13 +2,19 @@
  * Pure session → world mapper for the Sessions Map stage.
  *
  * Sessions are a RECORD (spatial read of activity), not a claimed affinity graph.
- * Placement is O(n) / O(n log n) only — never a force simulation, never fabricated links.
+ * Placement is O(n) / O(n log n) only — never a force simulation.
+ * Links are evidence-only: parentage + event_links projected from the query-service.
  */
-import type { SessionListRow } from './query-service';
-import type { GraphData, GraphNode, WorldNode } from '../render/graph';
+import type { SessionListRow, SessionMapLink } from './query-service';
+import { displayLabel, type GraphData, type GraphLink, type GraphNode, type WorldNode } from '../render/graph';
+import { clusterColor, type RGB } from '../render/color';
+import type { LegendEntry } from '../graph-view/blit';
 
 /** Structure-invalidating map modes (reset viewport on change). */
 export type MapMode = 'density' | 'cluster';
+
+/** Edge-kind keys used by the map legend (evidence only). */
+export type MapEdgeKind = 'parentage' | 'event';
 
 export interface SessionWorldNode {
   id: string;
@@ -33,14 +39,19 @@ export interface SessionWorld {
   groupKeys: string[];
 }
 
-/** Frozen empty link list — the map never invents session-affinity edges. */
-export const SESSION_MAP_LINKS: readonly { source: string; target: string }[] = Object.freeze([]);
+/**
+ * Default empty link list for callers that intentionally omit evidence edges.
+ * The map never invents session-affinity; real edges come from `links()`.
+ */
+export const SESSION_MAP_LINKS: readonly GraphLink[] = Object.freeze([]);
 
 const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
 const ANCHOR_R = 100;
 const CLUSTER_SPACING = 5;
 const DENSITY_X_SPAN = 200;
 const DENSITY_Y_STEP = 28;
+/** Glyph label budget (matches GraphView displayLabel default). */
+export const SESSION_GLYPH_LABEL_MAX = 18;
 
 /** Project path → stable short group key (basename; empty → `∅`). */
 export function projectBasename(projectPath: string): string {
@@ -50,8 +61,19 @@ export function projectBasename(projectPath: string): string {
   return parts[parts.length - 1] || '∅';
 }
 
-/** Short glyph label: last 8 of id (or whole id if shorter). */
-export function sessionLabel(id: string): string {
+/**
+ * Glyph / hover / info label for a session.
+ * Prefer summarized title (via displayLabel — strips machine-slug prefixes before
+ * truncating so two different titles never collapse to the same head-slice).
+ * Empty title → honest id-suffix fallback.
+ */
+export function sessionLabel(
+  id: string,
+  title?: string | null,
+  max: number = SESSION_GLYPH_LABEL_MAX,
+): string {
+  const t = (title ?? '').trim();
+  if (t) return displayLabel(t, max);
   const s = id.trim();
   if (s.length <= 10) return s;
   return s.slice(-8);
@@ -143,7 +165,7 @@ function densityLayout(
     const jy = (stableUnit(s.id + '|y') - 0.5) * 4;
     return {
       id: s.id,
-      label: sessionLabel(s.id),
+      label: sessionLabel(s.id, s.title),
       groupKey,
       x: (u - 0.5) * DENSITY_X_SPAN + jx,
       y: (cluster - yMid) * DENSITY_Y_STEP + jy,
@@ -190,7 +212,7 @@ function clusterLayout(
       const theta = i * GOLDEN_ANGLE;
       out.push({
         id: s.id,
-        label: sessionLabel(s.id),
+        label: sessionLabel(s.id, s.title),
         groupKey: key,
         x: anchor.x + r * Math.cos(theta),
         y: anchor.y + r * Math.sin(theta),
@@ -210,12 +232,17 @@ function clusterLayout(
 
 /**
  * Project a SessionWorld into GraphData + WorldNode[] for `renderView`.
- * Links are ALWAYS empty — no force-edge wiring.
+ * Evidence links are co-visible only (both endpoints in the world node set).
+ * No affinity fabrication — empty evidence → empty links.
  */
-export function sessionWorldToGraph(world: SessionWorld): {
+export function sessionWorldToGraph(
+  world: SessionWorld,
+  evidenceLinks: readonly SessionMapLink[] = [],
+): {
   graph: GraphData;
   worldNodes: WorldNode[];
 } {
+  const nodeIds = new Set(world.nodes.map((n) => n.id));
   const nodes: GraphNode[] = world.nodes.map((n) => ({
     id: n.id,
     label: n.label,
@@ -232,10 +259,131 @@ export function sessionWorldToGraph(world: SessionWorld): {
     y: n.y,
     cluster: n.cluster,
   }));
+
+  const links: GraphLink[] = [];
+  for (const l of evidenceLinks) {
+    if (!nodeIds.has(l.source) || !nodeIds.has(l.target)) continue;
+    if (l.source === l.target) continue;
+    links.push({ source: l.source, target: l.target });
+  }
+  // Degree for attention: recount from projected links.
+  if (links.length > 0) {
+    const deg = new Map<string, number>();
+    for (const l of links) {
+      deg.set(l.source, (deg.get(l.source) ?? 0) + 1);
+      deg.set(l.target, (deg.get(l.target) ?? 0) + 1);
+    }
+    for (const n of nodes) n.linkCount = deg.get(n.id) ?? 0;
+  }
+
   return {
-    graph: { nodes, links: [...SESSION_MAP_LINKS] },
+    graph: { nodes, links },
     worldNodes,
   };
+}
+
+/**
+ * Filter evidence links by edge-kind visibility (render-time; never re-layouts).
+ */
+export function filterEvidenceLinks(
+  links: readonly SessionMapLink[],
+  hiddenEdgeKinds: ReadonlySet<MapEdgeKind>,
+): SessionMapLink[] {
+  if (hiddenEdgeKinds.size === 0) return [...links];
+  return links.filter((l) => !hiddenEdgeKinds.has(l.kind));
+}
+
+/**
+ * Session ids whose project group is hidden — feed to renderView.hiddenIds
+ * so toggling skips draw/hit without re-running layout.
+ */
+export function hiddenIdsForProjects(
+  world: SessionWorld,
+  hiddenProjects: ReadonlySet<string>,
+): Set<string> | undefined {
+  if (hiddenProjects.size === 0) return undefined;
+  const out = new Set<string>();
+  for (const n of world.nodes) {
+    if (hiddenProjects.has(n.groupKey)) out.add(n.id);
+  }
+  return out.size > 0 ? out : undefined;
+}
+
+/**
+ * Build the map legend rows: project groups (clusterColor from group index) then
+ * edge-kind rows. Swatches use the same clusterColor the nodes use — never a second palette.
+ */
+export function buildMapLegendRows(
+  world: SessionWorld,
+  evidenceLinks: readonly SessionMapLink[],
+  hiddenProjects: ReadonlySet<string>,
+  hiddenEdgeKinds: ReadonlySet<MapEdgeKind>,
+): LegendEntry[] {
+  const counts = new Map<string, number>();
+  for (const n of world.nodes) {
+    counts.set(n.groupKey, (counts.get(n.groupKey) ?? 0) + 1);
+  }
+  const rows: LegendEntry[] = [];
+  for (let i = 0; i < world.groupKeys.length; i++) {
+    const key = world.groupKeys[i]!;
+    const color: RGB = clusterColor(i);
+    rows.push({
+      glyph: '●',
+      label: key,
+      color,
+      count: counts.get(key) ?? 0,
+      hidden: hiddenProjects.has(key),
+      depth: 0,
+      expandable: false,
+      expanded: false,
+      partial: false,
+    });
+  }
+
+  let parentageCount = 0;
+  let eventCount = 0;
+  for (const l of evidenceLinks) {
+    if (l.kind === 'parentage') parentageCount += l.count;
+    else eventCount += l.count;
+  }
+  // Edge-kind rows share a neutral slate so they read as chrome, not project clusters.
+  const edgeColor: RGB = { r: 160, g: 168, b: 180 };
+  rows.push({
+    glyph: '─',
+    label: 'parentage',
+    color: edgeColor,
+    count: parentageCount,
+    hidden: hiddenEdgeKinds.has('parentage'),
+    depth: 0,
+    expandable: false,
+    expanded: false,
+    partial: false,
+  });
+  rows.push({
+    glyph: '═',
+    label: 'event links',
+    color: edgeColor,
+    count: eventCount,
+    hidden: hiddenEdgeKinds.has('event'),
+    depth: 0,
+    expandable: false,
+    expanded: false,
+    partial: false,
+  });
+  return rows;
+}
+
+/**
+ * Map a legend row label to a toggle action for MapStage.
+ * Project keys toggle projects; reserved edge labels toggle edge kinds.
+ */
+export function legendToggleTarget(
+  label: string,
+): { kind: 'project'; key: string } | { kind: 'edge'; key: MapEdgeKind } | null {
+  if (label === 'parentage') return { kind: 'edge', key: 'parentage' };
+  if (label === 'event links') return { kind: 'edge', key: 'event' };
+  if (!label) return null;
+  return { kind: 'project', key: label };
 }
 
 /**
@@ -262,7 +410,7 @@ export function hitTestSession(
   return best && bestD <= maxD2 ? best : null;
 }
 
-/** True when a graph has zero links (map invariant). */
+/** True when a graph has zero links (no evidence edges projected). */
 export function hasNoForceEdges(graph: GraphData): boolean {
   return !graph.links || graph.links.length === 0;
 }

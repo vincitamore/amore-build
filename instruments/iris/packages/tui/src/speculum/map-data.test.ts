@@ -1,10 +1,14 @@
 import { describe, expect, test } from 'bun:test';
-import type { SessionListRow } from './query-service';
+import type { SessionListRow, SessionMapLink } from './query-service';
 import {
+  buildMapLegendRows,
   buildSessionWorld,
+  filterEvidenceLinks,
   gridAnchors,
   hasNoForceEdges,
+  hiddenIdsForProjects,
   hitTestSession,
+  legendToggleTarget,
   projectBasename,
   sessionLabel,
   sessionWorldToGraph,
@@ -27,6 +31,7 @@ function row(partial: Partial<SessionListRow> & { id: string }): SessionListRow 
     toolCallCount: partial.toolCallCount ?? 0,
     toolErrorCount: partial.toolErrorCount ?? 0,
     eventCount: partial.eventCount ?? 1,
+    title: partial.title ?? '',
   };
 }
 
@@ -38,9 +43,26 @@ describe('projectBasename / labels', () => {
     expect(projectBasename('/')).toBe('∅');
   });
 
-  test('sessionLabel shortens long ids', () => {
+  test('sessionLabel falls back to id suffix when title empty', () => {
     expect(sessionLabel('ab')).toBe('ab');
     expect(sessionLabel('1234567890abcdef')).toBe('90abcdef');
+    expect(sessionLabel('1234567890abcdef', '')).toBe('90abcdef');
+    expect(sessionLabel('1234567890abcdef', '   ')).toBe('90abcdef');
+  });
+
+  test('sessionLabel prefers title via displayLabel (head-slice doctrine)', () => {
+    expect(sessionLabel('uuid-long-enough', 'KB Link Density Report')).toBe('KB Link Density Re');
+    // Machine-slug dream titles: distinctive tail leads so two family members never share a glyph label.
+    const a = sessionLabel('id-a', 'Pipeline: dream-2026-02-17T09-31-56-dream-digest');
+    const b = sessionLabel('id-b', 'Pipeline: dream-2026-02-17T12-42-09-self-orient');
+    expect(a).not.toBe(b);
+    expect(a.startsWith('dream-digest')).toBe(true);
+    expect(b.startsWith('self-orient')).toBe(true);
+    // Naive head-slice would collapse both to the shared prefix.
+    const naiveA = 'Pipeline: dream-2026-02-17T09-31-56-dream-digest'.slice(0, 18);
+    const naiveB = 'Pipeline: dream-2026-02-17T12-42-09-self-orient'.slice(0, 18);
+    expect(naiveA).toBe(naiveB);
+    expect(a).not.toBe(naiveA);
   });
 
   test('stableUnit is deterministic in [0,1)', () => {
@@ -71,6 +93,15 @@ describe('buildSessionWorld', () => {
     expect(Number.isFinite(w.nodes[0].y)).toBe(true);
     expect(w.nodes[0].groupKey).toBe('solo');
     expect(w.nodes[0].cluster).toBe(0);
+  });
+
+  test('title becomes glyph label', () => {
+    const w = buildSessionWorld(
+      [row({ id: 'sess-long-id-abcdef01', title: 'Repeat Previous Single Word' })],
+      'cluster',
+    );
+    expect(w.nodes[0]!.label).toBe(sessionLabel('sess-long-id-abcdef01', 'Repeat Previous Single Word'));
+    expect(w.nodes[0]!.label).not.toBe('abcdef01');
   });
 
   test('determinism: same input → same world (order-invariant groups)', () => {
@@ -160,13 +191,13 @@ describe('buildSessionWorld', () => {
   });
 });
 
-describe('sessionWorldToGraph / no force edges', () => {
-  test('SESSION_MAP_LINKS is empty and frozen', () => {
+describe('sessionWorldToGraph / evidence links', () => {
+  test('SESSION_MAP_LINKS is empty and frozen (no invented affinity default)', () => {
     expect(SESSION_MAP_LINKS).toHaveLength(0);
     expect(Object.isFrozen(SESSION_MAP_LINKS)).toBe(true);
   });
 
-  test('graph projection never adds links', () => {
+  test('graph projection without evidence → empty links', () => {
     const w = buildSessionWorld(
       [
         row({ id: 's1', projectPath: '/p/a' }),
@@ -180,6 +211,78 @@ describe('sessionWorldToGraph / no force edges', () => {
     expect(graph.nodes).toHaveLength(2);
     expect(worldNodes).toHaveLength(2);
     expect(graph.nodes.every((n) => n.kind === 'doc')).toBe(true);
+  });
+
+  test('projects co-visible evidence links; drops endpoints outside the world', () => {
+    const w = buildSessionWorld(
+      [
+        row({ id: 'parent', projectPath: '/p/a' }),
+        row({ id: 'child', projectPath: '/p/a', parentSession: 'parent' }),
+        row({ id: 'other', projectPath: '/p/b' }),
+      ],
+      'cluster',
+    );
+    const evidence: SessionMapLink[] = [
+      { source: 'child', target: 'parent', kind: 'parentage', count: 1 },
+      { source: 'parent', target: 'other', kind: 'event', count: 3 },
+      { source: 'child', target: 'missing-out-of-set', kind: 'event', count: 1 },
+    ];
+    const { graph } = sessionWorldToGraph(w, evidence);
+    expect(graph.links).toHaveLength(2);
+    expect(graph.links).toContainEqual({ source: 'child', target: 'parent' });
+    expect(graph.links).toContainEqual({ source: 'parent', target: 'other' });
+    expect(hasNoForceEdges(graph)).toBe(false);
+  });
+});
+
+describe('legend + visibility helpers', () => {
+  test('buildMapLegendRows colors projects via cluster index; edge kinds present', () => {
+    const w = buildSessionWorld(
+      [
+        row({ id: 'a1', projectPath: '/work/alpha' }),
+        row({ id: 'b1', projectPath: '/work/beta' }),
+      ],
+      'cluster',
+    );
+    const evidence: SessionMapLink[] = [
+      { source: 'a1', target: 'b1', kind: 'parentage', count: 1 },
+      { source: 'a1', target: 'b1', kind: 'event', count: 2 },
+    ];
+    const rows = buildMapLegendRows(w, evidence, new Set(), new Set());
+    expect(rows.some((r) => r.label === 'alpha')).toBe(true);
+    expect(rows.some((r) => r.label === 'beta')).toBe(true);
+    expect(rows.some((r) => r.label === 'parentage' && r.count === 1)).toBe(true);
+    expect(rows.some((r) => r.label === 'event links' && r.count === 2)).toBe(true);
+    const alpha = rows.find((r) => r.label === 'alpha')!;
+    const beta = rows.find((r) => r.label === 'beta')!;
+    // Different cluster indices → different colors (same function nodes use).
+    expect(alpha.color).not.toEqual(beta.color);
+  });
+
+  test('hiddenIdsForProjects skips hidden groups without changing layout', () => {
+    const w = buildSessionWorld(
+      [
+        row({ id: 'a1', projectPath: '/p/alpha' }),
+        row({ id: 'b1', projectPath: '/p/beta' }),
+      ],
+      'cluster',
+    );
+    const hidden = hiddenIdsForProjects(w, new Set(['alpha']));
+    expect(hidden?.has('a1')).toBe(true);
+    expect(hidden?.has('b1')).toBe(false);
+  });
+
+  test('filterEvidenceLinks + legendToggleTarget', () => {
+    const links: SessionMapLink[] = [
+      { source: 'a', target: 'b', kind: 'parentage', count: 1 },
+      { source: 'a', target: 'c', kind: 'event', count: 2 },
+    ];
+    expect(filterEvidenceLinks(links, new Set(['parentage']))).toEqual([
+      { source: 'a', target: 'c', kind: 'event', count: 2 },
+    ]);
+    expect(legendToggleTarget('parentage')).toEqual({ kind: 'edge', key: 'parentage' });
+    expect(legendToggleTarget('event links')).toEqual({ kind: 'edge', key: 'event' });
+    expect(legendToggleTarget('alpha')).toEqual({ kind: 'project', key: 'alpha' });
   });
 });
 

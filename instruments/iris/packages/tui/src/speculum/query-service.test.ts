@@ -420,6 +420,119 @@ describe('typed reads', () => {
   });
 });
 
+describe('links() evidence edges', () => {
+  test('parentage + event_links aggregation; co-visible filter; empty set', () => {
+    const path = join(tempRoot, 'links-v5.sqlite');
+    {
+      const db = new Database(path);
+      db.exec(SYNTHETIC_DDL);
+      db.run(`
+        CREATE TABLE event_links (
+          id               INTEGER PRIMARY KEY AUTOINCREMENT,
+          source_event_id  INTEGER NOT NULL,
+          target_event_id  INTEGER NOT NULL,
+          kind             TEXT NOT NULL,
+          method           TEXT NOT NULL,
+          confidence       REAL NOT NULL DEFAULT 1.0,
+          heuristic        INTEGER NOT NULL DEFAULT 0,
+          UNIQUE(source_event_id, target_event_id, kind)
+        );
+      `);
+      db.run('ALTER TABLE sessions ADD COLUMN title TEXT NOT NULL DEFAULT \'\'');
+      db.run('PRAGMA user_version = 5');
+
+      const insertSession = (
+        id: string,
+        parent: string | null,
+        project = '/proj/a',
+      ) => {
+        db.run(
+          `INSERT INTO sessions (
+             id, project_path, agent, parent_session, model_id,
+             started_at, ended_at, turn_count, user_msg_count, tool_call_count, tool_error_count, title
+           ) VALUES (?, ?, ?, ?, 'm',
+             '2026-06-02T12:00:00.000Z', '2026-06-02T13:00:00.000Z', 1, 1, 0, 0, ?)`,
+          [id, project, parent ? 'subagent' : 'primary', parent, id === 'parent-sess' ? 'Primary Title' : ''],
+        );
+      };
+      insertSession('parent-sess', null);
+      insertSession('child-sess', 'parent-sess');
+      insertSession('peer-a', null, '/proj/b');
+      insertSession('peer-b', null, '/proj/b');
+      insertSession('outside-only', null, '/proj/c');
+
+      const insertEvent = (sessionId: string, text: string): number => {
+        db.run(
+          `INSERT INTO events (
+             session_id, project_path, agent, parent_session, ts, kind,
+             text, tool_name, tool_input, tool_output, tool_error, tool_call_id,
+             is_boilerplate, sensitive, raw
+           ) VALUES (?, '/proj/a', 'primary', NULL, '2026-06-02T12:00:00.000Z',
+             'user', ?, NULL, NULL, NULL, NULL, NULL, 0, 0, '{}')`,
+          [sessionId, text],
+        );
+        return Number(db.query<{ id: number }, []>('SELECT last_insert_rowid() AS id').get()!.id);
+      };
+      const eParent = insertEvent('parent-sess', 'from parent');
+      const ePeerA = insertEvent('peer-a', 'from peer-a');
+      const ePeerB = insertEvent('peer-b', 'from peer-b');
+      const eOutside = insertEvent('outside-only', 'outside');
+      // Two event_links between peer-a and peer-b (aggregated count=2).
+      db.run(
+        `INSERT INTO event_links (source_event_id, target_event_id, kind, method)
+         VALUES (?, ?, 'GENERATED', 'test'), (?, ?, 'USED', 'test')`,
+        [ePeerA, ePeerB, ePeerA, ePeerB],
+      );
+      // Cross-set link: parent → outside (should drop when outside not in set).
+      db.run(
+        `INSERT INTO event_links (source_event_id, target_event_id, kind, method)
+         VALUES (?, ?, 'GENERATED', 'test')`,
+        [eParent, eOutside],
+      );
+      db.close();
+    }
+
+    const qs = openQueryService(path);
+    try {
+      expect(qs.links([])).toEqual([]);
+      const full = qs.links(['parent-sess', 'child-sess', 'peer-a', 'peer-b']);
+      const parentage = full.filter((l) => l.kind === 'parentage');
+      expect(parentage).toEqual([
+        { source: 'child-sess', target: 'parent-sess', kind: 'parentage', count: 1 },
+      ]);
+      const events = full.filter((l) => l.kind === 'event');
+      expect(events).toHaveLength(1);
+      expect(events[0]).toEqual({
+        source: 'peer-a',
+        target: 'peer-b',
+        kind: 'event',
+        count: 2,
+      });
+      // Co-visible: without peer-b, event edge drops; without parent, parentage drops.
+      const noPeerB = qs.links(['parent-sess', 'child-sess', 'peer-a']);
+      expect(noPeerB.filter((l) => l.kind === 'event')).toHaveLength(0);
+      expect(noPeerB.filter((l) => l.kind === 'parentage')).toHaveLength(1);
+      const noParent = qs.links(['child-sess', 'peer-a', 'peer-b']);
+      expect(noParent.filter((l) => l.kind === 'parentage')).toHaveLength(0);
+      expect(noParent.filter((l) => l.kind === 'event')).toHaveLength(1);
+    } finally {
+      qs.close();
+    }
+  });
+
+  test('links() is resilient when event_links table is absent', () => {
+    // goodDbPath is v4 synthetic without event_links — parentage only if any.
+    const qs = openQueryService(goodDbPath);
+    try {
+      const links = qs.links(['sess-newer', 'sess-older']);
+      expect(Array.isArray(links)).toBe(true);
+      expect(links.every((l) => l.kind === 'parentage' || l.kind === 'event')).toBe(true);
+    } finally {
+      qs.close();
+    }
+  });
+});
+
 describe('schema v5 title column', () => {
   test('sessionList returns titles; search joins title; v4 stays empty', () => {
     const v5Path = join(tempRoot, 'v5-titles.sqlite');

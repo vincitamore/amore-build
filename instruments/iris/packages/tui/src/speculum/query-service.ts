@@ -90,6 +90,18 @@ export type SearchOpts = {
   sessionId?: string;
 };
 
+/**
+ * Evidence edge between two sessions (map-record only — never affinity/similarity).
+ * - parentage: subagent session → its parent_session (both in the requested set)
+ * - event: session-pair aggregation of event_links (both endpoints in the set)
+ */
+export type SessionMapLink = {
+  source: string;
+  target: string;
+  kind: 'parentage' | 'event';
+  count: number;
+};
+
 export type OpenQueryServiceOpts = {
   /** Explicit db path; wins over env resolution. */
   path?: string;
@@ -119,6 +131,11 @@ export interface QueryService {
   busy(): boolean;
   status(): QueryStatus;
   sessionList(limit?: number, offset?: number): SessionListRow[];
+  /**
+   * Evidence edges among a co-visible session-id set: parentage + event_links aggregation.
+   * Edges whose endpoints are outside the set are dropped. Empty input → [].
+   */
+  links(sessionIds: readonly string[]): SessionMapLink[];
   turns(sessionId: string): TurnRow[];
   search(query: string, opts?: SearchOpts): SearchHit[];
   close(): void;
@@ -202,6 +219,20 @@ function sessionsHasTitleColumn(db: Database): boolean {
   try {
     const cols = db.query<{ name: string }, []>(`PRAGMA table_info(sessions)`).all();
     return cols.some((c) => c.name === 'title');
+  } catch {
+    return false;
+  }
+}
+
+/** True when a named table exists (event_links may be absent on stripped fixtures). */
+function tableExists(db: Database, name: string): boolean {
+  try {
+    const row = db
+      .query<{ n: number }, [string]>(
+        `SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table' AND name = ?`,
+      )
+      .get(name);
+    return (row?.n ?? 0) > 0;
   } catch {
     return false;
   }
@@ -382,6 +413,63 @@ class SqliteQueryService implements QueryService {
         eventCount: r.event_count,
         title: r.title ?? '',
       }));
+    }, []);
+  }
+
+  links(sessionIds: readonly string[]): SessionMapLink[] {
+    const ids = [...new Set(sessionIds.map((s) => s.trim()).filter(Boolean))];
+    if (ids.length === 0) return [];
+    return this.read(() => {
+      const db = this.requireDb();
+      const out: SessionMapLink[] = [];
+      const idSet = new Set(ids);
+      // Parentage: child (subagent) → parent, only when both endpoints are co-visible.
+      const placeholders = ids.map(() => '?').join(', ');
+      const parentRows = db
+        .query<{ id: string; parent_session: string | null }, string[]>(
+          `SELECT id, parent_session FROM sessions
+           WHERE parent_session IS NOT NULL
+             AND parent_session != ''
+             AND id IN (${placeholders})`,
+        )
+        .all(...ids);
+      for (const r of parentRows) {
+        const parent = (r.parent_session ?? '').trim();
+        if (!parent || !idSet.has(parent) || parent === r.id) continue;
+        out.push({ source: r.id, target: parent, kind: 'parentage', count: 1 });
+      }
+
+      // event_links → session pairs via events (table may be absent on stripped fixtures).
+      if (tableExists(db, 'event_links')) {
+        const eventRows = db
+          .query<
+            { source: string; target: string; n: number },
+            string[]
+          >(
+            `SELECT
+               es.session_id AS source,
+               et.session_id AS target,
+               COUNT(*) AS n
+             FROM event_links el
+             JOIN events es ON es.id = el.source_event_id
+             JOIN events et ON et.id = el.target_event_id
+             WHERE es.session_id IN (${placeholders})
+               AND et.session_id IN (${placeholders})
+               AND es.session_id != et.session_id
+             GROUP BY es.session_id, et.session_id`,
+          )
+          .all(...ids, ...ids);
+        for (const r of eventRows) {
+          if (!idSet.has(r.source) || !idSet.has(r.target)) continue;
+          out.push({
+            source: r.source,
+            target: r.target,
+            kind: 'event',
+            count: Math.max(1, Number(r.n) || 1),
+          });
+        }
+      }
+      return out;
     }, []);
   }
 

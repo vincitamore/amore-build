@@ -1,6 +1,5 @@
-// Char-frame smoke for MapStage: synthetic temp index → glyphs + hit-test + openSession on Enter.
-// Asserts explicitly that no force-edge wiring is present.
-// Run: bun run src/speculum/map-smoke.tsx
+// Char-frame smoke for MapStage: synthetic temp index → glyphs + titles + legend +
+// evidence links + showing N of M. Run: bun run src/speculum/map-smoke.tsx
 import { readFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -11,13 +10,14 @@ import { ThemeProvider } from '../ThemeProvider';
 import { fitViewport, worldToScreen } from '../render/viewport';
 import { renderView } from '../render/graph';
 import {
+  buildMapLegendRows,
   buildSessionWorld,
-  hasNoForceEdges,
   hitTestSession,
+  sessionLabel,
   sessionWorldToGraph,
 } from './map-data';
 import { MapStage } from './MapStage';
-import type { SessionListRow } from './query-service';
+import { openQueryService, type SessionListRow, type SessionMapLink } from './query-service';
 
 const W = Number(process.env.SMOKE_W ?? 120);
 const H = Number(process.env.SMOKE_H ?? 34);
@@ -52,7 +52,8 @@ CREATE TABLE sessions (
   turn_count       INTEGER NOT NULL,
   user_msg_count   INTEGER NOT NULL,
   tool_call_count  INTEGER NOT NULL,
-  tool_error_count INTEGER NOT NULL
+  tool_error_count INTEGER NOT NULL,
+  title            TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE usage (
   id                  INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -77,6 +78,16 @@ CREATE TABLE ingest_state (
   last_ingested TEXT NOT NULL,
   forgotten     INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE event_links (
+  id               INTEGER PRIMARY KEY AUTOINCREMENT,
+  source_event_id  INTEGER NOT NULL,
+  target_event_id  INTEGER NOT NULL,
+  kind             TEXT NOT NULL,
+  method           TEXT NOT NULL,
+  confidence       REAL NOT NULL DEFAULT 1.0,
+  heuristic        INTEGER NOT NULL DEFAULT 0,
+  UNIQUE(source_event_id, target_event_id, kind)
+);
 CREATE VIRTUAL TABLE events_fts USING fts5(
   text,
   tool_name,
@@ -90,35 +101,47 @@ function seedMapIndex(path: string): SessionListRow[] {
   const rows: SessionListRow[] = [];
   try {
     db.exec(SYNTHETIC_DDL);
-    db.run('PRAGMA user_version = 4');
+    db.run('PRAGMA user_version = 5');
     const projects = ['/work/alpha', '/work/beta', '/work/gamma'];
+    const titles = [
+      'Alpha Primary Session',
+      'Beta Review Pass',
+      'Pipeline: dream-2026-02-17T09-31-56-dream-digest',
+      'Gamma Operator Notes',
+    ];
+    let parentId = '';
     for (let i = 0; i < 12; i++) {
       const id = `map-sess-${String(i).padStart(3, '0')}`;
-      const projectPath = projects[i % projects.length];
+      const projectPath = projects[i % projects.length]!;
       const day = String(1 + (i % 28)).padStart(2, '0');
       const startedAt = `2026-05-${day}T10:00:00.000Z`;
       const endedAt = `2026-05-${day}T11:00:00.000Z`;
       const turnCount = 2 + i * 3;
+      const isSub = i === 1;
+      const parentSession = isSub ? parentId : null;
+      const agent = isSub ? 'subagent' : 'primary';
+      const title = isSub ? 'Subagent of Alpha' : titles[i % titles.length]!;
+      if (i === 0) parentId = id;
       db.run(
         `INSERT INTO sessions (
            id, project_path, agent, parent_session, model_id,
-           started_at, ended_at, turn_count, user_msg_count, tool_call_count, tool_error_count
-         ) VALUES (?, ?, 'primary', NULL, 'model-x', ?, ?, ?, 1, 1, 0)`,
-        [id, projectPath, startedAt, endedAt, turnCount],
+           started_at, ended_at, turn_count, user_msg_count, tool_call_count, tool_error_count, title
+         ) VALUES (?, ?, ?, ?, 'model-x', ?, ?, ?, 1, 1, 0, ?)`,
+        [id, projectPath, agent, parentSession, startedAt, endedAt, turnCount, title],
       );
       db.run(
         `INSERT INTO events (
            session_id, project_path, agent, parent_session, ts, kind,
            text, tool_name, tool_input, tool_output, tool_error, tool_call_id,
            is_boilerplate, sensitive, raw
-         ) VALUES (?, ?, 'primary', NULL, ?, 'user', ?, NULL, NULL, NULL, NULL, NULL, 0, 0, ?)`,
-        [id, projectPath, startedAt, `hello ${id}`, JSON.stringify({ id })],
+         ) VALUES (?, ?, ?, ?, ?, 'user', ?, NULL, NULL, NULL, NULL, NULL, 0, 0, ?)`,
+        [id, projectPath, agent, parentSession, startedAt, `hello ${id}`, JSON.stringify({ id })],
       );
       rows.push({
         id,
         projectPath,
-        agent: 'primary',
-        parentSession: null,
+        agent,
+        parentSession,
         modelId: 'model-x',
         startedAt,
         endedAt,
@@ -127,8 +150,25 @@ function seedMapIndex(path: string): SessionListRow[] {
         toolCallCount: 1,
         toolErrorCount: 0,
         eventCount: 1,
+        title,
       });
     }
+    // event_links between sess 2 and 3 (cross-session evidence).
+    const e2 = Number(
+      db
+        .query<{ id: number }, [string]>('SELECT id FROM events WHERE session_id = ?')
+        .get('map-sess-002')!.id,
+    );
+    const e3 = Number(
+      db
+        .query<{ id: number }, [string]>('SELECT id FROM events WHERE session_id = ?')
+        .get('map-sess-003')!.id,
+    );
+    db.run(
+      `INSERT INTO event_links (source_event_id, target_event_id, kind, method)
+       VALUES (?, ?, 'GENERATED', 'smoke')`,
+      [e2, e3],
+    );
     db.run(
       `INSERT INTO ingest_state (
          file_path, size_bytes, mtime, byte_offset, last_ingested, forgotten
@@ -138,6 +178,37 @@ function seedMapIndex(path: string): SessionListRow[] {
     db.close();
   }
   return rows;
+}
+
+/** Seed a large synthetic corpus for frame-cost measurement (no real index touch). */
+function seedLargeIndex(path: string, n: number): void {
+  const db = new Database(path);
+  try {
+    db.exec(SYNTHETIC_DDL);
+    db.run('PRAGMA user_version = 5');
+    const insert = db.prepare(
+      `INSERT INTO sessions (
+         id, project_path, agent, parent_session, model_id,
+         started_at, ended_at, turn_count, user_msg_count, tool_call_count, tool_error_count, title
+       ) VALUES (?, ?, 'primary', NULL, 'm', ?, ?, ?, 1, 0, 0, ?)`,
+    );
+    db.run('BEGIN');
+    for (let i = 0; i < n; i++) {
+      const id = `bulk-${String(i).padStart(5, '0')}`;
+      const proj = `/work/p${i % 24}`;
+      const day = String(1 + (i % 28)).padStart(2, '0');
+      const started = `2026-04-${day}T${String(i % 24).padStart(2, '0')}:00:00.000Z`;
+      insert.run(id, proj, started, started, 1 + (i % 40), `Session title ${i}`);
+    }
+    db.run('COMMIT');
+    db.run(
+      `INSERT INTO ingest_state (
+         file_path, size_bytes, mtime, byte_offset, last_ingested, forgotten
+       ) VALUES ('/sessions/bulk.jsonl', 1, '2026-05-28T12:00:00.000Z', 1, '2026-05-28T12:00:00.000Z', 0)`,
+    );
+  } finally {
+    db.close();
+  }
 }
 
 const tempRoot = mkdtempSync(join(tmpdir(), 'map-smoke-'));
@@ -155,10 +226,37 @@ const log = (msg: string, ok: boolean) => {
   if (!ok) failures++;
 };
 
-// ── 1. Pure path: world → renderView → hit-test (no force edges) ─────────────
-const world = buildSessionWorld(seeded, 'cluster');
-const { graph, worldNodes } = sessionWorldToGraph(world);
-log(`no force edges (links=${graph.links.length})`, hasNoForceEdges(graph) && graph.links.length === 0);
+// ── 1. Pure path: world → titles → evidence links → renderView ───────────────
+const qs = openQueryService(dbPath);
+const listed = qs.sessionList(1_000_000);
+const evidence: SessionMapLink[] = qs.links(listed.map((s) => s.id));
+qs.close();
+
+const world = buildSessionWorld(listed, 'cluster');
+const { graph, worldNodes } = sessionWorldToGraph(world, evidence);
+log(`evidence links projected (links=${graph.links.length})`, graph.links.length >= 2);
+log(
+  `parentage edge present`,
+  evidence.some((l) => l.kind === 'parentage' && l.source === 'map-sess-001' && l.target === 'map-sess-000'),
+);
+log(
+  `event link present`,
+  evidence.some((l) => l.kind === 'event'),
+);
+
+const titleNode = world.nodes.find((n) => n.id === 'map-sess-000');
+log(
+  `title as glyph label (${titleNode?.label})`,
+  !!titleNode && titleNode.label === sessionLabel('map-sess-000', 'Alpha Primary Session'),
+);
+
+const legend = buildMapLegendRows(world, evidence, new Set(), new Set());
+log(
+  `legend has project + edge rows (${legend.length})`,
+  legend.some((r) => r.label === 'alpha') &&
+    legend.some((r) => r.label === 'parentage') &&
+    legend.some((r) => r.label === 'event links'),
+);
 
 const cols = 100;
 const rows = 24;
@@ -172,19 +270,16 @@ const { grid, nodes: screenNodes } = renderView(graph, worldNodes, vp, {
   attention: true,
 });
 const glyphCells = grid.cells.filter((c) => c && c.char && c.char !== ' ' && !/^[⠀-⣿]$/.test(c.char));
+const edgeCells = grid.cells.filter((c) => c && c.char && /^[⠀-⣿]$/.test(c.char));
 log(`renderView glyphs present (${glyphCells.length})`, glyphCells.length > 0);
-log(`screen nodes positioned (${screenNodes.length})`, screenNodes.length === seeded.length);
+log(`renderView edge braille present (${edgeCells.length})`, edgeCells.length > 0);
+log(`screen nodes positioned (${screenNodes.length})`, screenNodes.length === listed.length);
 
-// Hit-test: pick first on-screen node via its cell.
-const probe = screenNodes[0];
+const probe = screenNodes[0]!;
 const cellX = Math.floor(probe.x / 2);
 const cellY = Math.floor(probe.y / 4);
 const hit = hitTestSession(screenNodes, cellX, cellY);
 log(`hit-test selects session (${hit})`, hit === probe.id);
-
-// Density mode also places without links.
-const dens = sessionWorldToGraph(buildSessionWorld(seeded, 'density'));
-log(`density mode no links`, hasNoForceEdges(dens.graph));
 
 // ── 2. Source hygiene: MapStage must not import force layout / d3-force ───────
 const stageSrc = readFileSync(new URL('./MapStage.tsx', import.meta.url), 'utf8');
@@ -195,8 +290,44 @@ const noForceImport =
   !/\bforceLink\b|\bforceSimulation\b|\blayoutWorld\b|\blayoutWorldAsync\b/.test(stageSrc) &&
   !/\bforceLink\b|\bforceSimulation\b|\blayoutWorld\b/.test(mapDataSrc);
 log('no force-edge wiring in MapStage/map-data sources', noForceImport);
+log('no SESSION_LIST_LIMIT 500 cap', !/SESSION_LIST_LIMIT\s*=\s*500/.test(stageSrc));
 
-// ── 3. Mount MapStage → char frame + openSession on Enter ────────────────────
+// ── 3. Full-set frame cost (synthetic 1699 — matches reported corpus scale) ──
+const largePath = join(tempRoot, 'large.sqlite');
+const LARGE_N = 1699;
+seedLargeIndex(largePath, LARGE_N);
+const largeRows: SessionListRow[] = [];
+{
+  const q = openQueryService(largePath);
+  const list = q.sessionList(1_000_000);
+  largeRows.push(...list);
+  q.close();
+}
+const t0 = performance.now();
+const largeWorld = buildSessionWorld(largeRows, 'cluster');
+const tLayout = performance.now();
+const largeGraph = sessionWorldToGraph(largeWorld, []);
+const largeVp = fitViewport(largeGraph.worldNodes, width, height);
+const tFit = performance.now();
+renderView(largeGraph.graph, largeGraph.worldNodes, largeVp, {
+  cols,
+  rows,
+  mode: 'cluster',
+  attention: true,
+});
+const tRender = performance.now();
+const layoutMs = tLayout - t0;
+const renderMs = tRender - tFit;
+const totalMs = tRender - t0;
+console.log(
+  `FRAME_COST n=${LARGE_N} layout=${layoutMs.toFixed(2)}ms fit+project=${(tFit - tLayout).toFixed(2)}ms render=${renderMs.toFixed(2)}ms total=${totalMs.toFixed(2)}ms`,
+);
+log(
+  `full-set frame under ~30ms render budget (render=${renderMs.toFixed(1)}ms total=${totalMs.toFixed(1)}ms)`,
+  renderMs < 30 || totalMs < 50,
+);
+
+// ── 4. Mount MapStage → char frame + openSession on Enter ────────────────────
 let opened: string | null = null;
 const { renderer, renderOnce, captureCharFrame } = await createTestRenderer({ width: W, height: H });
 const keys = createMockKeys(renderer);
@@ -213,19 +344,27 @@ root.render(
   </ThemeProvider>,
 );
 
-await new Promise((r) => setTimeout(r, 350));
+await new Promise((r) => setTimeout(r, 400));
 await renderOnce();
 const frame = captureCharFrame();
 console.log(frame);
 
 const hasTitle = /\bMap\b/.test(frame);
-const hasSessionsStatus = /sessions/.test(frame);
+const hasShowing = /showing\s+\d+\s+of\s+\d+/i.test(frame);
+const hasLinks = /\d+\s+links/.test(frame);
 const hasGlyph = /[⬢●◆◉•]/.test(frame) || /[⠀-⣿]/.test(frame);
 const hasMode = /cluster|density/.test(frame);
+const hasLegendProject = /alpha|beta|gamma/i.test(frame);
+const hasLegendEdges = /parentage|event links/i.test(frame);
+const hasTitleInInfo = /Alpha Primary|dream-digest|Primary Session/i.test(frame);
 log(`frame title Map:${hasTitle}`, hasTitle);
-log(`frame sessions status:${hasSessionsStatus}`, hasSessionsStatus);
+log(`frame showing N of M:${hasShowing}`, hasShowing);
+log(`frame links count:${hasLinks}`, hasLinks);
 log(`frame glyphs/density present:${hasGlyph}`, hasGlyph);
 log(`frame mode label:${hasMode}`, hasMode);
+log(`frame legend projects:${hasLegendProject}`, hasLegendProject);
+log(`frame legend edge kinds:${hasLegendEdges}`, hasLegendEdges);
+log(`frame title in info line:${hasTitleInInfo}`, hasTitleInInfo || /◉/.test(frame));
 
 // Enter → openSession with the pre-selected id.
 await keys.pressKeys(['RETURN']);
@@ -233,10 +372,12 @@ await new Promise((r) => setTimeout(r, 80));
 await renderOnce();
 log(`openSession fired (${opened})`, opened === 'map-sess-000');
 
-// Sanity: worldToScreen used consistently (subpixel contract 2×4).
-const w0 = worldNodes[0];
+const w0 = worldNodes[0]!;
 const s0 = worldToScreen(w0, vp, width, height);
 log(`subpixel contract finite`, Number.isFinite(s0.x) && Number.isFinite(s0.y));
+
+// Seeded rows carry titles for pure-path checks.
+log(`seeded title field present`, seeded.every((r) => typeof r.title === 'string'));
 
 renderer.destroy();
 if (prevDb === undefined) delete process.env.SPECULUM_DB;

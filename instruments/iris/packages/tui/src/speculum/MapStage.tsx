@@ -2,7 +2,8 @@
  * Sessions Map stage — Panel-framed density / cluster scatter of the session RECORD.
  *
  * Composition: pure `buildSessionWorld` anchors + Graph `renderView` (glyphs, cluster hue)
- * with EMPTY links (no force-edge web). Viewport chrome matches GraphView (pan/zoom/fit/hit-test).
+ * with evidence links only (parentage + event_links). Viewport chrome matches GraphView
+ * (pan/zoom/fit/hit-test). Project/edge legend via shared blit geometry + click-to-toggle.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useKeyboard, useTerminalDimensions } from '@opentui/react';
@@ -27,17 +28,29 @@ import {
   type Viewport,
   type WorldPoint,
 } from '../render/viewport';
-import { blitGrid, GRAPH_BG, type DrawBuffer } from '../graph-view/blit';
+import {
+  blitGrid,
+  drawLegend,
+  legendHitAt,
+  GRAPH_BG,
+  type DrawBuffer,
+} from '../graph-view/blit';
 import {
   openQueryService,
   resolveIndexPath,
   type QueryService,
   type SessionListRow,
+  type SessionMapLink,
 } from './query-service';
 import {
+  buildMapLegendRows,
   buildSessionWorld,
+  filterEvidenceLinks,
+  hiddenIdsForProjects,
   hitTestSession,
+  legendToggleTarget,
   sessionWorldToGraph,
+  type MapEdgeKind,
   type MapMode,
   type SessionWorld,
 } from './map-data';
@@ -45,7 +58,8 @@ import {
 const STATUS_BG = RGBA.fromInts(30, 34, 42);
 const STATUS_FG = RGBA.fromInts(205, 211, 220);
 const STATUS_DIM = RGBA.fromInts(120, 128, 140);
-const SESSION_LIST_LIMIT = 500;
+/** Full-set fetch ceiling — well above any realistic corpus; never a soft product cap. */
+const SESSION_LIST_FETCH = 1_000_000;
 const INSTALL_RECIPE = 'amore init --with-speculum';
 
 interface MouseLike {
@@ -70,7 +84,14 @@ type SoftState =
   | { kind: 'busy'; path: string }
   | { kind: 'error'; message: string }
   | { kind: 'empty'; path: string }
-  | { kind: 'ready'; path: string; sessions: SessionListRow[] };
+  | {
+      kind: 'ready';
+      path: string;
+      sessions: SessionListRow[];
+      /** Total sessions in the index (honest coverage denominator). */
+      total: number;
+      links: SessionMapLink[];
+    };
 
 function padRow(text: string, width: number): string {
   if (width <= 0) return '';
@@ -154,7 +175,7 @@ function softCopy(state: SoftState): { title: string; lines: string[] } {
 
 /**
  * Interactive session map. Opens the readonly query-service, places sessions with
- * `buildSessionWorld`, draws via Graph `renderView` with zero links.
+ * `buildSessionWorld`, draws via Graph `renderView` with evidence links.
  */
 export function MapStage({
   inputActive = true,
@@ -181,6 +202,8 @@ export function MapStage({
   const [viewport, setViewport] = useState<Viewport | null>(null);
   const [selected, setSelected] = useState<string | null>(initialSelected ?? null);
   const [hovered, setHovered] = useState<string | null>(null);
+  const [hiddenProjects, setHiddenProjects] = useState<Set<string>>(() => new Set());
+  const [hiddenEdgeKinds, setHiddenEdgeKinds] = useState<Set<MapEdgeKind>>(() => new Set());
   const qsRef = useRef<QueryService | null>(null);
   const aliveRef = useRef(true);
   const onFlashRef = useRef(onFlash);
@@ -231,7 +254,10 @@ export function MapStage({
       return;
     }
 
-    const sessions = qs.sessionList(SESSION_LIST_LIMIT);
+    const st = qs.status();
+    const total = st.sessions;
+    // Full-set fetch — no product 500 cap. Coverage line reports showing N of M.
+    const sessions = qs.sessionList(SESSION_LIST_FETCH);
     if (qs.busy()) {
       if (aliveRef.current) setSoft({ kind: 'busy', path: qs.path });
       onFlashRef.current?.('map: corpus busy');
@@ -242,11 +268,20 @@ export function MapStage({
       onFlashRef.current?.('map: empty index');
       return;
     }
+    const links = qs.links(sessions.map((s) => s.id));
     if (aliveRef.current) {
-      setSoft({ kind: 'ready', path: qs.path, sessions });
+      setSoft({
+        kind: 'ready',
+        path: qs.path,
+        sessions,
+        total: Math.max(total, sessions.length),
+        links,
+      });
       setSelected(null);
       setViewport(null);
-      onFlashRef.current?.(`map: ${sessions.length} sessions`);
+      onFlashRef.current?.(
+        `map: showing ${sessions.length} of ${Math.max(total, sessions.length)} · ${links.length} links`,
+      );
     }
   }, []);
 
@@ -257,11 +292,18 @@ export function MapStage({
   useRefreshOnActive(inputActive, load);
 
   const sessions = soft.kind === 'ready' ? soft.sessions : null;
+  const evidenceLinks = soft.kind === 'ready' ? soft.links : [];
+  const totalSessions = soft.kind === 'ready' ? soft.total : 0;
 
   const sessionWorld: SessionWorld | null = useMemo(() => {
     if (!sessions) return null;
     return buildSessionWorld(sessions, mode);
   }, [sessions, mode]);
+
+  const visibleLinks = useMemo(
+    () => filterEvidenceLinks(evidenceLinks, hiddenEdgeKinds),
+    [evidenceLinks, hiddenEdgeKinds],
+  );
 
   const { graph, worldNodes } = useMemo(() => {
     if (!sessionWorld) {
@@ -270,8 +312,18 @@ export function MapStage({
         worldNodes: [] as WorldNode[],
       };
     }
-    return sessionWorldToGraph(sessionWorld);
-  }, [sessionWorld]);
+    return sessionWorldToGraph(sessionWorld, visibleLinks);
+  }, [sessionWorld, visibleLinks]);
+
+  const legend = useMemo(() => {
+    if (!sessionWorld) return [];
+    return buildMapLegendRows(sessionWorld, evidenceLinks, hiddenProjects, hiddenEdgeKinds);
+  }, [sessionWorld, evidenceLinks, hiddenProjects, hiddenEdgeKinds]);
+
+  const hiddenIds = useMemo(
+    () => (sessionWorld ? hiddenIdsForProjects(sessionWorld, hiddenProjects) : undefined),
+    [sessionWorld, hiddenProjects],
+  );
 
   // Structure-invalidating mode change → reset viewport (GraphView pattern).
   const lastMode = useRef(mode);
@@ -315,17 +367,24 @@ export function MapStage({
           rows,
           mode: 'cluster',
           attention: true,
+          hiddenIds,
         },
         focus,
       ),
-    [graph, worldNodes, vp, cols, rows, focus],
+    [graph, worldNodes, vp, cols, rows, focus, hiddenIds],
   );
 
   const gridRef = useRef(grid);
   gridRef.current = grid;
+  const legendRef = useRef(legend);
+  legendRef.current = legend;
+
   const draw = useCallback(
     (buffer: DrawBuffer) => {
       blitGrid(buffer, gridRef.current, 0, 0, cols, rows);
+      if (legendRef.current.length > 0) {
+        drawLegend(buffer, legendRef.current, cols, rows, 0);
+      }
     },
     [cols, rows],
   );
@@ -335,12 +394,33 @@ export function MapStage({
     [screenNodes],
   );
 
+  const toggleLegendKey = useCallback((label: string) => {
+    const target = legendToggleTarget(label);
+    if (!target) return;
+    if (target.kind === 'project') {
+      setHiddenProjects((prev) => {
+        const next = new Set(prev);
+        if (next.has(target.key)) next.delete(target.key);
+        else next.add(target.key);
+        return next;
+      });
+      return;
+    }
+    setHiddenEdgeKinds((prev) => {
+      const next = new Set(prev);
+      if (next.has(target.key)) next.delete(target.key);
+      else next.add(target.key);
+      return next;
+    });
+  }, []);
+
   const openSelected = useCallback(
     (id: string | null) => {
       if (!id) return;
       const row = sessions?.find((s) => s.id === id);
       onOpenSession?.(id, { ts: row?.startedAt });
-      onFlashRef.current?.(`open session ${id.slice(-8)}`);
+      const label = row ? (row.title?.trim() || id.slice(-8)) : id.slice(-8);
+      onFlashRef.current?.(`open session ${label}`);
     },
     [sessions, onOpenSession],
   );
@@ -414,21 +494,34 @@ export function MapStage({
       const d = dragRef.current;
       dragRef.current = null;
       if (d && !d.moved && (e.button ?? 0) === 0) {
+        // Legend first (shared geometry with drawLegend) — then node hit-test.
+        const legHit = legendHitAt(legend, cols, rows, 0, e.x, e.y, 'right');
+        if (legHit) {
+          if (legHit.kind === 'toggle-parent' || legHit.kind === 'expand') {
+            toggleLegendKey(legHit.key);
+          }
+          return;
+        }
         const hit = hitTest(e.x, e.y);
         if (hit && hit === selected) openSelected(hit);
         else setSelected(hit);
       }
     },
-    [hitTest, selected, openSelected],
+    [legend, cols, rows, hitTest, selected, openSelected, toggleLegendKey],
   );
 
   const onMouseMove = useCallback(
     (e: MouseLike) => {
       if (dragRef.current) return;
+      // Skip hover while over the legend block so rows stay clickable without sticky hover.
+      if (legendHitAt(legend, cols, rows, 0, e.x, e.y, 'right')) {
+        setHovered((h) => (h === null ? h : null));
+        return;
+      }
       const hit = hitTest(e.x, e.y);
       setHovered((h) => (h === hit ? h : hit));
     },
-    [hitTest],
+    [hitTest, legend, cols, rows],
   );
 
   const onMouseScroll = useCallback(
@@ -447,17 +540,19 @@ export function MapStage({
   const rowW = Math.max(16, dims.width - 8);
   const groupCount = sessionWorld?.groupKeys.length ?? 0;
   const selNode = selected ? sessionWorld?.nodes.find((n) => n.id === selected) : undefined;
+  const showing = sessions?.length ?? 0;
+  const linkCount = visibleLinks.length;
 
   const headerRight =
     soft.kind === 'ready'
-      ? `${soft.sessions.length} sess · ${mode}`
+      ? `${showing}/${totalSessions} · ${mode}`
       : soft.kind === 'loading'
         ? 'loading'
         : soft.kind;
 
   const infoLine =
     soft.kind === 'ready'
-      ? ` ${soft.sessions.length} sessions · 0 links · ${mode}${groupCount ? ` (${groupCount})` : ''} · ${zoomFactor.toFixed(1)}× zoom` +
+      ? ` showing ${showing} of ${totalSessions} · ${linkCount} links · ${mode}${groupCount ? ` (${groupCount})` : ''} · ${zoomFactor.toFixed(1)}× zoom` +
         (selNode
           ? `   ◉ ${displayLabel(selNode.label)} · ${selNode.groupKey} · turns ${selNode.turnCount}`
           : '')
@@ -465,7 +560,7 @@ export function MapStage({
 
   const controlLine =
     soft.kind === 'ready'
-      ? ' drag pan · scroll zoom · click select · click·click / ⏎ open · [d]ensity/cluster · [f]it [c]enter [r]eload'
+      ? ' drag pan · scroll zoom · click select · legend toggle · click·click / ⏎ open · [d]ensity/cluster · [f]it [c]enter [r]eload'
       : ' r retry';
 
   const softBody =
