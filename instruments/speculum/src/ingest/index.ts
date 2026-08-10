@@ -32,7 +32,7 @@ import {
 import { matchSensitivePatterns } from "../probes/sensitive-content";
 import { rebuildEventLinksAndDecisions } from "../decisions";
 
-// WU-04: progress callback shape (per-file / per-stage, not a pipeline).
+// progress callback shape (per-file / per-stage, not a pipeline).
 export type IngestPhase = "list" | "session" | "rebuild" | "done";
 
 export interface IngestProgress {
@@ -55,7 +55,7 @@ export interface IngestOptions {
    * Used for live-shape validation and CLI --dry-run.
    */
   dryRun?: boolean;
-  // WU-04
+
   /** Optional progress callback (per session / stage). */
   onProgress?: (p: IngestProgress) => void;
 }
@@ -73,7 +73,7 @@ export interface IngestStats {
   errors: number;
   durationMs: number;
   dryRun: boolean;
-  // WU-04: named stage timings (ms)
+  // named stage timings (ms)
   listMs: number;
   parseMs: number;
   writeMs: number;
@@ -125,7 +125,7 @@ const INSERT_USAGE = `INSERT INTO usage
    cached_read_tokens, reasoning_tokens, total_tokens, num_turns, model_calls, raw)
   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 
-// WU-08: flag-only sensitive mark from the shared bank; never rewrites raw.
+// flag-only sensitive mark from the shared bank; never rewrites raw.
 function eventIsSensitive(ev: NormalizedEvent): boolean {
   for (const blob of [ev.text, ev.tool_input, ev.tool_output]) {
     if (blob && matchSensitivePatterns(blob).length > 0) return true;
@@ -405,7 +405,7 @@ export function ingest(db: Db, opts: IngestOptions = {}): IngestStats {
   const root = opts.sessionsDir ?? sessionsRoot();
   const dryRun = opts.dryRun === true;
   const full = opts.full === true;
-  // WU-04
+
   const onProgress = opts.onProgress;
 
   const stats: IngestStats = {
@@ -421,14 +421,14 @@ export function ingest(db: Db, opts: IngestOptions = {}): IngestStats {
     errors: 0,
     durationMs: 0,
     dryRun,
-    // WU-04
+
     listMs: 0,
     parseMs: 0,
     writeMs: 0,
     rebuildMs: 0,
   };
 
-  // WU-04: progress emitter (no-op when callback absent)
+  // progress emitter (no-op when callback absent)
   const emit = (
     phase: IngestPhase,
     sessionsDone: number,
@@ -456,7 +456,7 @@ export function ingest(db: Db, opts: IngestOptions = {}): IngestStats {
     return stats;
   }
 
-  // WU-04: list stage
+  // list stage
   const tList0 = Date.now();
   let sessions = listSessionDirs(root);
   if (typeof opts.limit === "number" && opts.limit >= 0) {
@@ -480,7 +480,7 @@ export function ingest(db: Db, opts: IngestOptions = {}): IngestStats {
     db.run("DELETE FROM session_titles");
     // Reset byte offsets so every non-forgotten file re-reads from 0.
     db.run("UPDATE ingest_state SET byte_offset = 0, size_bytes = 0 WHERE forgotten = 0");
-    // WU-11: clear FTS with the events wipe so --full rebuilds the sparse index too.
+    // clear FTS with the events wipe so --full rebuilds the sparse index too.
     clearEventsFts(db);
   }
 
@@ -522,7 +522,7 @@ export function ingest(db: Db, opts: IngestOptions = {}): IngestStats {
         cursor = getCursor(db, s.updatesPath);
         if (cursor?.forgotten === 1) {
           stats.sessionDirsSkippedForgotten++;
-          // WU-04
+
           emit("session", stats.sessionDirsScanned, sessionsTotal);
           continue;
         }
@@ -538,7 +538,7 @@ export function ingest(db: Db, opts: IngestOptions = {}): IngestStats {
           const mtimeIso = new Date(st.mtimeMs).toISOString();
           if (cursor.size_bytes === st.size && cursor.mtime === mtimeIso) {
             stats.sessionDirsSkippedUnchanged++;
-            // WU-04
+
             emit("session", stats.sessionDirsScanned, sessionsTotal);
             continue;
           }
@@ -548,7 +548,7 @@ export function ingest(db: Db, opts: IngestOptions = {}): IngestStats {
           // shrunk → startOffset 0
         } catch {
           stats.errors++;
-          // WU-04
+
           emit("session", stats.sessionDirsScanned, sessionsTotal);
           continue;
         }
@@ -556,14 +556,14 @@ export function ingest(db: Db, opts: IngestOptions = {}): IngestStats {
 
       if (!dryRun && startOffset === 0 && cursor && !full) {
         // Re-read from start: wipe prior rows for this session.
-        // WU-11: drop FTS rows for this session before events DELETE.
+        // drop FTS rows for this session before events DELETE.
         deleteSessionFromFts(db, s.sessionId);
         db.prepare("DELETE FROM events WHERE session_id = ?").run(s.sessionId);
         db.prepare("DELETE FROM usage WHERE session_id = ?").run(s.sessionId);
       }
 
       try {
-        // WU-04: parse stage accumulator
+        // parse stage accumulator
         const tParse0 = Date.now();
         const parsed = parseUpdatesFromOffset(s.updatesPath, startOffset, ctx);
         stats.parseMs += Date.now() - tParse0;
@@ -572,11 +572,11 @@ export function ingest(db: Db, opts: IngestOptions = {}): IngestStats {
         stats.linesSkipped += parsed.linesSkipped;
 
         if (!dryRun && insertEventStmt && insertUsageStmt) {
-          // WU-04: write stage accumulator
+          // write stage accumulator
           const tWrite0 = Date.now();
           for (const ev of parsed.events) {
             const eventId = insertEvent(insertEventStmt, ev);
-            // WU-11: keep events_fts in sync with each inserted event row.
+            // keep events_fts in sync with each inserted event row.
             upsertEventFts(db, eventId, {
               text: ev.text,
               tool_name: ev.tool_name,
@@ -601,16 +601,16 @@ export function ingest(db: Db, opts: IngestOptions = {}): IngestStats {
       } catch {
         stats.errors++;
       }
-      // WU-04
+
       emit("session", stats.sessionDirsScanned, sessionsTotal);
     }
 
     if (!dryRun) {
-      // WU-04: rebuild stage
+      // rebuild stage
       emit("rebuild", sessionsTotal, sessionsTotal);
       const tRebuild0 = Date.now();
       rebuildSessions(db);
-      // WU-14: re-derive event_links + decisions after events/sessions settle.
+      // re-derive event_links + decisions after events/sessions settle.
       // Single ordered scan → wipe + bulk insert; never hand-maintained.
       rebuildEventLinksAndDecisions(db);
       stats.rebuildMs = Date.now() - tRebuild0;
@@ -621,7 +621,7 @@ export function ingest(db: Db, opts: IngestOptions = {}): IngestStats {
   else processAll();
 
   stats.durationMs = Date.now() - started;
-  // WU-04
+
   emit("done", sessionsTotal, sessionsTotal);
   return stats;
 }

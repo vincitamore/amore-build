@@ -1,5 +1,5 @@
 /**
- * Migration framework coverage (WU-07 framework + WU-08 v2 product step).
+ * Migration framework coverage (framework + v2 product step).
  * File-backed fixtures under OS temp — never a real instrument home.
  */
 

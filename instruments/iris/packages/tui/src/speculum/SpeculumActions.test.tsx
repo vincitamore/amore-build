@@ -971,7 +971,7 @@ describe('SpeculumActions render', () => {
     );
   });
 
-  test('over-cap at default → narrow last-n 1 + no-subagents → sendable (R-lens turnaround)', async () => {
+  test('over-cap at default → narrow last-n 1 + no-subagents → sendable (the lens turnaround)', async () => {
     setOversizeDry(true);
     const { keys, renderOnce, captureCharFrame } = await mount();
     clearLog();

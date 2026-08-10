@@ -19,7 +19,7 @@ export async function ingestCommand(args: string[]): Promise<void> {
   const limit = limitStr ? Number(limitStr) : undefined;
   const sessionsDir = opt(args, "--sessions-dir") ?? sessionsRoot();
 
-  // WU-04: live progress only on interactive TTY when not dumping JSON.
+  // live progress only on interactive TTY when not dumping JSON.
   // Non-TTY and --json already suppress human output via printStats.
   const onProgress =
     !json && process.stderr.isTTY ? makeProgressPrinter() : undefined;
@@ -57,7 +57,7 @@ export async function ingestCommand(args: string[]): Promise<void> {
   }
 }
 
-// WU-04
+
 function makeProgressPrinter(): (p: IngestProgress) => void {
   return (p: IngestProgress) => {
     if (p.phase === "done") {
@@ -91,7 +91,7 @@ function printStats(stats: IngestStats, json: boolean, dry: boolean): void {
   console.log(`  usage rows ${dry ? "would append" : "appended"}:  ${stats.usageRowsAppended}`);
   console.log(`  errors:                   ${stats.errors}`);
   console.log(`  duration:                 ${stats.durationMs}ms`);
-  // WU-04
+
   console.log(
     `  stages:                   list ${stats.listMs}ms · parse ${stats.parseMs}ms · write ${stats.writeMs}ms · rebuild ${stats.rebuildMs}ms`,
   );

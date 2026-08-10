@@ -1,5 +1,5 @@
 /**
- * Export platform (WU-12): envelope, pure renderers, containsSensitive flag.
+ * Export platform : envelope, pure renderers, containsSensitive flag.
  */
 
 import { describe, expect, test } from "bun:test";

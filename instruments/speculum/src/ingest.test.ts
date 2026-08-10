@@ -236,7 +236,7 @@ describe("ingest", () => {
     }
   });
 
-  // WU-04
+
   test("stage timings and onProgress are additive observability", () => {
     const corpus = writeCorpus(cleanCorpus());
     const db = openDb(":memory:");
@@ -281,7 +281,7 @@ describe("ingest", () => {
     }
   });
 
-  // WU-04: derived-index honesty — onProgress must not change written rows
+  // derived-index honesty — onProgress must not change written rows
   test("onProgress does not change event/usage rows vs baseline ingest", () => {
     const corpus = writeCorpus(cleanCorpus());
     const dbA = openDb(":memory:");
@@ -330,7 +330,7 @@ describe("ingest", () => {
     }
   });
 
-  // WU-04
+
   test("dry-run stage timings have zero write/rebuild and still report linesSkipped", () => {
     const corpus = writeCorpus(cleanCorpus());
     const db = openDb(":memory:");

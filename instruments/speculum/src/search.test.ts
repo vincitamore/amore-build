@@ -1,5 +1,5 @@
 /**
- * FTS5 search + RRF (WU-11). Exercises CREATE VIRTUAL TABLE + MATCH + bm25
+ * FTS5 search + RRF . Exercises CREATE VIRTUAL TABLE + MATCH + bm25
  * so instruments-ci (ubuntu/windows/macos) confirms G4 cross-platform.
  */
 

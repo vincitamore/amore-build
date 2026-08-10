@@ -1,5 +1,5 @@
 /**
- * Evidence spine (WU-08): HitDetail.eventId + events.sensitive at ingest.
+ * Evidence spine : HitDetail.eventId + events.sensitive at ingest.
  */
 
 import { describe, expect, test } from "bun:test";

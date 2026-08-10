@@ -68,7 +68,7 @@ export function applyMigrations(
     if (!step) {
       throw new Error(`missing migration step for schema version ${v}`);
     }
-    // WU-07: one transaction per step — partial multi-step upgrades leave a
+    // one transaction per step — partial multi-step upgrades leave a
     // coherent intermediate stamp rather than a half-applied jump.
     const run = (db as MigrationDb).transaction(() => {
       step.up(db);
@@ -95,7 +95,7 @@ export function openDb(path?: string): Db {
   db.run("PRAGMA journal_mode = WAL");
   db.run("PRAGMA synchronous = NORMAL");
 
-  // WU-07: migration / greenfield loop
+  // migration / greenfield loop
   if (isFreshDb(db)) {
     db.exec(SCHEMA_SQL);
     setUserVersion(db, SCHEMA_VERSION);

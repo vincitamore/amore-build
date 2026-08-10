@@ -1,5 +1,5 @@
 /**
- * Graph projection + degree + state-at-T coverage (WU-10).
+ * Graph projection + degree + state-at-T coverage .
  * Synthetic fixtures only — never a live sessions tree.
  */
 
@@ -52,7 +52,7 @@ function timedCorpus() {
   ];
 }
 
-describe("WU-10 graph project + degree + state-at-T", () => {
+describe("graph project + degree + state-at-T", () => {
   test("projectGraph builds nodes and succession + tool_link edges", () => {
     const corpus = writeCorpus(timedCorpus());
     const db = openDb(":memory:");

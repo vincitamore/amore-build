@@ -14,8 +14,10 @@ import {
   writeFileSync,
   rmSync,
   mkdirSync,
+  copyFileSync,
+  existsSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Db } from "./store/db";
 import {
@@ -310,6 +312,16 @@ export async function runLens(
       // files under this scratch home, never the operator's real ~/.amore.
       const scratchHome = join(dir, "amore-home");
       mkdirSync(scratchHome, { recursive: true });
+      // Seed the scratch home with the real config so the headless amore
+      // authenticates and routes through the same models — while its session
+      // files stay in this scratch tree, never the real home (auth works,
+      // pollution does not). The per-run copy is removed with the scratch
+      // tree in the finally below.
+      const realHome = process.env.AMORE_HOME?.trim() || join(homedir(), ".amore");
+      const realConfig = join(realHome, "config.toml");
+      if (existsSync(realConfig)) {
+        copyFileSync(realConfig, join(scratchHome, "config.toml"));
+      }
       const { code, stdout, stderr } = await runAmoreProcess(
         bin,
         argv,

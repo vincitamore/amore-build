@@ -22,7 +22,7 @@ export interface ProbeHit {
   ts?: string;
   evidence: string;
   category?: string;
-  /** WU-08 jump grain when the CLI attaches it. */
+  /** jump grain when the CLI attaches it. */
   eventId?: string | number;
   eventIds?: Array<string | number>;
 }

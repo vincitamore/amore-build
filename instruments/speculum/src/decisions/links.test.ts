@@ -1,5 +1,5 @@
 /**
- * WU-14: event_links + decisions derivation and rebuild.
+ * event_links + decisions derivation and rebuild.
  * Synthetic fixtures only.
  */
 
@@ -73,7 +73,7 @@ function artifactCorpus() {
   ];
 }
 
-describe("WU-14 links + decisions", () => {
+describe("links + decisions", () => {
   test("extractArtifactIds pulls path fields from JSON tool_input", () => {
     const ids = extractArtifactIds(
       JSON.stringify({ target_file: "src/foo.ts", offset: 0 }),

@@ -189,7 +189,7 @@ export function forgetSession(
   // Capture source file sizes before forgotten flag flips.
   const sources = collectSourceMeta(db, sessionId);
 
-  // WU-11: drop FTS rows for this session before events DELETE.
+  // drop FTS rows for this session before events DELETE.
   deleteSessionFromFts(db, sessionId);
 
   const delEvents = db.prepare("DELETE FROM events WHERE session_id = ?").run(sessionId);

@@ -36,6 +36,8 @@ SCAN_ROOTS = ("instruments", "templates")
 SCAN_EXCLUDES = {
     ".git", "node_modules", "dist", "target", ".sweep-scratch",
     "__pycache__", ".turbo", "coverage",
+    # Run-captured dash frames: screenshots of real data, not shipped source.
+    "e2e-frames", "e2e-pty-frames",
 }
 SCAN_SKIP_NAMES = {
     "Cargo.lock", "package-lock.json", "bun.lock", "bun.lockb",
@@ -115,6 +117,12 @@ CAMPAIGN_PATTERNS = [
     (re.compile(r"\bthe synthesis\b", re.IGNORECASE), "the synthesis"),
     (re.compile(r"\bauriga\b", re.IGNORECASE), "auriga"),
     (re.compile(r"\boeconomia\b", re.IGNORECASE), "oeconomia"),
+    # Work-unit / round labels used inside private campaign briefs (shipped
+    # source is a standalone artifact; these are process ids, not content).
+    # Case-sensitive: an ordinary lowercase "u-2"/"wu-04" phrase stays clean.
+    (re.compile(r"\bWU-\d+\b"), "work-unit label (WU-<n>)"),
+    (re.compile(r"\bU-\d+\b"), "work-unit label (U-<n>)"),
+    (re.compile(r"\bR-(?:lens|count|UI-\d)\b"), "review-round label (R-<name>)"),
 ]
 
 # Dated provenance comments (heuristic). Report-only: dates next to
@@ -438,8 +446,10 @@ def scan_file(path: Path, root: Path) -> list[Finding]:
             add(i, "dated_provenance",
                 "dated provenance comment", line)
 
-        # soft TODO / for now / temporary without tracker ref on same line
-        soft_hit = (
+        # soft TODO / for now / temporary without tracker ref on same line.
+        # Comment/prose context only: a literal "TODO" string constant in a
+        # token list is a value, not a todo marker.
+        soft_hit = i in comment_lines and (
             SOFT_TODO_TODO_RE.search(line) or SOFT_TODO_HEDGE_RE.search(line)
         )
         if soft_hit and not TRACKER_RE.search(line):
@@ -564,6 +574,16 @@ def run_self_test() -> int:
             ("instruments/demo/recipe_o.ts",
              "// oeconomia pricing table\nexport {}\n",
              "campaign"),
+            # work-unit / round labels (the class that used to ride through)
+            ("instruments/demo/wu.ts",
+             "// WU-04 progress marker in the walker\nexport {}\n",
+             "campaign"),
+            ("instruments/demo/unit.ts",
+             "// U-7 bar: narrow the slice and re-run\nexport {}\n",
+             "campaign"),
+            ("instruments/demo/rlens.ts",
+             "// R-lens turnaround copy\nexport {}\n",
+             "campaign"),
             # ai_authorship in comments
             ("instruments/demo/ai1.ts",
              "// Co-Authored-By: someone\nexport {}\n",
@@ -634,6 +654,12 @@ def run_self_test() -> int:
             # Claude-compatible is API vocabulary, not authorship
             ("instruments/demo/hooks.py",
              "# emit Claude-compatible hook payload\nVALUE = 1\n"),
+            # lowercase "u-2"/"wu-04" are ordinary hyphenated text, not labels
+            ("instruments/demo/case.ts",
+             "// the u-2 connector and the wu-04 wire both fit\nexport const x = 1;\n"),
+            # a literal "TODO" string constant is a value, not a todo marker
+            ("instruments/demo/strlst.ts",
+             "const ACRONYMS = ['HTTP', 'TODO', 'API'];\nexport {};\n"),
         ]
         for rel, content in clean_files:
             _write(root, rel, content)

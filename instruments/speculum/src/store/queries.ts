@@ -180,7 +180,7 @@ export function sessionToolMixes(db: Db, opts: TurnQueryOpts = {}): SessionToolM
 }
 
 // ---------------------------------------------------------------------------
-// WU-10: prefix state-at-T + tool activity spans (named helpers only)
+// prefix state-at-T + tool activity spans (named helpers only)
 // ---------------------------------------------------------------------------
 
 /** Full event row from the derived index (query-time projection grain). */

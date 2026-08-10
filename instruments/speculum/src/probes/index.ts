@@ -40,7 +40,7 @@ export const PROBES: Record<string, Probe> = {
   "operator-correction": operatorCorrection,
   "sensitive-content": sensitiveContent,
   "stale-corpus": staleCorpus,
-  // WU-13 investigative probes
+  // investigative probes
   "session-phase": sessionPhase,
   contradiction: contradiction,
   "session-overlap": sessionOverlap,

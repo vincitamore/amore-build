@@ -1,5 +1,5 @@
 /**
- * WU-14: graph + decisions CLI shells over fixture index.
+ * graph + decisions CLI shells over fixture index.
  */
 
 import { describe, expect, test } from "bun:test";
@@ -54,7 +54,7 @@ function fixtureCorpus() {
   ];
 }
 
-describe("WU-14 graph + decisions CLI", () => {
+describe("graph + decisions CLI", () => {
   test("buildGraph + shortestPath over ingested fixture", () => {
     const corpus = writeCorpus(fixtureCorpus());
     const db = openDb(":memory:");

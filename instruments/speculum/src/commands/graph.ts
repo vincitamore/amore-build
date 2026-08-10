@@ -1,5 +1,5 @@
 /**
- * `speculum graph` — thin CLI shell over query-time graph projection (WU-10).
+ * `speculum graph` — thin CLI shell over query-time graph projection .
  * Local only; no network, no model. Neighbors / path / degree / state-at-T.
  */
 

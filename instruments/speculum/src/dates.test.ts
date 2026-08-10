@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { resolveTimeReference, resolveToDate } from "./dates";
 
-/** Fixed reference: 2026-08-10T15:30:00.000Z (Monday). */
+/** Reference timestamp: 2026-08-10T15:30:00.000Z (Monday). */
 const NOW = new Date("2026-08-10T15:30:00.000Z");
 
 describe("resolveTimeReference", () => {
