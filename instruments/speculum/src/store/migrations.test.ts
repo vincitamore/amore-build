@@ -189,13 +189,13 @@ describe("migrations framework", () => {
     const db = openDb(":memory:");
     try {
       expect(getUserVersion(db)).toBe(SCHEMA_VERSION);
-      expect(SCHEMA_VERSION).toBe(4);
+      expect(SCHEMA_VERSION).toBe(5);
       expect(isFreshDb(db)).toBe(false);
 
       const tables = db
         .query<{ name: string }, []>(
           `SELECT name FROM sqlite_master
-           WHERE type = 'table' AND name IN ('events', 'sessions', 'usage', 'ingest_state', 'event_links', 'decisions')
+           WHERE type = 'table' AND name IN ('events', 'sessions', 'usage', 'ingest_state', 'event_links', 'decisions', 'session_titles')
            ORDER BY name`,
         )
         .all()
@@ -205,10 +205,12 @@ describe("migrations framework", () => {
         "event_links",
         "events",
         "ingest_state",
+        "session_titles",
         "sessions",
         "usage",
       ]);
       expect(tableHasColumn(db, "events", "sensitive")).toBe(true);
+      expect(tableHasColumn(db, "sessions", "title")).toBe(true);
       const fts = db
         .query<{ name: string }, []>(
           `SELECT name FROM sqlite_master WHERE name = 'events_fts'`,
@@ -265,7 +267,7 @@ describe("migrations framework", () => {
       const db = openDb(scratch.path);
       try {
         expect(getUserVersion(db)).toBe(SCHEMA_VERSION);
-        expect(SCHEMA_VERSION).toBe(4);
+        expect(SCHEMA_VERSION).toBe(5);
         expect(tableHasColumn(db, "events", "sensitive")).toBe(true);
         const row = db
           .query<{ text: string; sensitive: number }, []>(
@@ -303,6 +305,14 @@ describe("migrations framework", () => {
           )
           .get();
         expect(decisions?.name).toBe("decisions");
+        // v5 title column + side store
+        expect(tableHasColumn(db, "sessions", "title")).toBe(true);
+        const titles = db
+          .query<{ name: string }, []>(
+            `SELECT name FROM sqlite_master WHERE name = 'session_titles'`,
+          )
+          .get();
+        expect(titles?.name).toBe("session_titles");
       } finally {
         db.close();
       }
@@ -323,7 +333,7 @@ describe("migrations framework", () => {
       const db = openDb(scratch.path);
       try {
         expect(getUserVersion(db)).toBe(SCHEMA_VERSION);
-        expect(SCHEMA_VERSION).toBe(4);
+        expect(SCHEMA_VERSION).toBe(5);
         // Column untouched, row survives, single events row (no dupes).
         expect(tableHasColumn(db, "events", "sensitive")).toBe(true);
         const row = db
@@ -437,7 +447,7 @@ describe("migrations framework", () => {
 
       const db = openDb(scratch.path);
       try {
-        expect(getUserVersion(db)).toBe(4);
+        expect(getUserVersion(db)).toBe(SCHEMA_VERSION);
         const row = db
           .query<{ text: string }, []>(
             "SELECT text FROM events WHERE session_id = 'sess-v3'",
@@ -468,6 +478,150 @@ describe("migrations framework", () => {
         expect(
           db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM decisions").get()?.n,
         ).toBe(0);
+        // v5 lands on the same walk
+        expect(tableHasColumn(db, "sessions", "title")).toBe(true);
+        expect(
+          db
+            .query<{ name: string }, []>(
+              `SELECT name FROM sqlite_master WHERE name = 'session_titles'`,
+            )
+            .get()?.name,
+        ).toBe("session_titles");
+      } finally {
+        db.close();
+      }
+    } finally {
+      scratch.cleanup();
+    }
+  });
+
+  test("v4→v5 migration preserves rows and adds title + session_titles", () => {
+    const scratch = scratchDbPath();
+    try {
+      const seed = new Database(scratch.path);
+      seed.exec(`
+        CREATE TABLE events (
+          id              INTEGER PRIMARY KEY AUTOINCREMENT,
+          session_id      TEXT NOT NULL,
+          project_path    TEXT NOT NULL,
+          agent           TEXT NOT NULL,
+          parent_session  TEXT,
+          ts              TEXT NOT NULL,
+          kind            TEXT NOT NULL,
+          text            TEXT,
+          tool_name       TEXT,
+          tool_input      TEXT,
+          tool_output     TEXT,
+          tool_error      INTEGER,
+          tool_call_id    TEXT,
+          is_boilerplate  INTEGER NOT NULL DEFAULT 0,
+          sensitive       INTEGER NOT NULL DEFAULT 0,
+          raw             TEXT NOT NULL
+        );
+        CREATE TABLE sessions (
+          id               TEXT PRIMARY KEY,
+          project_path     TEXT NOT NULL,
+          agent            TEXT NOT NULL,
+          parent_session   TEXT,
+          model_id         TEXT,
+          started_at       TEXT NOT NULL,
+          ended_at         TEXT NOT NULL,
+          turn_count       INTEGER NOT NULL,
+          user_msg_count   INTEGER NOT NULL,
+          tool_call_count  INTEGER NOT NULL,
+          tool_error_count INTEGER NOT NULL
+        );
+        CREATE TABLE usage (
+          id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+          session_id          TEXT NOT NULL,
+          project_path        TEXT NOT NULL,
+          ts                  TEXT NOT NULL,
+          model_id            TEXT,
+          input_tokens        INTEGER NOT NULL DEFAULT 0,
+          output_tokens       INTEGER NOT NULL DEFAULT 0,
+          cached_read_tokens  INTEGER NOT NULL DEFAULT 0,
+          reasoning_tokens    INTEGER NOT NULL DEFAULT 0,
+          total_tokens        INTEGER NOT NULL DEFAULT 0,
+          num_turns           INTEGER NOT NULL DEFAULT 0,
+          model_calls         INTEGER NOT NULL DEFAULT 0,
+          raw                 TEXT NOT NULL
+        );
+        CREATE TABLE ingest_state (
+          file_path     TEXT PRIMARY KEY,
+          size_bytes    INTEGER NOT NULL,
+          mtime         TEXT NOT NULL,
+          byte_offset   INTEGER NOT NULL,
+          last_ingested TEXT NOT NULL,
+          forgotten     INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE VIRTUAL TABLE events_fts USING fts5(
+          text, tool_name, tool_input, tool_output
+        );
+        CREATE TABLE event_links (
+          id               INTEGER PRIMARY KEY AUTOINCREMENT,
+          source_event_id  INTEGER NOT NULL,
+          target_event_id  INTEGER NOT NULL,
+          kind             TEXT NOT NULL,
+          method           TEXT NOT NULL,
+          confidence       REAL NOT NULL DEFAULT 1.0,
+          heuristic        INTEGER NOT NULL DEFAULT 0,
+          UNIQUE(source_event_id, target_event_id, kind)
+        );
+        CREATE TABLE decisions (
+          id               TEXT PRIMARY KEY,
+          session_id       TEXT NOT NULL,
+          project_path     TEXT NOT NULL,
+          ts               TEXT NOT NULL,
+          category         TEXT NOT NULL,
+          scenario         TEXT,
+          reasoning        TEXT,
+          outcome          TEXT,
+          confidence       REAL,
+          decision_maker   TEXT,
+          source_event_id  INTEGER,
+          method           TEXT NOT NULL,
+          metadata         TEXT
+        );
+        PRAGMA user_version = 4;
+      `);
+      seed.run(
+        `INSERT INTO events (session_id, project_path, agent, ts, kind, text, is_boilerplate, sensitive, raw)
+         VALUES ('sess-v4', '/proj', 'primary', '2026-01-01T00:00:00.000Z', 'user', 'v4-survive', 0, 0, '{}')`,
+      );
+      seed.run(
+        `INSERT INTO sessions (id, project_path, agent, parent_session, model_id, started_at, ended_at, turn_count, user_msg_count, tool_call_count, tool_error_count)
+         VALUES ('sess-v4', '/proj', 'primary', NULL, 'm', '2026-01-01T00:00:00.000Z', '2026-01-01T01:00:00.000Z', 1, 1, 0, 0)`,
+      );
+      seed.close();
+
+      const db = openDb(scratch.path);
+      try {
+        expect(getUserVersion(db)).toBe(5);
+        expect(SCHEMA_VERSION).toBe(5);
+        expect(tableHasColumn(db, "sessions", "title")).toBe(true);
+        const event = db
+          .query<{ text: string }, []>(
+            "SELECT text FROM events WHERE session_id = 'sess-v4'",
+          )
+          .get();
+        expect(event?.text).toBe("v4-survive");
+        const sess = db
+          .query<{ id: string; title: string }, []>(
+            "SELECT id, title FROM sessions WHERE id = 'sess-v4'",
+          )
+          .get();
+        expect(sess?.id).toBe("sess-v4");
+        expect(sess?.title).toBe("");
+        const titles = db
+          .query<{ name: string }, []>(
+            `SELECT name FROM sqlite_master WHERE name = 'session_titles'`,
+          )
+          .get();
+        expect(titles?.name).toBe("session_titles");
+        // Pre-existing sessions row survives; title defaults empty until rebuild.
+        const n =
+          db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM sessions").get()?.n ?? 0;
+        expect(n).toBe(1);
       } finally {
         db.close();
       }

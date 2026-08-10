@@ -226,6 +226,7 @@ describe('parseQuery / hitRowText', () => {
     const hit: SearchHit = {
       eventId: 42,
       sessionId: 'sess-search-a',
+      title: '',
       kind: 'assistant',
       snippet: 'stuck on path',
     };
@@ -237,6 +238,20 @@ describe('parseQuery / hitRowText', () => {
     expect(plain).toContain('[assistant]');
     expect(plain).toContain('#42');
     expect(plain).toContain('stuck on path');
+  });
+
+  test('hitRowText surfaces title before id when present', () => {
+    const hit: SearchHit = {
+      eventId: 7,
+      sessionId: 'sess-titled-xx',
+      title: 'Repeat Previous Single Word Reply Request',
+      kind: 'user',
+      snippet: 'hello',
+    };
+    const line = hitRowText(hit, false);
+    expect(line).toContain('Repeat Previous Single');
+    expect(line).toContain('sess-titled-xx');
+    expect(line.indexOf('Repeat')).toBeLessThan(line.indexOf('sess-titled'));
   });
 });
 

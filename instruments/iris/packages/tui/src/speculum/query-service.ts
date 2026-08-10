@@ -8,7 +8,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 /** Schema versions this reader understands (column set it actually queries). */
-export const SUPPORTED_SCHEMA_VERSIONS: readonly number[] = [4];
+export const SUPPORTED_SCHEMA_VERSIONS: readonly number[] = [4, 5];
 
 /** Staleness threshold aligned with `speculum status` (hours since newest session). */
 export const STALE_THRESHOLD_HOURS = 24;
@@ -58,6 +58,11 @@ export type SessionListRow = {
   toolErrorCount: number;
   /** Events belonging to this session (COUNT from events). */
   eventCount: number;
+  /**
+   * Session title from summary.json session_summary (schema v5).
+   * Empty string on v4 indexes or when summary had no title.
+   */
+  title: string;
 };
 
 export type TurnRow = {
@@ -73,6 +78,8 @@ export type TurnRow = {
 export type SearchHit = {
   eventId: number;
   sessionId: string;
+  /** Session title when available (v5); empty on v4 / absent. */
+  title: string;
   kind: string;
   /** Short FTS snippet (or text fallback). */
   snippet: string;
@@ -190,6 +197,16 @@ export function prepareFtsQuery(raw: string): string {
   return tokens.map((t) => `"${t.replace(/"/g, '')}"`).join(' ');
 }
 
+/** True when sessions.title exists (schema v5+). Cached per open. */
+function sessionsHasTitleColumn(db: Database): boolean {
+  try {
+    const cols = db.query<{ name: string }, []>(`PRAGMA table_info(sessions)`).all();
+    return cols.some((c) => c.name === 'title');
+  } catch {
+    return false;
+  }
+}
+
 class SqliteQueryService implements QueryService {
   readonly path: string;
   private db: Database | null;
@@ -198,6 +215,8 @@ class SqliteQueryService implements QueryService {
   private readonly sleep: (ms: number) => void;
   private forceBusyRemaining: number;
   private _busy = false;
+  /** Cached sessions.title presence; null until first introspect. */
+  private _hasTitleCol: boolean | null = null;
 
   constructor(path: string, opts: OpenQueryServiceOpts) {
     this.path = path;
@@ -206,6 +225,17 @@ class SqliteQueryService implements QueryService {
     this.sleep = opts.sleep ?? defaultSleep;
     this.forceBusyRemaining = opts.forceBusyAttempts ?? 0;
     this.db = openReadonly(path);
+  }
+
+  private hasTitleColumn(): boolean {
+    if (this._hasTitleCol != null) return this._hasTitleCol;
+    const db = this.db;
+    if (!db) {
+      this._hasTitleCol = false;
+      return false;
+    }
+    this._hasTitleCol = sessionsHasTitleColumn(db);
+    return this._hasTitleCol;
   }
 
   getVersion(): number {
@@ -297,6 +327,8 @@ class SqliteQueryService implements QueryService {
     const lim = Math.max(0, Math.trunc(limit));
     const off = Math.max(0, Math.trunc(offset));
     return this.read(() => {
+      const withTitle = this.hasTitleColumn();
+      const titleSelect = withTitle ? 's.title AS title' : "'' AS title";
       const rows = this.requireDb()
         .query<
           {
@@ -312,6 +344,7 @@ class SqliteQueryService implements QueryService {
             tool_call_count: number;
             tool_error_count: number;
             event_count: number;
+            title: string;
           },
           [number, number]
         >(
@@ -327,7 +360,8 @@ class SqliteQueryService implements QueryService {
              s.user_msg_count,
              s.tool_call_count,
              s.tool_error_count,
-             (SELECT COUNT(*) FROM events e WHERE e.session_id = s.id) AS event_count
+             (SELECT COUNT(*) FROM events e WHERE e.session_id = s.id) AS event_count,
+             ${titleSelect}
            FROM sessions s
            ORDER BY s.started_at DESC
            LIMIT ? OFFSET ?`,
@@ -346,6 +380,7 @@ class SqliteQueryService implements QueryService {
         toolCallCount: r.tool_call_count,
         toolErrorCount: r.tool_error_count,
         eventCount: r.event_count,
+        title: r.title ?? '',
       }));
     }, []);
   }
@@ -389,12 +424,19 @@ class SqliteQueryService implements QueryService {
 
     return this.read(() => {
       const db = this.requireDb();
+      const titleExpr = this.hasTitleColumn()
+        ? "COALESCE(s.title, '') AS title"
+        : "'' AS title";
+      const joinSessions = this.hasTitleColumn()
+        ? 'LEFT JOIN sessions s ON s.id = e.session_id'
+        : '';
       if (sessionId) {
         const rows = db
           .query<
             {
               eventId: number;
               sessionId: string;
+              title: string;
               kind: string;
               snippet: string | null;
               text: string | null;
@@ -404,11 +446,13 @@ class SqliteQueryService implements QueryService {
             `SELECT
                e.id AS eventId,
                e.session_id AS sessionId,
+               ${titleExpr},
                e.kind AS kind,
                snippet(events_fts, 0, '', '', '…', 12) AS snippet,
                e.text AS text
              FROM events_fts
              JOIN events e ON e.id = events_fts.rowid
+             ${joinSessions}
              WHERE events_fts MATCH ?
                AND e.session_id = ?
              ORDER BY bm25(events_fts)
@@ -422,6 +466,7 @@ class SqliteQueryService implements QueryService {
           {
             eventId: number;
             sessionId: string;
+            title: string;
             kind: string;
             snippet: string | null;
             text: string | null;
@@ -431,11 +476,13 @@ class SqliteQueryService implements QueryService {
           `SELECT
              e.id AS eventId,
              e.session_id AS sessionId,
+             ${titleExpr},
              e.kind AS kind,
              snippet(events_fts, 0, '', '', '…', 12) AS snippet,
              e.text AS text
            FROM events_fts
            JOIN events e ON e.id = events_fts.rowid
+           ${joinSessions}
            WHERE events_fts MATCH ?
            ORDER BY bm25(events_fts)
            LIMIT ?`,
@@ -461,6 +508,7 @@ class SqliteQueryService implements QueryService {
     this.close();
     this.db = openReadonly(this.path);
     this._busy = false;
+    this._hasTitleCol = null;
   }
 
   /** @internal test seam — force upcoming read attempts to appear busy. */
@@ -504,6 +552,7 @@ class SqliteQueryService implements QueryService {
 function mapSearchHit(r: {
   eventId: number;
   sessionId: string;
+  title?: string;
   kind: string;
   snippet: string | null;
   text: string | null;
@@ -513,6 +562,7 @@ function mapSearchHit(r: {
   return {
     eventId: r.eventId,
     sessionId: r.sessionId,
+    title: (r.title ?? '').trim(),
     kind: r.kind,
     snippet: snip || text.slice(0, 120),
   };

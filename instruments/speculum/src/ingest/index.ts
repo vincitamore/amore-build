@@ -174,10 +174,13 @@ function insertUsage(stmt: ReturnType<Db["prepare"]>, u: NormalizedUsage): void 
 
 function rebuildSessions(db: Db): void {
   db.run("DELETE FROM sessions");
+  // title is joined from the derived session_titles side store (never hand-written
+  // into sessions outside this GROUP-BY rebuild).
   db.run(`
     INSERT INTO sessions (
       id, project_path, agent, parent_session, model_id,
-      started_at, ended_at, turn_count, user_msg_count, tool_call_count, tool_error_count
+      started_at, ended_at, turn_count, user_msg_count, tool_call_count, tool_error_count,
+      title
     )
     SELECT
       e.session_id,
@@ -190,10 +193,22 @@ function rebuildSessions(db: Db): void {
       COUNT(*),
       SUM(CASE WHEN e.kind = 'user' AND e.is_boilerplate = 0 THEN 1 ELSE 0 END),
       SUM(CASE WHEN e.kind = 'tool_use' THEN 1 ELSE 0 END),
-      SUM(CASE WHEN e.kind = 'tool_result' AND e.tool_error = 1 THEN 1 ELSE 0 END)
+      SUM(CASE WHEN e.kind = 'tool_result' AND e.tool_error = 1 THEN 1 ELSE 0 END),
+      COALESCE(
+        (SELECT t.title FROM session_titles t WHERE t.session_id = e.session_id),
+        ''
+      )
     FROM events e
     GROUP BY e.session_id
   `);
+}
+
+/** Upsert a derived session title from summary.json (empty string when absent). */
+function upsertSessionTitle(db: Db, sessionId: string, title: string): void {
+  db.prepare(
+    `INSERT INTO session_titles (session_id, title) VALUES (?, ?)
+     ON CONFLICT(session_id) DO UPDATE SET title = excluded.title`,
+  ).run(sessionId, title);
 }
 
 interface SessionDir {
@@ -461,6 +476,8 @@ export function ingest(db: Db, opts: IngestOptions = {}): IngestStats {
     db.run("DELETE FROM events");
     db.run("DELETE FROM usage");
     db.run("DELETE FROM sessions");
+    // Side store is derived — wipe + re-derive with everything else on --full.
+    db.run("DELETE FROM session_titles");
     // Reset byte offsets so every non-forgotten file re-reads from 0.
     db.run("UPDATE ingest_state SET byte_offset = 0, size_bytes = 0 WHERE forgotten = 0");
     // WU-11: clear FTS with the events wipe so --full rebuilds the sparse index too.
@@ -479,11 +496,13 @@ export function ingest(db: Db, opts: IngestOptions = {}): IngestStats {
 
       let projectPath = s.projectPath;
       let modelId: string | null = null;
+      let sessionTitle = "";
       if (existsSync(s.summaryPath)) {
         try {
           const meta = parseSummaryJson(readFileSync(s.summaryPath, "utf-8"), s.sessionId, s.projectPath);
           projectPath = meta.projectPath || projectPath;
           modelId = meta.modelId;
+          sessionTitle = meta.title;
           void modelId;
         } catch {
           // tolerate
@@ -507,6 +526,9 @@ export function ingest(db: Db, opts: IngestOptions = {}): IngestStats {
           emit("session", stats.sessionDirsScanned, sessionsTotal);
           continue;
         }
+        // Derived title side store: write for every non-forgotten session so
+        // rebuildSessions can join it (incl. skipped-unchanged paths below).
+        upsertSessionTitle(db, s.sessionId, sessionTitle);
       }
 
       let startOffset = 0;

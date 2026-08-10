@@ -40,18 +40,28 @@ export function parseQuery(raw: string): string {
   return (raw ?? '').trim();
 }
 
+/** Max title width in a search hit row (id stays secondary). */
+const SEARCH_TITLE_MAX = 24;
+
 /**
- * One fixed hit row: session prefix · kind · eventId · truncated snippet.
+ * One fixed hit row: title (when known) · session prefix · kind · eventId · snippet.
  * Selection marker is a leading `>` (house list register).
  */
 export function hitRowText(hit: SearchHit, selected: boolean): string {
   const mark = selected ? '>' : ' ';
   const sid =
     hit.sessionId.length > 14 ? `${hit.sessionId.slice(0, 13)}…` : hit.sessionId;
+  const title = (hit.title ?? '').replace(/\s+/g, ' ').trim();
+  const titlePart =
+    title.length === 0
+      ? ''
+      : title.length <= SEARCH_TITLE_MAX
+        ? `${title}  `
+        : `${title.slice(0, SEARCH_TITLE_MAX - 1)}…  `;
   const kind = hit.kind || '?';
   const eid = String(hit.eventId);
   const snip = (hit.snippet ?? '').replace(/\s+/g, ' ').trim();
-  return `${mark}${sid}  [${kind}]  #${eid}  ${snip}`;
+  return `${mark}${titlePart}${sid}  [${kind}]  #${eid}  ${snip}`;
 }
 
 function padRow(text: string, width: number): string {

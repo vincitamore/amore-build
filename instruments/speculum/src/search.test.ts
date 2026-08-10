@@ -196,7 +196,7 @@ describe("search backend", () => {
     const db = openDb(":memory:");
     try {
       expect(getUserVersion(db)).toBe(SCHEMA_VERSION);
-      expect(SCHEMA_VERSION).toBe(4);
+      expect(SCHEMA_VERSION).toBe(5);
 
       const fts = db
         .query<{ name: string }, []>(
@@ -357,7 +357,7 @@ describe("v2→current migration keeps rows and builds FTS", () => {
       const db = openDb(scratch.path);
       try {
         expect(getUserVersion(db)).toBe(SCHEMA_VERSION);
-        expect(SCHEMA_VERSION).toBe(4);
+        expect(SCHEMA_VERSION).toBe(5);
         const row = db
           .query<{ text: string }, []>(
             "SELECT text FROM events WHERE session_id = 'sess-v2'",
@@ -464,8 +464,8 @@ describe("ingest / forget maintain FTS", () => {
 });
 
 describe("schema version pin", () => {
-  test("SCHEMA_VERSION is 4 after WU-14", () => {
-    expect(SCHEMA_VERSION).toBe(4);
+  test("SCHEMA_VERSION is 5 after session titles", () => {
+    expect(SCHEMA_VERSION).toBe(5);
     const db = openDb(":memory:");
     try {
       expect(getUserVersion(db)).toBe(SCHEMA_VERSION);

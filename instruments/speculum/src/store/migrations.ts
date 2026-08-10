@@ -28,6 +28,7 @@ export interface Migration {
 // Version 2 adds events.sensitive (flag-only at ingest; never rewrites raw).
 // Version 3 adds events_fts (FTS5 standalone over events text/tool fields).
 // Version 4 adds event_links + decisions (derived; rebuilt on every ingest post-pass).
+// Version 5 adds sessions.title + session_titles side store (from summary.json).
 export const MIGRATIONS: readonly Migration[] = [
   {
     version: 1,
@@ -123,6 +124,23 @@ export const MIGRATIONS: readonly Migration[] = [
       db.run(
         "CREATE INDEX IF NOT EXISTS idx_decisions_source ON decisions(source_event_id)",
       );
+    },
+  },
+  {
+    version: 5,
+    name: "v5-session-titles",
+    up: (db) => {
+      // Guard against a column already present (mirrors v2 introspective pattern).
+      const cols = db.query<{ name: string }, []>(`PRAGMA table_info(sessions)`).all();
+      if (!cols.some((c) => c.name === "title")) {
+        db.run("ALTER TABLE sessions ADD COLUMN title TEXT NOT NULL DEFAULT ''");
+      }
+      db.run(`
+        CREATE TABLE IF NOT EXISTS session_titles (
+          session_id  TEXT PRIMARY KEY,
+          title       TEXT NOT NULL DEFAULT ''
+        )
+      `);
     },
   },
 ];

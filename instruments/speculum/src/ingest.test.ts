@@ -15,7 +15,7 @@ import {
   writeTripwireCorpus,
 } from "./test/fixtures";
 import { join } from "node:path";
-import { appendFileSync, statSync, utimesSync } from "node:fs";
+import { appendFileSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
 
 describe("ingest", () => {
   test("indexes synthetic clean corpus", () => {
@@ -154,9 +154,16 @@ describe("ingest", () => {
         db
           .query<{ n: number }, [string]>("SELECT COUNT(*) AS n FROM sessions WHERE id = ?")
           .get(id)?.n ?? 0;
+      const afterTitles =
+        db
+          .query<{ n: number }, [string]>(
+            "SELECT COUNT(*) AS n FROM session_titles WHERE session_id = ?",
+          )
+          .get(id)?.n ?? 0;
       expect(afterEvents).toBe(0);
       expect(afterUsage).toBe(0);
       expect(afterSession).toBe(0);
+      expect(afterTitles).toBe(0);
 
       // Re-ingest should skip forgotten.
       const again = ingest(db, { sessionsDir: corpus.root });
@@ -166,6 +173,63 @@ describe("ingest", () => {
           .query<{ n: number }, [string]>("SELECT COUNT(*) AS n FROM events WHERE session_id = ?")
           .get(id)?.n ?? 0;
       expect(resurrected).toBe(0);
+    } finally {
+      db.close();
+      corpus.cleanup();
+    }
+  });
+
+  test("session_summary populates title; absent → empty; --full re-derives", () => {
+    const withTitle = cleanCorpus()[0]!;
+    const withTitleSess = {
+      ...withTitle,
+      id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+      summaryExtra: { session_summary: "Repeat Previous Single Word Reply Request" },
+    };
+    const noTitle = {
+      ...cleanCorpus()[0]!,
+      id: "ffffffff-0000-1111-2222-333333333333",
+      // no session_summary
+    };
+    const corpus = writeCorpus([withTitleSess, noTitle]);
+    const db = openDb(":memory:");
+    try {
+      ingest(db, { sessionsDir: corpus.root });
+      const titled = db
+        .query<{ title: string }, [string]>("SELECT title FROM sessions WHERE id = ?")
+        .get(withTitleSess.id);
+      expect(titled?.title).toBe("Repeat Previous Single Word Reply Request");
+      const side = db
+        .query<{ title: string }, [string]>(
+          "SELECT title FROM session_titles WHERE session_id = ?",
+        )
+        .get(withTitleSess.id);
+      expect(side?.title).toBe("Repeat Previous Single Word Reply Request");
+      const empty = db
+        .query<{ title: string }, [string]>("SELECT title FROM sessions WHERE id = ?")
+        .get(noTitle.id);
+      expect(empty?.title).toBe("");
+
+      // Mutate summary on disk, --full wipe + re-derive.
+      const summaryPath = join(
+        corpus.root,
+        withTitleSess.cwdEnc,
+        withTitleSess.id,
+        "summary.json",
+      );
+      const raw = JSON.parse(readFileSync(summaryPath, "utf-8")) as Record<string, unknown>;
+      raw.session_summary = "Updated Title After Full";
+      writeFileSync(summaryPath, JSON.stringify(raw, null, 2), "utf-8");
+
+      ingest(db, { sessionsDir: corpus.root, full: true });
+      const afterFull = db
+        .query<{ title: string }, [string]>("SELECT title FROM sessions WHERE id = ?")
+        .get(withTitleSess.id);
+      expect(afterFull?.title).toBe("Updated Title After Full");
+      const stillEmpty = db
+        .query<{ title: string }, [string]>("SELECT title FROM sessions WHERE id = ?")
+        .get(noTitle.id);
+      expect(stillEmpty?.title).toBe("");
     } finally {
       db.close();
       corpus.cleanup();

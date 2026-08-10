@@ -172,7 +172,7 @@ describe("WU-14 links + decisions", () => {
     const db = openDb(":memory:");
     try {
       expect(getUserVersion(db)).toBe(SCHEMA_VERSION);
-      expect(SCHEMA_VERSION).toBe(4);
+      expect(SCHEMA_VERSION).toBe(5);
 
       ingest(db, { sessionsDir: corpus.root });
 

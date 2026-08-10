@@ -6,6 +6,7 @@ import { Panel } from '../components/Panel';
 import { useStableDimensions } from '../use-stable-dimensions';
 import { useRefreshOnActive } from '../use-refresh-on-active';
 import { runSpeculum, type SpeculumResult } from './speculum-spawn';
+import { openQueryService } from './query-service';
 import {
   Card,
   CardGrid,
@@ -263,9 +264,34 @@ function FixedClearRow({
   );
 }
 
-function formatHitLine(h: ProbeHit, selected: boolean): string {
+/** Max title width in a probe hit row (id stays secondary). */
+const HIT_TITLE_MAX = 28;
+
+/** Truncate a label to maxLen with an ellipsis; no wrap. */
+export function truncateHitLabel(text: string, maxLen: number): string {
+  const t = (text ?? '').replace(/\s+/g, ' ').trim();
+  if (!t) return '';
+  if (t.length <= maxLen) return t;
+  return `${t.slice(0, Math.max(1, maxLen - 1))}…`;
+}
+
+/**
+ * One fixed hit row: title (when known) with id secondary · ts · category · evidence.
+ * Selection marker is a leading `>` (house list register).
+ */
+export function formatHitLine(
+  h: ProbeHit,
+  selected: boolean,
+  titleById?: ReadonlyMap<string, string>,
+): string {
   const mark = selected ? '>' : ' ';
-  const parts = [`${h.sessionId}`];
+  const title = titleById?.get(h.sessionId)?.trim() ?? '';
+  const sid =
+    h.sessionId.length > 14 ? `${h.sessionId.slice(0, 13)}…` : h.sessionId;
+  const head = title
+    ? `${truncateHitLabel(title, HIT_TITLE_MAX)}  (${sid})`
+    : h.sessionId;
+  const parts = [head];
   if (h.ts) parts.push(h.ts);
   if (h.category) parts.push(h.category);
   parts.push(h.evidence ?? '');
@@ -342,6 +368,10 @@ export function ProbesStage({
   const [hitCursor, setHitCursor] = useState(0);
   const [hitScroll, setHitScroll] = useState(0);
   const [rowScroll, setRowScroll] = useState(0);
+  /** id → title map for hit rows (readonly index read at drill-open). */
+  const [titleById, setTitleById] = useState<ReadonlyMap<string, string>>(
+    () => new Map(),
+  );
   const aliveRef = useRef(true);
   const onFlashRef = useRef(onFlash);
   onFlashRef.current = onFlash;
@@ -354,6 +384,27 @@ export function ProbesStage({
       aliveRef.current = false;
     };
   }, []);
+
+  // Cheap readonly title map when the hits drill opens (id secondary, title primary).
+  useEffect(() => {
+    if (!hitsOpen) return;
+    try {
+      const qs = openQueryService();
+      try {
+        const list = qs.sessionList(10_000, 0);
+        const m = new Map<string, string>();
+        for (const s of list) {
+          if (s.title) m.set(s.id, s.title);
+        }
+        if (aliveRef.current) setTitleById(m);
+      } finally {
+        qs.close();
+      }
+    } catch {
+      // Missing / locked index — hit rows fall back to id-only labels.
+      if (aliveRef.current) setTitleById(new Map());
+    }
+  }, [hitsOpen]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -617,7 +668,7 @@ export function ProbesStage({
                   key={`h-slot-${slot}`}
                   width={rowW}
                   color={selHit ? t.info : t.foreground}
-                  text={padRow(formatHitLine(h, selHit), rowW)}
+                  text={padRow(formatHitLine(h, selHit, titleById), rowW)}
                 />
               );
             })}
@@ -646,6 +697,7 @@ export function ProbesStage({
     hitCursor,
     hitScroll,
     hitSlots,
+    titleById,
   ]);
 
   const headerRight = error

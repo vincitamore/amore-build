@@ -36,10 +36,18 @@ CREATE TABLE IF NOT EXISTS sessions (
   turn_count       INTEGER NOT NULL,
   user_msg_count   INTEGER NOT NULL,
   tool_call_count  INTEGER NOT NULL,
-  tool_error_count INTEGER NOT NULL
+  tool_error_count INTEGER NOT NULL,
+  title            TEXT NOT NULL DEFAULT ''
 );
 
 CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_path, started_at);
+
+-- Per-session title side store (derived from summary.json session_summary at ingest).
+-- sessions.title is joined from this table during rebuildSessions; never hand-maintained.
+CREATE TABLE IF NOT EXISTS session_titles (
+  session_id  TEXT PRIMARY KEY,
+  title       TEXT NOT NULL DEFAULT ''
+);
 
 -- Per-turn usage from turn_completed.usage (counts/tokens only; no prices).
 CREATE TABLE IF NOT EXISTS usage (

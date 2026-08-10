@@ -299,8 +299,8 @@ describe('prepareFtsQuery / busy helpers', () => {
 });
 
 describe('openQueryService readonly + version gate', () => {
-  test('SUPPORTED_SCHEMA_VERSIONS is pinned to [4]', () => {
-    expect([...SUPPORTED_SCHEMA_VERSIONS]).toEqual([4]);
+  test('SUPPORTED_SCHEMA_VERSIONS is pinned to [4, 5]', () => {
+    expect([...SUPPORTED_SCHEMA_VERSIONS]).toEqual([4, 5]);
   });
 
   test('readonly: INSERT on opened db throws', () => {
@@ -392,6 +392,9 @@ describe('typed reads', () => {
     expect(list[0]!.eventCount).toBeGreaterThanOrEqual(2);
     expect(list[0]!.turnCount).toBe(2);
     expect(list[1]!.eventCount).toBe(1);
+    // v4 synthetic seed has no title column → empty string, no error.
+    expect(list[0]!.title).toBe('');
+    expect(list[1]!.title).toBe('');
   });
 
   test('turns returns eventId/kind/text in ts order', () => {
@@ -412,6 +415,60 @@ describe('typed reads', () => {
     expect(hits[0]!.sessionId).toBe('sess-newer');
     expect(typeof hits[0]!.eventId).toBe('number');
     expect(hits[0]!.snippet.toLowerCase()).toContain('junction');
+    // v4 seed: title empty
+    expect(hits[0]!.title).toBe('');
+  });
+});
+
+describe('schema v5 title column', () => {
+  test('sessionList returns titles; search joins title; v4 stays empty', () => {
+    const v5Path = join(tempRoot, 'v5-titles.sqlite');
+    {
+      const db = new Database(v5Path);
+      db.exec(SYNTHETIC_DDL);
+      db.run('ALTER TABLE sessions ADD COLUMN title TEXT NOT NULL DEFAULT \'\'');
+      db.run('PRAGMA user_version = 5');
+      db.run(
+        `INSERT INTO sessions (
+           id, project_path, agent, parent_session, model_id,
+           started_at, ended_at, turn_count, user_msg_count, tool_call_count, tool_error_count, title
+         ) VALUES ('sess-titled', '/proj/a', 'primary', NULL, 'm',
+           '2026-06-02T12:00:00.000Z', '2026-06-02T13:00:00.000Z', 1, 1, 0, 0,
+           'Repeat Previous Single Word Reply Request')`,
+      );
+      db.run(
+        `INSERT INTO events (
+           session_id, project_path, agent, parent_session, ts, kind,
+           text, tool_name, tool_input, tool_output, tool_error, tool_call_id,
+           is_boilerplate, sensitive, raw
+         ) VALUES ('sess-titled', '/proj/a', 'primary', NULL, '2026-06-02T12:00:00.000Z',
+           'user', 'junction path title search', NULL, NULL, NULL, NULL, NULL, 0, 0, '{}')`,
+      );
+      const eid = Number(
+        db.query<{ id: number }, []>('SELECT last_insert_rowid() AS id').get()!.id,
+      );
+      db.run(
+        `INSERT INTO events_fts(rowid, text, tool_name, tool_input, tool_output)
+         VALUES (?, 'junction path title search', NULL, NULL, NULL)`,
+        [eid],
+      );
+      db.close();
+    }
+
+    const qs = openQueryService(v5Path);
+    try {
+      expect(qs.getVersion()).toBe(5);
+      expect(qs.schemaOK()).toBe(true);
+      const list = qs.sessionList();
+      expect(list.length).toBe(1);
+      expect(list[0]!.title).toBe('Repeat Previous Single Word Reply Request');
+      const hits = qs.search('junction', { limit: 5 });
+      expect(hits.length).toBeGreaterThanOrEqual(1);
+      expect(hits[0]!.title).toBe('Repeat Previous Single Word Reply Request');
+      expect(hits[0]!.sessionId).toBe('sess-titled');
+    } finally {
+      qs.close();
+    }
   });
 });
 

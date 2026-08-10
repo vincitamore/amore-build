@@ -11,12 +11,14 @@ import {
   budgetProbeVisibleRows,
   clampHitScroll,
   clampRowScroll,
+  formatHitLine,
   formatProbeValue,
   formatWilsonRange,
   hitEventId,
   moveProbeCursor,
   probeCardRight,
   probeVisibleRange,
+  truncateHitLabel,
   ProbesStage,
   type ProbeHit,
   type ScanRow,
@@ -125,6 +127,40 @@ afterEach(() => {
   destroy = undefined;
   if (prevBin === undefined) delete process.env.SPECULUM_BIN;
   else process.env.SPECULUM_BIN = prevBin;
+});
+
+describe('formatHitLine titles', () => {
+  const hit: ProbeHit = {
+    sessionId: 'sess-aaa-bbbb-cccc',
+    ts: '2026-01-01T00:00:00.000Z',
+    category: 'self-correction',
+    evidence: 'sorry about that',
+    eventId: 42,
+  };
+
+  test('without title map falls back to full session id', () => {
+    const line = formatHitLine(hit, false);
+    expect(line.startsWith(' ')).toBe(true);
+    expect(line).toContain('sess-aaa-bbbb-cccc');
+    expect(line).toContain('sorry about that');
+  });
+
+  test('with title map: title primary, id secondary', () => {
+    const titles = new Map([
+      ['sess-aaa-bbbb-cccc', 'Repeat Previous Single Word Reply Request'],
+    ]);
+    const line = formatHitLine(hit, true, titles);
+    expect(line.startsWith('>')).toBe(true);
+    expect(line).toContain('Repeat Previous Single Word');
+    expect(line).toContain('(sess-aaa-bbbb…)');
+    expect(line.indexOf('Repeat')).toBeLessThan(line.indexOf('sess-aaa'));
+  });
+
+  test('truncateHitLabel respects max', () => {
+    expect(truncateHitLabel('short', 28)).toBe('short');
+    expect(truncateHitLabel('x'.repeat(40), 10).length).toBe(10);
+    expect(truncateHitLabel('x'.repeat(40), 10).endsWith('…')).toBe(true);
+  });
 });
 
 describe('formatProbeValue / formatWilsonRange', () => {

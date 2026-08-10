@@ -121,6 +121,7 @@ describe("summary + subagent meta", () => {
         info: { id: "abc", cwd: "C:\\work" },
         current_model_id: "grok-4",
         created_at: "2026-01-01T00:00:00Z",
+        session_summary: "  Repeat Previous Single Word Reply Request  ",
       }),
       "fallback",
       "C:\\fallback",
@@ -128,6 +129,24 @@ describe("summary + subagent meta", () => {
     expect(m.sessionId).toBe("abc");
     expect(m.projectPath).toBe("C:\\work");
     expect(m.modelId).toBe("grok-4");
+    expect(m.title).toBe("Repeat Previous Single Word Reply Request");
+  });
+
+  test("parseSummaryJson empty/non-string session_summary → empty title", () => {
+    const absent = parseSummaryJson("{}", "fb", "/p");
+    expect(absent.title).toBe("");
+    const empty = parseSummaryJson(
+      JSON.stringify({ session_summary: "   " }),
+      "fb",
+      "/p",
+    );
+    expect(empty.title).toBe("");
+    const nonStr = parseSummaryJson(
+      JSON.stringify({ session_summary: 42 }),
+      "fb",
+      "/p",
+    );
+    expect(nonStr.title).toBe("");
   });
 
   test("parseSubagentMeta linkage", () => {

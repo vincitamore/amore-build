@@ -195,6 +195,13 @@ export function forgetSession(
   const delEvents = db.prepare("DELETE FROM events WHERE session_id = ?").run(sessionId);
   const delUsage = db.prepare("DELETE FROM usage WHERE session_id = ?").run(sessionId);
   const delSession = db.prepare("DELETE FROM sessions WHERE id = ?").run(sessionId);
+  // Drop derived title side-store row (table may be absent on pre-v5 indexes
+  // mid-migration tests; ignore so purge never fails on schema lag).
+  try {
+    db.prepare("DELETE FROM session_titles WHERE session_id = ?").run(sessionId);
+  } catch {
+    // session_titles not yet present
+  }
   const markForgotten = db
     .prepare(
       "UPDATE ingest_state SET forgotten = 1 WHERE file_path LIKE '%' || ? || '%' ",

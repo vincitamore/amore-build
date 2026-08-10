@@ -19,7 +19,7 @@ import { MIGRATIONS, migrationFor, type Migration, type MigrationDb } from "./mi
 export type Db = Database;
 
 /** Current greenfield schema version. Product bumps land with a matching migration. */
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 export function getUserVersion(db: Db): number {
   const row = db.query<{ user_version: number }, []>("PRAGMA user_version").get();

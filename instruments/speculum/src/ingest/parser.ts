@@ -55,6 +55,8 @@ export interface SessionMeta {
   parentSession: string | null;
   createdAt: string | null;
   updatedAt: string | null;
+  /** From summary.json session_summary; empty when absent/non-string. */
+  title: string;
 }
 
 export interface SubagentMeta {
@@ -410,6 +412,7 @@ export function parseSummaryJson(
   let createdAt: string | null = null;
   let updatedAt: string | null = null;
   let cwd = projectPath;
+  let title = "";
 
   try {
     const s = JSON.parse(raw) as Record<string, unknown>;
@@ -420,6 +423,10 @@ export function parseSummaryJson(
     const info = s.info as { id?: string; cwd?: string } | undefined;
     if (info?.id) sessionId = info.id;
     if (info?.cwd) cwd = info.cwd;
+    // session_summary is the terminal-tab title; empty/non-string → no title.
+    if (typeof s.session_summary === "string") {
+      title = s.session_summary.trim();
+    }
   } catch {
     // tolerate bad summary
   }
@@ -432,6 +439,7 @@ export function parseSummaryJson(
     parentSession: null,
     createdAt,
     updatedAt,
+    title,
   };
 }
 
