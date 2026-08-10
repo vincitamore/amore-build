@@ -41,11 +41,14 @@ Options:
   --max-turns N        Amore max-turns (default 4)
   --audit-path <path>  Override audit log path
 
-Privacy:
+Privacy (dual posture):
+  Local verbs (ingest, status, forget, scan, usage) never egress — probes and
+  usage stay on this machine only.
+  Lenses are the ONLY egress path: opt-in, explicit \`speculum lens <name>\`.
   The selected slice is scrubbed locally before any model call. Fail-closed:
   residual secrets or oversize payloads abort the lens; nothing partial is sent.
-  Lenses send scrubbed content to the model the local amore configuration routes
-  to. Nothing is sent without an explicit lens command.
+  Scrubbed content is sent only to the model the local amore configuration
+  routes to. Every invocation is recorded in the audit log.
 
 Audit log (append-only JSONL):
   ${defaultAuditPath()}

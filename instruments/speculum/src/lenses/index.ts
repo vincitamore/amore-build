@@ -1,7 +1,8 @@
 /**
  * Built-in agentic lenses. Each lens is a prompt template plus selection
- * guidance. Lenses send scrubbed local session content through the user's own
- * amore configuration; nothing is sent without an explicit lens command.
+ * guidance. Local verbs (ingest/status/forget/scan/usage) never egress; lenses
+ * are the only opt-in egress path — scrubbed local session content through the
+ * user's own amore configuration after fail-closed scrub + audit.
  */
 
 export interface LensDefinition {
@@ -20,7 +21,7 @@ export interface LensDefinition {
 }
 
 const EGRESS =
-  "Sends scrubbed session content to the model configured by the local amore installation. Local scrub runs first; audit log records every send.";
+  "ONLY egress path (local verbs never leave the machine). Opt-in: sends scrubbed session content to the model configured by the local amore installation. Fail-closed scrub first; audit log records every send.";
 
 export const LENSES: Record<string, LensDefinition> = {
   "session-postmortem": {

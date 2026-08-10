@@ -9,8 +9,20 @@ slice through the user's own amore configuration for a qualitative read.
 
 ## Privacy doctrine
 
-- **Probes and usage stay on the machine.** They report only against the local
-  index.
+Speculum has a **dual posture**: almost everything is local-only; the single
+egress path is explicit, scrubbed, audited, and fail-closed.
+
+**Local verbs never egress.** `ingest`, `status`, `forget`, `scan`, and `usage`
+read and write only on this machine. Probes never call models or open network
+sockets. They report only against the local sqlite index.
+
+**The only egress is the opt-in lens path.** Nothing is sent without an explicit
+`speculum lens <name>` command. Before any model call, the selected slice is
+scrubbed locally (secrets, emails, absolute home paths). The scrubber fails
+closed: residual unredactable content or an oversize payload aborts the lens.
+Nothing partial is ever sent. Every invocation (including dry-run and refusal)
+is recorded in the local audit log.
+
 - **Ingest is explicit.** Nothing is indexed until you run `speculum ingest`.
 - **`forget` is complete for the index.** `speculum forget <session-prefix>`
   deletes that session's events, usage rows, and session row, and marks the
@@ -18,12 +30,6 @@ slice through the user's own amore configuration for a qualitative read.
   Source files under `~/.amore/sessions` are left alone (delete those with the
   harness if you want the originals gone).
 - The index is a **derived** database. Source of truth remains the session tree.
-- **Lenses are opt-in egress.** Nothing is sent without an explicit
-  `speculum lens <name>` command. Before any model call, the selected slice is
-  scrubbed locally (secrets, emails, absolute home paths). The scrubber fails
-  closed: residual unredactable content or an oversize payload aborts the lens.
-  Nothing partial is ever sent. Every invocation (including dry-run and
-  refusal) is recorded in the local audit log.
 
 ## Install / run
 
