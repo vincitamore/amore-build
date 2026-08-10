@@ -14,6 +14,9 @@ import { formatLucernaDisplayLine } from './lucerna-display';
 import { ProbesStage } from '../speculum/ProbesStage';
 import { UsageStage } from '../speculum/UsageStage';
 import { SpeculumActions } from '../speculum/SpeculumActions';
+import { MicroscopeStage } from '../speculum/MicroscopeStage';
+import { MapStage } from '../speculum/MapStage';
+import { SearchStage } from '../speculum/SearchStage';
 import {
   fetchStatusState,
   type DerivedSessionsState,
@@ -21,7 +24,16 @@ import {
   INSTALL_RECIPE,
 } from '../speculum/status';
 
-type StageId = 'probes' | 'usage';
+type StageId = 'probes' | 'usage' | 'microscope' | 'map' | 'search';
+/** Full implemented set for the chip row; exactAgenda = what the coherent gate expects. */
+export const SESSION_STAGES: readonly StageId[] = ['probes', 'usage', 'microscope', 'map', 'search'];
+export const STAGE_CHIP_LABEL: Record<StageId, string> = {
+  probes: 'Probes',
+  usage: 'Usage',
+  microscope: 'Microscope',
+  map: 'Map',
+  search: 'Search',
+};
 
 function statusStripLine(status: DerivedSessionsState | null): string {
   if (!status) return 'loading status…';
@@ -38,27 +50,31 @@ function statusStripLine(status: DerivedSessionsState | null): string {
 }
 
 /**
- * Sessions container. Props `focus` / `focusKey` are the jump seam: accepted now so a
- * future session list can consume them. When focusKey changes and sessionId is present,
- * honest behavior is a no-op flash ("session picker arrives with exploration") — no fake
- * chrome; the real jump lands when exploration mounts the picker.
+ * Sessions container — composition point for the record surface.
+ * Five stages: Probes · Usage (glass) + Microscope · Map · Search (member-native
+ * reads via the query-service). `focus` / `focusKey` is the jump seam: a jump
+ * routes to the Microscope stage, which consumes it (the D7 consume-once rule).
+ * `onOpenSession` is the shell's openSession spine passed to Map/Search glyphs.
  */
 export function SessionsMember({
   inputActive,
   onCapture,
   focus,
   focusKey,
+  onOpenSession,
 }: {
   inputActive?: boolean;
   onCapture?: (b: boolean) => void;
   focus?: SessionFocus | null;
   focusKey?: number;
+  onOpenSession?: (sessionId: string, opts?: { eventId?: string | number; ts?: string }) => void;
 }) {
   const t = usePalette();
   const dims = useStableDimensions();
   const [status, setStatus] = useState<DerivedSessionsState | null>(null);
   const [stage, setStage] = useState<StageId>('probes');
   const [actionsCapture, setActionsCapture] = useState(false);
+  const [searchCapture, setSearchCapture] = useState(false);
   const [flash, setFlash] = useFlash();
   const aliveRef = useRef(true);
   const lastFocusKey = useRef<number | undefined>(undefined);
@@ -83,29 +99,29 @@ export function SessionsMember({
   }, [refreshStatus]);
   useRefreshOnActive(inputActive, refreshStatus);
 
-  // Bridge SpeculumActions capture (confirm / lens picker) up to the shell.
+  // Bridge stage/actions capture (search typing, lens picker, confirm) up to the shell.
   useEffect(() => {
-    onCapture?.(actionsCapture);
-  }, [actionsCapture, onCapture]);
+    onCapture?.(actionsCapture || searchCapture);
+  }, [actionsCapture, searchCapture, onCapture]);
   useEffect(() => () => onCapture?.(false), [onCapture]);
 
-  // Jump spine: consume focusKey change; without a session list this is a no-op flash.
-  // Comment for the exploration unit: session picker arrives with exploration.
+  // Jump spine: route a jump to the Microscope stage, which consumes it (consume-once —
+  // arrowing away after the land is the Microscope's own cursor, not a fight).
   useEffect(() => {
     if (focusKey === undefined) return;
     if (focusKey === lastFocusKey.current) return;
     lastFocusKey.current = focusKey;
     if (focus?.sessionId) {
-      setFlash('session picker arrives with exploration');
+      setStage('microscope');
     }
-  }, [focusKey, focus?.sessionId, setFlash]);
+  }, [focusKey, focus?.sessionId]);
 
   tickRender('SessionsMember');
 
   useKeyboard((key: { name?: string }) => {
-    if (!inputActive || actionsCapture) return;
+    if (!inputActive || actionsCapture || searchCapture) return;
     const n = (key.name ?? '').toLowerCase().replace('arrow', '');
-    // Stage keys: plain letters (shell owns 1-9 / t v q / ctrl+n/p).
+    // Stage keys: plain letters (shell owns 1-9 / t v q / ctrl+n/p / s).
     if (n === 'p') {
       setStage('probes');
       return;
@@ -114,8 +130,20 @@ export function SessionsMember({
       setStage('usage');
       return;
     }
+    if (n === 'm') {
+      setStage('microscope');
+      return;
+    }
+    if (n === 'g') {
+      setStage('map');
+      return;
+    }
+    if (n === 'w') {
+      setStage('search');
+      return;
+    }
     if (n === 'tab') {
-      setStage((s) => (s === 'probes' ? 'usage' : 'probes'));
+      setStage((s) => SESSION_STAGES[(SESSION_STAGES.indexOf(s) + 1) % SESSION_STAGES.length]);
       return;
     }
     // Member r refreshes the status strip only; stages own their own r handlers.
@@ -142,7 +170,7 @@ export function SessionsMember({
 
   const footerHint = flash
     ? flash
-    : 'p probes · u usage · tab cycle · r status · i ingest · L lens · A audit';
+    : 'p probes · u usage · m microscope · g map · w search · tab cycle · i ingest · L lens · A audit';
 
   return (
     <box
@@ -159,33 +187,15 @@ export function SessionsMember({
         </text>
       </Panel>
 
-      {/*
-        Stage chips: Probes · Usage only.
-        Microscope / Map / Search are omitted (not stubbed) — honor-of-absence beats
-        "coming soon" chrome (tell-test honesty).
-      */}
+      {/* Stage chips — all five, each with a real implementation (no coming-soon chrome). */}
       <box flexDirection="row" flexShrink={0} marginTop={1} height={1} overflow="hidden">
-        <box
-          flexShrink={0}
-          onMouseDown={() => setStage('probes')}
-          backgroundColor={t.background}
-        >
-          <text fg={stageChipColor('probes')} wrapMode="none">
-            {stage === 'probes' ? '· Probes ·' : '  Probes  '}
-          </text>
-        </box>
-        <text fg={t.muted} wrapMode="none">
-          {' '}
-        </text>
-        <box
-          flexShrink={0}
-          onMouseDown={() => setStage('usage')}
-          backgroundColor={t.background}
-        >
-          <text fg={stageChipColor('usage')} wrapMode="none">
-            {stage === 'usage' ? '· Usage ·' : '  Usage  '}
-          </text>
-        </box>
+        {SESSION_STAGES.map((id) => (
+          <box key={id} flexShrink={0} onMouseDown={() => setStage(id)} backgroundColor={t.background}>
+            <text fg={stageChipColor(id)} wrapMode="none">
+              {stage === id ? `· ${STAGE_CHIP_LABEL[id]} ·` : `  ${STAGE_CHIP_LABEL[id]}  `}
+            </text>
+          </box>
+        ))}
       </box>
 
       {/*
@@ -216,6 +226,50 @@ export function SessionsMember({
         <UsageStage
           inputActive={!!inputActive && stage === 'usage' && !actionsCapture}
           onFlash={setFlash}
+        />
+      </box>
+      <box
+        flexDirection="column"
+        flexGrow={stage === 'microscope' ? 1 : 0}
+        flexShrink={stage === 'microscope' ? 1 : 0}
+        height={stage === 'microscope' ? undefined : 0}
+        minHeight={0}
+        overflow="hidden"
+      >
+        <MicroscopeStage
+          inputActive={!!inputActive && stage === 'microscope' && !actionsCapture}
+          onFlash={setFlash}
+          jump={focus}
+          jumpKey={focusKey}
+        />
+      </box>
+      <box
+        flexDirection="column"
+        flexGrow={stage === 'map' ? 1 : 0}
+        flexShrink={stage === 'map' ? 1 : 0}
+        height={stage === 'map' ? undefined : 0}
+        minHeight={0}
+        overflow="hidden"
+      >
+        <MapStage
+          inputActive={!!inputActive && stage === 'map' && !actionsCapture}
+          onFlash={setFlash}
+          onOpenSession={onOpenSession}
+        />
+      </box>
+      <box
+        flexDirection="column"
+        flexGrow={stage === 'search' ? 1 : 0}
+        flexShrink={stage === 'search' ? 1 : 0}
+        height={stage === 'search' ? undefined : 0}
+        minHeight={0}
+        overflow="hidden"
+      >
+        <SearchStage
+          inputActive={!!inputActive && stage === 'search' && !actionsCapture}
+          onFlash={setFlash}
+          onCapture={setSearchCapture}
+          onOpenSession={onOpenSession}
         />
       </box>
 

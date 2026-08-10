@@ -4,6 +4,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { Database } from 'bun:sqlite';
 import { createTestRenderer, createMockKeys } from '@opentui/core/testing';
 import { createRoot } from '@opentui/react';
 import { ThemeProvider } from '../ThemeProvider';
@@ -92,6 +93,60 @@ const AUDIT = {
 
 const tmp = mkdtempSync(join(tmpdir(), 'sessions-smoke-'));
 const prevBin = process.env.SPECULUM_BIN;
+const prevDb = process.env.SPECULUM_DB;
+
+/**
+ * Synthetic index for the query-service stages (Microscope/Map/Search open it
+ * read-only at mount, even while hidden). v4 shape, stamped user_version 4 —
+ * the version the query-service's SUPPORTED_SCHEMA_VERSIONS gate accepts.
+ */
+function seedIndex(path: string): void {
+  const db = new Database(path);
+  db.exec(`
+    CREATE TABLE events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, project_path TEXT NOT NULL,
+      agent TEXT NOT NULL, parent_session TEXT, ts TEXT NOT NULL, kind TEXT NOT NULL, text TEXT,
+      tool_name TEXT, tool_input TEXT, tool_output TEXT, tool_error INTEGER,
+      tool_call_id TEXT, is_boilerplate INTEGER NOT NULL DEFAULT 0,
+      sensitive INTEGER NOT NULL DEFAULT 0, raw TEXT NOT NULL
+    );
+    CREATE TABLE sessions (
+      id TEXT PRIMARY KEY, project_path TEXT NOT NULL, agent TEXT NOT NULL, parent_session TEXT,
+      model_id TEXT, started_at TEXT NOT NULL, ended_at TEXT NOT NULL,
+      turn_count INTEGER NOT NULL, user_msg_count INTEGER NOT NULL,
+      tool_call_count INTEGER NOT NULL, tool_error_count INTEGER NOT NULL
+    );
+    CREATE TABLE usage (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL, project_path TEXT NOT NULL,
+      ts TEXT NOT NULL, model_id TEXT,
+      input_tokens INTEGER NOT NULL DEFAULT 0, output_tokens INTEGER NOT NULL DEFAULT 0,
+      cached_read_tokens INTEGER NOT NULL DEFAULT 0, reasoning_tokens INTEGER NOT NULL DEFAULT 0,
+      total_tokens INTEGER NOT NULL DEFAULT 0, num_turns INTEGER NOT NULL DEFAULT 0,
+      model_calls INTEGER NOT NULL DEFAULT 0, raw TEXT NOT NULL
+    );
+    CREATE TABLE ingest_state (
+      file_path TEXT PRIMARY KEY, size_bytes INTEGER NOT NULL, mtime TEXT NOT NULL,
+      byte_offset INTEGER NOT NULL, last_ingested TEXT NOT NULL, forgotten INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE VIRTUAL TABLE events_fts USING fts5(text, tool_name, tool_input, tool_output);
+    PRAGMA user_version = 4;
+  `);
+  db.run(
+    `INSERT INTO sessions (id, project_path, agent, started_at, ended_at, turn_count, user_msg_count, tool_call_count, tool_error_count)
+     VALUES ('smoke-sess', '/house/proj', 'primary', '2026-01-02T11:00:00.000Z', '2026-01-02T13:00:00.000Z', 3, 2, 2, 1)`,
+  );
+  db.run(
+    `INSERT INTO events (session_id, project_path, agent, ts, kind, text, tool_name, tool_error, is_boilerplate, sensitive, raw)
+     VALUES ('smoke-sess', '/house/proj', 'primary', '2026-01-02T11:00:00.000Z', 'user', 'debug the loop', NULL, NULL, 0, 0, '{}')`,
+  );
+  db.run(
+    `INSERT INTO events (session_id, project_path, agent, ts, kind, text, tool_name, tool_error, is_boilerplate, sensitive, raw)
+     VALUES ('smoke-sess', '/house/proj', 'primary', '2026-01-02T12:00:00.000Z', 'tool_error', NULL, 'run-scan', 'boom', 0, 0, '{}')`,
+  );
+  db.run(`INSERT INTO events_fts(rowid, text, tool_name, tool_input, tool_output)
+         SELECT id, text, tool_name, tool_input, tool_output FROM events`);
+  db.close();
+}
 
 function writeReadyBin(): string {
   const mjs = join(tmp, 'fake-ready.mjs');
@@ -124,12 +179,19 @@ function writeReadyBin(): string {
 function cleanup() {
   if (prevBin === undefined) delete process.env.SPECULUM_BIN;
   else process.env.SPECULUM_BIN = prevBin;
+  if (prevDb === undefined) delete process.env.SPECULUM_DB;
+  else process.env.SPECULUM_DB = prevDb;
   try {
     rmSync(tmp, { recursive: true, force: true });
   } catch {
     // best-effort
   }
 }
+
+// The query-service stages read a synthetic index (never the live one).
+const indexPath = join(tmp, 'speculum.sqlite');
+seedIndex(indexPath);
+process.env.SPECULUM_DB = indexPath;
 
 // ── Run 1: ready corpus ──
 process.env.SPECULUM_BIN = writeReadyBin();
@@ -157,7 +219,7 @@ const hasReadyStrip = /installed · 3 sessions|3 sessions/.test(frameReady);
 const hasProbes = /apology-rate/.test(frameReady);
 const hasHeuristic = /\[heuristic\]/.test(frameReady);
 const hasChips = /Probes/.test(frameReady) && /Usage/.test(frameReady);
-const noMicroscope = !/Microscope|Map|Search/.test(frameReady);
+const hasExplorationChips = /Microscope/.test(frameReady) && /Map/.test(frameReady) && /Search/.test(frameReady);
 const hasBorders = /[┌┐└┘─│]/.test(frameReady);
 
 // Stage switch: u → Usage
@@ -204,7 +266,7 @@ const checks = {
   probes: hasProbes,
   heuristic: hasHeuristic,
   chips: hasChips,
-  noMicroscope,
+  explorationChips: hasExplorationChips,
   borders: hasBorders,
   usageNote: hasUsageNote,
   model: hasModel,

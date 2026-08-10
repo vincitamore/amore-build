@@ -466,6 +466,7 @@ export function Shell({ onQuit }: { onQuit?: () => void }) {
             onCapture={cap}
             focus={sessionFocus}
             focusKey={sessionFocusNonce}
+            onOpenSession={openSession}
           />
         );
       default:

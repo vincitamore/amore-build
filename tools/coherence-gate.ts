@@ -10,8 +10,8 @@ const LEGACY = ['Dashboard', 'Tasks', 'Inbox', 'Reminders', 'Knowledge', 'Files'
 const checks = runCoherenceChecks({
   members: MEMBERS,
   legacyMembers: LEGACY,
-  displayedStages: ['Probes', 'Usage'],
-  implementedStages: ['Probes', 'Usage'],
+  displayedStages: ['Probes', 'Usage', 'Microscope', 'Map', 'Search'],
+  implementedStages: ['Probes', 'Usage', 'Microscope', 'Map', 'Search'],
   auditPaths: [], // the dash never writes an audit file; CLI owns the single one
   sideEffectPath: 'src/speculum/speculum-spawn.ts',
   orgSearchQuery: 'org search query', // never receives session bodies (Phase-1 pin)
