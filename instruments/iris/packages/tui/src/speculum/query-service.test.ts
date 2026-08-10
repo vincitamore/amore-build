@@ -373,6 +373,10 @@ describe('typed reads', () => {
   test('status returns counts + lastIngestedAt + stale', () => {
     const st = qs.status();
     expect(st.sessions).toBe(2);
+    // seedGoodIndex rows are both agent='primary'.
+    expect(st.primarySessions).toBe(2);
+    expect(st.subagentSessions).toBe(0);
+    expect(st.byAgent).toEqual({ primary: 2 });
     expect(st.events).toBeGreaterThanOrEqual(3);
     expect(st.usageRows).toBe(1);
     expect(st.lastIngestedAt).toBe('2026-06-02T13:30:00.000Z');
@@ -442,6 +446,85 @@ describe('busy / retry on QueryService', () => {
       const list = qs.sessionList();
       expect(list).toEqual([]);
       expect(qs.busy()).toBe(true);
+    } finally {
+      qs.close();
+    }
+  });
+});
+
+describe('status session split (primary / subagent)', () => {
+  test('mix of primary + subagent + unknown agent classifies correctly', () => {
+    const path = join(tempRoot, 'agent-split.sqlite');
+    {
+      const db = new Database(path);
+      db.exec(SYNTHETIC_DDL);
+      db.run('PRAGMA user_version = 4');
+      const insert = (
+        id: string,
+        agent: string,
+        parent: string | null,
+      ): void => {
+        db.run(
+          `INSERT INTO sessions (
+             id, project_path, agent, parent_session, model_id,
+             started_at, ended_at, turn_count, user_msg_count, tool_call_count, tool_error_count
+           ) VALUES (?, '/p', ?, ?, NULL, '2026-06-01T00:00:00.000Z', '2026-06-01T01:00:00.000Z', 0, 0, 0, 0)`,
+          [id, agent, parent],
+        );
+      };
+      insert('p1', 'primary', null);
+      insert('p2', 'primary', null);
+      insert('s1', 'subagent', 'p1');
+      insert('s2', 'subagent', 'p1');
+      insert('s3', 'subagent', 'p2');
+      // Unclassifiable → primary bucket (never NaN/undefined).
+      insert('weird', 'orchestrator', null);
+      insert('empty-ish', '', null);
+      db.close();
+    }
+
+    const qs = openQueryService(path);
+    try {
+      const st = qs.status();
+      expect(st.sessions).toBe(7);
+      expect(st.subagentSessions).toBe(3);
+      // primary(2) + orchestrator(1) + empty(1) = 4
+      expect(st.primarySessions).toBe(4);
+      expect(st.primarySessions + st.subagentSessions).toBe(st.sessions);
+      expect(typeof st.primarySessions).toBe('number');
+      expect(typeof st.subagentSessions).toBe('number');
+      expect(Number.isNaN(st.primarySessions)).toBe(false);
+      expect(Number.isNaN(st.subagentSessions)).toBe(false);
+      expect(st.byAgent.primary).toBe(2);
+      expect(st.byAgent.subagent).toBe(3);
+      expect(st.byAgent.orchestrator).toBe(1);
+      expect(st.byAgent['']).toBe(1);
+    } finally {
+      qs.close();
+    }
+  });
+
+  test('all-subagent corpus: primarySessions is 0, not undefined', () => {
+    const path = join(tempRoot, 'all-sub.sqlite');
+    {
+      const db = new Database(path);
+      db.exec(SYNTHETIC_DDL);
+      db.run('PRAGMA user_version = 4');
+      db.run(
+        `INSERT INTO sessions (
+           id, project_path, agent, parent_session, model_id,
+           started_at, ended_at, turn_count, user_msg_count, tool_call_count, tool_error_count
+         ) VALUES ('c1', '/p', 'subagent', 'parent', NULL, '2026-06-01T00:00:00.000Z', '2026-06-01T01:00:00.000Z', 0, 0, 0, 0)`,
+      );
+      db.close();
+    }
+    const qs = openQueryService(path);
+    try {
+      const st = qs.status();
+      expect(st.sessions).toBe(1);
+      expect(st.primarySessions).toBe(0);
+      expect(st.subagentSessions).toBe(1);
+      expect(st.byAgent).toEqual({ subagent: 1 });
     } finally {
       qs.close();
     }

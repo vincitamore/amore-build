@@ -62,16 +62,19 @@ export function formatIngestAge(lastIngestedAt: string | null | undefined, now =
 
 /**
  * One-line Speculum pulse copy from a successful `status --json` payload.
- * Empty corpus stays honest (no fake ages); non-empty surfaces session count, last ingest age, stale.
+ * Empty corpus stays honest (no fake ages); non-empty surfaces session-dir count,
+ * last ingest age, stale. Wording is "session dirs" (flat total includes
+ * primary + subagent rows) — the primary/subagent split lives on the Sessions
+ * member strip (query-service), not this CLI-only pulse.
  */
 export function formatPulseLine(status: SpeculumStatusJson, now = Date.now()): string {
   const sessions = status.counts?.sessions ?? 0;
   if (sessions === 0) {
-    return `installed · 0 sessions · run 'speculum ingest'`;
+    return `installed · 0 session dirs · run 'speculum ingest'`;
   }
   const age = formatIngestAge(status.ingest?.lastIngestedAt, now);
   const staleBit = status.staleness?.stale ? ' · stale' : '';
-  return `installed · ${sessions} sessions · last ingest ${age}${staleBit}`;
+  return `installed · ${sessions} session dirs · last ingest ${age}${staleBit}`;
 }
 
 interface SpeculumPulseView {

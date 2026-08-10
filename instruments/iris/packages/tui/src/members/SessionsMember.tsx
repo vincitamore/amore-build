@@ -44,8 +44,20 @@ function statusStripLine(status: DerivedSessionsState | null): string {
       return status.detail ?? 'status error';
     case 'empty':
       return status.detail ?? "no ingested sessions — run 'speculum ingest'";
-    case 'ready':
-      return status.detail ?? `installed · ${status.sessions} sessions`;
+    case 'ready': {
+      // Prefer detail (already split-aware when query-service enriched); fallback stays honest.
+      if (status.detail) return status.detail;
+      if (
+        typeof status.primarySessions === 'number' &&
+        typeof status.subagentSessions === 'number'
+      ) {
+        return (
+          `installed · ${status.sessions} session dirs · ` +
+          `${status.primarySessions} primary · ${status.subagentSessions} subagent`
+        );
+      }
+      return `installed · ${status.sessions} session dirs`;
+    }
   }
 }
 

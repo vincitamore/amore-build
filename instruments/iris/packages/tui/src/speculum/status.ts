@@ -2,6 +2,7 @@
  * Soft-state module for the Sessions member status strip.
  * Pure derivation + a thin spawn wrapper — no UI, no polling.
  */
+import { openQueryService } from './query-service';
 import { runSpeculum } from './speculum-spawn';
 
 export type SessionsState = 'not-installed' | 'error' | 'empty' | 'ready';
@@ -33,7 +34,12 @@ export type StatusResultInput = {
 
 export type DerivedSessionsState = {
   state: SessionsState;
+  /** Total session directories (primary + subagent). */
   sessions: number;
+  /** Present when the query-service split is available (schemaOK index). */
+  primarySessions?: number;
+  /** Present when the query-service split is available (schemaOK index). */
+  subagentSessions?: number;
   detail?: string;
 };
 
@@ -60,9 +66,41 @@ export function formatIngestAge(
 }
 
 /**
+ * Ready-state strip line. When primary/subagent split is known, surface it;
+ * otherwise report total as session dirs (not "sessions") so the flat count
+ * is not mistaken for primary-only.
+ */
+export function formatReadyStripDetail(opts: {
+  sessions: number;
+  primarySessions?: number;
+  subagentSessions?: number;
+  lastIngestedAt?: string | null;
+  stale?: boolean;
+  now?: number;
+}): string {
+  const age = formatIngestAge(opts.lastIngestedAt, opts.now);
+  const staleBit = opts.stale ? ' · stale' : '';
+  const hasSplit =
+    typeof opts.primarySessions === 'number' &&
+    typeof opts.subagentSessions === 'number' &&
+    Number.isFinite(opts.primarySessions) &&
+    Number.isFinite(opts.subagentSessions);
+  if (hasSplit) {
+    return (
+      `installed · ${opts.sessions} session dirs · ` +
+      `${opts.primarySessions} primary · ${opts.subagentSessions} subagent` +
+      ` · last ingest ${age}${staleBit}`
+    );
+  }
+  return `installed · ${opts.sessions} session dirs · last ingest ${age}${staleBit}`;
+}
+
+/**
  * Map a spawn result (or null = still loading) to soft state.
  * Returns `null` while loading so the holder can render a brief loading line
  * without inventing a fifth SessionsState.
+ * Does not invent a primary/subagent split — that comes from fetchStatusState
+ * enriching via the query-service when the index is readable.
  */
 export function deriveSessionsState(result: StatusResultInput): DerivedSessionsState | null {
   if (result === null) return null;
@@ -82,17 +120,65 @@ export function deriveSessionsState(result: StatusResultInput): DerivedSessionsS
     return { state: 'empty', sessions: 0, detail: EMPTY_DETAIL };
   }
 
-  const age = formatIngestAge(result.json?.ingest?.lastIngestedAt);
-  const staleBit = result.json?.staleness?.stale ? ' · stale' : '';
   return {
     state: 'ready',
     sessions,
-    detail: `installed · ${sessions} sessions · last ingest ${age}${staleBit}`,
+    detail: formatReadyStripDetail({
+      sessions,
+      lastIngestedAt: result.json?.ingest?.lastIngestedAt,
+      stale: Boolean(result.json?.staleness?.stale),
+    }),
   };
 }
 
-/** Thin wrapper: `status --json` → deriveSessionsState. */
+/**
+ * Prefer the query-service split when the derived index is openable and schemaOK.
+ * Falls back to CLI-only "session dirs" copy when the index is missing/mismatched
+ * — never invents primary/subagent numbers.
+ */
+export function enrichWithSessionSplit(
+  derived: DerivedSessionsState,
+  open: typeof openQueryService = openQueryService,
+): DerivedSessionsState {
+  if (derived.state !== 'ready') return derived;
+  try {
+    const qs = open();
+    try {
+      if (!qs.schemaOK()) return derived;
+      const st = qs.status();
+      // Prefer index totals when available (same corpus the stages read).
+      const sessions = st.sessions;
+      if (sessions === 0) {
+        return { state: 'empty', sessions: 0, detail: EMPTY_DETAIL };
+      }
+      const primarySessions = st.primarySessions;
+      const subagentSessions = st.subagentSessions;
+      return {
+        state: 'ready',
+        sessions,
+        primarySessions,
+        subagentSessions,
+        detail: formatReadyStripDetail({
+          sessions,
+          primarySessions,
+          subagentSessions,
+          lastIngestedAt: st.lastIngestedAt ?? undefined,
+          stale: st.stale,
+        }),
+      };
+    } finally {
+      qs.close();
+    }
+  } catch {
+    // Missing index / open failure — keep CLI-derived honest fallback.
+    return derived;
+  }
+}
+
+/** Thin wrapper: `status --json` → deriveSessionsState → optional query-service split. */
 export async function fetchStatusState(): Promise<DerivedSessionsState | null> {
   const r = await runSpeculum<StatusJson>('status', ['--json']);
-  return deriveSessionsState(r);
+  const derived = deriveSessionsState(r);
+  if (!derived) return null;
+  return enrichWithSessionSplit(derived);
 }

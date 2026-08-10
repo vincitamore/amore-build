@@ -26,7 +26,18 @@ export type PathEnv = {
 };
 
 export type QueryStatus = {
+  /** Total session directories in the derived index (primary + subagent). */
   sessions: number;
+  /**
+   * Session rows that are not agent='subagent'.
+   * Ingest only writes 'primary' | 'subagent'; anything else (nullish/unknown)
+   * is counted here so the split never produces NaN/undefined.
+   */
+  primarySessions: number;
+  /** Session rows where agent = 'subagent' (parent_session set at ingest). */
+  subagentSessions: number;
+  /** Cheap GROUP BY agent → count map (raw agent strings). */
+  byAgent: Record<string, number>;
   events: number;
   usageRows: number;
   lastIngestedAt: string | null;
@@ -218,6 +229,9 @@ class SqliteQueryService implements QueryService {
   status(): QueryStatus {
     const empty: QueryStatus = {
       sessions: 0,
+      primarySessions: 0,
+      subagentSessions: 0,
+      byAgent: {},
       events: 0,
       usageRows: 0,
       lastIngestedAt: null,
@@ -227,6 +241,24 @@ class SqliteQueryService implements QueryService {
       const db = this.requireDb();
       const sessions =
         db.query<{ n: number }, []>('SELECT COUNT(*) AS n FROM sessions').get()?.n ?? 0;
+      // Literal 'subagent' only — matches ingest resolveAgent (AgentRole).
+      // All other agent values (incl. 'primary', unknown, empty) count as primary.
+      const subagentSessions =
+        db
+          .query<{ n: number }, []>(
+            "SELECT COUNT(*) AS n FROM sessions WHERE agent = 'subagent'",
+          )
+          .get()?.n ?? 0;
+      const primarySessions = Math.max(0, sessions - subagentSessions);
+      const byAgentRows = db
+        .query<{ agent: string; n: number }, []>(
+          'SELECT agent, COUNT(*) AS n FROM sessions GROUP BY agent',
+        )
+        .all();
+      const byAgent: Record<string, number> = {};
+      for (const row of byAgentRows) {
+        byAgent[row.agent] = row.n;
+      }
       const events =
         db.query<{ n: number }, []>('SELECT COUNT(*) AS n FROM events').get()?.n ?? 0;
       const usageRows =
@@ -248,7 +280,16 @@ class SqliteQueryService implements QueryService {
         const hours = (Date.now() - new Date(newest).getTime()) / (3600 * 1000);
         stale = hours > STALE_THRESHOLD_HOURS;
       }
-      return { sessions, events, usageRows, lastIngestedAt, stale };
+      return {
+        sessions,
+        primarySessions,
+        subagentSessions,
+        byAgent,
+        events,
+        usageRows,
+        lastIngestedAt,
+        stale,
+      };
     }, empty);
   }
 
