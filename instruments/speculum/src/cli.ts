@@ -12,6 +12,8 @@ import { usageCommand } from "./commands/usage";
 import { lensCommand, lensHelpText } from "./commands/lens";
 import { lensesCommand } from "./commands/lenses";
 import { auditCommand } from "./commands/audit";
+import { searchCommand } from "./commands/search";
+import { exportCommand } from "./commands/export";
 import { defaultAuditPath } from "./paths";
 import { versionLine } from "./version";
 
@@ -67,13 +69,31 @@ Commands:
   audit                 Tail the append-only lens audit log
                         -n N           Last N records (default 20)
 
+  search <query>        Sparse FTS5 search over the local derived index
+                        --limit N      Max hits (default 20)
+                        --since D      Inclusive lower bound (YYYY-MM-DD / ISO)
+                        --until D      Inclusive upper bound
+                        --project P    Substring filter on project path
+                        --session ID   Exact session id
+                        --fts-only     Pure BM25 (skip recency RRF fusion)
+                        --json         Machine-readable hits
+
+  export <surface>      Durable snapshot of a local index surface
+                        surfaces: scan | status | usage | session
+                        --format json|csv|md  (default json)
+                        --output <path>  Write to file (default stdout)
+                        --project P    --since D  --until D
+                        --probe <name> (scan)  --model M (usage)
+                        --session <id> (session surface)
+                        --json         Alias for --format json
+
   --help, -h            Show this message
   --version, -V, version  Print package version and exit
 
-Privacy (dual posture): ingest, status, doctor, forget, scan, and usage NEVER
-egress — local only. The ONLY egress is opt-in lens: each \`speculum lens\` command
-sends a scrubbed slice to the model the local amore configuration routes to.
-Scrub fails closed; every invocation is audited. Audit log: ${defaultAuditPath()}
+Privacy (dual posture): ingest, status, doctor, forget, scan, search, export,
+and usage NEVER egress — local only. The ONLY egress is opt-in lens: each \`speculum lens\`
+command sends a scrubbed slice to the model the local amore configuration routes
+to. Scrub fails closed; every invocation is audited. Audit log: ${defaultAuditPath()}
 
 Probe rates are heuristic — pattern banks are unvalidated on this corpus.
 `);
@@ -90,6 +110,8 @@ const COMMANDS: Record<string, (args: string[]) => Promise<void>> = {
   forget: forgetCommand,
   scan: scanCommand,
   usage: usageCommand,
+  search: searchCommand,
+  export: exportCommand,
   lens: lensCommand,
   lenses: lensesCommand,
   audit: auditCommand,
