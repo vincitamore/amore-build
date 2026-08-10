@@ -5,6 +5,7 @@
 
 import { ingestCommand } from "./commands/ingest";
 import { statusCommand } from "./commands/status";
+import { doctorCommand } from "./commands/doctor";
 import { forgetCommand } from "./commands/forget";
 import { scanCommand } from "./commands/scan";
 import { usageCommand } from "./commands/usage";
@@ -31,17 +32,22 @@ Commands:
   status                Corpus counts, ingest freshness, probe registry
                         --json
 
+  doctor                Operational health checks on the local index
+                        --json
+
   forget <session-prefix>
                         Delete one session's rows from the index completely
                         and mark its source forgotten (disk files untouched)
                         --json
 
-  scan                  Run heuristic probes over the index
+  scan                  Run heuristic probes over the index (local only)
                         --probe <name> Limit to one probe
                         --project P    Filter by project path
                         --since D      ISO / YYYY-MM-DD floor
                         --until D      ISO / YYYY-MM-DD ceiling
-                        --json
+                        --hits         Print probe hit evidence on TTY
+                        --verbose      Same as --hits
+                        --json         Machine-readable (includes hits)
 
   usage                 Per-model token and turn aggregation (no prices)
                         --since D      Inclusive lower bound
@@ -49,7 +55,7 @@ Commands:
                         --model M      Substring filter on model id
                         --json
 
-  lens <name>           Agentic lens over a scrubbed session slice (egress)
+  lens <name>           ONLY egress: agentic lens over a scrubbed session slice
                         --dry-run      Selection + scrub + audit; no model call
                         See: speculum lens --help
 
@@ -61,10 +67,10 @@ Commands:
   --help, -h            Show this message
   --version, -V, version  Print package version and exit
 
-Privacy: probes, ingest, status, forget, and usage are local only. Lenses are
-opt-in egress: each \`speculum lens\` command sends a scrubbed slice to the
-model the local amore configuration routes to. The scrubber fails closed.
-Audit log: ${defaultAuditPath()}
+Privacy (dual posture): ingest, status, doctor, forget, scan, and usage NEVER
+egress — local only. The ONLY egress is opt-in lens: each \`speculum lens\` command
+sends a scrubbed slice to the model the local amore configuration routes to.
+Scrub fails closed; every invocation is audited. Audit log: ${defaultAuditPath()}
 
 Probe rates are heuristic — pattern banks are unvalidated on this corpus.
 `);
@@ -77,6 +83,7 @@ function printVersion(): void {
 const COMMANDS: Record<string, (args: string[]) => Promise<void>> = {
   ingest: ingestCommand,
   status: statusCommand,
+  doctor: doctorCommand,
   forget: forgetCommand,
   scan: scanCommand,
   usage: usageCommand,
