@@ -31,6 +31,8 @@ import {
   lightnessStatusLabel,
   budgetMapCanvasRows,
   clampMapLegendEntries,
+  eventToCanvasCell,
+  eventToCanvasSubpixel,
   mapCanvasBodyRows,
   mapCanvasTooSmall,
   mapFitPadding,
@@ -817,6 +819,70 @@ describe('time axis (timeline mode)', () => {
     // host too small → 0, never negative
     expect(budgetMapCanvasRows(5, 0, 5)).toBe(0);
     expect(budgetMapCanvasRows(4, 0, 5)).toBe(0);
+  });
+
+  test('eventToCanvasCell: screen-absolute event → local cell (shared draw/hit origin)', () => {
+    // Isolated canvas at terminal origin — identity transform.
+    expect(eventToCanvasCell({ x: 5, y: 3 }, { x: 0, y: 0 })).toEqual({ cellX: 5, cellY: 3 });
+    // Nested under Sessions chrome (round-1 lesson): canvas at (3, 9).
+    // Click on local cell (5, 2) arrives as screen event (8, 11).
+    expect(eventToCanvasCell({ x: 8, y: 11 }, { x: 3, y: 9 })).toEqual({ cellX: 5, cellY: 2 });
+    // Top-left of nested canvas
+    expect(eventToCanvasCell({ x: 3, y: 9 }, { x: 3, y: 9 })).toEqual({ cellX: 0, cellY: 0 });
+    // Subpixel center for pan/zoom anchors
+    expect(eventToCanvasSubpixel({ x: 8, y: 11 }, { x: 3, y: 9 })).toEqual({
+      x: 5 * 2 + 1,
+      y: 2 * 4 + 2,
+    });
+  });
+
+  test('event wiring: nested origin + legend/node hit use the same transform', () => {
+    const origin = { x: 3, y: 9 }; // nested Sessions residual
+    const legend = [
+      {
+        glyph: '─',
+        label: 'parentage',
+        count: 1,
+        color: { r: 160, g: 168, b: 180 },
+        hidden: false,
+        depth: 0 as const,
+        expandable: false,
+        expanded: false,
+        partial: false,
+      },
+      {
+        glyph: '→',
+        label: 'resumed',
+        count: 2,
+        color: { r: 160, g: 168, b: 180 },
+        hidden: false,
+        depth: 0 as const,
+        expandable: false,
+        expanded: false,
+        partial: false,
+      },
+    ];
+    const cols = 40;
+    const drawn = clampMapLegendEntries(legend, 10, { reserveAxis: true });
+    const x0 = mapLegendX0(drawn, cols);
+    // Screen event on first legend row mid-label
+    const legEvent = { x: origin.x + x0 + 3, y: origin.y + 0 };
+    const legCell = eventToCanvasCell(legEvent, origin);
+    expect(mapLegendHitAt(drawn, cols, drawn.length, legCell.cellX, legCell.cellY)).toEqual({
+      kind: 'toggle',
+      label: 'parentage',
+    });
+    // Click left of legend (world zone) falls through
+    const worldEvent = { x: origin.x + 2, y: origin.y + 2 };
+    const worldCell = eventToCanvasCell(worldEvent, origin);
+    expect(
+      mapLegendHitAt(drawn, cols, drawn.length, worldCell.cellX, worldCell.cellY),
+    ).toBe(null);
+    // Node sitting at local cell (2, 2) — screen event must hit after transform
+    const nodes = [{ id: 'n1', x: 2 * 2 + 1, y: 2 * 4 + 2 }];
+    expect(hitTestSession(nodes, worldCell.cellX, worldCell.cellY)).toBe('n1');
+    // Without transform (raw screen as cell) — the classic round-3 miss
+    expect(hitTestSession(nodes, worldEvent.x, worldEvent.y)).toBe(null);
   });
 
   test('map legend overlay geometry: right-aligned, clamp, hit-test shared with draw', () => {

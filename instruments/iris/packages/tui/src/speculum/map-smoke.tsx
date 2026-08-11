@@ -14,10 +14,12 @@ import { renderView } from '../render/graph';
 import {
   budgetMapCanvasRows,
   buildMapLegendRows,
+  clampMapLegendEntries,
   buildSessionWorld,
   DEFAULT_ALLOWED_AGENTS,
   DEFAULT_ALLOWED_ORIGINS,
   deriveAxisTicks,
+  eventToCanvasCell,
   filterSessionsByPopulation,
   formatLinksStatus,
   formatMapLegendLine,
@@ -25,6 +27,8 @@ import {
   layoutAxisStrip,
   LEGEND_MAX_ROWS,
   mapCanvasBodyRows,
+  mapLegendHitAt,
+  mapLegendX0,
   selectDrawnLinks,
   sessionLabel,
   sessionWorldToGraph,
@@ -675,6 +679,45 @@ if (worldNodes.length > 0) {
 
 log(`seeded title field present`, seeded.every((r) => typeof r.title === 'string'));
 
+// Hit-test wiring table (operator-size origin ≈ 0,0 for isolated smoke).
+{
+  const origin = { x: 0, y: 0 };
+  const leg = clampMapLegendEntries(legend, 20, { reserveAxis: true });
+  const x0 = mapLegendX0(leg, 80);
+  console.log('--- HIT TABLE operator (origin 0,0) ---');
+  const rows: { event: string; cell: string; hit: string }[] = [
+    {
+      event: `e(${x0 + 2},0)`,
+      cell: (() => {
+        const c = eventToCanvasCell({ x: x0 + 2, y: 0 }, origin);
+        return `${c.cellX},${c.cellY}`;
+      })(),
+      hit: mapLegendHitAt(leg, 80, leg.length, x0 + 2, 0)?.label ?? 'null',
+    },
+    {
+      event: 'e(2,5)',
+      cell: (() => {
+        const c = eventToCanvasCell({ x: 2, y: 5 }, origin);
+        return `${c.cellX},${c.cellY}`;
+      })(),
+      hit:
+        mapLegendHitAt(leg, 80, leg.length, 2, 5)?.label ??
+        hitTestSession(
+          screenNodes.map((n) => ({ id: n.id, x: n.x, y: n.y })),
+          2,
+          5,
+        ) ??
+        'null',
+    },
+  ];
+  for (const r of rows) console.log(`  ${r.event} → cell(${r.cell}) → ${r.hit}`);
+  log(
+    'operator hit table: legend cell toggles parentage',
+    rows[0]!.hit === 'parentage',
+  );
+  console.log('--- END HIT TABLE operator ---');
+}
+
 renderer.destroy();
 
 // ── 5. Tight profile 100×30 nested under Sessions-like chrome ───────────────
@@ -769,6 +812,51 @@ log(
   `tight 100x30 has showing or too-small status`,
   tightHasShowing || tightTooSmall,
 );
+
+// Nested hit table: canvas NOT at origin — without eventToCanvasCell every hit misses.
+{
+  const origin = { x: 3, y: 9 }; // typical nested residual (Sessions chrome above)
+  const leg = clampMapLegendEntries(legend, tightCanvasRows, { reserveAxis: true });
+  const x0 = mapLegendX0(leg, 80);
+  console.log('--- HIT TABLE tight nested (origin 3,9) ---');
+  const cases = [
+    {
+      name: 'legend row0 mid',
+      e: { x: origin.x + x0 + 3, y: origin.y + 0 },
+      expect: 'parentage',
+    },
+    {
+      name: 'left of legend (world zone)',
+      e: { x: origin.x + 1, y: origin.y + 2 },
+      expect: null as string | null,
+    },
+    {
+      name: 'raw screen as cell (BUG shape)',
+      e: { x: origin.x + x0 + 3, y: origin.y + 0 },
+      rawBug: true,
+      expect: null as string | null,
+    },
+  ];
+  for (const c of cases) {
+    if (c.rawBug) {
+      // Feeding screen coords as cells (pre–fix-round-3) misses the legend.
+      const miss = mapLegendHitAt(leg, 80, leg.length, c.e.x, c.e.y);
+      console.log(`  ${c.name}: raw(${c.e.x},${c.e.y}) → ${miss?.label ?? 'null'} (expect null miss)`);
+      log(`tight nested raw-screen miss:${miss == null}`, miss == null);
+    } else {
+      const cell = eventToCanvasCell(c.e, origin);
+      const hit = mapLegendHitAt(leg, 80, leg.length, cell.cellX, cell.cellY);
+      console.log(
+        `  ${c.name}: e(${c.e.x},${c.e.y}) → cell(${cell.cellX},${cell.cellY}) → ${hit?.label ?? 'null'}`,
+      );
+      log(
+        `tight nested ${c.name}:${hit?.label ?? 'null'}`,
+        (hit?.label ?? null) === c.expect,
+      );
+    }
+  }
+  console.log('--- END HIT TABLE tight nested ---');
+}
 
 tightRt.renderer.destroy();
 

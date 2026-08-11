@@ -61,6 +61,8 @@ import {
   layoutAxisStrip,
   legendToggleTarget,
   lightnessStatusLabel,
+  eventToCanvasCell,
+  eventToCanvasSubpixel,
   mapCanvasBodyRows,
   mapCanvasTooSmall,
   mapFitPadding,
@@ -75,6 +77,7 @@ import {
   sessionWorldToGraph,
   ZOOM_TIER_MIN,
   type MapAgent,
+  type MapCanvasOrigin,
   type MapEdgeKind,
   type MapLightness,
   type MapMode,
@@ -704,6 +707,11 @@ export function MapStage({
 
   const gridRef = useRef(grid);
   gridRef.current = grid;
+  /**
+   * Screen origin of the canvas element at last paint — the single number both
+   * blit and every mouse path share (via eventToCanvasCell).
+   */
+  const canvasOriginRef = useRef<MapCanvasOrigin>({ x: 0, y: 0 });
 
   // Keep-mounted stages load while parent height is 0; when the stage becomes
   // active (or the residual host settles), bump paintGen so renderAfter rebinds.
@@ -716,11 +724,9 @@ export function MapStage({
   }, [inputActive, rows, cols, soft.kind, stageBox.width, stageBox.height]);
 
   /**
-   * Canvas blit. OpenTUI invokes renderAfter as `fn.call(renderable, buffer)` and
-   * setCell on the root buffer is screen-absolute — so we MUST offset by the
-   * element's `_screenX/_screenY`. Blitting at (0,0) only looks correct when the
-   * canvas sits at the terminal origin (isolated smoke); nested under Sessions
-   * the map sits lower and a (0,0) blit vanishes (blank canvas under showing-N).
+   * Canvas blit. OpenTUI setCell is screen-absolute on the root buffer; paint the
+   * local grid at the element's `_screenX/_screenY` and STASH that origin so
+   * mouse handlers convert event coords with the same numbers.
    */
   const draw = useCallback(
     function mapDraw(
@@ -730,18 +736,30 @@ export function MapStage({
       if (rows <= 0 || cols <= 0) return;
       const ox = Math.max(0, Math.floor(this?._screenX ?? 0));
       const oy = Math.max(0, Math.floor(this?._screenY ?? 0));
+      canvasOriginRef.current = { x: ox, y: oy };
       blitGrid(buffer, gridRef.current, ox, oy, cols, rows);
     } as (buffer: DrawBuffer) => void,
     [cols, rows, grid, paintGen, inputActive],
   );
 
+  /** Event (screen cells) → canvas-local cell via the last paint origin. */
+  const toCell = useCallback((e: MouseLike) => {
+    return eventToCanvasCell(e, canvasOriginRef.current);
+  }, []);
+
+  /** Event → canvas sub-pixel center for pan/zoom anchors. */
+  const toSub = useCallback((e: MouseLike) => {
+    return eventToCanvasSubpixel(e, canvasOriginRef.current);
+  }, []);
+
   const hitTest = useCallback(
     (cellX: number, cellY: number): string | null => {
       // Axis strip is not a hit target.
       if (hasAxis && cellY >= bodyRows) return null;
+      if (cellX < 0 || cellY < 0 || cellX >= cols || cellY >= rows) return null;
       return hitTestSession(screenNodes, cellX, cellY);
     },
-    [screenNodes, hasAxis, bodyRows],
+    [screenNodes, hasAxis, bodyRows, cols, rows],
   );
 
   /** Overlay hit — same geometry as paintMapLegendOntoGrid (clamped drawn rows). */
@@ -802,8 +820,6 @@ export function MapStage({
     [sessions, onOpenSession],
   );
 
-  const sub = useCallback((e: MouseLike) => ({ x: e.x * 2 + 1, y: e.y * 4 + 2 }), []);
-
   useKeyboard((key: { name?: string; sequence?: string }) => {
     if (!inputActive) return;
     const n = (key.name ?? '').toLowerCase().replace('arrow', '');
@@ -855,15 +871,16 @@ export function MapStage({
 
   const onMouseDown = useCallback(
     (e: MouseLike) => {
+      const s = toSub(e);
       dragRef.current = {
-        anchorWorld: screenToWorld(sub(e), vp, width, bodyHeight),
+        anchorWorld: screenToWorld(s, vp, width, bodyHeight),
         scale: vp.scale,
         startX: e.x,
         startY: e.y,
         moved: false,
       };
     },
-    [vp, width, bodyHeight, sub],
+    [vp, width, bodyHeight, toSub],
   );
 
   const onMouseDrag = useCallback(
@@ -871,10 +888,10 @@ export function MapStage({
       const d = dragRef.current;
       if (!d) return;
       if (e.x !== d.startX || e.y !== d.startY) d.moved = true;
-      const s = sub(e);
+      const s = toSub(e);
       setViewport(anchorViewport(d.anchorWorld, d.scale, s.x, s.y, width, bodyHeight));
     },
-    [width, bodyHeight, sub],
+    [width, bodyHeight, toSub],
   );
 
   const onMouseUp = useCallback(
@@ -882,27 +899,30 @@ export function MapStage({
       const d = dragRef.current;
       dragRef.current = null;
       if (d && !d.moved && (e.button ?? 0) === 0) {
+        // ONE transform: screen event → canvas cell (same origin as blit).
+        const { cellX, cellY } = toCell(e);
         // Legend overlay first (shared geometry with draw) — then world hit-test.
-        const leg = legendHit(e.x, e.y);
+        const leg = legendHit(cellX, cellY);
         if (leg) {
           toggleLegendKey(leg.label);
           return;
         }
-        const hit = hitTest(e.x, e.y);
+        const hit = hitTest(cellX, cellY);
         if (hit && hit === selected) openSelected(hit);
         else setSelected(hit);
       }
     },
-    [legendHit, toggleLegendKey, hitTest, selected, openSelected],
+    [toCell, legendHit, toggleLegendKey, hitTest, selected, openSelected],
   );
 
   const onMouseMove = useCallback(
     (e: MouseLike) => {
       if (dragRef.current) return;
-      const hit = hitTest(e.x, e.y);
+      const { cellX, cellY } = toCell(e);
+      const hit = hitTest(cellX, cellY);
       setHovered((h) => (h === hit ? h : hit));
     },
-    [hitTest],
+    [toCell, hitTest],
   );
 
   const onMouseScroll = useCallback(
@@ -912,10 +932,10 @@ export function MapStage({
       if (!dir && e.button === 4) dir = 'up';
       if (!dir && e.button === 5) dir = 'down';
       if (!dir) return;
-      const s = sub(e);
+      const s = toSub(e);
       setViewport(zoomViewportAt(vp, dir === 'up' ? 1.2 : 1 / 1.2, s.x, s.y, width, bodyHeight));
     },
-    [vp, width, bodyHeight, sub],
+    [vp, width, bodyHeight, toSub],
   );
 
   const rowW = Math.max(16, stageBox.width - MAP_PANEL_PAD_COLS);

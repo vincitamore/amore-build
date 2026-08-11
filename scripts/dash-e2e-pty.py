@@ -1311,6 +1311,48 @@ def run_drive(
             + " · legend edge kinds",
         )
 
+        # SGR mouse click on the legend's parentage row must produce an
+        # OBSERVABLE toggle (dimmed row glyph or a changed drawn count) —
+        # mere row presence after the click is what a dead click looks like.
+        leg_row = None
+        leg_col = None
+        for li, line in enumerate(map_text.splitlines()):
+            m = re.search(r"parentage\s*\(\d+\)", line)
+            if m:
+                leg_row = li + 1  # 1-based for SGR
+                leg_col = m.start() + 1
+                break
+        if leg_row and leg_col:
+            pre_drawn = re.search(r"links\s+(\d+)/(\d+)", map_text)
+            drive.send(f"\x1b[<0;{leg_col};{leg_row}M")
+            drive.send(f"\x1b[<0;{leg_col};{leg_row}m")
+            drive.pump(0.6)
+            after = drive.frame_text()
+            dump_step("02-map-legend-click", after, drive.screen, ctx)
+            post_drawn = re.search(r"links\s+(\d+)/(\d+)", after)
+            dimmed = bool(re.search(r"[○─]\s*parentage", after))
+            drawn_changed = bool(
+                pre_drawn
+                and post_drawn
+                and pre_drawn.group(1) != post_drawn.group(1)
+            )
+            sheet.check(
+                "map_legend_mouse_toggle",
+                dimmed or drawn_changed,
+                f"dimmed={dimmed} drawn {pre_drawn.group(1) if pre_drawn else '?'}"
+                f"->{post_drawn.group(1) if post_drawn else '?'}",
+            )
+            # Toggle back so later steps see the default population.
+            drive.send(f"\x1b[<0;{leg_col};{leg_row}M")
+            drive.send(f"\x1b[<0;{leg_col};{leg_row}m")
+            drive.pump(0.4)
+        else:
+            sheet.check(
+                "map_legend_mouse_toggle",
+                False,
+                "parentage legend row not found in frame",
+            )
+
         # ── 2b. m → Microscope (redesigned two-pane; title-first picker) ────
         print("\n── 2b. m → Microscope ──")
         drive.send("m")

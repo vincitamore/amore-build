@@ -796,6 +796,42 @@ export function mapLegendHitAt(
   return { kind: 'toggle', label: e.label };
 }
 
+// ── Event ↔ canvas cell (shared draw/hit geometry) ───────────────────────────
+// OpenTUI mouse events carry SCREEN-ABSOLUTE cell coords (the same space used
+// for hit-grid dispatch and for setCell on the root buffer). The map paints a
+// LOCAL grid then blits at (_screenX, _screenY). Every mouse path must convert
+// event → local canvas cell with the SAME origin the blit used.
+
+/** Screen-cell origin of the map canvas (from the renderable at paint time). */
+export type MapCanvasOrigin = { x: number; y: number };
+
+/**
+ * Convert an OpenTUI mouse event (screen-absolute cells) into canvas-local
+ * cell coordinates. Draw-space and hit-space both use this origin so they
+ * cannot silently diverge.
+ */
+export function eventToCanvasCell(
+  e: { x: number; y: number },
+  origin: MapCanvasOrigin,
+): { cellX: number; cellY: number } {
+  return {
+    cellX: Math.floor(e.x) - Math.floor(origin.x),
+    cellY: Math.floor(e.y) - Math.floor(origin.y),
+  };
+}
+
+/**
+ * Event → canvas sub-pixel center (matches GraphView `cell*2+1` / `cell*4+2`
+ * contract after the origin transform). Used for pan/zoom anchors.
+ */
+export function eventToCanvasSubpixel(
+  e: { x: number; y: number },
+  origin: MapCanvasOrigin,
+): { x: number; y: number } {
+  const { cellX, cellY } = eventToCanvasCell(e, origin);
+  return { x: cellX * 2 + 1, y: cellY * 4 + 2 };
+}
+
 /**
  * Paint legend rows into a cell grid (local coords). Overwrites world glyphs under
  * the overlay block. Caller blits the grid with the screen-origin offset.
