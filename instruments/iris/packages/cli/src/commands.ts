@@ -3,7 +3,7 @@ import { isAbsolute, join } from 'node:path';
 import * as regula from '@amore/regula';
 import { type ParsedArgs, csv, str } from './contract';
 import { EXIT } from './contract';
-import { daemonGet } from './daemon';
+import { daemonGet, stopDaemon } from './daemon';
 import * as athanor from './athanor';
 import * as edges from './edges';
 import * as lucerna from './lucerna';
@@ -643,6 +643,23 @@ export const COMMANDS: CommandSpec[] = [
     booleanFlags: [],
     flags: {},
     run: ({ orgRoot, args }) => regula.getReminder(orgRoot, requireRef(args, 'reminder get')),
+  },
+
+  // ── daemon lifecycle ──
+  {
+    name: 'stop',
+    summary:
+      'Stop the iris daemon: read pidfile, verify identity via GET /api/daemon/status (pid + org_root + service), then signal',
+    isWrite: false,
+    booleanFlags: [],
+    flags: {},
+    run: async ({ orgRoot }) => {
+      const result = await stopDaemon(orgRoot);
+      if (!result.ok) {
+        throw new regula.RegulaError('CONFLICT', result.error);
+      }
+      return result as unknown as Record<string, unknown>;
+    },
   },
 
   // ── daemon reads (index / graph / search over HTTP) ──

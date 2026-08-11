@@ -127,6 +127,12 @@ test('search rejects an invalid --mode before any daemon call', () => {
   ).rejects.toThrow(/mode/);
 });
 
+test('stop resolves as a read (daemon lifecycle) verb', () => {
+  const spec = resolveOk(['stop']);
+  expect(spec.name).toBe('stop');
+  expect(spec.isWrite).toBe(false);
+});
+
 test('lucerna verbs resolve to the right spec', () => {
   expect(resolveOk(['lucerna', 'status']).name).toBe('lucerna status');
   expect(resolveOk(['lucerna', 'log']).name).toBe('lucerna log');

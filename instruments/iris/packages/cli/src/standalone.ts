@@ -72,6 +72,7 @@ function help(): void {
       'iris — Amore control surface (compiled binary)',
       '',
       '  iris daemon [--port N] [org_root]  start the index/read daemon',
+      '  iris stop                          stop daemon (pidfile + verified identity)',
       '  iris status|task|inbox|…           org verbs (regula + daemon reads)',
       '  iris regula <verb>                 explicit regula passthrough',
       '  iris commands [--json]             capability manifest',

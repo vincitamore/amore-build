@@ -156,14 +156,26 @@ function main(): void {
     search: { fuzzyMatch, search },
   };
 
-  startServer(deps);
+  // Watcher is started after the server so SIGTERM/SIGINT (installed in
+  // startServer) can tear it down via beforeStop before unlinking the pidfile.
+  let watcher: { stop(): void } | null = null;
+  const started = startServer(deps, {
+    beforeStop: () => {
+      try {
+        watcher?.stop();
+      } catch {
+        /* best-effort */
+      }
+    },
+  });
   console.log(`[daemon] listening on http://127.0.0.1:${config.port} (org root: ${orgRoot})`);
+  console.log(`[daemon] pidfile ${started.runtimeDir}/iris.pid pid=${process.pid}`);
 
   // First client has repointed to this daemon → the ratified trigger to keep the
   // (formerly boot-frozen) index live. One admission filter: every watcher event
   // routes through the same shouldExclude the walk uses (core/watcher.ts).
   if (!args.noWatch) {
-    startWatcher(index, orgRoot);
+    watcher = startWatcher(index, orgRoot);
     console.log(`[daemon] watching ${orgRoot} for changes`);
   }
 }

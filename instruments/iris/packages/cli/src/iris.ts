@@ -36,6 +36,7 @@ function help(): void {
       "  iris <regula-verb>   any regula verb (task, inbox, …)",
       "  iris regula <verb>   explicit regula passthrough",
       "  iris daemon [--port N]  start house iris daemon (default 3853)",
+      "  iris stop               stop daemon (pidfile + verified /api/daemon/status identity)",
       "  iris --version",
       "  iris --help",
       "",

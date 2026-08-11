@@ -149,10 +149,21 @@ jobs:
           ORG=$(mktemp -d)
           printf '%s\n' '# AGENTS' > "$ORG/AGENTS.md"
           mkdir -p "$ORG/tasks"
+          IRIS_HOME=$(mktemp -d)
+          export IRIS_HOME
+          export IRIS_ORG_ROOT="$ORG"
+          export IRIS_PORT="$PORT"
+          export IRIS_QMD_NO_REFRESH=1
 
           "$BIN" daemon --port "$PORT" --no-watch "$ORG" &
           PID=$!
-          cleanup() { kill "$PID" 2>/dev/null || true; wait "$PID" 2>/dev/null || true; rm -rf "$ORG"; }
+          cleanup() {
+            if kill -0 "$PID" 2>/dev/null; then
+              kill "$PID" 2>/dev/null || true
+              wait "$PID" 2>/dev/null || true
+            fi
+            rm -rf "$ORG" "$IRIS_HOME"
+          }
           trap cleanup EXIT
 
           ok=0
@@ -169,12 +180,42 @@ jobs:
           grep -q '"status"' /tmp/iris-health.json || grep -q ok /tmp/iris-health.json
           echo "smoke: health 200 ok ($(cat /tmp/iris-health.json))"
 
-          # Clean shutdown
-          kill "$PID"
+          # Lifecycle: status identity → iris stop → process gone → pidfile removed
+          code=$(curl -s -o /tmp/iris-daemon-status.json -w "%{http_code}" "http://127.0.0.1:${PORT}/api/daemon/status" || true)
+          if [ "$code" != "200" ]; then
+            echo "FAIL: /api/daemon/status http $code"
+            exit 1
+          fi
+          grep -q '"service":"iris-bun-daemon"' /tmp/iris-daemon-status.json \
+            || grep -q '"service": "iris-bun-daemon"' /tmp/iris-daemon-status.json
+          grep -q '"pid"' /tmp/iris-daemon-status.json
+          grep -q '"org_root"' /tmp/iris-daemon-status.json
+          echo "smoke: daemon status ok ($(cat /tmp/iris-daemon-status.json))"
+
+          PIDFILE="$IRIS_HOME/iris.pid"
+          test -f "$PIDFILE" || { echo "FAIL: missing pidfile $PIDFILE"; ls -la "$IRIS_HOME" || true; exit 1; }
+          echo "smoke: pidfile=$(cat "$PIDFILE")"
+
+          "$BIN" stop --json | tee /tmp/iris-stop.json
+          grep -q '"ok": *true' /tmp/iris-stop.json
+          echo "smoke: iris stop ok"
+
+          for i in $(seq 1 40); do
+            if ! kill -0 "$PID" 2>/dev/null; then break; fi
+            sleep 0.25
+          done
+          if kill -0 "$PID" 2>/dev/null; then
+            echo "FAIL: daemon pid $PID still alive after iris stop"
+            exit 1
+          fi
           wait "$PID" 2>/dev/null || true
+          if [ -f "$PIDFILE" ]; then
+            echo "FAIL: pidfile still present after stop: $PIDFILE"
+            exit 1
+          fi
           trap - EXIT
-          rm -rf "$ORG"
-          echo "smoke: daemon shutdown ok"
+          rm -rf "$ORG" "$IRIS_HOME"
+          echo "smoke: daemon lifecycle ok (stop + pidfile cleared)"
 
       - name: Smoke (windows) — help, regula JSON, daemon health
         if: runner.os == 'Windows'
@@ -207,6 +248,13 @@ jobs:
           $org = Join-Path $env:RUNNER_TEMP "iris-ci-org-$port"
           New-Item -ItemType Directory -Force -Path (Join-Path $org "tasks") | Out-Null
           Set-Content -Path (Join-Path $org "AGENTS.md") -Value "# AGENTS" -Encoding utf8
+          $irisHome = Join-Path $env:RUNNER_TEMP "iris-ci-home-$port"
+          New-Item -ItemType Directory -Force -Path $irisHome | Out-Null
+          $env:IRIS_HOME = $irisHome
+          $env:IRIS_ORG_ROOT = $org
+          $env:IRIS_PORT = "$port"
+          $env:IRIS_QMD_NO_REFRESH = "1"
+          Remove-Item Env:IRIS_URL -ErrorAction SilentlyContinue
 
           $proc = Start-Process -FilePath (Resolve-Path $bin).Path `
             -ArgumentList @("daemon", "--port", "$port", "--no-watch", $org) `
@@ -228,11 +276,39 @@ jobs:
               }
             }
             if (-not $healthOk) { throw "daemon health did not return 200 on port $port" }
+
+            # Lifecycle: status identity → iris stop → process gone → pidfile removed
+            $statusResp = Invoke-WebRequest -Uri "http://127.0.0.1:${port}/api/daemon/status" -UseBasicParsing -TimeoutSec 2
+            if ($statusResp.StatusCode -ne 200) { throw "daemon status http $($statusResp.StatusCode)" }
+            $status = $statusResp.Content | ConvertFrom-Json
+            if ($status.info.service -ne 'iris-bun-daemon') { throw "bad service $($status.info.service)" }
+            if (-not $status.info.pid) { throw "status missing pid" }
+            if (-not $status.info.org_root) { throw "status missing org_root" }
+            Write-Host "smoke: daemon status ok (pid=$($status.info.pid) org_root=$($status.info.org_root) service=$($status.info.service))"
+
+            $pidfile = Join-Path $irisHome "iris.pid"
+            if (-not (Test-Path $pidfile)) { throw "missing pidfile $pidfile" }
+            Write-Host "smoke: pidfile=$(Get-Content $pidfile -Raw)"
+
+            $stopJson = & $bin stop --json
+            if ($LASTEXITCODE -ne 0) { throw "iris stop exit=$LASTEXITCODE out=$stopJson" }
+            Write-Host "smoke: iris stop ok ($stopJson)"
+
+            for ($i = 0; $i -lt 40; $i++) {
+              if ($proc.HasExited) { break }
+              Start-Sleep -Milliseconds 250
+            }
+            if (-not $proc.HasExited) {
+              throw "daemon process still alive after iris stop (pid=$($proc.Id))"
+            }
+            if (Test-Path $pidfile) { throw "pidfile still present after stop: $pidfile" }
+            Write-Host "smoke: daemon lifecycle ok (stop + pidfile cleared)"
           } finally {
             if (-not $proc.HasExited) {
               Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
               try { $proc.WaitForExit(5000) } catch {}
             }
             if (Test-Path $org) { Remove-Item -Recurse -Force $org -ErrorAction SilentlyContinue }
+            if (Test-Path $irisHome) { Remove-Item -Recurse -Force $irisHome -ErrorAction SilentlyContinue }
           }
-          Write-Host "smoke: daemon shutdown ok"
+          Write-Host "smoke: windows lifecycle lane complete"

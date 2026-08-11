@@ -17,6 +17,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import type { DaemonDeps } from './contract.ts';
+import { clearPidFile, irisRuntimeDir, writePidFile } from './pidfile.ts';
 import { createQmdModule, startQmdRefreshWatch } from './proxies/qmd.ts';
 import { emptyStatus } from './routes/http.ts';
 import { health } from './routes/health.ts';
@@ -105,8 +106,21 @@ export function buildFetch(deps: DaemonDeps): (req: Request) => Response | Promi
 
 export interface StartedServer {
   server: ReturnType<typeof Bun.serve>;
-  /** Stop the HTTP server and any qmd refresh watch. */
+  /** Absolute runtime dir holding iris.pid. */
+  runtimeDir: string;
+  /** Stop the HTTP server, any qmd refresh watch, optional beforeStop, and unlink the pidfile. */
   stop(): void;
+}
+
+export interface StartServerOptions {
+  /** Override instrument-home runtime dir (tests / scratch). Default: irisRuntimeDir(). */
+  runtimeDir?: string;
+  /** Skip managed-qmd freshness watch (same as IRIS_QMD_NO_REFRESH=1). */
+  noRefresh?: boolean;
+  /** Extra cleanup run before server/qmd stop (e.g. index file watcher). */
+  beforeStop?: () => void;
+  /** When false, do not install SIGTERM/SIGINT handlers (tests). Default true. */
+  installSignalHandlers?: boolean;
 }
 
 /** Ensure deps carry a qmd module; start automatic freshness when not injected. */
@@ -119,19 +133,62 @@ export function wireQmd(deps: DaemonDeps, opts?: { noRefresh?: boolean }): Daemo
   return { ...deps, qmd: createQmdModule({}, refresh) };
 }
 
-/** Start Bun.serve on config.port with the wired deps. Returns the Bun server.
+/** Start Bun.serve on config.port with the wired deps.
  *
  *  Loopback-only by design: iris is a local-first instrument and its index is
  *  the org tree — Bun's default hostname is 0.0.0.0 (all interfaces), which
  *  would expose it to the LAN. Pinned, not configurable.
  *
+ *  Writes `{runtimeDir}/iris.pid` on start; SIGTERM/SIGINT and `stop()` clear it.
  *  When `deps.qmd` is absent, a default managed-qmd module is attached and a
  *  debounced freshness watch is started (disabled with IRIS_QMD_NO_REFRESH=1). */
-export function startServer(deps: DaemonDeps): ReturnType<typeof Bun.serve> {
-  const wired = wireQmd(deps);
-  return Bun.serve({
-    hostname: "127.0.0.1",
+export function startServer(deps: DaemonDeps, opts?: StartServerOptions): StartedServer {
+  const runtimeDir = opts?.runtimeDir ?? irisRuntimeDir();
+  const wired = wireQmd(deps, { noRefresh: opts?.noRefresh });
+  writePidFile(runtimeDir, process.pid);
+
+  const server = Bun.serve({
+    hostname: '127.0.0.1',
     port: wired.config.port,
     fetch: buildFetch(wired),
   });
+
+  let stopped = false;
+  const stop = (): void => {
+    if (stopped) return;
+    stopped = true;
+    try {
+      opts?.beforeStop?.();
+    } catch {
+      /* best-effort */
+    }
+    try {
+      server.stop(true);
+    } catch {
+      /* already closed */
+    }
+    try {
+      const refresh = wired.qmd?.refresh;
+      if (refresh && typeof (refresh as { stop?: () => void }).stop === 'function') {
+        (refresh as { stop: () => void }).stop();
+      }
+    } catch {
+      /* best-effort */
+    }
+    clearPidFile(runtimeDir);
+  };
+
+  if (opts?.installSignalHandlers !== false) {
+    let exiting = false;
+    const onSignal = (): void => {
+      if (exiting) return;
+      exiting = true;
+      stop();
+      process.exit(0);
+    };
+    process.on('SIGINT', onSignal);
+    process.on('SIGTERM', onSignal);
+  }
+
+  return { server, runtimeDir, stop };
 }
