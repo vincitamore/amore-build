@@ -438,6 +438,7 @@ function isMissingIndexError(err: unknown): boolean {
 export function MicroscopeStage({
   inputActive,
   onFlash,
+  onCapture,
   jump,
   jumpKey,
   path,
@@ -445,6 +446,8 @@ export function MicroscopeStage({
 }: {
   inputActive?: boolean;
   onFlash?: (msg: string) => void;
+  /** Typing-context bridge: true while a text input owns the keys. */
+  onCapture?: (b: boolean) => void;
   /** Consume-once jump target (shell openSession spine). */
   jump?: MicroscopeJump | null;
   /** Nonce — bumps on each openSession so repeat jumps fire. */
@@ -454,6 +457,7 @@ export function MicroscopeStage({
   /** Residual host box from SessionsMember; optional for isolated stage smokes. */
   stageBox?: MeasuredSize;
 }) {
+  void onCapture;
   const t = usePalette();
   const dims = useStableDimensions();
   const stageBox = stageBoxProp ?? seedStageBox(dims.width, dims.height);

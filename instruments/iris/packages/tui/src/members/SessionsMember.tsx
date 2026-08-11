@@ -107,6 +107,7 @@ export function SessionsMember({
   const [lensPrefill, setLensPrefill] = useState<{ sessionId: string; key: number } | null>(null);
   const [actionsCapture, setActionsCapture] = useState(false);
   const [searchCapture, setSearchCapture] = useState(false);
+  const [microscopeCapture, setMicroscopeCapture] = useState(false);
   const [flash, setFlash] = useFlash();
   const aliveRef = useRef(true);
   const lastFocusKey = useRef<number | undefined>(undefined);
@@ -137,8 +138,8 @@ export function SessionsMember({
 
   // Bridge stage/actions capture (search typing, lens picker, confirm) up to the shell.
   useEffect(() => {
-    onCapture?.(actionsCapture || searchCapture);
-  }, [actionsCapture, searchCapture, onCapture]);
+    onCapture?.(actionsCapture || searchCapture || microscopeCapture);
+  }, [actionsCapture, searchCapture, microscopeCapture, onCapture]);
   useEffect(() => () => onCapture?.(false), [onCapture]);
 
   // Jump spine: route a jump to the Microscope stage, which consumes it (consume-once —
@@ -155,7 +156,7 @@ export function SessionsMember({
   tickRender('SessionsMember');
 
   useKeyboard((key: { name?: string }) => {
-    if (!inputActive || actionsCapture || searchCapture) return;
+    if (!inputActive || actionsCapture || searchCapture || microscopeCapture) return;
     const n = (key.name ?? '').toLowerCase().replace('arrow', '');
     // Stage keys: plain letters (shell owns 1-9 / t v q / ctrl+n/p / s).
     if (n === 'p') {
@@ -293,6 +294,7 @@ export function SessionsMember({
           <MicroscopeStage
             inputActive={!!inputActive && stage === 'microscope' && !actionsCapture}
             onFlash={setFlash}
+            onCapture={setMicroscopeCapture}
             jump={focus}
             jumpKey={focusKey}
             stageBox={stageBox}
