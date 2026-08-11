@@ -47,6 +47,7 @@ use xai_grok_shell::leader::{
     ControlPayload, LeaderClient, LeaderEnvUrls, connect_or_spawn, socket_path_for_ws_url,
 };
 use xai_grok_update::{UpdateConfig, auto_update, enforce_version_policy_or_exit};
+mod update_outcome;
 /// Apply headless args to an existing config, only overriding values that are
 /// explicitly set. This allows environment defaults to be preserved when
 /// specific args are not provided.
@@ -2297,47 +2298,45 @@ async fn async_main(args: PagerArgs) -> Result<()> {
     match result {
         Ok(true) => {
             let adopted = bg_update_wait.lock().await.take();
-            if finish_update_on_exit(adopted, &update_config).await {
-                eprintln!("Update installed. Run `grok` to start.");
-            } else {
-                eprintln!("Update did not complete. Run `grok update` to retry.");
-            }
+            let outcome = finish_update_on_exit(adopted, &update_config).await;
+            let bin = xai_grok_pager::app::cli::resolved_bin_name();
+            eprintln!("{}", outcome.user_message(&bin));
             Ok(())
         }
         Ok(false) => Ok(()),
         Err(e) => Err(e),
     }
 }
-/// Complete the update after a quit-for-update (Ctrl+U) exit. Returns `true`
-/// when an update path completed without a reported failure.
+/// Complete the update after a quit-for-update (Ctrl+U) exit.
 ///
-/// Prefers awaiting the parked waiter for the background `grok update` child
-/// spawned at startup — the download is usually already done or in flight.
-/// Only when there is no waiter (spawn failed, or no download was needed
-/// because the target was already on disk) or the child failed does this
-/// fall back to a fresh blocking `grok update`, which itself resolves to
-/// "Already up to date" without downloading when the disk is current.
+/// Prefers awaiting the parked waiter for the background update child spawned
+/// at startup. On child exit 0, re-reads the on-disk version rather than
+/// trusting the exit code. When there is no waiter or the child failed, falls
+/// back to a blocking `run_update` and classifies its real `Result<Option<String>>`.
 async fn finish_update_on_exit(
     adopted: Option<tokio::task::JoinHandle<std::io::Result<std::process::ExitStatus>>>,
     update_config: &UpdateConfig,
-) -> bool {
-    let run_blocking = |reason: Option<String>| async move {
-        if let Some(reason) = reason {
-            eprintln!("{reason}");
+) -> update_outcome::UpdateOutcome {
+    let run_blocking = |reason: Option<String>| {
+        let mut cfg = update_config.clone();
+        async move {
+            if let Some(reason) = reason {
+                eprintln!("{reason}");
+            }
+            // Unconditional path: one-line re-point when self-update is re-enabled.
+            let result = auto_update::run_update(false, None, None, &mut cfg).await;
+            update_outcome::classify_run_update(result.map_err(|e| format!("{e:#}")))
         }
-        auto_update::run_update_if_available(
-            auto_update::UpdateRunMode::Blocking,
-            false,
-            update_config,
-        )
-        .await
-        .is_ok()
     };
     match adopted {
         Some(handle) => {
             eprintln!("Waiting for the update download to finish...");
             match handle.await {
-                Ok(Ok(status)) if status.success() => true,
+                Ok(Ok(status)) if status.success() => {
+                    let running = xai_grok_version::installed();
+                    let disk = xai_grok_update::version::installed_on_disk_version();
+                    update_outcome::classify_child(true, &running, disk.as_deref())
+                }
                 Ok(Ok(status)) => {
                     run_blocking(Some(format!(
                         "Background update exited with {status}; retrying..."
