@@ -14,6 +14,11 @@ import {
   type PolicyResult,
   type PolicyTable,
 } from "../policy";
+import {
+  formatSeriesLine,
+  runProbeSeries,
+  type SeriesGranularity,
+} from "../probes/series";
 import { readFileSync } from "node:fs";
 
 function opt(args: string[], name: string): string | undefined {
@@ -128,6 +133,22 @@ function printHumanResults(results: ProbeResult[], showHits: boolean): void {
   console.log("");
 }
 
+const SERIES_DEFAULT_WINDOWS = 12;
+const SERIES_MAX_WINDOWS = 52;
+
+function parseSeriesGranularity(raw: string | undefined): SeriesGranularity | null {
+  if (!raw) return null;
+  if (raw === "weekly" || raw === "daily") return raw;
+  return null;
+}
+
+function parseWindowsCount(raw: string | undefined): number {
+  if (!raw) return SERIES_DEFAULT_WINDOWS;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 1) return SERIES_DEFAULT_WINDOWS;
+  return Math.min(SERIES_MAX_WINDOWS, Math.floor(n));
+}
+
 export async function scanCommand(args: string[]): Promise<void> {
   const json = args.includes("--json");
   const showHits = args.includes("--hits") || args.includes("--verbose");
@@ -141,6 +162,24 @@ export async function scanCommand(args: string[]): Promise<void> {
   // Exit 1 on violations only when --policy is present (not report-only).
   const failOnViolations = policyTable !== null;
 
+  const seriesRaw = opt(args, "--series");
+  const seriesGranularity = parseSeriesGranularity(seriesRaw);
+
+  // Policy gates evaluate the corpus scan, not a windowed series.
+  if (seriesRaw !== undefined && wantPolicy) {
+    console.error(
+      "scan: --series cannot be combined with --policy / --policy-report",
+    );
+    process.exit(64);
+  }
+
+  if (seriesRaw !== undefined && seriesGranularity === null) {
+    console.error(
+      `scan: --series requires weekly|daily (got ${JSON.stringify(seriesRaw)})`,
+    );
+    process.exit(64);
+  }
+
   const project = opt(args, "--project");
   const sinceStr = opt(args, "--since");
   const untilStr = opt(args, "--until");
@@ -153,6 +192,44 @@ export async function scanCommand(args: string[]): Promise<void> {
 
   const db = openDb();
   try {
+    // ── Windowed series path ──────────────────────────────────────────
+    if (seriesGranularity) {
+      const windowCount = parseWindowsCount(opt(args, "--windows"));
+      const names = probeName ? [probeName] : listProbeNames();
+      if (probeName && !listProbeNames().includes(probeName)) {
+        console.error(
+          `unknown probe: ${probeName}\navailable: ${listProbeNames().join(", ")}`,
+        );
+        process.exit(1);
+      }
+
+      const seriesOpts = {
+        granularity: seriesGranularity,
+        windows: windowCount,
+        project: project || undefined,
+        until: untilStr ? new Date(untilStr) : undefined,
+      };
+
+      const series = runProbeSeries(db, names, seriesOpts);
+
+      if (json || !process.stdout.isTTY) {
+        console.log(JSON.stringify(series, null, 2));
+        return;
+      }
+
+      console.log("");
+      console.log(
+        `speculum scan --series ${seriesGranularity}  windows=${windowCount}`,
+      );
+      console.log("─".repeat(60));
+      for (const s of series) {
+        console.log(formatSeriesLine(s));
+      }
+      console.log("");
+      return;
+    }
+
+    // ── Standard scan path ────────────────────────────────────────────
     let results: ProbeResult[];
     if (probeName) {
       const one = runProbe(db, probeName, opts);
