@@ -1,4 +1,4 @@
-# Amore Build installer — Windows PowerShell.
+# Amore Build installer for Windows PowerShell.
 #
 #   irm https://amore.build/download/amore-install-ps1 | iex
 #
@@ -20,7 +20,7 @@ $artifact = 'amore-windows-x64'
 
 $arch = $env:PROCESSOR_ARCHITECTURE
 if ($arch -ne 'AMD64') {
-    Write-Error "No published build for Windows/$arch — build from source: https://github.com/$repo#build-from-source"
+    Write-Error "No published build for Windows/$arch. Build from source: https://github.com/$repo#build-from-source"
 }
 
 $installDir = if ($env:AMORE_INSTALL_DIR) { $env:AMORE_INSTALL_DIR } else { Join-Path $env:USERPROFILE 'amore\bin' }
@@ -102,7 +102,7 @@ try {
     $onPath = ($userPath -split ';' | Where-Object { $_.TrimEnd('\') -eq $installDir.TrimEnd('\') }).Count -gt 0
     if (-not $onPath) {
         [Environment]::SetEnvironmentVariable('Path', "$userPath;$installDir", 'User')
-        Write-Host "Added $installDir to your User PATH — open a new terminal to pick it up."
+        Write-Host "Added $installDir to your User PATH. Open a new terminal to pick it up."
     }
 } finally {
     Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
