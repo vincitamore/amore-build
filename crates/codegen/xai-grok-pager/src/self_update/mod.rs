@@ -6,6 +6,7 @@
 pub mod check;
 pub mod cmd;
 pub mod discover;
+pub mod fetch;
 pub mod origin;
 pub mod state;
 
