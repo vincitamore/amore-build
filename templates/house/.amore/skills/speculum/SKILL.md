@@ -1,6 +1,6 @@
 ---
 name: speculum
-description: "Speculum — a local mirror over your own Amore Build agent sessions. It walks ~/.amore/sessions, builds a rebuildable sqlite index (speculum.sqlite under ~/.amore/instruments/speculum/), runs heuristic probes (rage-rate, frustration-markers, tool-mix, stuck-loop, apology-rate, operator-correction, sensitive-content, stale-corpus) with Wilson 95% confidence intervals, and reports per-model token/turn usage. Local commands (ingest/status/forget/scan/usage) never call a model or open a socket. Optional lenses (session-postmortem, pattern-extraction, usage-story) send a scrubbed session slice through YOUR own amore configuration to the model that config routes to — opt-in by explicit `speculum lens <name>`; the scrubber fails closed (typed placeholders, 100 KB cap, refuse-over-send) and every invocation is recorded in an append-only audit log. Use when operating speculum: indexing sessions, running probes, reading usage, using or adding lenses, or checking what a session actually did. SKIP when the work is the org system itself (that is iris) or the amore fork (/amore-build)."
+description: "Speculum — a local mirror over your own Amore Build agent sessions. It walks ~/.amore/sessions, builds a rebuildable sqlite index (speculum.sqlite under ~/.amore/instruments/speculum/), runs heuristic probes (rage-rate, frustration-markers, tool-mix, stuck-loop, apology-rate, operator-correction, sensitive-content, stale-corpus) with Wilson 95% confidence intervals, and reports per-model token/turn usage. Local commands (ingest/sessions/status/forget/scan/usage) never call a model or open a socket. Optional lenses (session-postmortem, pattern-extraction, usage-story) send a scrubbed session slice through YOUR own amore configuration to the model that config routes to — opt-in by explicit `speculum lens <name>`; the scrubber fails closed (typed placeholders, 100 KB cap, refuse-over-send) and every invocation is recorded in an append-only audit log; `speculum summarize` is the only other egress, generating session titles from a scrubbed capped digest under the same fail-closed + audited discipline. Use when operating speculum: indexing sessions, running probes, reading usage, using or adding lenses, or checking what a session actually did. SKIP when the work is the org system itself (that is iris) or the amore fork (/amore-build)."
 allowed-tools: Read, Edit, Write, Glob, Grep, Bash
 ---
 
@@ -52,18 +52,20 @@ Compiled single-file binary: `bun run build:compile` → `dist/speculum-<os>-<ar
 
 | Command | Purpose |
 |---|---|
-| `speculum ingest` | Walk sessions, parse `updates.jsonl`, write sqlite (`--dry-run` walks only; `--full` rebuilds; prints stage timings/progress) |
+| `speculum ingest` | Walk sessions, parse `updates.jsonl`, write sqlite (`--dry-run` walks only; `--full` rebuilds; prints stage timings/progress). Rebuild also derives per-session facets (origin class, agent identity), annotations (phase, error density, probe hits, token rollups), and evidence-only cross-session links |
+| `speculum sessions` | List sessions with filters and paging: `--class`/`--agent`/`--project`/`--since`/`--until`/`--title`/`--sort`/`--limit`/`--offset`/`--count`; `--json` emits rows + total |
 | `speculum status` | Session/event counts, ingest freshness, probe registry |
 | `speculum doctor` | Operational health checks on the local index (db integrity, schema version, ingest freshness, probe registry) |
 | `speculum forget <prefix>` | Purge one session from the index (disk files untouched); append the purge to the `forget-audit.jsonl` ledger |
-| `speculum scan` | Run all probes (or `--probe <name>`), `--project`/`--since`/`--until` filtered; `--hits`/`--verbose` print hit evidence; `--policy [path]` exits 1 on threshold violations, `--policy-report` annotates |
+| `speculum scan` | Run all probes (or `--probe <name>`), `--project`/`--since`/`--until` filtered; `--hits`/`--verbose` print hit evidence; `--policy [path]` exits 1 on threshold violations, `--policy-report` annotates; `--series weekly\|daily [--windows N]` emits per-window rates with intervals (newest window partial) |
 | `speculum usage` | Per-model token and turn totals (no prices) |
 | `speculum search <query>` | Sparse FTS5 search over the index (BM25 + recency RRF); `--limit`/`--since`/`--until`/`--project`/`--session`/`--fts-only`; `--json` |
 | `speculum export <surface>` | Snapshot a surface (scan/status/usage/session) as `json`/`csv`/`md` with a metadata envelope + sensitive warning |
-| `speculum graph` | Query-time graph over the derived index: `summary`/`neighbors`/`path`/`degree`/`state-at` |
+| `speculum graph` | Query-time graph over the derived index: `summary`/`neighbors`/`path`/`degree`/`state-at`; `sessions` lists the durable cross-session links (resumed-from, shared-artifact) |
 | `speculum decisions` | Derived heuristic decisions + chain/impact over typed event links (method banner on every row) |
 | `speculum lenses` | List available lenses and their egress notes |
 | `speculum lens <name>` | Run a lens over a selected, scrubbed slice (`--dry-run` = selection+scrub+audit only) |
+| `speculum summarize` | Generate one-line titles for untitled sessions through your own amore configuration — opt-in egress like the lens: scrubbed capped digest, fail-closed, audited; `--dry-run` plans without calling; `--limit`/`--session`/`--all`/`--force`; titles persist across `--full` re-ingests |
 | `speculum audit [-n N]` | Tail the append-only lens audit log |
 
 Selection flags for lenses: `--session`, `--last-n`, `--project`, `--since` /
