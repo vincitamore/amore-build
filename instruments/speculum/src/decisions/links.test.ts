@@ -24,6 +24,7 @@ import {
   rebuildEventLinksAndDecisions,
   decisionId,
 } from "./index";
+import { isPlausibleArtifact, unescapeCandidateBlob } from "./links";
 
 const SESSION_ID = "bbbbbbbb-cccc-dddd-eeee-ffffffffffff";
 
@@ -73,13 +74,238 @@ function artifactCorpus() {
   ];
 }
 
-describe("links + decisions", () => {
-  test("extractArtifactIds pulls path fields from JSON tool_input", () => {
+describe("isPlausibleArtifact", () => {
+  // Escape residue, prose, dotted code refs, bare commons — must not become
+  // USED / GENERATED artifact identities.
+  const MUST_REJECT = [
+    "/ntriggered-by",
+    "/n/n",
+    "/npipeline",
+    "/n-",
+    "e.g",
+    "/n2.",
+    "/n/n---/n/n",
+    "/n3.",
+    "/n/n-",
+    "/n)",
+    "/n(",
+    "2.1",
+    "1.2",
+    "console.log",
+    "json.stringif",
+    "math.max",
+    "db.close",
+    "date.now",
+    "grok-4.5",
+    "/ counter-evidence",
+    "/n  -",
+    "/ open questions/n/n1.",
+    "/n        backgroundcolor",
+    "/ngit -c",
+    "/ search",
+    "/n/nthe",
+    "/ntry",
+    "g.width",
+    "color.sky500",
+    "rows.map",
+    "array.map",
+    "knowledge",
+    "inbox",
+    "..",
+    "/tmp",
+  ];
+
+  const MUST_KEEP = [
+    "package.json",
+    "readme.md",
+    "agents.md",
+    "schema.sql",
+    "context/current-state.md",
+    "shared/notes.md",
+    "c:/users/alexmoyer/documents/amore-build/instruments/speculum/src/store/schema.sql",
+    "../external/knowledge/readme.md",
+    ".amore/skills/tui/skill.md",
+    "instruments/speculum/src",
+    "c:/users/alexmoyer/documents/amore-build/instruments/speculum/src",
+    "search3.py",
+    "registry.tsx",
+    "where.exe",
+    "handle.exe",
+  ];
+
+  test("rejects escaped-newline fusions", () => {
+    for (const junk of [
+      "/ntriggered-by",
+      "/n/n",
+      "/npipeline",
+      "/n-",
+      "/n2.",
+      "/ntry",
+      "/n/nthe",
+    ]) {
+      expect(isPlausibleArtifact(junk)).toBe(false);
+    }
+  });
+
+  test("rejects prose fragments and spaced paths", () => {
+    for (const junk of [
+      "/ counter-evidence",
+      "/ open questions/n/n1.",
+      "/ search",
+      "knowledge",
+      "inbox",
+      "..",
+      "/tmp",
+    ]) {
+      expect(isPlausibleArtifact(junk)).toBe(false);
+    }
+  });
+
+  test("rejects dotted code refs and version tokens", () => {
+    for (const junk of [
+      "console.log",
+      "math.max",
+      "db.close",
+      "date.now",
+      "rows.map",
+      "array.map",
+      "g.width",
+      "color.sky500",
+      "e.g",
+      "2.1",
+      "1.2",
+      "grok-4.5",
+    ]) {
+      expect(isPlausibleArtifact(junk)).toBe(false);
+    }
+  });
+
+  test("rejects escape remnants and separator noise", () => {
+    for (const junk of [
+      "/n/n---/n/n",
+      "/n)",
+      "/n(",
+      "/n  -",
+      "/n        backgroundcolor",
+      "/ngit -c",
+      "json.stringif",
+    ]) {
+      expect(isPlausibleArtifact(junk)).toBe(false);
+    }
+  });
+
+  test("rejects the full must-reject bank", () => {
+    for (const junk of MUST_REJECT) {
+      expect(isPlausibleArtifact(junk)).toBe(false);
+    }
+  });
+
+  test("keeps real relative and absolute paths", () => {
+    for (const path of MUST_KEEP) {
+      expect(isPlausibleArtifact(path)).toBe(true);
+    }
+  });
+
+  test("keeps both slash styles after normalize", () => {
+    expect(isPlausibleArtifact(normalizeForCheck("src\\foo\\bar.ts"))).toBe(true);
+    expect(isPlausibleArtifact("src/foo/bar.ts")).toBe(true);
+  });
+
+  test("keeps dotted files with strong extensions", () => {
+    for (const path of ["package.json", "schema.sql", "app.tsx", "main.py", "lib.rs"]) {
+      expect(isPlausibleArtifact(path)).toBe(true);
+    }
+  });
+});
+
+/** Mirror normalizeArtifact for slash-style acceptance checks. */
+function normalizeForCheck(s: string): string {
+  return s.replace(/\\/g, "/").replace(/\/+/g, "/").toLowerCase();
+}
+
+describe("unescapeCandidateBlob", () => {
+  test("decodes newline/tab escapes without fusing into path tokens", () => {
+    const raw = 'line1\\ntriggered-by: x\\tand more';
+    const decoded = unescapeCandidateBlob(raw);
+    expect(decoded).toContain("\n");
+    expect(decoded).toContain("\t");
+    expect(decoded).not.toContain("\\n");
+  });
+
+  test("preserves literal backslash-n when escaped as \\\\", () => {
+    // JSON `\\n` → one backslash + letter n
+    expect(unescapeCandidateBlob("C:\\\\new\\\\file.ts")).toBe("C:\\new\\file.ts");
+  });
+});
+
+describe("extractArtifactIds", () => {
+  test("pulls path fields from JSON tool_input", () => {
     const ids = extractArtifactIds(
       JSON.stringify({ target_file: "src/foo.ts", offset: 0 }),
     );
     expect(ids.some((a) => a.includes("foo.ts"))).toBe(true);
   });
+
+  test("does not fuse JSON escaped newlines into identities", () => {
+    // Raw JSON text embeds `\n` before prose that used to become `/ntriggered-by`.
+    const blob =
+      '{"content":"frontmatter\\ntriggered-by: operator\\ntags: [x]","file_path":"docs/note.md"}';
+    const ids = extractArtifactIds(blob);
+    expect(ids.some((a) => a.includes("note.md"))).toBe(true);
+    expect(ids.some((a) => a.includes("ntriggered") || a === "/ntriggered-by")).toBe(
+      false,
+    );
+    expect(ids.every((a) => isPlausibleArtifact(a))).toBe(true);
+  });
+
+  test("rejects implausible path-key values", () => {
+    const ids = extractArtifactIds(
+      JSON.stringify({ path: "console.log", query: "see /ntriggered-by and e.g stuff" }),
+    );
+    expect(ids).not.toContain("console.log");
+    expect(ids.some((a) => a.includes("ntriggered"))).toBe(false);
+    expect(ids.some((a) => a === "e.g")).toBe(false);
+  });
+
+  test("accepts windows and posix path styles from JSON", () => {
+    const win = extractArtifactIds(
+      JSON.stringify({ file_path: "C:\\\\Users\\\\Synthetic\\\\project\\\\src\\\\a.ts" }),
+    );
+    expect(win.some((a) => a.endsWith("src/a.ts") || a.includes("/a.ts"))).toBe(true);
+
+    const posix = extractArtifactIds(
+      JSON.stringify({ target_file: "instruments/speculum/src/decisions/links.ts" }),
+    );
+    expect(posix.some((a) => a.includes("links.ts"))).toBe(true);
+  });
+
+  test("accepts dotted files and multi-segment dirs", () => {
+    const dotted = extractArtifactIds(JSON.stringify({ file: "package.json" }));
+    expect(dotted).toContain("package.json");
+
+    const dir = extractArtifactIds(
+      JSON.stringify({ target_directory: "instruments/speculum/src" }),
+    );
+    expect(dir.some((a) => a.includes("instruments/speculum/src"))).toBe(true);
+  });
+
+  test("non-JSON free text unescapes before recognition", () => {
+    // Token scan matches basenames / rooted paths (not mid-relative `src/x.ts`).
+    const ids = extractArtifactIds("see file good.ts\\ntriggered-by noise");
+    expect(ids.some((a) => a.includes("good.ts"))).toBe(true);
+    expect(ids.some((a) => a.includes("ntriggered"))).toBe(false);
+
+    const rooted = extractArtifactIds(
+      "open /tmp/work/note.md\\ntriggered-by: operator then done",
+    );
+    expect(rooted.some((a) => a.includes("note.md"))).toBe(true);
+    expect(rooted.some((a) => a.startsWith("/n") || a.includes("ntriggered"))).toBe(
+      false,
+    );
+  });
+});
+
+describe("links + decisions", () => {
 
   test("buildEventLinks: GENERATED via tool_call_id + USED via artifact path", () => {
     const events = [

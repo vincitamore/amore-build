@@ -53,14 +53,232 @@ const PATH_KEYS = [
   "destination",
 ];
 
-/** Extract artifact-path strings from tool_input / tool_output blobs. */
+/**
+ * Strong file extensions for artifact leaves (last path segment).
+ * Numeric tails (grok-4.5 → .5) and method-like tails (console.log → .log)
+ * are intentionally absent.
+ */
+const STRONG_FILE_EXT = new Set([
+  "ts",
+  "tsx",
+  "js",
+  "jsx",
+  "mjs",
+  "cjs",
+  "json",
+  "md",
+  "mdx",
+  "sql",
+  "rs",
+  "py",
+  "toml",
+  "yaml",
+  "yml",
+  "lock",
+  "txt",
+  "html",
+  "htm",
+  "css",
+  "scss",
+  "less",
+  "svg",
+  "png",
+  "jpg",
+  "jpeg",
+  "gif",
+  "webp",
+  "ico",
+  "sh",
+  "bash",
+  "zsh",
+  "ps1",
+  "bat",
+  "cmd",
+  "wasm",
+  "vue",
+  "svelte",
+  "go",
+  "java",
+  "kt",
+  "c",
+  "h",
+  "cpp",
+  "hpp",
+  "cc",
+  "rb",
+  "php",
+  "lua",
+  "zig",
+  "r",
+  "cs",
+  "fs",
+  "ex",
+  "exs",
+  "clj",
+  "scala",
+  "swift",
+  "m",
+  "mm",
+  "plist",
+  "proto",
+  "graphql",
+  "gql",
+  "csv",
+  "tsv",
+  "xml",
+  "pdf",
+  "zip",
+  "gz",
+  "tgz",
+  "patch",
+  "diff",
+  "rst",
+  "tex",
+  "ipynb",
+  "dll",
+  "exe",
+  "so",
+  "dylib",
+  "rlib",
+  "bin",
+  "gitignore",
+  "dockerignore",
+  "editorconfig",
+  "npmrc",
+  "env",
+]);
+
+/** Path segment charset (after normalizeArtifact folds backslashes to slashes). */
+const PATH_SEGMENT_RE = /^[A-Za-z0-9._@+()[\]~-]+$/;
+/** Windows drive segment, e.g. "c:". */
+const DRIVE_SEGMENT_RE = /^[A-Za-z]:$/;
+
+/**
+ * True when an extracted artifact identity looks like a real file path rather
+ * than escape residue, prose fragments, version numbers, or dotted code refs.
+ *
+ * Keeps strong-extension basenames (`package.json`, `schema.sql`) and
+ * multi-segment directory-style paths with no whitespace.
+ */
+export function isPlausibleArtifact(raw: string): boolean {
+  if (!raw || raw.length < 3 || raw.length > 512) return false;
+  // Whitespace / control → prose or broken extract.
+  if (/[\s\r\n\t]/.test(raw)) return false;
+  // Escape residue: a JSON `\n` folded by backslash→slash normalize becomes a
+  // leading `/n…` segment (`/ntriggered-by`, `/npipeline`). Mid-path `/n` is
+  // allowed so real paths like `shared/notes.md` stay valid.
+  if (raw.startsWith("/n")) return false;
+  // Markdown / separator noise folded into paths.
+  if (raw.includes("---")) return false;
+  // Embedded escape-residue runs after real content.
+  if (raw.includes("/n/n") || raw.includes("/n---")) return false;
+
+  const segments = raw.split("/").filter((s) => s.length > 0);
+  if (segments.length === 0) return false;
+
+  for (const seg of segments) {
+    if (DRIVE_SEGMENT_RE.test(seg)) continue;
+    if (!PATH_SEGMENT_RE.test(seg)) return false;
+    // Lone `n` / `n2` / `n2.` segments from residual `/n/n` and `/n2.` forms.
+    if (/^n\d*\.?$/i.test(seg)) return false;
+  }
+
+  const last = segments[segments.length - 1]!;
+  if (hasStrongFileExtension(last)) return true;
+
+  // Multi-segment directory-style paths (no file ext on leaf).
+  if (segments.length >= 2) {
+    const meaningful = segments.filter((s) => !DRIVE_SEGMENT_RE.test(s));
+    if (meaningful.length < 1) return false;
+    if (meaningful.every((s) => s.length < 2)) return false;
+    // Reject version-like leaves without a real extension (`…/2.1`).
+    if (/^\d+(\.\d+)+$/.test(last)) return false;
+    return true;
+  }
+
+  // Single segment without strong extension: prose / code / version tokens.
+  return false;
+}
+
+function hasStrongFileExtension(name: string): boolean {
+  const m = name.match(/\.([A-Za-z][A-Za-z0-9]{0,15})$/);
+  if (!m) return false;
+  const ext = m[1]!.toLowerCase();
+  if (/^\d+$/.test(ext)) return false;
+  return STRONG_FILE_EXT.has(ext);
+}
+
+/**
+ * Decode common JSON string-escape sequences in a candidate blob so path
+ * recognition never fuses an escape into an identity (`\n` + text → `/ntext`
+ * after backslash→slash normalize). Handles `\\` before other escapes so a
+ * literal backslash followed by `n` is not treated as a newline.
+ */
+export function unescapeCandidateBlob(blob: string): string {
+  return blob.replace(/\\(u[0-9a-fA-F]{4}|["\\/bfnrt])/g, (_m, esc: string) => {
+    switch (esc[0]) {
+      case "n":
+        return "\n";
+      case "r":
+        return "\r";
+      case "t":
+        return "\t";
+      case "b":
+        return "\b";
+      case "f":
+        return "\f";
+      case "u":
+        return String.fromCharCode(parseInt(esc.slice(1), 16));
+      default:
+        // ", \, /
+        return esc;
+    }
+  });
+}
+
+function collectStringLeaves(value: unknown, out: string[]): void {
+  if (typeof value === "string") {
+    out.push(value);
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) collectStringLeaves(item, out);
+    return;
+  }
+  if (value && typeof value === "object") {
+    for (const v of Object.values(value as Record<string, unknown>)) {
+      collectStringLeaves(v, out);
+    }
+  }
+}
+
+/** Path-like tokens (forward/back slash or common file suffixes). */
+const PATH_TOKEN_RE =
+  /(?:^|[\s"'`=])((?:[A-Za-z]:)?(?:[\\/][\w.@[\]()+ -]+){1,}|\w[\w.-]*\.\w{1,8})/g;
+
+function scanPathTokens(text: string, out: Set<string>): void {
+  PATH_TOKEN_RE.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = PATH_TOKEN_RE.exec(text)) !== null) {
+    const token = m[1]!.trim();
+    if (token.length >= 3 && token.length <= 512) out.add(normalizeArtifact(token));
+  }
+}
+
+/**
+ * Extract artifact-path strings from tool_input / tool_output blobs.
+ *
+ * Blobs are JSON-decoded or escape-normalized before path recognition so an
+ * escape sequence cannot fuse into a path identity. Identities that fail
+ * {@link isPlausibleArtifact} are dropped.
+ */
 export function extractArtifactIds(blob: string | null | undefined): string[] {
   if (!blob) return [];
   const out = new Set<string>();
 
-  // JSON object path fields
   try {
     const parsed = JSON.parse(blob) as unknown;
+    // Dedicated path-bearing keys (values already unescaped by JSON.parse).
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
       const obj = parsed as Record<string, unknown>;
       for (const key of PATH_KEYS) {
@@ -70,20 +288,16 @@ export function extractArtifactIds(blob: string | null | undefined): string[] {
         }
       }
     }
+    // Token-scan decoded string leaves only — never the raw escaped JSON text.
+    const leaves: string[] = [];
+    collectStringLeaves(parsed, leaves);
+    for (const leaf of leaves) scanPathTokens(leaf, out);
   } catch {
-    // not JSON — fall through to path-like token scan
+    // Not JSON: decode common escapes, then path-scan.
+    scanPathTokens(unescapeCandidateBlob(blob), out);
   }
 
-  // Path-like tokens (forward/back slash or common file suffixes)
-  const pathRe =
-    /(?:^|[\s"'`=])((?:[A-Za-z]:)?(?:[\\/][\w.@[\]()+ -]+){1,}|\w[\w.-]*\.\w{1,8})/g;
-  let m: RegExpExecArray | null;
-  while ((m = pathRe.exec(blob)) !== null) {
-    const token = m[1]!.trim();
-    if (token.length >= 3 && token.length <= 512) out.add(normalizeArtifact(token));
-  }
-
-  return Array.from(out).filter((s) => s.length >= 2);
+  return Array.from(out).filter((s) => s.length >= 2 && isPlausibleArtifact(s));
 }
 
 function normalizeArtifact(s: string): string {
