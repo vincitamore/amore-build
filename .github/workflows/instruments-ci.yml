@@ -46,7 +46,7 @@ jobs:
         timeout-minutes: 5
 
       - name: Source hygiene gate (instruments + templates)
-        working-directory: ../..
+        working-directory: ${{ github.workspace }}
         timeout-minutes: 3
         shell: bash
         run: |
