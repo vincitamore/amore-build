@@ -7,6 +7,7 @@ pub mod check;
 pub mod cmd;
 pub mod discover;
 pub mod fetch;
+pub mod fleet;
 pub mod origin;
 pub mod state;
 pub mod swap;

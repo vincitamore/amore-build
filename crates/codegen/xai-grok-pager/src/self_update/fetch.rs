@@ -157,6 +157,85 @@ pub fn fetch_and_stage_at(
     })
 }
 
+/// Fetch only the `.sha256` sidecar for `component`/`tag`/`os`/`arch` and return
+/// its hex digest. Does not download the archive.
+///
+/// Used by the fleet transaction for content-addressed skip: one small GET
+/// decides whether the archive body is needed at all.
+pub fn fetch_sidecar_digest(
+    component: Component,
+    tag: &str,
+    os: &str,
+    arch: &str,
+) -> Result<String> {
+    fetch_sidecar_digest_at(&origin::release_base(), component, tag, os, arch)
+}
+
+/// Testable seam for [`fetch_sidecar_digest`].
+pub fn fetch_sidecar_digest_at(
+    download_root: &str,
+    component: Component,
+    tag: &str,
+    os: &str,
+    arch: &str,
+) -> Result<String> {
+    let asset = discover::asset_name(component, os, arch).ok_or_else(|| {
+        anyhow::anyhow!(
+            "no asset name for {} on {}-{}",
+            component.name(),
+            os,
+            arch
+        )
+    })?;
+    let archive_url = asset_download_url(download_root, tag, &asset);
+    let sha_url = format!("{archive_url}.sha256");
+    let client = reqwest::blocking::Client::builder()
+        .timeout(TIMEOUT)
+        .user_agent(USER_AGENT)
+        .build()
+        .context("build http client")?;
+    let sha_doc = get_bytes(&client, &sha_url)
+        .with_context(|| format!("download {asset}.sha256"))?;
+    parse_expected_sha256(&sha_doc)
+}
+
+/// True when the published `.sha256` sidecar equals `installed_hash` (hex,
+/// case-insensitive). Performs a single sidecar GET and never requests the
+/// archive body.
+///
+/// `installed_hash` is the digest recorded for the target's active file in
+/// install state (the verified release digest from the last successful
+/// transaction). Same hash, two purposes: integrity gate and skip.
+pub fn sidecar_matches_installed(
+    component: Component,
+    tag: &str,
+    os: &str,
+    arch: &str,
+    installed_hash: &str,
+) -> Result<bool> {
+    sidecar_matches_installed_at(
+        &origin::release_base(),
+        component,
+        tag,
+        os,
+        arch,
+        installed_hash,
+    )
+}
+
+/// Testable seam for [`sidecar_matches_installed`].
+pub fn sidecar_matches_installed_at(
+    download_root: &str,
+    component: Component,
+    tag: &str,
+    os: &str,
+    arch: &str,
+    installed_hash: &str,
+) -> Result<bool> {
+    let remote = fetch_sidecar_digest_at(download_root, component, tag, os, arch)?;
+    Ok(remote.eq_ignore_ascii_case(installed_hash.trim()))
+}
+
 /// Whether a release archive is published for this component on `os`/`arch`.
 ///
 /// Per-component: amore ships five targets, companions three. Never answer
@@ -658,6 +737,92 @@ mod tests {
     }
 
     // -- digest --------------------------------------------------------------
+
+    #[test]
+    fn sidecar_matches_installed_skips_without_archive_request() {
+        // Content-addressed skip: one sidecar GET, zero archive body bytes.
+        let archive = build_zip(&[("amore.exe", b"fake-bin")]);
+        let good = xai_file_utils::sha256_hex(&archive);
+        let sha_doc = format!("{good}  amore-windows-x64.zip");
+
+        // Custom server that 500s on the archive body and 200s on the sidecar.
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let root = format!("http://{addr}/releases/download");
+        let sha_doc = Arc::new(sha_doc.into_bytes());
+        let archive_hits = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let sidecar_hits = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let serving = listener.try_clone().unwrap();
+        let archive_hits_t = Arc::clone(&archive_hits);
+        let sidecar_hits_t = Arc::clone(&sidecar_hits);
+        std::thread::spawn(move || {
+            for stream in serving.incoming() {
+                let Ok(mut stream) = stream else { return };
+                let mut buf = [0u8; 4096];
+                let n = match stream.read(&mut buf) {
+                    Ok(n) => n,
+                    Err(_) => continue,
+                };
+                let req = String::from_utf8_lossy(&buf[..n]);
+                let first = req.lines().next().unwrap_or("");
+                let path = first.split_whitespace().nth(1).unwrap_or("");
+                if path.ends_with(".sha256") {
+                    sidecar_hits_t.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    let body = sha_doc.as_ref();
+                    let _ = stream.write_all(
+                        format!(
+                            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                            body.len()
+                        )
+                        .as_bytes(),
+                    );
+                    let _ = stream.write_all(body);
+                } else {
+                    archive_hits_t.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    let _ = stream.write_all(
+                        b"HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                    );
+                }
+            }
+        });
+
+        let matches = sidecar_matches_installed_at(
+            &root,
+            Component::Amore,
+            "v1.0.0",
+            "windows",
+            "x64",
+            &good,
+        )
+        .expect("sidecar compare");
+        assert!(matches, "recorded archive digest must match sidecar");
+        assert_eq!(
+            archive_hits.load(std::sync::atomic::Ordering::SeqCst),
+            0,
+            "content-addressed skip must issue ZERO archive requests"
+        );
+        assert!(
+            sidecar_hits.load(std::sync::atomic::Ordering::SeqCst) >= 1,
+            "must fetch the sidecar"
+        );
+
+        let no_match = sidecar_matches_installed_at(
+            &root,
+            Component::Amore,
+            "v1.0.0",
+            "windows",
+            "x64",
+            &("0".repeat(64)),
+        )
+        .expect("sidecar compare mismatch");
+        assert!(!no_match);
+        assert_eq!(
+            archive_hits.load(std::sync::atomic::Ordering::SeqCst),
+            0,
+            "mismatch path also must not touch the archive"
+        );
+        drop(listener);
+    }
 
     #[test]
     fn checksum_is_enforced_and_mismatch_deletes_partial() {
