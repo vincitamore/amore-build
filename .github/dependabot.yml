@@ -1,0 +1,8 @@
+# Keep GitHub Actions pins current. SHA-pinned uses: entries are updated
+# by Dependabot when a newer release of each action is available.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

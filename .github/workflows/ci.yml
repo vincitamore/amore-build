@@ -59,24 +59,24 @@ jobs:
       CARGO_TERM_COLOR: always
       CARGO_INCREMENTAL: "0"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Install protoc
-        uses: arduino/setup-protoc@v3
+        uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b # v3
         with:
           # Authenticated: the runner's shared IP exhausts the anonymous
           # GitHub API pool (bit 2026-08-05, killed a tests job in 16s).
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install Rust toolchain (rust-toolchain.toml)
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master — installs with.toolchain (stable 1.92.0 here)
         with:
           toolchain: "1.92.0"
 
       # shared-key must be STABLE across runs — keying it on run_id gave every
       # run a fresh miss (every CI build was cold). Separate key per profile.
       - name: Cargo cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           shared-key: ci-build
 
@@ -114,7 +114,7 @@ jobs:
       # Keep the built binary reachable for local inspection (docs captures,
       # bisecting a report against a known commit) without a full local build.
       - name: Upload built binary
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: amore-ci-${{ matrix.os }}
           path: |
@@ -135,17 +135,17 @@ jobs:
       CARGO_TERM_COLOR: always
       CARGO_INCREMENTAL: "0"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Install protoc
-        uses: arduino/setup-protoc@v3
+        uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b # v3
         with:
           # Authenticated: the runner's shared IP exhausts the anonymous
           # GitHub API pool (bit 2026-08-05, killed a tests job in 16s).
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install Rust toolchain (rust-toolchain.toml)
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master — installs with.toolchain (stable 1.92.0 here)
         with:
           toolchain: "1.92.0"
 
@@ -162,7 +162,7 @@ jobs:
           df -h /
 
       - name: Cargo cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           shared-key: ci-test
 

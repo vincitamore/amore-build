@@ -53,17 +53,17 @@ jobs:
           - { os: macos-15,         artifact: amore-darwin-arm64, bin: amore,     }
           - { os: macos-15-intel,   artifact: amore-darwin-x64,   bin: amore,     }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Install protoc
-        uses: arduino/setup-protoc@v3
+        uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b # v3
         with:
           # Authenticated: the runner's shared IP exhausts the anonymous
           # GitHub API pool (bit 2026-08-05, killed a tests job in 16s).
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install Rust toolchain (rust-toolchain.toml)
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master — installs with.toolchain (stable 1.92.0 here)
         with:
           toolchain: "1.92.0"
 
@@ -136,7 +136,7 @@ jobs:
           Remove-Item -Recurse -Force "pkg"
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ${{ matrix.artifact }}
           path: |
@@ -161,14 +161,14 @@ jobs:
       run:
         working-directory: instruments/iris
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: oven-sh/setup-bun@v2
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: "1.3"
 
       - name: bun cache
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ~/.bun/install/cache
           key: iris-bun-${{ runner.os }}-${{ hashFiles('instruments/iris/bun.lock') }}
@@ -228,7 +228,7 @@ jobs:
           Get-Item release/* | Format-List Name, Length
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ${{ matrix.name }}
           path: |
@@ -253,14 +253,14 @@ jobs:
       run:
         working-directory: instruments/lucerna
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: oven-sh/setup-bun@v2
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: "1.3"
 
       - name: bun cache
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ~/.bun/install/cache
           key: lucerna-bun-${{ runner.os }}-${{ hashFiles('instruments/lucerna/bun.lock') }}
@@ -326,7 +326,7 @@ jobs:
           Get-Item release/* | Format-List Name, Length
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ${{ matrix.name }}
           path: |
@@ -351,14 +351,14 @@ jobs:
       run:
         working-directory: instruments/speculum
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: oven-sh/setup-bun@v2
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: "1.3"
 
       - name: bun cache
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ~/.bun/install/cache
           key: speculum-bun-${{ runner.os }}-${{ hashFiles('instruments/speculum/bun.lock') }}
@@ -424,7 +424,7 @@ jobs:
           Get-Item release/* | Format-List Name, Length
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ${{ matrix.name }}
           path: |
@@ -440,10 +440,10 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           pattern: "*"
           merge-multiple: true
@@ -506,7 +506,7 @@ jobs:
             || { echo "::error::no '## v${VER}' entry in amore-changelog.md; add the release's user changelog in the same commit"; exit 1; }
 
       - name: Create release + attach assets
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           name: Amore Build ${{ github.ref_name }}
           body_path: notes.md
