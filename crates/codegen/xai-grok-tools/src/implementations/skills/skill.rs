@@ -444,7 +444,7 @@ pub fn resolve_skill_internal_links(body: &str, skill_dir: &std::path::Path) -> 
         return body.to_string();
     }
 
-    edits.sort_by(|a, b| b.0.start.cmp(&a.0.start));
+    edits.sort_by_key(|b| std::cmp::Reverse(b.0.start));
     let mut result = body.to_string();
     for (range, replacement) in edits {
         result.replace_range(range, &replacement);
@@ -572,6 +572,7 @@ It has multiple lines."#;
             plugin_version: None,
             plugin_root: None,
             plugin_data: None,
+            allowed_tools: None,
             license: None,
             compatibility: None,
             metadata: None,
@@ -605,6 +606,7 @@ It has multiple lines."#;
             plugin_version: None,
             plugin_root: None,
             plugin_data: None,
+            allowed_tools: None,
             license: None,
             compatibility: None,
             metadata: None,
@@ -639,6 +641,7 @@ It has multiple lines."#;
             plugin_version: None,
             plugin_root: None,
             plugin_data: None,
+            allowed_tools: None,
             license: None,
             compatibility: None,
             metadata: None,
@@ -668,6 +671,7 @@ It has multiple lines."#;
             plugin_version: None,
             plugin_root: None,
             plugin_data: None,
+            allowed_tools: None,
             license: None,
             compatibility: None,
             metadata: None,
@@ -700,6 +704,7 @@ It has multiple lines."#;
             plugin_version: None,
             plugin_root: None,
             plugin_data: None,
+            allowed_tools: None,
             license: None,
             compatibility: None,
             metadata: None,
@@ -738,6 +743,7 @@ It has multiple lines."#;
             plugin_version: None,
             plugin_root: None,
             plugin_data: None,
+            allowed_tools: None,
             license: None,
             compatibility: None,
             metadata: None,

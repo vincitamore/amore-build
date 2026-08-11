@@ -1527,6 +1527,13 @@ pub struct Config {
     /// [`crate::config::SubagentsConfig::resolve_max_depth`]).
     #[serde(skip)]
     pub subagents_max_depth: u32,
+    #[serde(skip)]
+    pub subagents_max_concurrent: usize,
+    #[serde(skip)]
+    pub subagents_limit_behavior:
+        xai_grok_tools::implementations::grok_build::task::admission::LimitBehavior,
+    #[serde(skip)]
+    pub workflow_max_concurrent_agents: usize,
     /// Per-subagent model ID overrides from `[subagents.models]` in config.toml.
     /// Keys are agent names, values are model IDs. Set alongside `subagents_enabled`
     /// from `SubagentsConfig::resolve()`.
@@ -1854,6 +1861,11 @@ impl Default for Config {
             cli_agent_overrides: CliAgentOverrides::default(),
             subagents_enabled: true,
             subagents_max_depth: crate::config::SubagentsConfig::DEFAULT_MAX_DEPTH,
+            subagents_max_concurrent:
+                xai_grok_tools::implementations::grok_build::task::admission::DEFAULT_MAX_CONCURRENT,
+            subagents_limit_behavior: Default::default(),
+            workflow_max_concurrent_agents:
+                crate::session::workflow::host_service::DEFAULT_WORKFLOW_MAX_CONCURRENT_AGENTS,
             subagent_model_overrides: std::collections::HashMap::new(),
             subagent_toggle: std::collections::HashMap::new(),
             subagent_roles: std::collections::HashMap::new(),
@@ -2163,6 +2175,8 @@ impl Config {
     /// per cwd after that cwd's authoritative folder-trust resolve.
     pub(crate) fn resolve_subagents(&mut self, cli_flag: bool, raw_config: &toml::Value) {
         let sa = crate::config::SubagentsConfig::resolve(cli_flag, raw_config);
+        let remote_settings = self.remote_settings.clone();
+        self.resolve_subagent_limits(&sa, remote_settings.as_ref());
         self.subagents_enabled = sa.enabled;
         self.subagent_model_overrides = sa.models;
         self.subagent_toggle = sa.toggle;
@@ -2175,6 +2189,29 @@ impl Config {
             .and_then(|r| r.subagents_max_depth);
         self.subagents_max_depth =
             crate::config::SubagentsConfig::resolve_max_depth(env.as_deref(), sa.max_depth, remote);
+    }
+    fn resolve_subagent_limits(
+        &mut self,
+        sa: &crate::config::SubagentsConfig,
+        remote: Option<&crate::util::config::RemoteSettings>,
+    ) {
+        use crate::config::SubagentsConfig;
+        let env = |name: &str| std::env::var(name).ok();
+        self.subagents_max_concurrent = SubagentsConfig::resolve_max_concurrent(
+            env(SubagentsConfig::ENV_MAX_CONCURRENT).as_deref(),
+            sa.max_concurrent,
+            remote.and_then(|r| r.subagents_max_concurrent),
+        );
+        self.subagents_limit_behavior = SubagentsConfig::resolve_limit_behavior(
+            env(SubagentsConfig::ENV_LIMIT_BEHAVIOR).as_deref(),
+            sa.limit_behavior.as_deref(),
+            remote.and_then(|r| r.subagents_limit_behavior.as_deref()),
+        );
+        self.workflow_max_concurrent_agents = SubagentsConfig::resolve_workflow_max_concurrent(
+            env(SubagentsConfig::ENV_WORKFLOW_MAX_CONCURRENT).as_deref(),
+            sa.workflow_max_concurrent,
+            remote.and_then(|r| r.workflow_max_concurrent_agents),
+        );
     }
     /// Resolve all `#[serde(skip)]` runtime fields that have resolver functions.
     ///
@@ -2207,6 +2244,26 @@ impl Config {
         let remote = ctx.remote_settings.and_then(|r| r.subagents_max_depth);
         self.subagents_max_depth =
             crate::config::SubagentsConfig::resolve_max_depth(env.as_deref(), toml_max, remote);
+        let subagents_toml = crate::config::SubagentsConfig {
+            max_concurrent: ctx
+                .raw_config
+                .get("subagents")
+                .and_then(|s| s.get("max_concurrent"))
+                .and_then(|v| v.as_integer()),
+            limit_behavior: ctx
+                .raw_config
+                .get("subagents")
+                .and_then(|s| s.get("limit_behavior"))
+                .and_then(|v| v.as_str())
+                .map(str::to_owned),
+            workflow_max_concurrent: ctx
+                .raw_config
+                .get("subagents")
+                .and_then(|s| s.get("workflow_max_concurrent"))
+                .and_then(|v| v.as_integer()),
+            ..Default::default()
+        };
+        self.resolve_subagent_limits(&subagents_toml, ctx.remote_settings);
         let tools = crate::config::ToolsConfig::resolve(ctx.raw_config);
         self.respect_gitignore = match self.requirements.respect_gitignore.pinned() {
             Some(pinned) => pinned,
@@ -2323,6 +2380,9 @@ impl Config {
     }
     pub(crate) fn is_session_recap_enabled(&self) -> bool {
         self.resolve_session_recap().value
+    }
+    pub(crate) fn is_turn_summary_enabled(&self) -> bool {
+        self.resolve_turn_summary().value
     }
     pub(crate) fn is_voice_mode_enabled(&self) -> bool {
         self.resolve_voice_mode().value
@@ -2559,6 +2619,17 @@ impl Config {
         let ff = self.remote_settings.as_ref().and_then(|s| s.session_recap);
         BoolFlag::env("GROK_SESSION_RECAP")
             .config(self.features.session_recap)
+            .feature_flag(ff)
+            .default(true)
+            .resolve()
+    }
+    /// Per-turn dashboard summary gate. Default ON — disable via remote
+    /// settings `turn_summary`, the `[features] turn_summary` config.toml key,
+    /// or `GROK_TURN_SUMMARY` env.
+    pub(crate) fn resolve_turn_summary(&self) -> Resolved<bool> {
+        let ff = self.remote_settings.as_ref().and_then(|s| s.turn_summary);
+        BoolFlag::env("GROK_TURN_SUMMARY")
+            .config(self.features.turn_summary)
             .feature_flag(ff)
             .default(true)
             .resolve()
@@ -4609,6 +4680,10 @@ pub struct Features {
     /// `None` = defer to remote settings / env / default (`true`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_recap: Option<bool>,
+    /// Per-turn dashboard summary generated at turn end.
+    /// `None` = defer to remote settings / env / default (`true`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn_summary: Option<bool>,
     /// Voice dictation (STT). `None` = env / remote / default on.
     /// Set `false` in requirements or managed config to force off.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -9005,6 +9080,41 @@ reasoning_effort = "low"
             "remote settings/remote false must kill-switch default on"
         );
         assert_eq!(r.source, ConfigSource::Remote);
+    }
+    /// Precedence: env > config.toml > remote settings > default(true). One
+    /// test covers the full ladder (the `resolve_two_pass_compaction` pattern).
+    #[test]
+    #[serial]
+    fn resolve_turn_summary_precedence() {
+        unsafe { std::env::remove_var("GROK_TURN_SUMMARY") };
+        let r = Config::default().resolve_turn_summary();
+        assert!(r.value, "turn_summary defaults on");
+        assert_eq!(r.source, ConfigSource::Default);
+        let remote_off = Config {
+            remote_settings: Some(crate::util::config::RemoteSettings {
+                turn_summary: Some(false),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let r = remote_off.resolve_turn_summary();
+        assert!(!r.value, "remote false must kill-switch default on");
+        assert_eq!(r.source, ConfigSource::Remote);
+        let config_over_remote = Config {
+            features: Features {
+                turn_summary: Some(true),
+                ..Default::default()
+            },
+            ..remote_off
+        };
+        let r = config_over_remote.resolve_turn_summary();
+        assert!(r.value, "config.toml beats remote kill-switch");
+        assert_eq!(r.source, ConfigSource::Config);
+        unsafe { std::env::set_var("GROK_TURN_SUMMARY", "0") };
+        let r = config_over_remote.resolve_turn_summary();
+        assert!(!r.value, "env wins over config + remote");
+        assert_eq!(r.source, ConfigSource::Env);
+        unsafe { std::env::remove_var("GROK_TURN_SUMMARY") };
     }
     /// Precedence: env > config.toml > remote settings > default(false). One test
     /// covers the full ladder so we do not maintain a matrix of flag cases.

@@ -7,7 +7,7 @@ use crate::error::{WorkspaceError, WorkspaceResult};
 use crate::handle::WorkspaceHandle;
 use crate::hub_ids::WORKSPACE_RPC_TOOL_ID;
 use crate::rpc_envelope::{RpcEnvelope, envelope_err};
-use crate::workspace_ops::WorkspaceOp;
+use crate::workspace_ops::{RpcActivityClass, WorkspaceOp, WorkspaceRpc};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use prometheus::{HistogramVec, IntCounterVec, register_histogram_vec, register_int_counter_vec};
@@ -60,7 +60,9 @@ static WORKSPACE_RPC_REQUESTS_TOTAL: std::sync::LazyLock<IntCounterVec> =
     std::sync::LazyLock::new(|| {
         register_int_counter_vec!(
             "grok_workspace_rpc_requests_total",
-            "Workspace RPC dispatches, by method and result",
+            "Workspace RPC dispatches, by method and result. Donated per-sandbox \
+             series inflate absolute volume — SLOs must use ratios \
+             (error/total), not increase() counts.",
             &["method", "result"]
         )
         .unwrap()
@@ -71,7 +73,9 @@ static WORKSPACE_RPC_ERRORS_TOTAL: std::sync::LazyLock<IntCounterVec> =
     std::sync::LazyLock::new(|| {
         register_int_counter_vec!(
             "grok_workspace_rpc_errors_total",
-            "Failed workspace RPC dispatches, by method and error kind",
+            "Failed workspace RPC dispatches, by method and error kind. \
+             Donated per-sandbox series inflate absolute volume — compare \
+             error_kind shares or error/total ratios, not raw counts.",
             &["method", "error_kind"]
         )
         .unwrap()
@@ -188,12 +192,20 @@ fn ensure_client_fs_queries_enabled() -> WorkspaceResult<()> {
         ))
     }
 }
+/// Stamp client-RPC activity for mutation-classed methods. Called before
+/// param validation so a malformed call from a live client still counts.
+fn note_mutation<Op: WorkspaceRpc>(ws: &WorkspaceHandle) {
+    if Op::ACTIVITY == RpcActivityClass::Mutation {
+        ws.activity_tracker().note_client_rpc_activity();
+    }
+}
 /// Generic dispatch helper: deserialize params, execute, serialize result.
 async fn dispatch_op<Op: WorkspaceOp>(
     params: Value,
     ws: &WorkspaceHandle,
     session_id: Option<&str>,
 ) -> WorkspaceResult<Value> {
+    note_mutation::<Op>(ws);
     let req: Op = serde_json::from_value(params)
         .map_err(|e| WorkspaceError::HubError(format!("invalid params for {}: {e}", Op::METHOD)))?;
     let result = req.execute(ws, session_id).await?;
@@ -365,7 +377,7 @@ impl WorkspaceRpcHandler {
             ConfigureMcpReq, DropSessionReq, InstallPluginReq, ListBackgroundTasksReq,
             ListBackgroundTasksResponse, ListTodosReq, ListTodosResponse, LoadEnvrcReq,
             LoadPermissionsReq, LoadProjectConfigReq, RefreshPluginsReq, ResolveFileReferencesReq,
-            TasksSnapshotReq, ToolDefinitionsReq, UpdateToolConfigReq,
+            TasksSnapshotReq, ToolDefinitionsReq, UpdateToolConfigReq, WorkspaceInfo,
         };
         use xai_grok_workspace_types::rpc::worktree::WorktreeCreateSyncReq;
         tracing::debug!(method, "workspace rpc dispatch");
@@ -377,8 +389,6 @@ impl WorkspaceRpcHandler {
         match method {
             <WorkspaceInfoReq as WorkspaceRpc>::METHOD => {
                 let cwd = self.workspace.root_cwd()?;
-                let cwd_str = cwd.to_string_lossy().to_string();
-                let os = std::env::consts::OS;
                 let shell = std::env::var("SHELL")
                     .ok()
                     .and_then(|s| {
@@ -387,11 +397,13 @@ impl WorkspaceRpcHandler {
                             .map(|n| n.to_string_lossy().to_string())
                     })
                     .unwrap_or_else(|| "sh".to_string());
-                Ok(serde_json::json!({
-                    "os": os,
-                    "shell": shell,
-                    "cwd": cwd_str,
-                }))
+                let info = WorkspaceInfo {
+                    os: std::env::consts::OS.to_owned(),
+                    shell,
+                    cwd: cwd.to_string_lossy().into_owned(),
+                    version: Some(xai_grok_version::VERSION.to_owned()),
+                };
+                serde_json::to_value(info).map_err(|e| WorkspaceError::HubError(e.to_string()))
             }
             <GitStatusReq as WorkspaceRpc>::METHOD => {
                 static DEPRECATION_WARNING: std::sync::Once = std::sync::Once::new();
@@ -469,6 +481,7 @@ impl WorkspaceRpcHandler {
                     .map_err(|e| WorkspaceError::HubError(e.to_string()))
             }
             <UpdateToolConfigReq as WorkspaceRpc>::METHOD => {
+                note_mutation::<UpdateToolConfigReq>(&self.workspace);
                 let caller = resolve_mutation_caller(
                     "update_tool_config",
                     bound_session,
@@ -629,10 +642,11 @@ impl WorkspaceRpcHandler {
             }
             <LoadEnvrcReq as WorkspaceRpc>::METHOD => {
                 let cwd = self.workspace.root_cwd()?;
-                let env = crate::envrc::load_envrc_or_empty(&cwd);
+                let env = crate::envrc::spawn_envrc_load(cwd, true).join().await;
                 serde_json::to_value(env).map_err(|e| WorkspaceError::HubError(e.to_string()))
             }
             <InstallPluginReq as WorkspaceRpc>::METHOD => {
+                note_mutation::<InstallPluginReq>(&self.workspace);
                 let _ = params;
                 Ok(Value::Null)
             }
@@ -647,6 +661,7 @@ impl WorkspaceRpcHandler {
                 Ok(Value::Array(plugins))
             }
             <ConfigureMcpReq as WorkspaceRpc>::METHOD => {
+                note_mutation::<ConfigureMcpReq>(&self.workspace);
                 let session_id = bound_session.ok_or_else(|| {
                     WorkspaceError::HubError("configure_mcp requires a bound session".into())
                 })?;
@@ -720,12 +735,16 @@ impl WorkspaceRpcHandler {
                 dispatch_op::<PrepareWorktreeFromWorktreeReq>(params, &self.workspace, None).await
             }
             <WorktreeCreateSyncReq as WorkspaceRpc>::METHOD => {
+                note_mutation::<WorktreeCreateSyncReq>(&self.workspace);
                 let req: crate::worktree::CreateWorktreeRequest = serde_json::from_value(params)
                     .map_err(|e| {
                         WorkspaceError::HubError(format!("invalid create_sync params: {e}"))
                     })?;
                 let result = crate::worktree::create_worktree_streaming(&req, &NoOpNotifier).await;
                 serde_json::to_value(result).map_err(|e| WorkspaceError::HubError(e.to_string()))
+            }
+            <ReposListReq as WorkspaceRpc>::METHOD => {
+                dispatch_op::<ReposListReq>(params, &self.workspace, None).await
             }
             <GitStatusExtReq as WorkspaceRpc>::METHOD => {
                 dispatch_op::<GitStatusExtReq>(params, &self.workspace, None).await
@@ -912,6 +931,7 @@ impl WorkspaceRpcHandler {
                 serde_json::to_value(points).map_err(|e| WorkspaceError::HubError(e.to_string()))
             }
             <RewindToReq as WorkspaceRpc>::METHOD => {
+                note_mutation::<RewindToReq>(&self.workspace);
                 let req: RewindToReq = serde_json::from_value(params).map_err(|e| {
                     WorkspaceError::HubError(format!("invalid params for rewind_to: {e}"))
                 })?;
@@ -975,14 +995,10 @@ impl ToolServerHandler for WorkspaceRpcHandler {
             .cloned()
             .unwrap_or(Value::Object(Default::default()));
         let bound_session = ctx.extensions.get::<xai_tool_runtime::SessionContext>();
+        let session_id = bound_session.as_deref().map(|s| s.0.as_str());
         let start = std::time::Instant::now();
-        let result = self
-            .dispatch(
-                method,
-                params,
-                bound_session.as_deref().map(|s| s.0.as_str()),
-            )
-            .await;
+        let result = self.dispatch(method, params, session_id).await;
+        let error_kind = result.as_ref().err().map(WorkspaceError::metric_kind);
         let is_unknown_method = matches!(&result, Err(WorkspaceError::UnknownMethod(_)));
         let method_label = if is_unknown_method {
             UNKNOWN_METHOD_LABEL
@@ -992,9 +1008,9 @@ impl ToolServerHandler for WorkspaceRpcHandler {
         WORKSPACE_RPC_REQUESTS_TOTAL
             .with_label_values(&[method_label, if result.is_ok() { "ok" } else { "error" }])
             .inc();
-        if let Err(e) = &result {
+        if let Some(error_kind) = error_kind {
             WORKSPACE_RPC_ERRORS_TOTAL
-                .with_label_values(&[method_label, e.metric_kind()])
+                .with_label_values(&[method_label, error_kind])
                 .inc();
         }
         WORKSPACE_RPC_DURATION_SECONDS
@@ -1131,6 +1147,7 @@ impl ToolServerHandler for WorkspaceRpcHandler {
             if let Some(session) = sessions.remove(sid) {
                 session.abort_system_notify_forwarder();
                 session.shutdown_terminal_backend();
+                session.shutdown_browser_service();
                 session.cancel_hunk_tracker();
             }
             let empty = sessions.is_empty();
@@ -1262,6 +1279,21 @@ mod tests {
             .expect("fail-open no-op reply");
         let reply: turn_hook::HookReply = serde_json::from_value(value).unwrap();
         assert_eq!(reply, turn_hook::HookReply::default());
+    }
+    #[tokio::test]
+    async fn dispatch_workspace_info_reports_server_version() {
+        use xai_grok_workspace_types::rpc::workspace::{WorkspaceInfo, WorkspaceInfoReq};
+        let handler = WorkspaceRpcHandler::new(make_handle());
+        let value = handler
+            .dispatch(
+                <WorkspaceInfoReq as WorkspaceRpc>::METHOD,
+                serde_json::json!({}),
+                None,
+            )
+            .await
+            .expect("workspace.info dispatch");
+        let info: WorkspaceInfo = serde_json::from_value(value).expect("typed WorkspaceInfo");
+        assert_eq!(Some(xai_grok_version::VERSION.to_owned()), info.version);
     }
     #[tokio::test]
     async fn dispatch_unknown_method_returns_unknown_method_error() {
@@ -3172,6 +3204,7 @@ mod tests {
         let handler = WorkspaceRpcHandler::new(make_handle());
         let methods = [
             <WorkspaceInfoReq as WorkspaceRpc>::METHOD,
+            <ReposListReq as WorkspaceRpc>::METHOD,
             <GitStatusReq as WorkspaceRpc>::METHOD,
             <DiscoverSkillsReq as WorkspaceRpc>::METHOD,
             <DiscoverAgentsMdReq as WorkspaceRpc>::METHOD,
@@ -3263,5 +3296,53 @@ mod tests {
                 );
             }
         }
+    }
+    /// Mutation-classed methods stamp client-RPC activity (even on invalid
+    /// params — the call itself is the evidence of a live client); reads and
+    /// the deliberate teardown exception never do.
+    #[tokio::test]
+    async fn dispatch_stamps_client_rpc_activity_for_mutations_only() {
+        use crate::file_system::{FsListReq, FsWriteFileReq};
+        use xai_grok_workspace_types::rpc::workspace::DropSessionReq;
+        use xai_tool_protocol::IdleWithholdReason;
+        let handler = WorkspaceRpcHandler::new(make_handle());
+        let tracker = handler.workspace.activity_tracker().clone();
+        assert_eq!(tracker.snapshot().withhold_reason, None);
+        let _ = handler
+            .dispatch(
+                <FsListReq as WorkspaceRpc>::METHOD,
+                serde_json::json!({}),
+                None,
+            )
+            .await;
+        assert_eq!(
+            tracker.snapshot().withhold_reason,
+            None,
+            "a read never stamps"
+        );
+        let _ = handler
+            .dispatch(
+                <DropSessionReq as WorkspaceRpc>::METHOD,
+                serde_json::json!({}),
+                None,
+            )
+            .await;
+        assert_eq!(
+            tracker.snapshot().withhold_reason,
+            None,
+            "drop_session mutates but must not hold the sandbox alive"
+        );
+        let _ = handler
+            .dispatch(
+                <FsWriteFileReq as WorkspaceRpc>::METHOD,
+                serde_json::json!({}),
+                None,
+            )
+            .await;
+        assert_eq!(
+            tracker.snapshot().withhold_reason,
+            Some(IdleWithholdReason::ClientRpc),
+            "a mutation stamps"
+        );
     }
 }

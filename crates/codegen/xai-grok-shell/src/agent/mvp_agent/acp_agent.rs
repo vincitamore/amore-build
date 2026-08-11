@@ -45,6 +45,7 @@ impl acp::Agent for MvpAgent {
     ) -> Result<acp::InitializeResponse, acp::Error> {
         tracing::debug!(target: "sampling_log", "Received initialize request");
         xai_grok_telemetry::unified_log::info("agent initialized", None, None);
+        xai_grok_telemetry::startup::mark_agent_serving();
         self.start_subagent_coordinator();
         if self.cfg.borrow().remote_settings.is_none() {
             self.spawn_settings_reapply();
@@ -269,9 +270,32 @@ impl acp::Agent for MvpAgent {
                 );
             }
         }
-        let has_external_api_key = auth_method::should_advertise_xai_api_key(
+        let preferred_method_early = self.cfg.borrow().grok_com_config.preferred_method;
+        let xai_api_base_url = self.cfg.borrow().endpoints.xai_api_base_url.clone();
+        let has_byok = self
+            .models_manager
+            .models()
+            .values()
+            .any(crate::agent::config::ModelEntry::has_own_credentials);
+        let first_party_env_ok = if crate::auth::should_probe_first_party_env_key(
+            disable_api_key_auth,
+            has_byok,
+            auth_method::has_xai_api_key_env(),
+            preferred_method_early.is_some(),
+        ) {
+            crate::auth::first_party_env_key_allows_advertise(
+                    &xai_api_base_url,
+                    crate::auth::DEFAULT_PROBE_TIMEOUT,
+                )
+                .await
+        } else {
+            true
+        };
+        self.auth_manager.set_first_party_env_api_key_ok(first_party_env_ok);
+        let has_external_api_key = auth_method::should_advertise_xai_api_key_with_env_ok(
             disable_api_key_auth,
             self.models_manager.models().values(),
+            first_party_env_ok,
         );
         let init_has_current = self.auth_manager.current().is_some();
         let init_is_expired = self.auth_manager.is_expired();
@@ -329,7 +353,7 @@ impl acp::Agent for MvpAgent {
                 "auth: advertising grok.com auth method",
             );
         }
-        let preferred_method = self.cfg.borrow().grok_com_config.preferred_method;
+        let preferred_method = preferred_method_early;
         let has_external_api_key = match preferred_method {
             Some(crate::auth::PreferredAuthMethod::Oidc) => false,
             _ => has_external_api_key,
@@ -356,6 +380,7 @@ impl acp::Agent for MvpAgent {
                 "grok_home": crate::util::grok_home::grok_home().display().to_string(),
                 "HOME": std::env::var("HOME").unwrap_or_else(|_| "(unset)".into()),
                 "has_external_api_key": has_external_api_key,
+                "first_party_env_api_key_ok": first_party_env_ok,
                 "disable_api_key_auth": disable_api_key_auth,
                 "has_cached_token": has_cached_token,
                 "has_enterprise_oidc": has_enterprise_oidc,
@@ -403,12 +428,7 @@ impl acp::Agent for MvpAgent {
         let current_working_directory = self.launch_cwd.clone();
         let hostname = gethostname::gethostname();
         let mcp_servers: Vec<crate::extensions::mcp::McpServerEntry> = Vec::new();
-        let fetch_managed_mcps = self.cfg.borrow().managed_mcps_enabled
-            && self.can_fetch_managed_mcps();
-        if self.cfg.borrow().managed_mcps_enabled && !fetch_managed_mcps {
-            tracing::info!("Managed MCP fetch: DISABLED");
-        }
-        self.spawn_initialize_launch_mcp_setup(fetch_managed_mcps);
+        self.spawn_initialize_launch_mcp_setup();
         self.spawn_managed_gateway_tool_catalog_fetch();
         {
             let agent_ref = LocalRef::new(self);
@@ -2075,7 +2095,9 @@ impl acp::Agent for MvpAgent {
             let rewind_if_no_output = args
                 .meta
                 .as_ref()
-                .and_then(|m| m.get("rewindIfPristine"))
+                .and_then(|m| {
+                    m.get("rewindIfNoOutput").or_else(|| m.get("rewindIfPristine"))
+                })
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
             let dispatch_lock = self.dispatch_lock(&args.session_id);
@@ -2120,7 +2142,13 @@ impl acp::Agent for MvpAgent {
         &self,
         args: acp::SetSessionModelRequest,
     ) -> Result<acp::SetSessionModelResponse, acp::Error> {
-        let model = self.resolve_model_id(&args.model_id)?;
+        let model = match self.resolve_model_id(&args.model_id) {
+            Ok(model) => model,
+            Err(_) => {
+                self.models_manager.wait_for_first_catalog().await;
+                self.resolve_model_id(&args.model_id)?
+            }
+        };
         if !model.info.user_selectable {
             return Err(
                 acp::Error::invalid_params()
@@ -2171,6 +2199,9 @@ impl acp::Agent for MvpAgent {
             }
             "x.ai/workspaces/list" => {
                 crate::agent::handlers::workspaces::handle(self, &args).await
+            }
+            "x.ai/models/list" => {
+                crate::agent::handlers::models::handle(self, &args).await
             }
             "x.ai/session/updates" => {
                 crate::extensions::session_updates::handle(&args, &self.gateway).await
@@ -2667,47 +2698,42 @@ impl acp::Agent for MvpAgent {
                 );
             }
         }
-        if matches!(
-            args.method.as_ref(),
-            "x.ai/queue/remove"
-                | "x.ai/queue/reorder"
-                | "x.ai/queue/clear"
-                | "x.ai/queue/edit"
-                | "x.ai/queue/interject"
-        )
+        if args.method.as_ref().starts_with("x.ai/queue/")
             && let Ok(params) = serde_json::from_str::<
                 serde_json::Value,
             >(args.params.get())
         {
-            let session_id_str = params
-                .get("sessionId")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
             let owner = params
                 .get("owner")
                 .or_else(|| params.get("clientIdentifier"))
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string());
-            let handle = self.resident_handle(&acp::SessionId::new(session_id_str));
-            if let Some(handle) = handle {
-                let cmd = crate::agent::ext_parsers::parse_queue_edit_command(
-                    args.method.as_ref(),
-                    &params,
-                    owner,
-                );
-                if let Some(cmd) = cmd && handle.cmd_tx.send(cmd).is_err() {
+            if let Some(cmd) = crate::agent::ext_parsers::parse_queue_edit_command(
+                args.method.as_ref(),
+                &params,
+                owner,
+            ) {
+                let session_id_str = params
+                    .get("sessionId")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                if let Some(handle) = self
+                    .resident_handle(&acp::SessionId::new(session_id_str))
+                {
+                    if handle.cmd_tx.send(cmd).is_err() {
+                        tracing::warn!(
+                            session_id = %session_id_str,
+                            method = %args.method,
+                            "queue edit: failed to forward SessionCommand (session actor gone)"
+                        );
+                    }
+                } else {
                     tracing::warn!(
                         session_id = %session_id_str,
                         method = %args.method,
-                        "queue edit: failed to forward SessionCommand (session actor gone)"
+                        "queue edit: session not found"
                     );
                 }
-            } else {
-                tracing::warn!(
-                    session_id = %session_id_str,
-                    method = %args.method,
-                    "queue edit: session not found"
-                );
             }
         }
         if args.method.as_ref() == "x.ai/terminal/pty/input"

@@ -2,7 +2,7 @@
 
 use ratatui::text::{Line, Span};
 use unicode_segmentation::UnicodeSegmentation;
-use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+use unicode_width::UnicodeWidthStr;
 
 pub use super::tool_paths::{path_basename, path_for_tool_header, shorten_path};
 
@@ -247,17 +247,7 @@ pub fn fit_line_to_width<'a>(line: Line<'a>, width: usize) -> Line<'a> {
 
 /// Take the first `n` display columns from a string.
 fn take_width(s: &str, n: usize) -> String {
-    let mut width = 0;
-    let mut end = s.len();
-    for (i, ch) in s.char_indices() {
-        let cw = ch.width().unwrap_or(0);
-        if width + cw > n {
-            end = i;
-            break;
-        }
-        width += cw;
-    }
-    s[..end].to_string()
+    s[..byte_offset_at_width(s, n)].to_string()
 }
 
 /// Cascade-truncate multiple text elements to fit within `avail` display columns.

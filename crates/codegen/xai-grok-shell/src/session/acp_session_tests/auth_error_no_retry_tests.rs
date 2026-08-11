@@ -570,12 +570,22 @@ async fn legacy_auth_hint_on_404_model_not_found() {
                 "404 with WebLogin must include deprecation message, got: {msg}"
             );
             assert!(
+                msg.contains("amore update"),
+                "hint must mention `amore update` before re-login, got: {msg}"
+            );
+            assert!(
                 msg.contains("amore logout"),
                 "hint must mention `amore logout`, got: {msg}"
             );
             assert!(
                 msg.contains("amore login"),
                 "hint must mention `amore login`, got: {msg}"
+            );
+            let update_at = msg.find("grok update").expect("grok update");
+            let logout_at = msg.find("grok logout").expect("grok logout");
+            assert!(
+                update_at < logout_at,
+                "update must come before logout, got: {msg}"
             );
             assert!(
                 msg.contains("Version:"),
@@ -641,12 +651,22 @@ async fn legacy_auth_hint_on_401_unauthorized() {
                 "401 with WebLogin must include deprecation message, got: {msg}"
             );
             assert!(
+                msg.contains("amore update"),
+                "hint must mention `amore update` before re-login, got: {msg}"
+            );
+            assert!(
                 msg.contains("amore logout"),
                 "hint must mention `amore logout`, got: {msg}"
             );
             assert!(
                 msg.contains("amore login"),
                 "hint must mention `amore login`, got: {msg}"
+            );
+            let update_at = msg.find("grok update").expect("grok update");
+            let logout_at = msg.find("grok logout").expect("grok logout");
+            assert!(
+                update_at < logout_at,
+                "update must come before logout, got: {msg}"
             );
         })
         .await;

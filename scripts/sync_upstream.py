@@ -519,9 +519,6 @@ def cmd_verify(dry_run: bool) -> int:
         "crates/codegen/xai-grok-sampler/src/client.rs", "fn extract_request_id(",
         "provider x-request-id/request-id extracted from failed responses and logged", problems)
     _check_file_contains(
-        "crates/codegen/xai-grok-tools/src/implementations/skills/discovery.rs", "allowed_tools_key_is_ignored_not_surfaced",
-        "SkillInfo.allowed_tools removed; the ignored-legacy-key regression test pins the deletion", problems)
-    _check_file_contains(
         "instruments/iris/packages/tui/package.json", '"@opentui/core": "^0.4.5"',
         "iris TUI pins @opentui at a named floor, not floating latest", problems)
     _check_file_contains(

@@ -1072,11 +1072,44 @@ mod tests {
     }
 
     #[test]
-    fn allowed_tools_key_is_ignored() {
+    fn parse_allowed_tools_comma_string() {
         let content = "---\nname: my-skill\ndescription: test\nallowed-tools: \"bash, read_file, grep\"\n---\n";
         let parsed = parse_skill_frontmatter(content, None).unwrap();
-        assert_eq!(parsed.name, "my-skill");
-        assert_eq!(parsed.description, "test");
+        assert_eq!(
+            parsed.allowed_tools.as_deref(),
+            Some(
+                [
+                    "bash".to_string(),
+                    "read_file".to_string(),
+                    "grep".to_string()
+                ]
+                .as_slice()
+            )
+        );
+    }
+
+    #[test]
+    fn parse_allowed_tools_yaml_list() {
+        let content = "---\nname: my-skill\ndescription: test\nallowed-tools:\n  - bash\n  - read_file\n  - grep\n---\n";
+        let parsed = parse_skill_frontmatter(content, None).unwrap();
+        assert_eq!(
+            parsed.allowed_tools.as_deref(),
+            Some(
+                [
+                    "bash".to_string(),
+                    "read_file".to_string(),
+                    "grep".to_string()
+                ]
+                .as_slice()
+            )
+        );
+    }
+
+    #[test]
+    fn parse_allowed_tools_omitted() {
+        let content = "---\nname: my-skill\ndescription: test\n---\n";
+        let parsed = parse_skill_frontmatter(content, None).unwrap();
+        assert!(parsed.allowed_tools.is_none());
     }
 
     #[test]
@@ -1204,22 +1237,37 @@ mod tests {
     }
 
     #[test]
-    fn allowed_tools_key_ignored_with_pattern_spec() {
+    fn parse_allowed_tools_space_delimited() {
+        // agentskills.io format: space-delimited with tool patterns
         let content = "---\nname: my-skill\ndescription: test\nallowed-tools: \"Bash(git:*) Read Write\"\n---\n";
         let parsed = parse_skill_frontmatter(content, None).unwrap();
-        assert_eq!(parsed.name, "my-skill");
+        assert_eq!(
+            parsed.allowed_tools.as_deref(),
+            Some(
+                [
+                    "Bash(git:*)".to_string(),
+                    "Read".to_string(),
+                    "Write".to_string()
+                ]
+                .as_slice()
+            )
+        );
     }
 
     #[test]
     fn parse_full_spec_plus_extensions() {
         // Mixed agentskills.io spec fields + our extensions — all must parse.
-        let content = "---\nname: my-skill\ndescription: A full skill\nlicense: MIT\ncompatibility: Python 3.12+\nmetadata:\n  author: test-org\n  version: \"2.0\"\nargument-hint: file path\nmodel: grok-3\neffort: high\nuser-invocable: true\ndisable-model-invocation: false\n---\nBody content.\n";
+        let content = "---\nname: my-skill\ndescription: A full skill\nlicense: MIT\ncompatibility: Python 3.12+\nmetadata:\n  author: test-org\n  version: \"2.0\"\nallowed-tools:\n  - bash\n  - read_file\nargument-hint: file path\nmodel: grok-3\neffort: high\nuser-invocable: true\ndisable-model-invocation: false\n---\nBody content.\n";
         let parsed = parse_skill_frontmatter(content, None).unwrap();
         assert_eq!(parsed.name, "my-skill");
         assert_eq!(parsed.description, "A full skill");
         assert_eq!(parsed.license.as_deref(), Some("MIT"));
         assert_eq!(parsed.compatibility.as_deref(), Some("Python 3.12+"));
         assert_eq!(parsed.author.as_deref(), Some("test-org"));
+        assert_eq!(
+            parsed.allowed_tools.as_deref(),
+            Some(["bash".to_string(), "read_file".to_string()].as_slice())
+        );
         assert_eq!(parsed.argument_hint.as_deref(), Some("file path"));
         assert_eq!(parsed.model.as_deref(), Some("grok-3"));
         assert_eq!(parsed.effort.as_deref(), Some("high"));
@@ -1506,6 +1554,7 @@ mod tests {
             plugin_version: None,
             plugin_root: None,
             plugin_data: None,
+            allowed_tools: None,
             license: None,
             compatibility: None,
             metadata: None,
@@ -2396,26 +2445,17 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let cwd = tmp.path();
         // Not a git repo → falls to the cwd-only branch (no upward walk).
-        for name in [".amore", ".grok", ".agents", ".claude", ".cursor"] {
+        for name in [".grok", ".agents", ".claude", ".cursor"] {
             fs::create_dir_all(cwd.join(name)).unwrap();
         }
 
         let ends_with = |dirs: &[PathBuf], suffix: &str| dirs.iter().any(|d| d.ends_with(suffix));
 
-        // All on → both vendor dirs present (byte-for-byte legacy behavior),
-        // and fork-native `.amore` precedes legacy `.grok` within the tier.
+        // All on → both vendor dirs present (byte-for-byte legacy behavior).
         let all =
             collect_skill_config_dirs(Some(cwd), None, tmp.path(), &[], CompatConfig::default());
         assert!(ends_with(&all, ".claude"), "claude missing: {all:?}");
         assert!(ends_with(&all, ".cursor"), "cursor missing: {all:?}");
-        assert!(ends_with(&all, ".amore"), "amore missing: {all:?}");
-        let pos = |dirs: &[PathBuf], suffix: &str| {
-            dirs.iter().position(|d| d.ends_with(suffix)).unwrap()
-        };
-        assert!(
-            pos(&all, ".amore") < pos(&all, ".grok"),
-            "amore must outrank grok within the tier: {all:?}"
-        );
 
         // cursor.skills off → .cursor dropped, .claude kept.
         let mut compat = CompatConfig::default();

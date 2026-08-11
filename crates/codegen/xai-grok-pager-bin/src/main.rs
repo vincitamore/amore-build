@@ -1102,7 +1102,6 @@ async fn run_agent_command(
     }
     let early_prefetch = xai_grok_shell::agent::models::start_early_prefetch(None);
     xai_grok_shell::agent::mvp_agent::warm_async_http_client();
-    tokio::task::spawn_blocking(|| {});
     let is_stdio = matches!(agent_args.mode, Some(AgentCmd::Stdio));
     let is_leader = matches!(agent_args.mode, Some(AgentCmd::Leader(_)));
     if !is_stdio && !is_leader {
@@ -1845,6 +1844,7 @@ fn dispatch_setup_wizard_if_requested(args: &PagerArgs) -> bool {
     true
 }
 fn main() {
+    xai_grok_telemetry::startup::mark_process_start();
     if let Some(code) = xai_grok_pager::app::mermaid_worker::maybe_run_render_subprocess() {
         std::process::exit(code);
     }
@@ -1869,9 +1869,7 @@ fn main() {
     }
     #[cfg(all(feature = "jemalloc", unix))]
     install_heap_profile_hooks();
-    xai_grok_pager::memory_trace::start(
-        xai_grok_shell::util::grok_home::grok_home().join("memtrace"),
-    );
+    xai_grok_pager::memory_trace::start(xai_grok_pager::memory_trace::default_dir());
     raise_fd_limit();
     if let Err(e) = xai_grok_config::validate_requirements() {
         eprintln!("Couldn't start Grok: {e}");
@@ -1917,12 +1915,11 @@ fn main() {
         );
     }
     let workers = cli_worker_threads();
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(workers.get())
-        .enable_all()
-        .build()
-        .unwrap_or_else(|e| {
-            eprintln!("grok: failed to start tokio runtime with {workers} workers: {e}");
+    let mut builder = tokio::runtime::Builder::new_multi_thread();
+    builder.worker_threads(workers.get()).enable_all();
+    let runtime =
+        xai_tty_utils::runtime::build_with_blocking_pool(&mut builder).unwrap_or_else(|e| {
+            eprintln!("grok: failed to start tokio runtime: {e}");
             shutdown_and_flush_telemetry(1);
         });
     let result = run_and_shutdown(runtime, async_main(args), RUNTIME_SHUTDOWN_GRACE);
@@ -2092,6 +2089,11 @@ async fn async_main(args: PagerArgs) -> Result<()> {
                 let agent_config = AgentConfig::new_from_toml_cfg(&config)
                     .map_err(|e| anyhow::anyhow!("Failed to create agent config: {e}"))?;
                 return xai_grok_pager::worktree_cmd::run(worktree_args, &agent_config).await;
+            }
+            Command::DiskUsage(disk_usage_args) => {
+                init_tracing_simple("cli");
+                let _otel_guard = xai_grok_telemetry::otel_layer::otel_guard();
+                return xai_grok_pager::disk_usage_cmd::run(disk_usage_args);
             }
             Command::Workspace(workspace_args) => {
                 init_tracing_simple("cli");

@@ -924,7 +924,8 @@ impl JsonlStorageAdapter {
         Ok(())
     }
     /// Like [`Self::apply_summary_patch`], but returns whether a
-    /// `generated_title_if_absent` was applied (see [`Summary::apply_patch`]).
+    /// `generated_title_if_absent` was applied or a manual pin was
+    /// cleared by `reset_title_to_auto` (see [`Summary::apply_patch`]).
     async fn apply_summary_patch_reporting(
         &self,
         info: &Info,
@@ -1011,6 +1012,30 @@ impl StorageAdapter for JsonlStorageAdapter {
             info,
             super::summary_write::SummaryPatch {
                 generated_title_if_absent: Some(session_title),
+                ..Default::default()
+            },
+        )
+        .await
+    }
+    async fn reset_title_to_auto(&self, info: &Info) -> io::Result<bool> {
+        self.apply_summary_patch_reporting(
+            info,
+            super::summary_write::SummaryPatch {
+                reset_title_to_auto: true,
+                ..Default::default()
+            },
+        )
+        .await
+    }
+    async fn set_last_turn_summary(
+        &self,
+        info: &Info,
+        summary: Option<(String, String)>,
+    ) -> io::Result<()> {
+        self.apply_summary_patch(
+            info,
+            super::summary_write::SummaryPatch {
+                last_turn_summary: Some(summary),
                 ..Default::default()
             },
         )

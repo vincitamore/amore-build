@@ -88,13 +88,11 @@ impl AgentView {
     }
 
     /// Whether an explicit send-now dispatched right now will actually cancel
-    /// the running turn shell-side (`cancel_running_turn = send_now &&
-    /// turn_running && !goal_active`) — the arming predicate for
-    /// [`Self::expect_send_now_cancel`]. During an active goal the shell only
-    /// promotes the prompt (no cancel), so arming would leave a stale
-    /// expectation that suppresses a later real cancel's marker.
+    /// the running turn shell-side. Also requires the front committed so a
+    /// spared send-now does not paint under later output from that front.
     pub(crate) fn expects_send_now_cancel(&self) -> bool {
         self.session.state.is_turn_running()
+            && self.front_message_committed
             && !self
                 .goal_state
                 .as_ref()
@@ -111,6 +109,32 @@ impl AgentView {
     pub(crate) fn clear_send_now_expectation(&mut self) {
         self.expect_send_now_cancel = None;
         self.follow_without_jump_prompt_id = None;
+    }
+
+    /// Whether `prompt_id` names a Send Now painted block that is still awaiting
+    /// its authoritative interjection notification to claim (and restyle) it in
+    /// place — the active-goal Send Now flow: painted optimistically WITHOUT
+    /// arming a cancel expectation, then converted to interjection styling by
+    /// [`crate::app::acp_handler`]'s `handle_interjection`.
+    ///
+    /// Such a block must NOT be retired by the queue-echo reconcile
+    /// (`queue/changed`) or the non-running `PromptResponse` (`RemovedFromQueue`)
+    /// paths before its claim arrives: the row legitimately disappears from the
+    /// queue the instant the shell converts the Send Now into an interjection,
+    /// so those paths would otherwise drop the block and re-push the message at
+    /// the scrollback end (flicker / reorder). Keeping it in place lets
+    /// `handle_interjection` convert it, or turn-start adoption reuse it.
+    ///
+    /// Returns `false` for the armed (expects-cancel) Send Now path and for
+    /// non-goal rows, so their retirement behavior is unchanged.
+    pub(crate) fn is_send_now_awaiting_interjection_claim(&self, prompt_id: &str) -> bool {
+        self.send_now_painted_blocks.contains_key(prompt_id)
+            && self.is_self_originated_prompt(prompt_id)
+            && self.expect_send_now_cancel.as_deref() != Some(prompt_id)
+            && self
+                .goal_state
+                .as_ref()
+                .is_some_and(|g| matches!(g.status, crate::app::agent::GoalDisplayStatus::Active))
     }
 
     /// The current wait is a foreground subagent await — sendable, but excluded
@@ -377,6 +401,15 @@ impl AgentView {
         self.optimistic_queue_ids.remove(prompt_id);
         if self.send_now_awaiting_confirm.as_deref() == Some(prompt_id) {
             self.send_now_awaiting_confirm = None;
+        }
+        // An active-goal Send Now painted block awaiting its interjection claim
+        // stays put: the echo DID land (converted into an interjection), so the
+        // row's disappearance from the queue is expected — `handle_interjection`
+        // will convert the block in place. Retiring here would drop and re-push
+        // it at the scrollback end. Callers that must retire regardless (e.g. a
+        // genuine send failure) call `retire_send_now_painted_block` directly.
+        if self.is_send_now_awaiting_interjection_claim(prompt_id) {
+            return;
         }
         // Retired ids never adopt — drop the painted block with the id.
         // (Re-keys route through `note_queue_echo_rekeyed` instead.)

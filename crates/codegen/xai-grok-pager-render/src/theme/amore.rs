@@ -50,7 +50,6 @@ mod palette {
     pub const RUNNING_CYAN: Color = rgb(159, 198, 216); // #9fc6d8
     pub const PLAN_GOLD: Color = rgb(224, 214, 168); // #e0d6a8
     pub const VERIFY_LILAC: Color = rgb(179, 162, 220); // #b3a2dc
-    pub const FEEDBACK_TEAL: Color = rgb(143, 198, 176); // #8fc6b0
     pub const REMEMBER_GREEN: Color = rgb(154, 194, 143); // #9ac28f
     pub const LINK_BLUE: Color = rgb(137, 174, 222); // #89aede
     pub const CODE_BLUE: Color = rgb(127, 168, 201); // #7fa8c9
@@ -101,8 +100,6 @@ impl Theme {
             accent_plan: PLAN_GOLD,
 
             accent_verify: VERIFY_LILAC,
-
-            accent_feedback: FEEDBACK_TEAL,
 
             accent_remember: REMEMBER_GREEN,
 

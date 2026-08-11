@@ -11,13 +11,14 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::WorkspaceRpc;
+use super::{RpcActivityClass, WorkspaceRpc};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DiscoverSkillsReq {}
 
 impl WorkspaceRpc for DiscoverSkillsReq {
     const METHOD: &'static str = "workspace.discover_skills";
+    const ACTIVITY: RpcActivityClass = RpcActivityClass::Read;
     type Response = Vec<SkillInfo>;
 }
 
@@ -28,6 +29,7 @@ pub struct DiscoverPluginsReq {}
 
 impl WorkspaceRpc for DiscoverPluginsReq {
     const METHOD: &'static str = "workspace.discover_plugins";
+    const ACTIVITY: RpcActivityClass = RpcActivityClass::Read;
     type Response = Vec<Value>;
 }
 
@@ -136,6 +138,8 @@ pub struct SkillInfo {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plugin_data: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allowed_tools: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effort: Option<String>,
@@ -195,6 +199,7 @@ mod tests {
             "plugin_version": "1.0.0",
             "plugin_root": "/root/.grok/plugins/infra-plugin",
             "plugin_data": "/root/.grok/plugin-data/infra-plugin",
+            "allowed_tools": ["bash"],
             "model": "grok-4",
             "effort": "high",
             "user_invocable": true,

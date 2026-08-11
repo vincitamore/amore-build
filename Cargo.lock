@@ -5411,12 +5411,12 @@ dependencies = [
 
 [[package]]
 name = "indexmap"
-version = "2.12.0"
+version = "2.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6717a8d2a5a929a1a2eb43a12812498ed141a0bcfb7e8f7844fbdbe4303bba9f"
+checksum = "d466e9454f08e4a911e14806c24e16fba1b4c121d1ea474396f396069cf949d9"
 dependencies = [
  "equivalent",
- "hashbrown 0.16.1",
+ "hashbrown 0.17.0",
  "serde",
  "serde_core",
 ]
@@ -8112,6 +8112,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "prost-reflect"
+version = "0.16.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "590aa145fee8f7a26b5a6055365e7c5e89a5c1caae9869de76ec0ee73181a2f9"
+dependencies = [
+ "prost",
+ "prost-types",
+]
+
+[[package]]
 name = "prost-types"
 version = "0.14.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8450,9 +8460,9 @@ dependencies = [
 
 [[package]]
 name = "rayon"
-version = "1.11.0"
+version = "1.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "368f01d005bf8fd9b1206fb6fa653e6c4a81ceb1466406b81792d87c5677a58f"
+checksum = "fb39b166781f92d482534ef4b4b1b2568f42613b53e5b6c160e24cfbfa30926d"
 dependencies = [
  "either",
  "rayon-core",
@@ -13483,6 +13493,7 @@ dependencies = [
  "syntect",
  "textwrap",
  "two-face",
+ "unicode-segmentation",
  "unicode-width 0.2.0",
  "url",
  "xai-grok-markdown-core",
@@ -13597,7 +13608,7 @@ dependencies = [
 
 [[package]]
 name = "xai-grok-pager"
-version = "0.2.120"
+version = "1.0.0"
 dependencies = [
  "agent-client-protocol",
  "ansi-to-tui",
@@ -13657,6 +13668,7 @@ dependencies = [
  "urlencoding",
  "uuid",
  "wait-timeout",
+ "walkdir",
  "which",
  "windows-sys 0.59.0",
  "xai-acp-lib",
@@ -13691,7 +13703,7 @@ dependencies = [
 
 [[package]]
 name = "xai-grok-pager-bin"
-version = "0.2.120"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -13888,6 +13900,7 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.18",
  "tracing",
+ "xai-circuit-breaker",
  "xai-grok-compaction",
  "xai-grok-tools",
 ]
@@ -13957,7 +13970,7 @@ dependencies = [
 
 [[package]]
 name = "xai-grok-shell"
-version = "0.2.120"
+version = "1.0.0"
 dependencies = [
  "agent-client-protocol",
  "anyhow",
@@ -14131,21 +14144,16 @@ dependencies = [
 name = "xai-grok-shell-session-support"
 version = "0.1.0"
 dependencies = [
- "agent-client-protocol",
  "axum",
- "chrono",
  "reqwest 0.12.24",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
- "tokio-util",
  "tracing",
  "xai-file-utils",
  "xai-grok-http",
- "xai-grok-shell-base",
  "xai-grok-version",
- "xai-grok-workspace",
 ]
 
 [[package]]
@@ -14376,7 +14384,7 @@ dependencies = [
 
 [[package]]
 name = "xai-grok-version"
-version = "0.2.120"
+version = "1.0.0"
 dependencies = [
  "semver",
 ]
@@ -14432,6 +14440,7 @@ dependencies = [
  "infer 0.19.0",
  "libc",
  "md5",
+ "nix 0.30.1",
  "nohash-hasher",
  "nucleo",
  "parking_lot",
@@ -14461,6 +14470,7 @@ dependencies = [
  "url",
  "urlencoding",
  "uuid",
+ "wait-timeout",
  "windows 0.61.3",
  "xai-acp-lib",
  "xai-codebase-graph",
@@ -14501,6 +14511,7 @@ name = "xai-grok-workspace-client"
 version = "0.1.0"
 dependencies = [
  "schemars 1.0.4",
+ "semver",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -14586,6 +14597,7 @@ dependencies = [
  "anyhow",
  "pbjson-build",
  "prost-build",
+ "prost-reflect",
  "tempfile",
  "tonic-prost-build",
 ]
