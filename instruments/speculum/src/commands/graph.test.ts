@@ -8,6 +8,7 @@ import { mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { openDb } from "../store/db";
 import { ingest } from "../ingest";
+import { rebuildSessionLinks } from "../ingest/session-links";
 import {
   agentChunk,
   CWD_DEC,
@@ -140,6 +141,111 @@ describe("graph + decisions CLI", () => {
       expect(Array.isArray(decOut.decisions)).toBe(true);
       expect(decOut.decisions.length).toBeGreaterThanOrEqual(1);
       expect(decOut.decisions[0].method).toBeTruthy();
+    } finally {
+      corpus.cleanup();
+      try {
+        rmSync(home, { recursive: true, force: true });
+      } catch {
+        // ignore
+      }
+    }
+  });
+
+  test("CLI graph sessions lists session_links with --json and --session", () => {
+    const gen = "dddddddd-eeee-ffff-aaaa-111111111111";
+    const con = "dddddddd-eeee-ffff-aaaa-222222222222";
+    const t = (n: number) => `2026-07-15T12:00:${String(n).padStart(2, "0")}.000Z`;
+    const corpus = writeCorpus([
+      {
+        id: gen,
+        cwdEnc: encodeURIComponent("C:\\Users\\Synthetic\\project"),
+        cwdDecoded: CWD_DEC,
+        modelId: "grok-4",
+        updates: [
+          updateLine(
+            gen,
+            toolCall("w1", "write_file", { file_path: "pair.md", content: "z" }),
+            t(0),
+          ),
+          updateLine(gen, toolCallUpdate("w1", "write_file", "ok"), t(1)),
+          updateLine(gen, turnCompleted(makeUsage()), t(2)),
+        ],
+      },
+      {
+        id: con,
+        cwdEnc: encodeURIComponent("C:\\Users\\Synthetic\\project"),
+        cwdDecoded: CWD_DEC,
+        modelId: "grok-4",
+        updates: [
+          updateLine(con, toolCall("r1", "read_file", { target_file: "pair.md" }), t(10)),
+          updateLine(con, toolCallUpdate("r1", "read_file", "z"), t(11)),
+          updateLine(con, turnCompleted(makeUsage()), t(12)),
+        ],
+      },
+    ]);
+    const home = join(
+      tmpdir(),
+      `speculum-s3-graph-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    );
+    mkdirSync(home, { recursive: true });
+    const dbPath = join(home, "speculum.sqlite");
+    try {
+      const env = {
+        ...process.env,
+        SPECULUM_HOME: home,
+        SPECULUM_DB: dbPath,
+        SPECULUM_SESSIONS_DIR: corpus.root,
+      };
+      const ingestRun = Bun.spawnSync(["bun", "run", CLI, "ingest", "--json"], {
+        env,
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      expect(ingestRun.exitCode).toBe(0);
+
+      // Ensure session_links are present (shared_artifact is DB-derived).
+      const db = openDb(dbPath);
+      try {
+        rebuildSessionLinks(db, { sessionsDir: corpus.root });
+      } finally {
+        db.close();
+      }
+
+      const sess = Bun.spawnSync(
+        ["bun", "run", CLI, "graph", "sessions", "--json", "--limit", "50"],
+        { env, stdout: "pipe", stderr: "pipe" },
+      );
+      expect(sess.exitCode).toBe(0);
+      const out = JSON.parse(sess.stdout.toString());
+      expect(out.count).toBeGreaterThanOrEqual(1);
+      expect(out.links.some((l: { kind: string }) => l.kind === "shared_artifact")).toBe(
+        true,
+      );
+
+      const filtered = Bun.spawnSync(
+        [
+          "bun",
+          "run",
+          CLI,
+          "graph",
+          "sessions",
+          "--json",
+          "--session",
+          gen,
+          "--limit",
+          "50",
+        ],
+        { env, stdout: "pipe", stderr: "pipe" },
+      );
+      expect(filtered.exitCode).toBe(0);
+      const fOut = JSON.parse(filtered.stdout.toString());
+      expect(fOut.count).toBeGreaterThanOrEqual(1);
+      expect(
+        fOut.links.every(
+          (l: { sourceSession: string; targetSession: string }) =>
+            l.sourceSession === gen || l.targetSession === gen,
+        ),
+      ).toBe(true);
     } finally {
       corpus.cleanup();
       try {

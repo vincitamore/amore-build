@@ -686,7 +686,7 @@ export function ingest(db: Db, opts: IngestOptions = {}): IngestStats {
       // Per-session annotations + evidence-only cross-session links re-derive
       // after events, sessions and event_links settle.
       rebuildSessionAnnotations(db);
-      rebuildSessionLinks(db);
+      rebuildSessionLinks(db, { sessionsDir: root });
       stats.rebuildMs = Date.now() - tRebuild0;
     }
   };

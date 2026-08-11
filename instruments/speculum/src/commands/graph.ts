@@ -1,6 +1,7 @@
 /**
  * `speculum graph` — thin CLI shell over query-time graph projection .
- * Local only; no network, no model. Neighbors / path / degree / state-at-T.
+ * Local only; no network, no model. Neighbors / path / degree / state-at-T /
+ * sessions (durable session_links).
  */
 
 import { openDb, type Db } from "../store/db";
@@ -12,6 +13,7 @@ import {
   type GraphNode,
   type GraphEdge,
 } from "../graph";
+import { listSessionLinks } from "../ingest/session-links";
 
 function opt(args: string[], name: string): string | undefined {
   const i = args.indexOf(name);
@@ -34,8 +36,8 @@ function parseEventId(raw: string | undefined): number | null {
 export function graphHelpText(): string {
   return `speculum graph <subcommand> [options]
 
-Query-time graph over the local derived index (no durable edge store).
-Projection = succession + tool_link edges from events.
+Query-time graph over the local derived index (event projection) plus
+durable session_links (cross-session edges re-derived at ingest).
 
 Subcommands:
   summary              Node/edge counts + top degree (default)
@@ -43,6 +45,7 @@ Subcommands:
   path <from> <to>     Shortest BFS path (event ids or e:N)
   degree               Degree centrality ranking
   state-at <iso>       Prefix graph at timestamp (alias: --at)
+  sessions             List session_links (resumed_from, shared_artifact)
 
 Options:
   --session ID         Filter to one session
@@ -52,6 +55,7 @@ Options:
   --json               Machine-readable output
 
 Heuristic note: succession edges are temporal adjacency, not causation.
+session_links are evidence-only (record-stated resume; shared artifact paths).
 `;
 }
 
@@ -189,6 +193,55 @@ export async function graphCommand(args: string[]): Promise<void> {
 
   const db = openDb();
   try {
+    // Durable session_links only — skip event projection (can be large).
+    if (sub === "sessions") {
+      const links = listSessionLinks(db, {
+        sessionId: cli.sessionId,
+        limit: cli.limit,
+      });
+      const byKind = countBy(links.map((l) => l.kind));
+      const payload = {
+        count: links.length,
+        byKind,
+        sessionId: cli.sessionId ?? null,
+        links: links.map((l) => ({
+          sourceSession: l.sourceSession,
+          targetSession: l.targetSession,
+          kind: l.kind,
+          method: l.method,
+          confidence: l.confidence,
+          heuristic: l.heuristic === 1,
+          evidence: l.evidence,
+        })),
+        note: "durable session_links; evidence-only (not similarity)",
+      };
+      if (cli.json) {
+        console.log(JSON.stringify(payload, null, 2));
+        return;
+      }
+      console.log("");
+      console.log("speculum graph sessions");
+      console.log("─".repeat(72));
+      console.log(`  links: ${payload.count}`);
+      console.log(
+        `  kinds: ${Object.entries(payload.byKind)
+          .map(([k, v]) => `${k}=${v}`)
+          .join("  ") || "(none)"}`,
+      );
+      if (cli.sessionId) console.log(`  session: ${cli.sessionId}`);
+      for (const l of payload.links) {
+        const h = l.heuristic ? " heuristic" : "";
+        console.log(
+          `  ${l.sourceSession} → ${l.targetSession}  [${l.kind}]  method=${l.method}  conf=${l.confidence}${h}`,
+        );
+        if (l.evidence) console.log(`    evidence: ${l.evidence}`);
+      }
+      console.log("");
+      console.log("  note: session_links are evidence-only, not similarity.");
+      console.log("");
+      return;
+    }
+
     const g = buildGraph(db, cli);
 
     if (sub === "summary" || sub === "state-at") {
