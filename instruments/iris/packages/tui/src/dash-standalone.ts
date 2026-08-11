@@ -11,5 +11,22 @@
  *
  * TTY required for a usable interactive session; headless boots may paint
  * without a real terminal and should not be treated as a smoke pass alone.
+ *
+ * --version is handled before the TUI boots so release/CI can assert the
+ * compile-time companion stamp without needing a TTY or org root.
  */
-import './index.tsx';
+declare const __COMPANION_VERSION__: string | undefined;
+
+import cliPkg from '../../cli/package.json';
+
+const dashArgv = process.argv.slice(2);
+if (dashArgv[0] === '--version' || dashArgv[0] === '-V' || dashArgv[0] === 'version') {
+  const v =
+    (typeof __COMPANION_VERSION__ !== 'undefined' && __COMPANION_VERSION__) ||
+    (typeof cliPkg.version === 'string' && cliPkg.version) ||
+    '0.0.0';
+  process.stdout.write(`iris-dash ${v}\n`);
+  process.exit(0);
+}
+
+await import('./index.tsx');

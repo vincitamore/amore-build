@@ -177,6 +177,14 @@ jobs:
       - name: Install deps
         run: bun install --frozen-lockfile
 
+      - name: Version inject (strip leading v from tag)
+        shell: bash
+        run: |
+          REF="${{ github.event.inputs.tag }}"
+          [ -n "$REF" ] || REF="${GITHUB_REF_NAME}"
+          echo "GROK_VERSION=${REF#v}" >> "$GITHUB_ENV"
+          echo "Version inject: ${REF#v}"
+
       - name: Build compiled multi-tool (+ dash)
         run: bun run scripts/build-compile.ts --with-dash
 
@@ -185,6 +193,9 @@ jobs:
         shell: bash
         run: |
           "dist/${{ matrix.name }}" --help
+          out="$("dist/${{ matrix.name }}" --version)"
+          echo "$out"
+          echo "$out" | grep -q "$GROK_VERSION" || { echo "::error::version stamp missing $GROK_VERSION"; exit 1; }
           "dist/${{ matrix.name }}" commands --json > commands.json
           head -c 200 commands.json
           echo
@@ -193,6 +204,9 @@ jobs:
         if: matrix.os == 'windows-latest'
         run: |
           & "dist/${{ matrix.name }}.exe" --help
+          $out = & "dist/${{ matrix.name }}.exe" --version | Out-String
+          $out
+          if ($out -notmatch [regex]::Escape($env:GROK_VERSION)) { throw "version stamp missing $env:GROK_VERSION" }
           $cmds = & "dist/${{ matrix.name }}.exe" commands --json
           if ($LASTEXITCODE -ne 0) { throw "commands --json exited $LASTEXITCODE" }
           $cmds | Select-Object -First 1
@@ -269,6 +283,14 @@ jobs:
       - name: Install deps
         run: bun install --frozen-lockfile
 
+      - name: Version inject (strip leading v from tag)
+        shell: bash
+        run: |
+          REF="${{ github.event.inputs.tag }}"
+          [ -n "$REF" ] || REF="${GITHUB_REF_NAME}"
+          echo "GROK_VERSION=${REF#v}" >> "$GITHUB_ENV"
+          echo "Version inject: ${REF#v}"
+
       - name: Build compiled binary
         run: bun run build:compile
 
@@ -285,6 +307,7 @@ jobs:
           "$BIN" --version > version.txt
           cat version.txt
           test -s version.txt || { echo "::error::--version produced empty output"; exit 1; }
+          grep -q "$GROK_VERSION" version.txt || { echo "::error::version stamp missing $GROK_VERSION"; exit 1; }
           head -c 200 version.txt
           echo
 
@@ -296,6 +319,7 @@ jobs:
           $out = & $bin --version 2>&1 | Out-String
           if ($LASTEXITCODE -ne 0) { throw "--version exited $LASTEXITCODE" }
           if ([string]::IsNullOrWhiteSpace($out)) { throw "--version produced empty output" }
+          if ($out -notmatch [regex]::Escape($env:GROK_VERSION)) { throw "version stamp missing $env:GROK_VERSION" }
           $out | Out-File -FilePath version.txt -Encoding utf8
           Get-Content version.txt | Select-Object -First 1
 
@@ -367,6 +391,14 @@ jobs:
       - name: Install deps
         run: bun install --frozen-lockfile
 
+      - name: Version inject (strip leading v from tag)
+        shell: bash
+        run: |
+          REF="${{ github.event.inputs.tag }}"
+          [ -n "$REF" ] || REF="${GITHUB_REF_NAME}"
+          echo "GROK_VERSION=${REF#v}" >> "$GITHUB_ENV"
+          echo "Version inject: ${REF#v}"
+
       - name: Build compiled binary
         run: bun run build:compile
 
@@ -383,6 +415,7 @@ jobs:
           "$BIN" --version > version.txt
           cat version.txt
           test -s version.txt || { echo "::error::--version produced empty output"; exit 1; }
+          grep -q "$GROK_VERSION" version.txt || { echo "::error::version stamp missing $GROK_VERSION"; exit 1; }
           head -c 200 version.txt
           echo
 
@@ -394,6 +427,7 @@ jobs:
           $out = & $bin --version 2>&1 | Out-String
           if ($LASTEXITCODE -ne 0) { throw "--version exited $LASTEXITCODE" }
           if ([string]::IsNullOrWhiteSpace($out)) { throw "--version produced empty output" }
+          if ($out -notmatch [regex]::Escape($env:GROK_VERSION)) { throw "version stamp missing $env:GROK_VERSION" }
           $out | Out-File -FilePath version.txt -Encoding utf8
           Get-Content version.txt | Select-Object -First 1
 
@@ -434,11 +468,19 @@ jobs:
             instruments/speculum/release/*.tar.gz.sha256
           if-no-files-found: error
 
+  # Completeness of the release asset set is guaranteed by needs: below plus
+  # if-no-files-found: error on each lane's upload — NOT by fail_on_unmatched_files
+  # on softprops/action-gh-release (that flag only fails when a files: glob matches
+  # nothing; assets/** still matches a partial set). Do not relax needs: for
+  # latency under the belief that fail_on_unmatched_files guards completeness.
   release:
     name: GitHub Release
     needs: [amore, iris, lucerna, speculum]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
@@ -505,6 +547,8 @@ jobs:
           grep -q "## v${VER}" crates/codegen/xai-grok-shell-base/assets/amore-changelog.md \
             || { echo "::error::no '## v${VER}' entry in amore-changelog.md; add the release's user changelog in the same commit"; exit 1; }
 
+      # fail_on_unmatched_files only fails when files: matches nothing; it does
+      # not assert every expected asset is present (see needs: comment above).
       - name: Create release + attach assets
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
@@ -513,3 +557,14 @@ jobs:
           files: assets/**
           fail_on_unmatched_files: true
           generate_release_notes: false
+
+      # softprops/action-gh-release uses GITHUB_TOKEN, which does not re-trigger
+      # on: release workflows. Dispatch installers.yml explicitly so the only
+      # upgrade-path smoke still runs after a published release.
+      # Guard: job already requires refs/tags/; step re-asserts so a future
+      # workflow_dispatch dry-run path that reaches this job still skips.
+      - name: Dispatch installers.yml
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh workflow run installers.yml --ref "${{ github.ref_name }}"

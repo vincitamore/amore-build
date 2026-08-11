@@ -13,7 +13,7 @@ import {
   DEFAULT_DAILY_TOKEN_CEILING,
 } from "./budget.ts";
 import { resolveAmoreBin } from "./engine/amore-headless.ts";
-// Embed package.json so `bun build --compile` ships the real version string.
+// Embed package.json so unstamped compiles and source runs ship a real version.
 import packageJson from "../package.json";
 
 /** Default auto-commit draft cooldown (decoupled from heartbeat). */
@@ -23,13 +23,17 @@ export const DEFAULT_AUTO_COMMIT_COOLDOWN_MS = 30 * 60 * 1000;
 export const PROCESS_NAME = "lucerna";
 
 /**
- * Package version from package.json (embedded at compile time).
- * Not a hardcoded release number.
+ * Package version. Release builds inject via
+ * `bun build --define:__COMPANION_VERSION__=…` (from GROK_VERSION);
+ * otherwise package.json.
  */
+declare const __COMPANION_VERSION__: string | undefined;
+
 export const VERSION: string =
-  typeof packageJson.version === "string" && packageJson.version.trim()
+  (typeof __COMPANION_VERSION__ !== "undefined" && __COMPANION_VERSION__) ||
+  (typeof packageJson.version === "string" && packageJson.version.trim()
     ? packageJson.version.trim()
-    : "0.0.0";
+    : "0.0.0");
 
 export interface LucernaConfig {
   houseRoot: string;

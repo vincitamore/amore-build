@@ -14,13 +14,27 @@
  *   bun run scripts/build-compile.ts --target bun-windows-x64
  *   bun run scripts/build-compile.ts --outfile path/to/speculum.exe
  */
-import { mkdirSync, existsSync } from "node:fs";
+import { mkdirSync, existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..");
 const ENTRY = join(ROOT, "src/cli.ts");
+const PKG_JSON = join(ROOT, "package.json");
+
+/** Stamp for --define: release sets GROK_VERSION; otherwise package.json. */
+function companionVersion(): string {
+  const fromEnv = process.env.GROK_VERSION?.trim();
+  if (fromEnv) return fromEnv;
+  try {
+    const pkg = JSON.parse(readFileSync(PKG_JSON, "utf-8")) as { version?: string };
+    if (typeof pkg.version === "string" && pkg.version.trim()) return pkg.version.trim();
+  } catch {
+    /* fall through */
+  }
+  return "0.0.0";
+}
 
 function hostOsArch(): { os: string; arch: string } {
   const os =
@@ -54,9 +68,19 @@ function parseArgs(argv: string[]): {
 }
 
 async function compileOne(entry: string, outfile: string, target?: string): Promise<number> {
-  const bunArgs = ["build", "--compile", `--outfile=${outfile}`, entry];
+  const version = companionVersion();
+  // Bun wants `--define KEY=VALUE` as two argv slots (not esbuild's `--define:K=V`).
+  const bunArgs = [
+    "build",
+    "--compile",
+    "--define",
+    `__COMPANION_VERSION__=${JSON.stringify(version)}`,
+    `--outfile=${outfile}`,
+    entry,
+  ];
   if (target) bunArgs.splice(2, 0, `--target=${target}`);
   console.log(`[build-compile] bun ${bunArgs.join(" ")}`);
+  console.log(`[build-compile] __COMPANION_VERSION__=${version}`);
   const proc = Bun.spawn([process.execPath, ...bunArgs], {
     cwd: ROOT,
     stdout: "inherit",

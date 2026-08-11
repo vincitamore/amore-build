@@ -135,6 +135,18 @@ jobs:
           "$BIN" --help
           echo "smoke: --help ok"
 
+          # CI has no GROK_VERSION: assert package.json semver fallback (not 0.0.0)
+          "$BIN" --version > /tmp/iris-version.txt
+          cat /tmp/iris-version.txt
+          test -s /tmp/iris-version.txt || { echo "FAIL: --version empty"; exit 1; }
+          grep -Eq '[0-9]+\.[0-9]+\.[0-9]+' /tmp/iris-version.txt \
+            || { echo "FAIL: --version missing semver"; exit 1; }
+          if grep -qE '(^|[^0-9])0\.0\.0([^0-9]|$)' /tmp/iris-version.txt; then
+            echo "FAIL: --version is placeholder 0.0.0"
+            exit 1
+          fi
+          echo "smoke: --version ok ($(cat /tmp/iris-version.txt))"
+
           # regula JSON surface (capability manifest; no org root required)
           "$BIN" commands --json > /tmp/iris-commands.json
           test -s /tmp/iris-commands.json
@@ -231,6 +243,14 @@ jobs:
           & $bin --help
           if ($LASTEXITCODE -ne 0) { throw "--help exit=$LASTEXITCODE" }
           Write-Host "smoke: --help ok"
+
+          # CI has no GROK_VERSION: assert package.json semver fallback (not 0.0.0)
+          $verOut = & $bin --version 2>&1 | Out-String
+          if ($LASTEXITCODE -ne 0) { throw "--version exit=$LASTEXITCODE" }
+          if ([string]::IsNullOrWhiteSpace($verOut)) { throw "--version produced empty output" }
+          if ($verOut -notmatch '\d+\.\d+\.\d+') { throw "--version missing semver: $verOut" }
+          if ($verOut -match '(^|[^0-9])0\.0\.0([^0-9]|$)') { throw "--version is placeholder 0.0.0: $verOut" }
+          Write-Host "smoke: --version ok ($($verOut.Trim()))"
 
           # regula JSON surface
           $jsonOut = Join-Path $env:RUNNER_TEMP "iris-commands.json"

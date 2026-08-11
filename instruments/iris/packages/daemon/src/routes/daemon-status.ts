@@ -17,6 +17,14 @@
 
 import type { DaemonConfig } from '../contract.ts';
 import { json } from './http.ts';
+import pkg from '../../../cli/package.json';
+
+declare const __COMPANION_VERSION__: string | undefined;
+
+const DAEMON_VERSION: string =
+  (typeof __COMPANION_VERSION__ !== 'undefined' && __COMPANION_VERSION__) ||
+  pkg.version ||
+  '0.0.0';
 
 export function daemonStatus(config: DaemonConfig): Response {
   return json({
@@ -34,7 +42,7 @@ export function daemonStatus(config: DaemonConfig): Response {
       org_root: config.orgRoot,
       started_at: Math.floor(config.startedAt / 1000),
       uptime_secs: Math.floor((Date.now() - config.startedAt) / 1000),
-      version: '0.0.0',
+      version: DAEMON_VERSION,
       pty: false,
     },
   });
