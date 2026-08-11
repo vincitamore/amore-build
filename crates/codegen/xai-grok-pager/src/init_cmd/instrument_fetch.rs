@@ -10,12 +10,14 @@
 
 use std::io::Read as _;
 use std::path::Path;
+use std::sync::LazyLock;
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 
-/// Where release assets live. The repo's own public URL.
-pub const RELEASE_BASE: &str = "https://github.com/vincitamore/amore-build/releases/download";
+/// Where release assets live. Derived from [`crate::self_update::origin`].
+pub static RELEASE_BASE: LazyLock<String> =
+    LazyLock::new(crate::self_update::origin::release_base);
 
 const TIMEOUT: Duration = Duration::from_secs(120);
 
@@ -128,9 +130,11 @@ impl Outcome {
             Self::OptedOut => None,
             Self::UnsupportedHost { name, host } => {
                 let label = summary_label(name);
+                let origin_host = crate::self_update::origin::UPDATE_ORIGIN_HOST;
+                let origin_repo = crate::self_update::origin::UPDATE_ORIGIN_REPO;
                 Some(format!(
                     "  {label} no published build for {host} — build it from source: \
-                     https://github.com/vincitamore/amore-build/tree/main/instruments/{name}"
+                     https://{origin_host}/{origin_repo}/tree/main/instruments/{name}"
                 ))
             }
             Self::Failed { name, reason } => {
@@ -194,7 +198,7 @@ fn try_install(
     suffix: &str,
 ) -> Result<(String, Option<String>)> {
     let (archive_name, binary_name) = asset_names(spec.name, suffix);
-    let base = format!("{RELEASE_BASE}/v{version}");
+    let base = format!("{}/v{version}", *RELEASE_BASE);
     let archive_url = format!("{base}/{archive_name}");
     let sha_url = format!("{archive_url}.sha256");
 

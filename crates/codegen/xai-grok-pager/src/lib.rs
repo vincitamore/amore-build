@@ -53,6 +53,7 @@ pub mod pty_wrap;
 pub mod recent_dirs;
 pub mod scrollback;
 pub mod search;
+pub mod self_update;
 pub mod sessions_cmd;
 pub mod settings;
 pub mod share_cmd;

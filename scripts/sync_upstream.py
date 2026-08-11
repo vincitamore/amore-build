@@ -91,6 +91,9 @@ DOCTOR_CMD_FILE = "crates/codegen/xai-grok-pager/src/doctor_cmd/mod.rs"
 RELEASE_WORKFLOW = ".github/workflows/release.yml"
 INSTRUMENTS_CI_WORKFLOW = ".github/workflows/instruments-ci.yml"
 RELEASE_BASE_NEEDLE = "vincitamore/amore-build"
+SELF_UPDATE_ORIGIN_FILE = (
+    "crates/codegen/xai-grok-pager/src/self_update/origin.rs"
+)
 
 
 def run(cmd: list[str], **kw) -> subprocess.CompletedProcess:
@@ -277,6 +280,21 @@ def _check_file_contains(path: str, needle: str, what: str, problems: list[str])
         problems.append(f"{what}: {path} no longer contains '{needle}'")
 
 
+def _check_file_lacks(path_glob: str, needle: str, what: str, problems: list[str]) -> None:
+    """Report a problem when any file matching path_glob contains needle."""
+    matches = sorted(REPO.glob(path_glob))
+    if not matches:
+        problems.append(f"MISSING {path_glob} — cannot verify {what}")
+        return
+    for p in matches:
+        text = p.read_text(encoding="utf-8", errors="replace")
+        if needle in text:
+            rel = p.relative_to(REPO).as_posix()
+            problems.append(f"{what}: {rel} must not contain '{needle}'")
+            return
+    print(f"  ok  {what}")
+
+
 def cmd_verify(dry_run: bool) -> int:
     problems: list[str] = []
     print("post-merge verify: fork surfaces")
@@ -331,6 +349,14 @@ def cmd_verify(dry_run: bool) -> int:
         HARD_OFF_FILE,
         "fork guard: run_update stays inert",
         "upstream update origins remain unreachable (constant + enforcement)", problems)
+
+    # Installer harness must exercise the shipped repo-root installer, never
+    # the vendored upstream pager copy (still points at x.ai/cli).
+    _check_file_lacks(
+        "crates/codegen/xai-grok-update/tests/test_install_sh.rs",
+        "xai-grok-pager/scripts/install.sh",
+        "installer harness does not reference vendored pager install.sh",
+        problems)
 
     # 5. embed + init ownership tests still target amore
     _check_file_contains(
@@ -438,9 +464,12 @@ def cmd_verify(dry_run: bool) -> int:
     _check_file_contains(
         INSTRUMENTS_DIAG_FILE, "probe_qmd_search",
         "doctor instruments probe registers qmd/search probe (probe_qmd_search)", problems)
+    # RELEASE_BASE derives from origin::; the repo substring lives only in
+    # self_update/origin.rs (group 11a also pins it). Keep this historical
+    # needle so a drift there still fails verify.
     _check_file_contains(
-        INSTRUMENT_FETCH_FILE, RELEASE_BASE_NEEDLE,
-        "instrument_fetch RELEASE_BASE names the fork release repo", problems)
+        SELF_UPDATE_ORIGIN_FILE, RELEASE_BASE_NEEDLE,
+        "origin RELEASE_BASE names the fork release repo", problems)
     _check_file_contains(
         INSTRUMENT_FETCH_FILE, "format!(\"{name}-{suffix}.exe.zip\")",
         "instrument_fetch Windows asset naming <name>-<suffix>.exe.zip", problems)
@@ -568,6 +597,18 @@ def cmd_verify(dry_run: bool) -> int:
         "crates/codegen/xai-grok-shell/src/util/config/resolve/version.rs",
         "// fork: remote-synced layers cannot gate startup",
         "remote-synced required_* keys cannot gate startup", problems)
+
+    # 11. self-update origin lock (partial: 11a/11b/11g land here; 11c-11f later).
+    #     Exactly one place names the release origin; instrument_fetch derives.
+    _check_file_contains(
+        SELF_UPDATE_ORIGIN_FILE, RELEASE_BASE_NEEDLE,
+        "11a: self_update origin names the fork release repo", problems)
+    _check_file_contains(
+        SELF_UPDATE_ORIGIN_FILE, "UPDATE_ORIGIN_HOST",
+        "11b: self_update origin defines UPDATE_ORIGIN_HOST", problems)
+    _check_file_contains(
+        INSTRUMENT_FETCH_FILE, "origin::",
+        "11g: instrument_fetch RELEASE_BASE derives from origin::", problems)
 
     # 7. build + smoke (this host). Build is the long pole; allow skipping.
     #    The full Linux pager suite remains CI-owned (UPSTREAM.md §5).
