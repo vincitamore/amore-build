@@ -639,12 +639,13 @@ log(`frame showing N of M:${hasShowing}`, hasShowing);
 log(`frame links drawn/loaded status:${hasLinksStatus}`, hasLinksStatus);
 log(`frame glyphs/density present:${hasGlyph}`, hasGlyph);
 log(`frame mode label (timeline/structure):${hasMode}`, hasMode);
-log(`frame React legend parentage line:${hasLegendParentageLine}`, hasLegendParentageLine);
-log(`frame React legend operator line:${hasLegendOperatorLine}`, hasLegendOperatorLine);
-log(`frame React legend event links line:${hasLegendEventLine}`, hasLegendEventLine);
-log(`frame React legend resumed line:${hasLegendResumedLine}`, hasLegendResumedLine);
-log(`frame React legend shared artifact line:${hasLegendSharedLine}`, hasLegendSharedLine);
-log(`frame React legend primary line:${hasLegendPrimaryLine}`, hasLegendPrimaryLine);
+log(`frame overlay legend parentage:${hasLegendParentageLine}`, hasLegendParentageLine);
+log(`frame overlay legend operator:${hasLegendOperatorLine}`, hasLegendOperatorLine);
+log(`frame overlay legend event links:${hasLegendEventLine}`, hasLegendEventLine);
+log(`frame overlay legend resumed:${hasLegendResumedLine}`, hasLegendResumedLine);
+log(`frame overlay legend shared artifact:${hasLegendSharedLine}`, hasLegendSharedLine);
+log(`frame overlay legend primary:${hasLegendPrimaryLine}`, hasLegendPrimaryLine);
+log(`frame legend toggle key [l]:${/\[l\]egend|legend/.test(frame)}`, /\[l\]egend|click legend/.test(frame));
 log(`frame has no A-sen- labels:${!hasASen}`, !hasASen);
 log(`frame title in info line:${hasTitleInInfo}`, hasTitleInInfo || /◉/.test(frame));
 log(`frame filter short (op·prim):${hasOpPrim}`, hasOpPrim);
@@ -683,10 +684,11 @@ const TIGHT_W = 100;
 const TIGHT_H = 30;
 const tightStage = seedStageBox(TIGHT_W, TIGHT_H);
 const tightLegendN = legend.length; // 9 with unknown omitted
-const tightCanvasRows = budgetMapCanvasRows(tightStage.height, tightLegendN, 5);
+// Overlay legend costs 0 layout rows — canvas reclaims full residual.
+const tightCanvasRows = budgetMapCanvasRows(tightStage.height, 0, 5);
 log(
-  `tight budget host=${tightStage.height} legend=${tightLegendN} canvasRows=${tightCanvasRows}`,
-  tightCanvasRows >= 2,
+  `tight budget host=${tightStage.height} legendOverlay=${tightLegendN} canvasRows=${tightCanvasRows} (no legend layout steal)`,
+  tightCanvasRows >= 2 && tightCanvasRows === tightStage.height - 5,
 );
 
 const tightRt = await createTestRenderer({ width: TIGHT_W, height: TIGHT_H });
@@ -732,14 +734,25 @@ const tightAxisIdx = tightLines.findIndex(
 const tightAxisBelowTitle =
   tightTooSmall ||
   (tightAxisIdx > tightTitleIdx && tightTitleIdx >= 0);
-// Body node glyph: braille edge or ●/◉ not on a legend/status facts line.
+// Body node glyph or braille; legend overlay may share a row with a world glyph.
 const tightHasNode =
+  /[⠀-⣿]/.test(tightFrame) ||
+  /◉/.test(tightFrame) ||
   tightLines.some((l, i) => {
     if (tightTitleIdx >= 0 && i <= tightTitleIdx) return false;
-    if (/parentage|event links|resumed|shared artifact|operator|primary|subagent|showing |drag pan/.test(l))
-      return false;
-    return /[●◉◇]/.test(l) || /[⠀-⣿]/.test(l);
-  }) || /[⠀-⣿]/.test(tightFrame);
+    if (/showing |drag pan/.test(l)) return false;
+    return /●/.test(l);
+  });
+// Overlay legend tokens still visible in-frame (not a flex block under the canvas).
+const tightHasOverlayLegend =
+  /parentage/.test(tightFrame) &&
+  /resumed/.test(tightFrame) &&
+  /shared artifact/.test(tightFrame);
+// Canvas must be taller than the old flex-legend steal (host-5 with legend 0).
+const tightWorldTall =
+  tightTitleIdx >= 0 &&
+  tightAxisIdx > tightTitleIdx &&
+  tightAxisIdx - tightTitleIdx >= 4;
 const tightHonest = tightTooSmall || (tightHasShowing && tightHasNode);
 log(
   `tight 100x30 canvas paints nodes or too-small:${tightHasNode || tightTooSmall}`,
@@ -749,6 +762,8 @@ log(
   `tight 100x30 axis below Map title:${tightAxisBelowTitle}`,
   tightAxisBelowTitle,
 );
+log(`tight 100x30 overlay legend tokens:${tightHasOverlayLegend}`, tightHasOverlayLegend);
+log(`tight 100x30 world taller than old flex-legend steal:${tightWorldTall}`, tightWorldTall || tightTooSmall);
 log(`tight 100x30 no showing-N without paint:${tightHonest}`, tightHonest);
 log(
   `tight 100x30 has showing or too-small status`,

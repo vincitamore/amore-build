@@ -3,9 +3,9 @@
  *
  * Composition: pure one-house world builders + Graph `renderView` (glyphs, origin hue)
  * with evidence links only (parentage + event_links + session_links). Viewport chrome
- * matches GraphView (pan/zoom/fit/hit-test). Legend is fixed React rows (not a canvas
- * blit) so it paints reliably when nested under SessionsMember and appears in
- * char-frame harnesses. Timeline mode reserves the canvas bottom row as a time axis.
+ * matches GraphView (pan/zoom/fit/hit-test). Legend is a canvas OVERLAY (top-right,
+ * same draw/hit geometry contract as graph-view) so it consumes zero flex rows.
+ * Timeline mode reserves the canvas bottom row as a time axis.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useKeyboard } from '@opentui/react';
@@ -36,7 +36,7 @@ import {
 } from '../render/viewport';
 import { BrailleCanvas } from '../render/braille';
 import { attentionShade, clusterColor, EDGE_FAINT, type RGB } from '../render/color';
-import { blitGrid, GRAPH_BG, type DrawBuffer, type LegendEntry } from '../graph-view/blit';
+import { blitGrid, GRAPH_BG, type DrawBuffer } from '../graph-view/blit';
 import {
   openQueryService,
   resolveIndexPath,
@@ -49,25 +49,26 @@ import {
   budgetMapCanvasRows,
   buildMapLegendRows,
   buildSessionWorld,
+  clampMapLegendEntries,
   DEFAULT_ALLOWED_AGENTS,
   DEFAULT_ALLOWED_ORIGINS,
   errorDensityTier,
   filtersShortLabel,
   formatHoverReadout,
   formatLinksStatus,
-  formatMapLegendLine,
   formatSelectionReadout,
   hitTestSession,
   layoutAxisStrip,
-  LEGEND_MAX_ROWS,
   legendToggleTarget,
   lightnessStatusLabel,
   mapCanvasBodyRows,
   mapCanvasTooSmall,
   mapFitPadding,
+  mapLegendHitAt,
   minMapCanvasRows,
   modeStatusLabel,
   neighborhoodIds,
+  paintMapLegendOntoGrid,
   partitionDrawnLinks,
   selectDrawnLinks,
   selectZoomTierLabels,
@@ -159,40 +160,6 @@ function FixedClearRow({
         {cell}
       </text>
     </box>
-  );
-}
-
-function rgbToRgba(c: { r: number; g: number; b: number }, dim = false): RGBA {
-  if (dim) {
-    return RGBA.fromInts(
-      Math.round(c.r * 0.45 + 30),
-      Math.round(c.g * 0.45 + 30),
-      Math.round(c.b * 0.45 + 30),
-    );
-  }
-  return RGBA.fromInts(c.r, c.g, c.b);
-}
-
-/** One fixed-slot legend row — click toggles origin/agent/edge via legendToggleTarget. */
-function MapLegendRow({
-  entry,
-  width,
-  onToggle,
-}: {
-  entry: LegendEntry;
-  width: number;
-  onToggle: (label: string) => void;
-}) {
-  const line = formatMapLegendLine(entry);
-  const color = rgbToRgba(entry.color, entry.hidden);
-  return (
-    <FixedClearRow
-      width={width}
-      color={color}
-      bg={GRAPH_BG}
-      text={padRow(line, width)}
-      onMouseDown={() => onToggle(entry.label)}
-    />
   );
 }
 
@@ -296,6 +263,8 @@ export function MapStage({
   const [hiddenEdgeKinds, setHiddenEdgeKinds] = useState<Set<MapEdgeKind>>(() => new Set());
   /** Exclusive lightness channel: volume-halo (default) ↔ error-density (`e`). */
   const [lightness, setLightness] = useState<MapLightness>('volume');
+  /** Legend overlay visible by default (graph-view `l` convention). */
+  const [showLegend, setShowLegend] = useState(true);
   const qsRef = useRef<QueryService | null>(null);
   const aliveRef = useRef(true);
   const onFlashRef = useRef(onFlash);
@@ -442,14 +411,8 @@ export function MapStage({
   }, [sessions, evidenceLinks, allowedOrigins, allowedAgents, hiddenEdgeKinds]);
 
   // ── Explicit canvas budget (fit-clamp from residual host) ─────────────────
-  // Legend is real fixed-slot height; reserve it before the canvas so the blit
-  // rows always match the box. Never flexGrow-measure against the legend.
-  const legendRows = soft.kind === 'ready' ? Math.min(LEGEND_MAX_ROWS, legend.length) : 0;
-  // Pre-ready: reserve a mid legend so the first ready paint does not jump from
-  // a huge seed into a squeezed box (the blank-canvas-under-showing-N defect).
-  const legendReserve =
-    soft.kind === 'ready' ? legendRows : Math.min(LEGEND_MAX_ROWS, 8);
-  const canvasRowsBudget = budgetMapCanvasRows(stageBox.height, legendReserve, MAP_BASE_CHROME);
+  // Legend is a canvas OVERLAY — pass legendRows=0 so the world reclaims full height.
+  const canvasRowsBudget = budgetMapCanvasRows(stageBox.height, 0, MAP_BASE_CHROME);
   const cols = Math.max(1, stageBox.width - MAP_PANEL_PAD_COLS);
   const rows = Math.max(0, canvasRowsBudget);
   const tooSmall = soft.kind === 'ready' && mapCanvasTooSmall(rows, mode);
@@ -459,6 +422,11 @@ export function MapStage({
   const width = cols * 2;
   const hasAxis = mode === 'density' && rows >= minMapCanvasRows('density');
   const fitPad = mapFitPadding(bodyHeight, width);
+  // Overlay clamp: never paint past the canvas; leave axis strip free in timeline.
+  const legendDrawn = showLegend
+    ? clampMapLegendEntries(legend, rows, { reserveAxis: hasAxis })
+    : [];
+  const legendDrawnCount = legendDrawn.length;
 
   // Structure-invalidating mode change → reset viewport (GraphView pattern).
   const lastMode = useRef(mode);
@@ -684,6 +652,31 @@ export function MapStage({
       }
       result.grid.rows = rows;
       result.grid.cells = full;
+    } else if (result.grid.rows !== rows || result.grid.cols !== cols) {
+      // Ensure full canvas grid size when no axis expansion path ran.
+      const full: (Cell | null)[] = new Array(cols * Math.max(1, rows)).fill(null);
+      const gr = result.grid.rows;
+      const gc = result.grid.cols;
+      for (let cy = 0; cy < Math.min(gr, rows); cy++) {
+        for (let cx = 0; cx < Math.min(gc, cols); cx++) {
+          full[cy * cols + cx] = result.grid.cells[cy * gc + cx] ?? null;
+        }
+      }
+      result.grid.rows = Math.max(1, rows);
+      result.grid.cols = cols;
+      result.grid.cells = full;
+    }
+
+    // Legend overlay (top-right) — after world + axis so it paints on top; clamped
+    // away from the axis strip. Zero layout rows; draw/hit share clamp geometry.
+    if (legendDrawnCount > 0) {
+      paintMapLegendOntoGrid(
+        result.grid.cells,
+        result.grid.cols,
+        legendDrawn,
+        cols,
+        legendDrawnCount,
+      );
     }
 
     return result;
@@ -705,6 +698,8 @@ export function MapStage({
     width,
     bodyHeight,
     tooSmall,
+    legendDrawn,
+    legendDrawnCount,
   ]);
 
   const gridRef = useRef(grid);
@@ -747,6 +742,15 @@ export function MapStage({
       return hitTestSession(screenNodes, cellX, cellY);
     },
     [screenNodes, hasAxis, bodyRows],
+  );
+
+  /** Overlay hit — same geometry as paintMapLegendOntoGrid (clamped drawn rows). */
+  const legendHit = useCallback(
+    (cellX: number, cellY: number) => {
+      if (!showLegend || legendDrawnCount <= 0) return null;
+      return mapLegendHitAt(legendDrawn, cols, legendDrawnCount, cellX, cellY);
+    },
+    [showLegend, legendDrawn, legendDrawnCount, cols],
   );
 
   const toggleLegendKey = useCallback((label: string) => {
@@ -830,6 +834,11 @@ export function MapStage({
       setLightness((m) => (m === 'volume' ? 'error' : 'volume'));
       return;
     }
+    if (n === 'l') {
+      // Graph-view convention: toggle legend overlay (default ON).
+      setShowLegend((s) => !s);
+      return;
+    }
     if (n === 'left') setViewport(panViewport(vp, -3, 0));
     else if (n === 'right') setViewport(panViewport(vp, 3, 0));
     else if (n === 'up') setViewport(panViewport(vp, 0, -2));
@@ -873,13 +882,18 @@ export function MapStage({
       const d = dragRef.current;
       dragRef.current = null;
       if (d && !d.moved && (e.button ?? 0) === 0) {
-        // Legend lives in React rows (own mouse handlers) — canvas is node hit-test only.
+        // Legend overlay first (shared geometry with draw) — then world hit-test.
+        const leg = legendHit(e.x, e.y);
+        if (leg) {
+          toggleLegendKey(leg.label);
+          return;
+        }
         const hit = hitTest(e.x, e.y);
         if (hit && hit === selected) openSelected(hit);
         else setSelected(hit);
       }
     },
-    [hitTest, selected, openSelected],
+    [legendHit, toggleLegendKey, hitTest, selected, openSelected],
   );
 
   const onMouseMove = useCallback(
@@ -938,7 +952,7 @@ export function MapStage({
   const controlLine = tooSmall
     ? ' enlarge the terminal · r reload'
     : soft.kind === 'ready'
-      ? ` drag pan · scroll zoom · click select · legend filter · click·click / ⏎ open · [d] timeline/structure · [e] ${lightnessLabel} · [f]it [c]enter [r]eload`
+      ? ` drag pan · scroll zoom · click select · click legend = toggle · click·click / ⏎ open · [d] timeline/structure · [e] ${lightnessLabel} · [l]egend · [f]it [c]enter [r]eload`
       : ' r retry';
 
   const softBody =
@@ -975,7 +989,7 @@ export function MapStage({
           width={rowW}
           color={t.muted}
           text={padRow(
-            `host ${stageBox.height} · legend ${legendRows} · chrome ${MAP_BASE_CHROME} → canvas ${rows} (min ${minMapCanvasRows(mode)})`,
+            `host ${stageBox.height} · chrome ${MAP_BASE_CHROME} → canvas ${rows} (min ${minMapCanvasRows(mode)})`,
             rowW,
           )}
         />
@@ -1004,37 +1018,15 @@ export function MapStage({
     <box height={Math.max(1, rows)} width={cols} flexShrink={0} backgroundColor={GRAPH_BG} />
   );
 
-  const legendBlock =
-    soft.kind === 'ready' && legend.length > 0 ? (
-      <box
-        flexDirection="column"
-        flexShrink={0}
-        width="100%"
-        height={legend.length}
-        overflow="hidden"
-        backgroundColor={GRAPH_BG}
-      >
-        {legend.map((entry) => (
-          <MapLegendRow
-            key={entry.label}
-            entry={entry}
-            width={rowW}
-            onToggle={toggleLegendKey}
-          />
-        ))}
-      </box>
-    ) : null;
-
   return (
     <Panel title="Map" headerRight={headerRight} flexGrow={1} minHeight={0} active={!!inputActive}>
       {softBody ?? (
         <box flexDirection="column" flexGrow={1} width="100%" minHeight={0} overflow="hidden">
           {/*
-            Explicit height from residual budget — never flexGrow+measure against the
-            legend (that path left a blank canvas under a showing-N claim at 100×30).
+            Canvas reclaims full residual height; legend is an overlay inside the blit
+            (top-right), not a flex block under the world.
           */}
           {canvasBody}
-          {legendBlock}
           <box width="100%" height={1} flexShrink={0} overflow="hidden" backgroundColor={STATUS_BG}>
             <FixedClearRow width={rowW} color={STATUS_FG} text={padRow(infoLine.trimStart(), rowW)} />
           </box>

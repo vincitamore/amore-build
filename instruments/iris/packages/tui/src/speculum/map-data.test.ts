@@ -30,10 +30,16 @@ import {
   legendToggleTarget,
   lightnessStatusLabel,
   budgetMapCanvasRows,
+  clampMapLegendEntries,
   mapCanvasBodyRows,
   mapCanvasTooSmall,
   mapFitPadding,
+  mapLegendBlockWidth,
+  mapLegendHitAt,
+  mapLegendRowWidth,
+  mapLegendX0,
   minMapCanvasRows,
+  paintMapLegendOntoGrid,
   modeStatusLabel,
   neighborhoodIds,
   ORIGIN_ORDER,
@@ -803,13 +809,56 @@ describe('time axis (timeline mode)', () => {
     expect(mapCanvasBodyRows(0, 'density')).toBe(0);
   });
 
-  test('budgetMapCanvasRows fit-clamps host minus chrome minus legend', () => {
-    // tight residual host ~21, chrome 5, legend 9 → canvas 7
-    expect(budgetMapCanvasRows(21, 9, 5)).toBe(7);
-    expect(budgetMapCanvasRows(21, 10, 5)).toBe(6);
+  test('budgetMapCanvasRows fit-clamps host minus chrome; legend overlay costs 0 layout rows', () => {
+    // Overlay legend: legendRows arg is ignored — canvas reclaims full residual.
+    expect(budgetMapCanvasRows(21, 0, 5)).toBe(16);
+    expect(budgetMapCanvasRows(21, 9, 5)).toBe(16); // non-zero legendRows no longer steals
+    expect(budgetMapCanvasRows(21, 10, 5)).toBe(16);
     // host too small → 0, never negative
-    expect(budgetMapCanvasRows(10, 9, 5)).toBe(0);
     expect(budgetMapCanvasRows(5, 0, 5)).toBe(0);
+    expect(budgetMapCanvasRows(4, 0, 5)).toBe(0);
+  });
+
+  test('map legend overlay geometry: right-aligned, clamp, hit-test shared with draw', () => {
+    const entries = [
+      { glyph: '─', label: 'parentage', count: 1, color: { r: 1, g: 1, b: 1 }, hidden: false, depth: 0 as const, expandable: false, expanded: false, partial: false },
+      { glyph: '═', label: 'event links', count: 2, color: { r: 1, g: 1, b: 1 }, hidden: false, depth: 0 as const, expandable: false, expanded: false, partial: false },
+      { glyph: '→', label: 'resumed', count: 0, color: { r: 1, g: 1, b: 1 }, hidden: false, depth: 0 as const, expandable: false, expanded: false, partial: false },
+      { glyph: '┄', label: 'shared artifact', count: 3, color: { r: 1, g: 1, b: 1 }, hidden: false, depth: 0 as const, expandable: false, expanded: false, partial: false },
+      { glyph: '●', label: 'operator', count: 10, color: { r: 1, g: 1, b: 1 }, hidden: false, depth: 0 as const, expandable: false, expanded: false, partial: false },
+    ];
+    expect(mapLegendRowWidth(entries[0]!)).toBe(2 + 'parentage (1)'.length);
+    const w = mapLegendBlockWidth(entries);
+    expect(mapLegendX0(entries, 80)).toBe(80 - w);
+    expect(mapLegendX0(entries, 5)).toBe(0); // too narrow → pinned left
+
+    // Clamp leaves axis row free in timeline
+    expect(clampMapLegendEntries(entries, 4, { reserveAxis: true })).toHaveLength(3);
+    expect(clampMapLegendEntries(entries, 2, { reserveAxis: true })).toHaveLength(1);
+    expect(clampMapLegendEntries(entries, 1, { reserveAxis: true })).toHaveLength(0);
+    expect(clampMapLegendEntries(entries, 3, { reserveAxis: false })).toHaveLength(3);
+
+    const drawn = clampMapLegendEntries(entries, 10, { reserveAxis: true });
+    const x0 = mapLegendX0(drawn, 80);
+    // Click on first legend row → toggle
+    expect(mapLegendHitAt(drawn, 80, drawn.length, x0 + 2, 0)).toEqual({
+      kind: 'toggle',
+      label: 'parentage',
+    });
+    // Click past drawn rows → null (fall through to world)
+    expect(mapLegendHitAt(drawn, 80, drawn.length, x0 + 2, drawn.length)).toBe(null);
+    // Click left of overlay block → null
+    expect(mapLegendHitAt(drawn, 80, drawn.length, 0, 0)).toBe(null);
+
+    // Paint does not write past clamp
+    const cells: ({ char: string; fg: { r: number; g: number; b: number } } | null)[] =
+      new Array(80 * 10).fill(null);
+    paintMapLegendOntoGrid(cells, 80, drawn, 80, drawn.length);
+    // First row has a glyph at x0
+    expect(cells[x0]?.char).toBe('─');
+    // Row beyond clamp stays empty
+    const beyond = drawn.length * 80 + x0;
+    if (beyond < cells.length) expect(cells[beyond]).toBe(null);
   });
 
   test('mapCanvasTooSmall / minMapCanvasRows', () => {

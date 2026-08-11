@@ -8,7 +8,7 @@
  */
 import type { SessionListRow, SessionMapLink } from './query-service';
 import { displayLabel, type GraphData, type GraphLink, type GraphNode, type WorldNode } from '../render/graph';
-import { clusterColor, type RGB } from '../render/color';
+import { clusterColor, dim, type RGB } from '../render/color';
 import type { LegendEntry } from '../graph-view/blit';
 import { classifyCwd, type CwdOrigin } from './cwd-class';
 import type { Viewport } from '../render/viewport';
@@ -708,20 +708,122 @@ export function mapCanvasBodyRows(canvasRows: number, mode: MapMode): number {
 
 /**
  * Fit-clamp canvas rows from the residual stage host.
- * stageH is the MapStage host (includes panel title/borders + legend + status + canvas).
+ * stageH is the MapStage host (includes panel title/borders + status + canvas).
  * baseChrome = panel title/borders (~3) + status/control lines (2).
- * legendRows = actual legend block height (0 before ready).
+ * legendRows — kept for API stability; map legend is a canvas OVERLAY and must
+ * pass 0 so the canvas reclaims the full residual (no flex block under the blit).
  * Never returns a negative; 0 means the host cannot hold a canvas.
  */
 export function budgetMapCanvasRows(
   stageH: number,
-  legendRows: number,
+  legendRows: number = 0,
   baseChrome: number = 5,
 ): number {
   const h = Math.max(0, Math.floor(stageH));
-  const legend = Math.max(0, Math.floor(legendRows));
+  // Overlay legends consume no layout rows; ignore non-zero only for legacy callers.
+  const legend = 0;
+  void legendRows;
   const chrome = Math.max(0, Math.floor(baseChrome));
   return Math.max(0, h - chrome - legend);
+}
+
+// ── Map legend overlay (canvas blit; graph-view geometry) ─────────────────────
+// Right-aligned top-right so it stays clear of the bottom axis strip. Draw and
+// hit-test share mapLegendX0 + clampMapLegendEntries so a click never resolves
+// to an undrawn row.
+
+const MAP_LEGEND_FG: RGB = { r: 200, g: 206, b: 214 };
+
+/** "label (count)" text width (glyph column excluded — matches graph-view row layout). */
+function mapLegendText(e: { label: string; count: number }): string {
+  return `${e.label} (${e.count})`;
+}
+
+/** Row print width: `[glyph]@0 ' '@1 [label (count)]@2+` → 2 + text. */
+export function mapLegendRowWidth(e: { label: string; count: number }): number {
+  return 2 + mapLegendText(e).length;
+}
+
+/** Width of the overlay block: widest row + one-cell right margin. */
+export function mapLegendBlockWidth(entries: readonly { label: string; count: number }[]): number {
+  return entries.reduce((m, e) => Math.max(m, mapLegendRowWidth(e)), 0) + 1;
+}
+
+/** Left column of the right-aligned overlay given canvas cols. */
+export function mapLegendX0(
+  entries: readonly { label: string; count: number }[],
+  cols: number,
+): number {
+  return Math.max(0, cols - mapLegendBlockWidth(entries));
+}
+
+/**
+ * Clamp overlay entries to the paintable canvas rows.
+ * When reserveAxis is true (timeline mode), leave the last row for the axis strip.
+ */
+export function clampMapLegendEntries<T>(
+  entries: readonly T[],
+  canvasRows: number,
+  opts?: { reserveAxis?: boolean; maxRows?: number },
+): T[] {
+  const maxCap = opts?.maxRows ?? LEGEND_MAX_ROWS;
+  let room = Math.max(0, Math.floor(canvasRows));
+  if (opts?.reserveAxis && room > 0) room -= 1;
+  const n = Math.min(entries.length, maxCap, room);
+  return entries.slice(0, n);
+}
+
+export type MapLegendHit = { kind: 'toggle'; label: string };
+
+/**
+ * Hit-test a cell against the drawn overlay. Geometry mirrors paintMapLegendOntoGrid:
+ * right-aligned, top-down, clamped to drawn row count. Null = fall through to world.
+ */
+export function mapLegendHitAt(
+  entries: readonly { label: string; count: number }[],
+  cols: number,
+  drawnRows: number,
+  cellX: number,
+  cellY: number,
+): MapLegendHit | null {
+  if (drawnRows <= 0 || entries.length === 0) return null;
+  if (cellY < 0 || cellY >= drawnRows || cellY >= entries.length) return null;
+  const visible = entries.slice(0, drawnRows);
+  const x0 = mapLegendX0(visible, cols);
+  if (cellX < x0 || cellX >= cols) return null;
+  const e = visible[cellY];
+  if (!e) return null;
+  return { kind: 'toggle', label: e.label };
+}
+
+/**
+ * Paint legend rows into a cell grid (local coords). Overwrites world glyphs under
+ * the overlay block. Caller blits the grid with the screen-origin offset.
+ */
+export function paintMapLegendOntoGrid(
+  cells: ({ char: string; fg: RGB; attr?: number } | null)[],
+  gridCols: number,
+  entries: readonly LegendEntry[],
+  canvasCols: number,
+  drawnRows: number,
+): void {
+  if (drawnRows <= 0 || entries.length === 0 || gridCols <= 0) return;
+  const visible = entries.slice(0, drawnRows);
+  const x0 = mapLegendX0(visible, canvasCols);
+  for (let i = 0; i < visible.length; i++) {
+    const e = visible[i]!;
+    const gc = e.hidden ? dim(e.color, 0.6) : e.color;
+    const tc = e.hidden ? dim(MAP_LEGEND_FG, 0.55) : MAP_LEGEND_FG;
+    const mark = e.hidden ? '○' : e.glyph;
+    const put = (x: number, ch: string, c: RGB) => {
+      if (x < 0 || x >= canvasCols || x >= gridCols) return;
+      cells[i * gridCols + x] = { char: ch, fg: c };
+    };
+    put(x0, mark, gc);
+    put(x0 + 1, ' ', tc);
+    const text = mapLegendText(e);
+    for (let j = 0; j < text.length; j++) put(x0 + 2 + j, text[j]!, tc);
+  }
 }
 
 /** Minimum canvas rows to paint honestly: timeline needs body+axis (2), structure needs 1. */
