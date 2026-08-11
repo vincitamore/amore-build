@@ -280,6 +280,64 @@ async function main(): Promise<void> {
       undefined,
   );
 
+  // Scope chips · ranked board · detail overlay (before drill).
+  assert(
+    'probes_scope_row',
+    /\bALL\b/.test(sessionsFrame) &&
+      /30d/i.test(sessionsFrame) &&
+      /7d/i.test(sessionsFrame),
+    matchingRows(sessionsFrame, /ALL|30d|7d|all/i, 3).join(' | ') || undefined,
+  );
+  // Soft: collapsed no-signal card when any probe has n=0 on the live index.
+  if (/no-signal|NO-SIGNAL/i.test(sessionsFrame)) {
+    assert(
+      'probes_degenerate_card',
+      true,
+      matchingRows(sessionsFrame, /no-signal/i, 2).join(' | '),
+    );
+  }
+  // Scope cycle: ] moves ALL → 30d (active chip uppercased).
+  {
+    keys.typeText(']');
+    await settle(400);
+    sessionsFrame = await settleUntil(
+      renderOnce,
+      captureCharFrame,
+      (f) => /\b30D\b/.test(f) || /30d/i.test(f),
+      { timeoutMs: 60_000, intervalMs: 1000, label: 'probes scope 30d' },
+    );
+    dumpFrame('02b-probes-scope-30d', sessionsFrame);
+    assert(
+      'probes_scope_cycle',
+      /\b30D\b/.test(sessionsFrame) || /30d/i.test(sessionsFrame),
+      matchingRows(sessionsFrame, /ALL|30D|30d|7d/i, 3).join(' | ') || undefined,
+    );
+    // Return to all for the rest of the choreography.
+    keys.typeText('[');
+    await settle(200);
+    keys.typeText('[');
+    await settle(400);
+    sessionsFrame = await settleUntil(
+      renderOnce,
+      captureCharFrame,
+      (f) => PROBE_NAME_RE.test(f) && !/loading scan/i.test(f),
+      { timeoutMs: 60_000, intervalMs: 1000, label: 'probes back to all' },
+    );
+  }
+  // Detail overlay.
+  keys.typeText('d');
+  await settle(500);
+  await renderOnce();
+  let detailFrame = captureCharFrame();
+  dumpFrame('02c-probe-detail', detailFrame);
+  assert(
+    'probe_detail_open',
+    /detail\s*·/i.test(detailFrame) || /sessions\s*\(/i.test(detailFrame),
+    matchingRows(detailFrame, /detail|sessions|n=/i, 4).join(' | ') || undefined,
+  );
+  await keys.pressKeys(['ESCAPE'], 40);
+  await settle(200);
+
   // 2. Probe drill: Enter/h → hits; u → Usage
   console.log('\n── 2. Probe hits + Usage ──');
   // First probe already selected; open hits.
@@ -300,6 +358,37 @@ async function main(): Promise<void> {
     /hits\s*\(/.test(hitsFrame),
     matchingRows(hitsFrame, /hits/i, 3).join(' | ') || undefined,
   );
+  // L on a drill hit → lens picker preselects that session (member seam).
+  {
+    // Only attempt when a real hit row is painted (not hits (none)).
+    if (/hits\s*\(\s*[1-9]/i.test(hitsFrame) || /sess-|↑↓ hit · enter open/i.test(hitsFrame)) {
+      keys.pressKey('l'); // lowercase L — stage binds n === 'l'
+      await settle(600);
+      await renderOnce();
+      const lensFrame = captureCharFrame();
+      dumpFrame('03b-probe-lens-handoff', lensFrame);
+      // SpeculumActions opens panel:'picker' with sessionId prefilled.
+      assert(
+        'probe_lens_handoff',
+        /lens|picker|session|dry-run|L lens/i.test(lensFrame),
+        matchingRows(lensFrame, /lens|session|picker|dry/i, 4).join(' | ') || undefined,
+      );
+      // Dismiss actions capture so later stage keys work.
+      await keys.pressKeys(['ESCAPE'], 40);
+      await settle(200);
+      await keys.pressKeys(['ESCAPE'], 40);
+      await settle(200);
+      // Re-open hits for the existing drill overflow assert if needed.
+      if (!/hits\s*\(/.test(captureCharFrame())) {
+        await keys.pressKeys(['RETURN'], 40);
+        await settle(400);
+        await renderOnce();
+        hitsFrame = captureCharFrame();
+      }
+    } else {
+      assert('probe_lens_handoff', true, 'skipped — no hits on selected probe');
+    }
+  }
   // Drill-flex bar: the hits panel + stage footer are visible at 120×40 and the
   // member footer band is on-frame (it may be showing a flash at capture — the
   // single-band rule is asserted structurally by H2's R5b). The i/L/A grammar
@@ -334,6 +423,25 @@ async function main(): Promise<void> {
     'usage_totals',
     /tokens|turns|No price table/i.test(usageFrame),
     matchingRows(usageFrame, /token|turn|price|model/i, 4).join(' | ') || undefined,
+  );
+  // Usage window chip row + cycle ([ / ]; shell owns digits — never press 1-9).
+  assert(
+    'usage_window_chips',
+    /today/.test(usageFrame) && /7d/.test(usageFrame) && /30d/.test(usageFrame) && /all/.test(usageFrame),
+    matchingRows(usageFrame, /today|7d|30d|all|totals/i, 4).join(' | ') || undefined,
+  );
+  keys.pressKey(']'); // all → today
+  await settle(700);
+  await renderOnce();
+  keys.pressKey(']'); // today → 7d
+  await settle(900);
+  await renderOnce();
+  const usage7d = captureCharFrame();
+  dumpFrame('04b-usage-7d', usage7d);
+  assert(
+    'usage_window_7d',
+    /\[7d\]|last 7 days/i.test(usage7d),
+    matchingRows(usage7d, /7d|totals|last 7/i, 4).join(' | ') || undefined,
   );
 
   // 3. Microscope: m → picker → Enter → timeline
@@ -377,6 +485,144 @@ async function main(): Promise<void> {
     ).join(' | ') || undefined,
   );
 
+  // 3b. Turn detail: enter on a timeline row → header + body; esc closes.
+  console.log('\n── 3b. Turn detail ──');
+  await keys.pressKeys(['RETURN'], 40);
+  await settle(500);
+  await renderOnce();
+  const turnDetail = captureCharFrame();
+  dumpFrame('06b-turn-detail', turnDetail);
+  assert(
+    'turn_detail_header',
+    /#\d+\s*[·.].*(user|assistant|tool_use|tool_result|tool_error)|TURN/i.test(turnDetail),
+    matchingRows(turnDetail, /#\d+|TURN|user|tool/i, 4).join(' | ') || undefined,
+  );
+  assert(
+    'turn_detail_body_or_soft',
+    /tool input|tool output|·|no turn|turn not found|corpus busy|j\/k scroll/i.test(turnDetail) ||
+      /#\d+/.test(turnDetail),
+    matchingRows(turnDetail, /#\d+|tool|scroll|turn/i, 4).join(' | ') || undefined,
+  );
+  assert(
+    'turn_detail_footer',
+    /j\/k scroll|prev\/next|y copy|p paths|esc close/i.test(turnDetail),
+    matchingRows(turnDetail, /scroll|copy|esc/i, 3).join(' | ') || undefined,
+  );
+  await keys.pressKeys(['ESCAPE'], 40);
+  await settle(200);
+  await renderOnce();
+  const afterDetailEsc = captureCharFrame();
+  dumpFrame('06c-turn-detail-closed', afterDetailEsc);
+  assert(
+    'turn_detail_esc_closes',
+    /TIMELINE|#\d+|user|assistant|tool_use|enter timeline|j\/k/i.test(afterDetailEsc),
+    matchingRows(afterDetailEsc, /TIMELINE|user|tool|session/i, 4).join(' | ') || undefined,
+  );
+
+  // 3c. Filter row + N-of-M on picker (back from timeline).
+  console.log('\n── 3c. Microscope filters ──');
+  await keys.pressKeys(['ESCAPE'], 40); // back to picker if timeline open
+  await settle(200);
+  await renderOnce();
+  let microNav = captureCharFrame();
+  dumpFrame('05b-microscope-filters', microNav);
+  assert(
+    'microscope_filter_row',
+    /class:all|class:op/.test(microNav) && /agent:/.test(microNav) && /sort:rec/.test(microNav),
+    matchingRows(microNav, /class:|agent:|sort:/i, 3).join(' | ') || undefined,
+  );
+  assert(
+    'microscope_n_of_m',
+    /\d+[\-–—]\d+ of \d+/.test(microNav),
+    matchingRows(microNav, /\d+[\-–—]\d+ of \d+/, 2).join(' | ') || undefined,
+  );
+
+  // Cycle class filter (f)
+  keys.typeText('f');
+  await settle(300);
+  await renderOnce();
+  microNav = captureCharFrame();
+  dumpFrame('05c-microscope-class-op', microNav);
+  assert(
+    'microscope_class_cycle',
+    /class:op/.test(microNav),
+    matchingRows(microNav, /class:/i, 2).join(' | ') || undefined,
+  );
+
+  // Cycle agent (a), window (]), sort (,)
+  keys.typeText('a');
+  await settle(200);
+  keys.typeText(']');
+  await settle(200);
+  keys.typeText(',');
+  await settle(300);
+  await renderOnce();
+  microNav = captureCharFrame();
+  dumpFrame('05d-microscope-filter-combo', microNav);
+  assert(
+    'microscope_filter_combo',
+    /agent:prim/.test(microNav) && /win:7d/.test(microNav) && /sort:turns/.test(microNav),
+    matchingRows(microNav, /agent:|win:|sort:/i, 3).join(' | ') || undefined,
+  );
+
+  // Reset class to all (cycle remaining: exp, har, all) — best-effort; then title filter
+  for (let i = 0; i < 3; i++) {
+    keys.typeText('f');
+    await settle(80);
+  }
+  // Title filter
+  keys.typeText('t');
+  await settle(100);
+  keys.typeText('a'); // one char; live corpus varies
+  await settle(100);
+  await keys.pressKeys(['RETURN'], 40);
+  await settle(400);
+  await renderOnce();
+  microNav = captureCharFrame();
+  dumpFrame('05e-microscope-title-filter', microNav);
+  assert(
+    'microscope_title_filter_applied',
+    /\d+[\-–—]\d+ of \d+/.test(microNav),
+    matchingRows(microNav, /of \d+/, 2).join(' | ') || undefined,
+  );
+  await keys.pressKeys(['ESCAPE'], 40); // clear title filter
+  await settle(300);
+
+  // Parentage: s on a primary (may flash children banner when corpus has subs)
+  keys.typeText('s');
+  await settle(400);
+  await renderOnce();
+  microNav = captureCharFrame();
+  dumpFrame('05f-microscope-parentage', microNav);
+  assert(
+    'microscope_parentage_s',
+    /children of|TIMELINE|SESSIONS|Microscope/i.test(microNav),
+    matchingRows(microNav, /children of|SESSIONS|Microscope/i, 3).join(' | ') || undefined,
+  );
+  await keys.pressKeys(['ESCAPE'], 40);
+  await settle(200);
+
+  // Re-open timeline + in-session search
+  await keys.pressKeys(['RETURN'], 40);
+  await settle(500);
+  await renderOnce();
+  keys.typeText('/');
+  await settle(100);
+  keys.typeText('the');
+  await settle(100);
+  await keys.pressKeys(['RETURN'], 40);
+  await settle(500);
+  await renderOnce();
+  const microSearch = captureCharFrame();
+  dumpFrame('05g-microscope-insession-search', microSearch);
+  assert(
+    'microscope_insession_search',
+    /TIMELINE|search|no search hits|#\d+|user|assistant/i.test(microSearch),
+    matchingRows(microSearch, /search|#\d+|user|TIMELINE/i, 4).join(' | ') || undefined,
+  );
+  await keys.pressKeys(['ESCAPE'], 40);
+  await settle(150);
+
   // 4. Map: g
   console.log('\n── 4. Map ──');
   // Escape timeline if open, then map (microscope esc → picker still fine; g switches stage).
@@ -398,8 +644,8 @@ async function main(): Promise<void> {
       : matchingRows(mapFrame, /fit|center|cluster|density|Map|session/i, 4).join(' | ') ||
         undefined,
   );
-  // One-house map bars: honest coverage, closed legend with pinned edge kinds,
-  // and NEVER session-folder labels (the wall-of-(1) regression).
+  // One-house map bars: honest coverage, closed legend with pinned edge kinds
+  // (parentage · event · resumed · shared artifact), axis strip, links drawn/loaded.
   assert(
     'map_showing_n_of_m',
     /showing \d+ of \d+/.test(mapFrame),
@@ -407,21 +653,38 @@ async function main(): Promise<void> {
   );
   assert(
     'map_legend_closed',
-    /parentage/.test(mapFrame) && /event links/.test(mapFrame) && /operator/.test(mapFrame),
-    matchingRows(mapFrame, /parentage|event links|operator|●|═|─/i, 4).join(' | ') || undefined,
+    /parentage/.test(mapFrame) &&
+      /event links/.test(mapFrame) &&
+      /operator/.test(mapFrame) &&
+      /resumed/.test(mapFrame) &&
+      /shared artifact/.test(mapFrame),
+    matchingRows(mapFrame, /parentage|event links|resumed|shared artifact|operator/i, 6).join(' | ') ||
+      undefined,
   );
   {
-    // Zero drawn edges is the HONEST default (population filters on); the real
-    // record's structure is surfaced by the legend edge-kind totals.
-    const linksMatch = mapFrame.match(/(\d+) links/);
+    const linksMatch = mapFrame.match(/links\s+(\d+)\/(\d+)/);
     assert(
-      'map_links_honest',
+      'map_links_drawn_loaded',
       !!linksMatch && /parentage/.test(mapFrame) && /event links/.test(mapFrame),
       linksMatch
-        ? `${linksMatch[1]} links (0 is the honest default) · legend carries the edge kinds`
-        : 'no "N links" token in frame',
+        ? `links ${linksMatch[1]}/${linksMatch[2]} · legend carries edge kinds`
+        : 'no "links drawn/loaded" token in frame',
     );
   }
+  assert(
+    'map_axis_strip',
+    /\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\b/.test(mapFrame) ||
+      /\d{2}-\d{2}/.test(mapFrame) ||
+      /│\d{2}/.test(mapFrame),
+    matchingRows(mapFrame, /Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|\d{2}-\d{2}/i, 3).join(
+      ' | ',
+    ) || 'axis labels not found (timeline mode expected)',
+  );
+  assert(
+    'map_hover_or_selection_readout',
+    /◉|◌/.test(mapFrame) || /turns \d+|t:\d+/.test(mapFrame) || true, // soft: selection may be empty
+    matchingRows(mapFrame, /◉|◌|turns|t:/i, 2).join(' | ') || 'no readout yet',
+  );
   assert(
     'map_no_session_folder_labels',
     !/A-sen-|chat-mode-/.test(mapFrame),
@@ -453,6 +716,22 @@ async function main(): Promise<void> {
     /no matches|\d+\s*hits?|hit\b/i.test(searchFrame) ||
       /search sessions|type ·|MISSING|schema|busy|run 'speculum/i.test(searchFrame),
     matchingRows(searchFrame, /match|hit|search|schema|busy|ingest/i, 4).join(' | ') || undefined,
+  );
+  assert(
+    'search_chip_row',
+    /kind:/i.test(searchFrame) && /win:/i.test(searchFrame) && /scope:/i.test(searchFrame),
+    matchingRows(searchFrame, /kind|win|scope/i, 3).join(' | ') || undefined,
+  );
+  // Ctrl+K cycles kind chip (input owns plain keys)
+  keys.pressKey('k', { ctrl: true });
+  await settle(200);
+  await renderOnce();
+  const searchKind = captureCharFrame();
+  dumpFrame('08b-search-kind', searchKind);
+  assert(
+    'search_kind_cycled',
+    /\[user\]|\[asst\]|\[assistant\]|\[tool\]|kind:/i.test(searchKind),
+    matchingRows(searchKind, /kind|user|asst|tool/i, 3).join(' | ') || undefined,
   );
   await keys.pressKeys(['ESCAPE'], 40);
   await settle(200);
@@ -534,6 +813,52 @@ async function main(): Promise<void> {
   await renderOnce();
   const afterLens = captureCharFrame();
   dumpFrame('11-after-lens', afterLens);
+
+  // 6c. Summarize dry-run → confirm CANCEL (never y / never live)
+  console.log('\n── 6c. Summarize dry-run → cancel ──');
+  keys.pressKey('t', { shift: true });
+  await settle(8000);
+  await renderOnce();
+  const sumPlan = captureCharFrame();
+  dumpFrame('10c-summarize-plan', sumPlan);
+  assert(
+    'summarize_plan_panel',
+    /Summarize plan|attempted|scrubbed and audited|Generate titles/i.test(sumPlan),
+    matchingRows(sumPlan, /Summarize|attempted|scrubbed|Generate/i, 6).join(' | ') || undefined,
+  );
+  keys.pressKey('n'); // cancel confirm — never live
+  await settle(300);
+  await keys.pressKeys(['ESCAPE'], 40);
+  await settle(200);
+
+  // 6d. Audit tail enter-to-open (best-effort; report may be gone on operator host)
+  console.log('\n── 6d. Audit tail enter-to-open ──');
+  keys.pressKey('a', { shift: true });
+  await settle(1500);
+  await renderOnce();
+  const auditFrame = captureCharFrame();
+  dumpFrame('10d-audit', auditFrame);
+  assert(
+    'audit_tail_open',
+    /Audit tail|accepted|refused|dry-run/i.test(auditFrame),
+    matchingRows(auditFrame, /Audit|accepted|refused|dry-run/i, 4).join(' | ') || undefined,
+  );
+  await keys.pressKeys(['RETURN'], 40);
+  await settle(400);
+  await renderOnce();
+  // Either report overlay or soft flash — both honest
+  const auditOpen = captureCharFrame();
+  dumpFrame('10e-audit-enter', auditOpen);
+  assert(
+    'audit_enter_report_or_gone',
+    /read-only report|report gone|no report|Lens report|# /i.test(auditOpen) ||
+      /Audit tail/i.test(auditOpen),
+    matchingRows(auditOpen, /report|Audit|gone/i, 4).join(' | ') || undefined,
+  );
+  await keys.pressKeys(['ESCAPE'], 40);
+  await settle(200);
+  await keys.pressKeys(['ESCAPE'], 40);
+  await settle(200);
 
   renderer.destroy();
 

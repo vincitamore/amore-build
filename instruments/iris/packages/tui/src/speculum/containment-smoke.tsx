@@ -75,6 +75,19 @@ const SCAN = [
     hits: MANY_HITS.slice(0, 4),
     heuristic: true,
   },
+  {
+    probe: 'sensitive-content',
+    value: 0,
+    ciLow: 0,
+    ciHigh: 1,
+    n: 0,
+    partial: false,
+    unit: 'session',
+    summary: '0 of 0 sessions [heuristic]',
+    data: {},
+    hits: [],
+    heuristic: true,
+  },
 ];
 
 const USAGE = {
@@ -541,6 +554,75 @@ async function driveSize(w: number, h: number): Promise<SizeResult> {
     await renderOnce();
   }
 
+  // ── Degenerate no-signal card (fixed-slot surface) ────────────────────────
+  {
+    // Board should show NO-SIGNAL card after ranking; ensure not overflowing.
+    await renderOnce();
+    const frame = captureCharFrame();
+    const lines = frame.split('\n');
+    const bounds = panelBounds(lines, /^\s*[│|].*Probes\b/i);
+    const probesBot = bounds?.bottom ?? null;
+    const degRow = lastMatchRow(lines, /no-signal|NO-SIGNAL/i);
+    let ok = true;
+    let detail = '';
+    if (probesBot == null) {
+      ok = false;
+      detail = 'Probes panel bottom not found (degenerate)';
+    } else if (degRow != null && degRow >= probesBot) {
+      ok = false;
+      detail = `no-signal row ${degRow} >= Probes bottom ${probesBot}`;
+    } else if (degRow == null) {
+      // Fixture includes n=0 probe (collapsed no-signal). When the ranked board
+      // only has one visible card slot, the trailing no-signal sits off-window —
+      // that is windowing, not overflow. Fail closed only when budget could fit it.
+      const bodyH = Math.max(1, seedStageBox(w, h).height - PROBES_STAGE_CHROME);
+      const vr = budgetProbeVisibleRows(bodyH, true);
+      if (vr <= 1) {
+        detail = `no-signal off-window (vr=${vr})`;
+      } else {
+        ok = false;
+        detail = 'no-signal card not painted';
+      }
+    } else {
+      detail = `no-signal row=${degRow} bot=${probesBot}`;
+    }
+    if (!ok) dumpFail(sizeLabel, 'probes-degenerate', frame);
+    stages.push({ stage: 'probes-degenerate', ok, detail });
+  }
+
+  // ── Probe detail overlay (fixed-slot surface) ─────────────────────────────
+  {
+    // Select first live probe and open detail.
+    keys.typeText('d');
+    await settle(200);
+    await renderOnce();
+    const frame = captureCharFrame();
+    const lines = frame.split('\n');
+    const bounds = panelBounds(lines, /^\s*[│|].*Probes\b/i);
+    const probesBot = bounds?.bottom ?? null;
+    const hasDetail = /detail\s*·/i.test(frame) || /sessions\s*\(/i.test(frame);
+    const lastSess =
+      probesBot != null
+        ? lastMatchInside(lines, /hit|session|latest|\d+\s+hits/i, probesBot, bounds!.title + 1)
+        : lastMatchRow(lines, /latest|\d+\s+hits/i);
+    let ok = hasDetail;
+    let detail = hasDetail ? 'detail chrome present' : 'detail overlay missing';
+    if (ok && probesBot != null && lastSess != null && lastSess >= probesBot) {
+      ok = false;
+      detail = `detail content row ${lastSess} >= Probes bottom ${probesBot}`;
+    } else if (ok && probesBot != null && borderHasBleed(lines[probesBot]!)) {
+      ok = false;
+      detail = `Probes bottom bleed under detail: ${lines[probesBot]!.trim().slice(0, 80)}`;
+    } else if (ok) {
+      detail = `detail last=${lastSess ?? 'none'} bot=${probesBot}`;
+    }
+    if (!ok) dumpFail(sizeLabel, 'probes-detail', frame);
+    stages.push({ stage: 'probes-detail', ok, detail });
+    await keys.pressKeys(['ESCAPE']);
+    await settle(80);
+    await renderOnce();
+  }
+
   // ── Microscope with session open ──────────────────────────────────────────
   {
     keys.typeText('m');
@@ -618,6 +700,55 @@ async function driveSize(w: number, h: number): Promise<SizeResult> {
     }
     if (!ok) dumpFail(sizeLabel, 'microscope', frame);
     stages.push({ stage: 'microscope', ok, detail: parts.join('; ') });
+
+    // Turn detail overlay: enter on a timeline row → TURN card must not paint past border.
+    {
+      await keys.pressKeys(['RETURN']);
+      await settle(250);
+      await renderOnce();
+      const dFrame = captureCharFrame();
+      const dLines = dFrame.split('\n');
+      // Card title is ALL-CAPS "TURN" (detail pane replaces TIMELINE content).
+      const turnBounds = cardBounds(dLines, /\bTURN\b/);
+      const turnBot = turnBounds?.bottom ?? null;
+      const lastDetail =
+        turnBot != null
+          ? lastMatchInside(
+              dLines,
+              /#\d+|user|assistant|tool_use|tool_result|tool input|contain hello|contain reply/i,
+              turnBot,
+              (turnBounds?.title ?? 0) + 1,
+            )
+          : lastMatchRow(dLines, /#\d+|tool input|contain hello/i);
+      let dOk = true;
+      const dParts: string[] = [];
+      if (turnBot == null) {
+        if (!/\bTURN\b|#\d+/i.test(dFrame)) {
+          dOk = false;
+          dParts.push('TURN card missing');
+        } else {
+          dParts.push('TURN label present (no bottom pair)');
+        }
+      } else if (borderHasBleed(dLines[turnBot]!)) {
+        dOk = false;
+        dParts.push(`TURN border bleed: ${dLines[turnBot]!.trim().slice(0, 60)}`);
+      } else if (lastDetail != null && lastDetail >= turnBot) {
+        dOk = false;
+        dParts.push(`last detail row ${lastDetail} >= TURN bottom ${turnBot}`);
+      } else {
+        dParts.push(`detail last=${lastDetail ?? 'none'} bot=${turnBot}`);
+      }
+      // Footer should name detail keys while open.
+      if (!/j\/k scroll|prev\/next|y copy|esc close/i.test(dFrame)) {
+        // Soft: footer may be on member line; don't hard-fail if header present.
+        dParts.push('detail footer soft-miss');
+      }
+      if (!dOk) dumpFail(sizeLabel, 'turn-detail', dFrame);
+      stages.push({ stage: 'turn-detail', ok: dOk, detail: dParts.join('; ') });
+      await keys.pressKeys(['ESCAPE']);
+      await settle(80);
+      await renderOnce();
+    }
   }
 
   // ── Search idle + typed query ─────────────────────────────────────────────
@@ -727,6 +858,41 @@ async function driveSize(w: number, h: number): Promise<SizeResult> {
       detail = `Map border bleed: ${lines[mapBot]!.trim().slice(0, 60)}`;
     } else {
       detail = `map bot=${mapBot ?? 'n/a'}`;
+    }
+    // Axis strip is inside the canvas blit — no map content row may paint
+    // past the panel bottom border at any size in the matrix.
+    if (mapBot != null) {
+      for (let li = bounds?.top ?? 0; li <= mapBot; li++) {
+        const line = lines[li] ?? '';
+        // A content row that lost both side borders while carrying axis ticks
+        // is the signature of canvas paint past the panel.
+        if (
+          /05-\d{2}|0[1-9]-\d{2}|\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\b/.test(
+            line,
+          )
+        ) {
+          const hasLeft = /^\s*[│|]/.test(line) || line.includes('│');
+          // Accept either bordered content or a pure interior strip that still
+          // sits above mapBot.
+          if (li > mapBot) {
+            ok = false;
+            detail = `axis row ${li} past panel bot ${mapBot}`;
+          } else if (!hasLeft && li === mapBot) {
+            // axis on the border line itself is a defect
+            ok = false;
+            detail = `axis strip on panel border: ${line.trim().slice(0, 60)}`;
+          }
+        }
+      }
+      // Canvas must not push legend/status past panel bottom (existing foot check
+      // plus: legend rows that appear after mapBot).
+      const legendIdx = lines.findIndex((l) => /parentage\s*\(\d+\)/.test(l));
+      if (legendIdx >= 0 && mapBot != null && legendIdx > mapBot) {
+        ok = false;
+        detail = detail
+          ? `${detail}; legend past panel`
+          : `legend row ${legendIdx} past map bot ${mapBot}`;
+      }
     }
     const foot = checkFooters(frame, 'map');
     if (foot && !foot.ok) {

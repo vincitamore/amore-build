@@ -77,11 +77,23 @@ SAFE_QUERY = "hello"
 REVIEW_STEPS = [
     "00-boot",
     "01-sessions",
+    "01b-probes-series",
+    "01c-probes-scope-30d",
+    "02c-usage",
+    "02c-usage-7d",
     "02-map",
     "02b-microscope",
     "02c-microscope-timeline",
+    "02d-turn-detail",
+    "02e-turn-detail-closed",
+    "02b2-microscope-filters",
+    "02b3-microscope-class",
+    "02b4-microscope-title",
+    "02b5-microscope-parentage",
+    "02b6-microscope-search",
     "03-search",
     "04-lens-picker",
+    "04b-summarize-plan",
     "05-after-escape",
 ]
 
@@ -718,11 +730,23 @@ def write_manifest(
     notes = {
         "00-boot": "Dashboard/Sessions/Attention",
         "01-sessions": "chips + strip + footer",
+        "01b-probes-series": "probes sparkline settle",
+        "01c-probes-scope-30d": "] → 30d scope chip",
+        "02c-usage": "u → Usage window chips",
+        "02c-usage-7d": "] ] → 7d window",
         "02-map": "g → Map",
         "02b-microscope": "m → two-pane",
         "02c-microscope-timeline": "enter session",
+        "02d-turn-detail": "enter turn → detail header+body",
+        "02e-turn-detail-closed": "esc closes detail",
+        "02b2-microscope-filters": "filter row + N-of-M",
+        "02b3-microscope-class": "f → class:op",
+        "02b4-microscope-title": "t title filter",
+        "02b5-microscope-parentage": "s parentage",
+        "02b6-microscope-search": "/ in-session search",
         "03-search": "w + hello",
         "04-lens-picker": "L",
+        "04b-summarize-plan": "T summarize plan cancel",
         "05-after-escape": "esc",
     }
     for step in steps:
@@ -1125,6 +1149,82 @@ def run_drive(
         for chip in ("Microscope", "Map", "Search"):
             sheet.check(f"chips_{chip}", chip in sess_text)
 
+        # ── Probes scope chips + sparkline (default stage; operator settle) ──
+        # Scope chips are always on the probes board (default stage).
+        scope_ok = bool(re.search(r"\bALL\b", sess_text)) and bool(
+            re.search(r"30d", sess_text, re.I)
+        ) and bool(re.search(r"7d", sess_text, re.I))
+        sheet.check(
+            "probes_scope_chips",
+            scope_ok,
+            matching_rows(sess_text, "ALL") or matching_rows(sess_text, "30d"),
+        )
+        # Braille sparkline cells (U+2800–U+28FF) on trend-worthy probe cards.
+        # Series is parallel and may still be loading on tight profiles — soft
+        # on non-operator, hard-ish on operator after a settle.
+        if profile == "operator":
+            drive.pump(4.0)  # series wall ~3.5s scoped
+            sess_text = drive.frame_text()
+            dump_step("01b-probes-series", sess_text, drive.screen, ctx)
+            has_spark = any("\u2800" <= ch <= "\u28FF" for ch in sess_text)
+            # Map stage also paints braille — require probe card context nearby.
+            spark_near_probe = has_spark and bool(
+                re.search(r"apology|stuck|rage|phase|heuristic|hits\s+\d+", sess_text, re.I)
+            )
+            sheet.check(
+                "probes_sparkline",
+                spark_near_probe or has_spark,
+                "braille spark present"
+                if has_spark
+                else matching_rows(sess_text, "Probes") or "no braille yet",
+            )
+        # Scope cycle at operator: send ] and expect 30D active chip.
+        if profile == "operator":
+            drive.send("]")
+            drive.pump(2.0)
+            cyc_text = drive.frame_text()
+            dump_step("01c-probes-scope-30d", cyc_text, drive.screen, ctx)
+            sheet.check(
+                "probes_scope_cycle",
+                bool(re.search(r"\b30D\b", cyc_text)) or bool(re.search(r"30d", cyc_text, re.I)),
+                matching_rows(cyc_text, "30D") or matching_rows(cyc_text, "30d"),
+            )
+            drive.send("[")  # back toward all
+            drive.pump(0.5)
+            drive.send("[")
+            drive.pump(1.0)
+
+        # ── 2c. u → Usage window chips (operator + narrow) ──
+        if profile in ("operator", "narrow"):
+            print("\n── 2c. u → Usage chips ──")
+            drive.send("u")
+            u_ok, u_text = drive.wait_for(
+                lambda t: re.search(r"today|7d|30d|Usage|Token", t, re.I) is not None,
+                timeout=STEP_TIMEOUT,
+                label="usage stage",
+            )
+            dump_step("02c-usage", u_text, drive.screen, ctx)
+            sheet.check(
+                "usage_window_chips",
+                all(x in u_text for x in ("today", "7d", "30d"))
+                or bool(re.search(r"\[all\]|all time", u_text, re.I)),
+                matching_rows(u_text, "today") or matching_rows(u_text, "Usage"),
+            )
+            # [ / ] cycle; shell owns digits — never press 1-9 for windows
+            drive.send("]")  # all → today
+            drive.pump(0.7)
+            drive.send("]")  # today → 7d
+            drive.pump(1.0)
+            u7 = drive.frame_text()
+            dump_step("02c-usage-7d", u7, drive.screen, ctx)
+            sheet.check(
+                "usage_window_7d_label",
+                bool(re.search(r"\[7d\]|last 7", u7, re.I)),
+                matching_rows(u7, "7d") or matching_rows(u7, "totals"),
+            )
+            drive.send("p")  # leave to probes
+            drive.pump(0.4)
+
         # ── 2. g → Map ───────────────────────────────────────────────────────
         print("\n── 2. g → Map ──")
         drive.send("g")
@@ -1163,13 +1263,46 @@ def run_drive(
             ),
             matching_rows(map_text, "parentage") or matching_rows(map_text, "event links"),
         )
-        links_m = re.search(r"(\d+) links", map_text)
+        # Vitrum bar: axis labels, resumed/shared legend, links drawn/loaded
+        sheet.check(
+            "map_links_drawn_loaded",
+            bool(re.search(r"links\s+\d+/\d+", map_text)),
+            matching_rows(map_text, "links") or "no links drawn/loaded token",
+        )
+        sheet.check(
+            "map_legend_resumed_shared",
+            bool(re.search(r"resumed", map_text, re.I))
+            and bool(re.search(r"shared artifact", map_text, re.I)),
+            matching_rows(map_text, "resumed")
+            or matching_rows(map_text, "shared artifact"),
+        )
+        sheet.check(
+            "map_axis_strip",
+            bool(
+                re.search(
+                    r"\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\b|\d{2}-\d{2}",
+                    map_text,
+                )
+            )
+            or profile in ("narrow",),  # very narrow may clip labels; operator+tight required
+            matching_rows(map_text, r"\d{2}-\d{2}|Jan|May|Jun")
+            or "axis month/week labels",
+        )
+        # Prefer the unified vocabulary over the legacy "N links" token.
+        # Keep map_links_honest but allow either form during transition:
+        links_drawn = re.search(r"links\s+(\d+)/(\d+)", map_text)
+        links_legacy = re.search(r"(\d+) links", map_text)
         sheet.check(
             "map_links_honest",
-            bool(links_m)
+            bool(links_drawn or links_legacy)
             and bool(re.search(r"parentage", map_text, re.I))
             and bool(re.search(r"event links", map_text, re.I)),
-            f"{links_m.group(1) if links_m else 'no'} links (0 is the honest default) · legend edge kinds",
+            (
+                f"links {links_drawn.group(1)}/{links_drawn.group(2)}"
+                if links_drawn
+                else f"{links_legacy.group(1) if links_legacy else 'no'} links"
+            )
+            + " · legend edge kinds",
         )
 
         # ── 2b. m → Microscope (redesigned two-pane; title-first picker) ────
@@ -1209,8 +1342,144 @@ def run_drive(
             or matching_rows(mic_timeline, "#")
             or matching_rows(mic_timeline, "enter a session"),
         )
+
+        # ── 2d. Turn detail: enter on timeline row (operator profile frame) ──
+        print("\n── 2d. Turn detail ──")
+        drive.send("\r")
+        drive.pump(0.7)
+        detail_ok, detail_text = drive.wait_for(
+            lambda t: bool(
+                re.search(
+                    r"#\d+\s*[·.].*(user|assistant|tool_use|tool_result)|TURN|j/k scroll",
+                    t,
+                    re.I,
+                )
+            ),
+            timeout=STEP_TIMEOUT,
+            label="turn detail header",
+        )
+        dump_step("02d-turn-detail", detail_text, drive.screen, ctx)
+        sheet.check(
+            "turn_detail_header",
+            detail_ok
+            and bool(
+                re.search(
+                    r"#\d+|TURN|user|assistant|tool_use|tool_result",
+                    detail_text,
+                    re.I,
+                )
+            ),
+            matching_rows(detail_text, "#")
+            or matching_rows(detail_text, "TURN")
+            or matching_rows(detail_text, "user"),
+        )
+        sheet.check(
+            "turn_detail_body_line",
+            bool(
+                re.search(
+                    r"tool input|tool output|·|Session title|j/k scroll|esc close|"
+                    r"e2e-sess|hello|user|assistant|Read|Bash",
+                    detail_text,
+                    re.I,
+                )
+            ),
+            matching_rows(detail_text, "tool")
+            or matching_rows(detail_text, "scroll")
+            or matching_rows(detail_text, "Session"),
+        )
+        # esc closes detail → timeline still present
+        drive.send("\x1b")
+        drive.pump(0.4)
+        closed_text = drive.frame_text()
+        dump_step("02e-turn-detail-closed", closed_text, drive.screen, ctx)
+        sheet.check(
+            "turn_detail_esc_closes",
+            bool(
+                re.search(
+                    r"TIMELINE|#\d+|user|assistant|tool_use|enter timeline",
+                    closed_text,
+                    re.I,
+                )
+            ),
+            matching_rows(closed_text, "TIMELINE")
+            or matching_rows(closed_text, "user")
+            or matching_rows(closed_text, "#"),
+        )
         drive.send("\x1b")  # back to picker
         drive.pump(0.35)
+
+        # ── 2b+. Filter row + N-of-M + filter cycle ─────────────────────────
+        drive.send("\x1b")  # ensure picker
+        drive.pump(0.35)
+        mic_pick = drive.frame_text()
+        dump_step("02b2-microscope-filters", mic_pick, drive.screen, ctx)
+        sheet.check(
+            "microscope_filter_row",
+            bool(re.search(r"class:all|class:op", mic_pick))
+            and bool(re.search(r"agent:", mic_pick))
+            and bool(re.search(r"sort:rec", mic_pick)),
+            matching_rows(mic_pick, "class:") or matching_rows(mic_pick, "sort:"),
+        )
+        sheet.check(
+            "microscope_n_of_m",
+            bool(re.search(r"\d+[–\-—]\d+ of \d+", mic_pick)),
+            matching_rows(mic_pick, " of "),
+        )
+        drive.send("f")
+        drive.pump(0.4)
+        mic_class = drive.frame_text()
+        dump_step("02b3-microscope-class", mic_class, drive.screen, ctx)
+        sheet.check(
+            "microscope_class_cycle",
+            "class:op" in mic_class,
+            matching_rows(mic_class, "class:"),
+        )
+        # Title filter
+        drive.send("t")
+        drive.pump(0.2)
+        for ch in "Session":
+            drive.send(ch, settle=0.05)
+        drive.send("\r")
+        drive.pump(0.5)
+        mic_title = drive.frame_text()
+        dump_step("02b4-microscope-title", mic_title, drive.screen, ctx)
+        sheet.check(
+            "microscope_title_filter",
+            bool(re.search(r"\d+[–\-—]\d+ of \d+", mic_title)),
+            matching_rows(mic_title, " of "),
+        )
+        drive.send("\x1b")  # clear title
+        drive.pump(0.3)
+        # Parentage probe
+        drive.send("s")
+        drive.pump(0.45)
+        mic_par = drive.frame_text()
+        dump_step("02b5-microscope-parentage", mic_par, drive.screen, ctx)
+        sheet.check(
+            "microscope_parentage",
+            bool(re.search(r"children of|SESSIONS|TIMELINE", mic_par, re.I)),
+            matching_rows(mic_par, "children of") or matching_rows(mic_par, "SESSIONS"),
+        )
+        drive.send("\x1b")
+        drive.pump(0.3)
+        # In-session search
+        drive.send("\r")
+        drive.pump(0.6)
+        drive.send("/")
+        drive.pump(0.15)
+        for ch in "the":
+            drive.send(ch, settle=0.05)
+        drive.send("\r")
+        drive.pump(0.6)
+        mic_srch = drive.frame_text()
+        dump_step("02b6-microscope-search", mic_srch, drive.screen, ctx)
+        sheet.check(
+            "microscope_insession_search",
+            bool(re.search(r"#\d+|user|assistant|search|TIMELINE", mic_srch, re.I)),
+            matching_rows(mic_srch, "#") or matching_rows(mic_srch, "TIMELINE"),
+        )
+        drive.send("\x1b")
+        drive.pump(0.3)
 
         # ── 3. w → Search + safe query ───────────────────────────────────────
         print(f"\n── 3. w → Search, type {SAFE_QUERY!r} ──")
@@ -1272,6 +1541,15 @@ def run_drive(
             or matching_rows(search_text, "match")
             or matching_rows(search_text, "Search"),
         )
+        sheet.check(
+            "search_chip_row",
+            bool(re.search(r"kind:", search_text, re.I))
+            and bool(re.search(r"win:", search_text, re.I))
+            and bool(re.search(r"scope:", search_text, re.I)),
+            matching_rows(search_text, "kind")
+            or matching_rows(search_text, "win")
+            or matching_rows(search_text, "scope"),
+        )
 
         # Leave search so L is not eaten by the query input (H1 note: search
         # capture can append into the field as e.g. "helloL"). Escape drops
@@ -1316,6 +1594,34 @@ def run_drive(
             or matching_rows(lens_text, "pattern")
             or matching_rows(lens_text, "usage"),
         )
+
+        # ── 4b. T summarize dry-run → cancel ──
+        print("\n── 4b. T summarize plan cancel ──")
+        drive.send("\x1b")
+        drive.pump(0.3)
+        drive.send("T")
+        sum_ok, sum_text = drive.wait_for(
+            lambda t: re.search(
+                r"Summarize plan|attempted|scrubbed and audited|Generate titles",
+                t,
+                re.I,
+            )
+            is not None,
+            timeout=STEP_TIMEOUT * 2,
+            label="summarize plan",
+        )
+        dump_step("04b-summarize-plan", sum_text, drive.screen, ctx)
+        sheet.check(
+            "summarize_plan_or_skip",
+            sum_ok or "not installed" in sum_text.lower(),
+            matching_rows(sum_text, "Summarize")
+            or matching_rows(sum_text, "attempted")
+            or "summarize surface absent (not-installed ok)",
+        )
+        drive.send("n")  # cancel — never live
+        drive.pump(0.3)
+        drive.send("\x1b")
+        drive.pump(0.3)
 
         # ── 5. Escape / leave ────────────────────────────────────────────────
         print("\n── 5. Escape leave ──")
