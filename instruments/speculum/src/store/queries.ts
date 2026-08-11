@@ -420,3 +420,183 @@ export function* eventsInToolSpan(
   const rows = db.query<EventSqlRow, (string | number)[]>(sql).iterate(...params);
   for (const row of rows) yield mapEventRow(row);
 }
+
+// ---------------------------------------------------------------------------
+// Session list / count (filtered, paged navigation over the derived index)
+// ---------------------------------------------------------------------------
+
+export type SessionSort = "recent" | "turns" | "errors";
+
+export interface SessionListOpts {
+  /** Exact match on sessions.cwd_class (operator|experiment|harness|unknown). */
+  cwdClass?: string;
+  /** Exact match on sessions.agent (primary|subagent). */
+  agent?: string;
+  /** Substring filter on project_path. */
+  project?: string;
+  /** Inclusive lower bound on ended_at (ISO string or Date). */
+  since?: Date | string;
+  /** Inclusive upper bound on ended_at (ISO string or Date). */
+  until?: Date | string;
+  /** Substring filter on resolved title. */
+  title?: string;
+  /** Sort order; default recent (ended_at DESC). */
+  sort?: SessionSort;
+  /** Page size; default 50. */
+  limit?: number;
+  /** Page start; default 0. */
+  offset?: number;
+}
+
+export interface SessionListRow {
+  id: string;
+  projectPath: string;
+  agent: string;
+  parentSession: string | null;
+  modelId: string | null;
+  startedAt: string;
+  endedAt: string;
+  turnCount: number;
+  userMsgCount: number;
+  toolCallCount: number;
+  toolErrorCount: number;
+  title: string;
+  cwdClass: string;
+  agentName: string;
+  subagentType: string;
+  description: string;
+  titleSource: string;
+}
+
+type SessionSqlRow = {
+  id: string;
+  project_path: string;
+  agent: string;
+  parent_session: string | null;
+  model_id: string | null;
+  started_at: string;
+  ended_at: string;
+  turn_count: number;
+  user_msg_count: number;
+  tool_call_count: number;
+  tool_error_count: number;
+  title: string;
+  cwd_class: string;
+  agent_name: string;
+  subagent_type: string;
+  description: string;
+  title_source: string;
+};
+
+function toIsoBound(v: Date | string): string {
+  return typeof v === "string" ? v : v.toISOString();
+}
+
+/**
+ * Shared WHERE clause builder for listSessions / countSessions.
+ * Values are always bound as parameters — never interpolated into SQL text.
+ */
+function buildSessionListWhere(opts: SessionListOpts): {
+  whereSql: string;
+  params: (string | number)[];
+} {
+  const wheres: string[] = [];
+  const params: (string | number)[] = [];
+
+  if (opts.cwdClass) {
+    wheres.push("cwd_class = ?");
+    params.push(opts.cwdClass);
+  }
+  if (opts.agent) {
+    wheres.push("agent = ?");
+    params.push(opts.agent);
+  }
+  if (opts.project) {
+    wheres.push("project_path LIKE '%' || ? || '%'");
+    params.push(opts.project);
+  }
+  if (opts.since !== undefined) {
+    wheres.push("ended_at >= ?");
+    params.push(toIsoBound(opts.since));
+  }
+  if (opts.until !== undefined) {
+    wheres.push("ended_at <= ?");
+    params.push(toIsoBound(opts.until));
+  }
+  if (opts.title) {
+    wheres.push("title LIKE '%' || ? || '%'");
+    params.push(opts.title);
+  }
+
+  const whereSql = wheres.length > 0 ? `WHERE ${wheres.join(" AND ")}` : "";
+  return { whereSql, params };
+}
+
+function sessionOrderBy(sort: SessionSort | undefined): string {
+  switch (sort) {
+    case "turns":
+      return "ORDER BY turn_count DESC, ended_at DESC, id ASC";
+    case "errors":
+      return "ORDER BY tool_error_count DESC, ended_at DESC, id ASC";
+    case "recent":
+    default:
+      return "ORDER BY ended_at DESC, id ASC";
+  }
+}
+
+function mapSessionListRow(row: SessionSqlRow): SessionListRow {
+  return {
+    id: row.id,
+    projectPath: row.project_path,
+    agent: row.agent,
+    parentSession: row.parent_session,
+    modelId: row.model_id,
+    startedAt: row.started_at,
+    endedAt: row.ended_at,
+    turnCount: row.turn_count,
+    userMsgCount: row.user_msg_count,
+    toolCallCount: row.tool_call_count,
+    toolErrorCount: row.tool_error_count,
+    title: row.title,
+    cwdClass: row.cwd_class,
+    agentName: row.agent_name,
+    subagentType: row.subagent_type,
+    description: row.description,
+    titleSource: row.title_source,
+  };
+}
+
+const SESSION_LIST_SELECT = `
+  SELECT id, project_path, agent, parent_session, model_id,
+         started_at, ended_at, turn_count, user_msg_count,
+         tool_call_count, tool_error_count, title,
+         cwd_class, agent_name, subagent_type, description, title_source
+  FROM sessions
+`;
+
+/**
+ * Filtered, paged session listing over the derived sessions table.
+ * Defaults: sort=recent, limit=50, offset=0.
+ */
+export function listSessions(db: Db, opts: SessionListOpts = {}): SessionListRow[] {
+  const limit = opts.limit ?? 50;
+  const offset = opts.offset ?? 0;
+  const { whereSql, params } = buildSessionListWhere(opts);
+  const sql = `
+    ${SESSION_LIST_SELECT}
+    ${whereSql}
+    ${sessionOrderBy(opts.sort)}
+    LIMIT ? OFFSET ?
+  `;
+  const bound = [...params, limit, offset];
+  const rows = db.query<SessionSqlRow, (string | number)[]>(sql).all(...bound);
+  return rows.map(mapSessionListRow);
+}
+
+/** Count of sessions matching the same filters as listSessions (ignores limit/offset/sort). */
+export function countSessions(db: Db, opts: SessionListOpts = {}): number {
+  const { whereSql, params } = buildSessionListWhere(opts);
+  const sql = `SELECT COUNT(*) AS n FROM sessions ${whereSql}`;
+  const row = db.query<{ n: number }, (string | number)[]>(sql).get(...params);
+  return row?.n ?? 0;
+}

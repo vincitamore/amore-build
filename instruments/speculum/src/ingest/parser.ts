@@ -57,6 +57,10 @@ export interface SessionMeta {
   updatedAt: string | null;
   /** From summary.json session_summary; empty when absent/non-string. */
   title: string;
+  /** From summary.json agent_name; empty when absent/non-string. */
+  agentName: string;
+  /** From summary.json generated_title (harness); empty when absent/non-string. */
+  generatedTitle: string;
 }
 
 export interface SubagentMeta {
@@ -413,6 +417,8 @@ export function parseSummaryJson(
   let updatedAt: string | null = null;
   let cwd = projectPath;
   let title = "";
+  let agentName = "";
+  let generatedTitle = "";
 
   try {
     const s = JSON.parse(raw) as Record<string, unknown>;
@@ -427,6 +433,13 @@ export function parseSummaryJson(
     if (typeof s.session_summary === "string") {
       title = s.session_summary.trim();
     }
+    // agent_name + generated_title are real harness fields on live summary.json.
+    if (typeof s.agent_name === "string") {
+      agentName = s.agent_name.trim();
+    }
+    if (typeof s.generated_title === "string") {
+      generatedTitle = s.generated_title.trim();
+    }
   } catch {
     // tolerate bad summary
   }
@@ -440,6 +453,8 @@ export function parseSummaryJson(
     createdAt,
     updatedAt,
     title,
+    agentName,
+    generatedTitle,
   };
 }
 

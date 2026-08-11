@@ -28,6 +28,7 @@ import {
   type AgentRole,
   type NormalizedEvent,
   type NormalizedUsage,
+  type SubagentMeta,
 } from "./parser";
 import { matchSensitivePatterns } from "../probes/sensitive-content";
 import { rebuildEventLinksAndDecisions } from "../decisions";
@@ -223,6 +224,38 @@ function upsertSessionTitle(db: Db, sessionId: string, title: string): void {
   ).run(sessionId, title);
 }
 
+/**
+ * Upsert harvested summary/subagent facets into session_meta.
+ * Written for every non-forgotten session (including skipped-unchanged) so
+ * rebuildSessions and applySessionFacets can join a complete side store.
+ */
+function upsertSessionMeta(
+  db: Db,
+  sessionId: string,
+  fields: {
+    agentName: string;
+    subagentType: string;
+    description: string;
+    generatedTitle: string;
+  },
+): void {
+  db.prepare(
+    `INSERT INTO session_meta (session_id, agent_name, subagent_type, description, generated_title)
+     VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(session_id) DO UPDATE SET
+       agent_name = excluded.agent_name,
+       subagent_type = excluded.subagent_type,
+       description = excluded.description,
+       generated_title = excluded.generated_title`,
+  ).run(
+    sessionId,
+    fields.agentName,
+    fields.subagentType,
+    fields.description,
+    fields.generatedTitle,
+  );
+}
+
 interface SessionDir {
   sessionDir: string;
   sessionId: string;
@@ -290,35 +323,38 @@ export function listSessionDirs(root: string): SessionDir[] {
   return out;
 }
 
-function loadParentLinks(sessionDir: SessionDir): Map<string, string> {
-  /** childSessionId → parentSessionId */
-  const links = new Map<string, string>();
-  if (!existsSync(sessionDir.subagentsDir)) return links;
+/**
+ * Load subagent meta.json rows under a parent session dir.
+ * childSessionId is the key used for linkage and facet harvest.
+ */
+function loadSubagentMetas(sessionDir: SessionDir): SubagentMeta[] {
+  const out: SubagentMeta[] = [];
+  if (!existsSync(sessionDir.subagentsDir)) return out;
   let kids: string[];
   try {
     kids = readdirSync(sessionDir.subagentsDir);
   } catch {
-    return links;
+    return out;
   }
   for (const kid of kids) {
     const metaPath = join(sessionDir.subagentsDir, kid, "meta.json");
     if (!existsSync(metaPath)) continue;
     try {
       const meta = parseSubagentMeta(readFileSync(metaPath, "utf-8"));
-      if (meta) links.set(meta.childSessionId, meta.parentSessionId);
+      if (meta) out.push(meta);
     } catch {
       // tolerate
     }
   }
-  return links;
+  return out;
 }
 
-/** Global parent map built while scanning (subagent meta lives under parent dir). */
-function buildParentMap(sessions: SessionDir[]): Map<string, string> {
-  const map = new Map<string, string>();
+/** Global childSessionId → SubagentMeta (meta lives under the parent session dir). */
+function buildSubagentMetaMap(sessions: SessionDir[]): Map<string, SubagentMeta> {
+  const map = new Map<string, SubagentMeta>();
   for (const s of sessions) {
-    for (const [child, parent] of loadParentLinks(s)) {
-      map.set(child, parent);
+    for (const meta of loadSubagentMetas(s)) {
+      map.set(meta.childSessionId, meta);
     }
   }
   return map;
@@ -326,10 +362,12 @@ function buildParentMap(sessions: SessionDir[]): Map<string, string> {
 
 function resolveAgent(
   sessionId: string,
-  parentMap: Map<string, string>,
+  subagentMetaMap: Map<string, SubagentMeta>,
 ): { agent: AgentRole; parentSession: string | null } {
-  const parent = parentMap.get(sessionId) ?? null;
-  return parent ? { agent: "subagent", parentSession: parent } : { agent: "primary", parentSession: null };
+  const meta = subagentMetaMap.get(sessionId);
+  return meta
+    ? { agent: "subagent", parentSession: meta.parentSessionId }
+    : { agent: "primary", parentSession: null };
 }
 
 function parseUpdatesFromOffset(
@@ -475,7 +513,7 @@ export function ingest(db: Db, opts: IngestOptions = {}): IngestStats {
     sessions = sessions.slice(0, opts.limit);
   }
 
-  const parentMap = buildParentMap(sessions);
+  const subagentMetaMap = buildSubagentMetaMap(sessions);
   stats.listMs = Date.now() - tList0;
   const sessionsTotal = sessions.length;
   emit("list", 0, sessionsTotal);
@@ -514,19 +552,24 @@ export function ingest(db: Db, opts: IngestOptions = {}): IngestStats {
       let projectPath = s.projectPath;
       let modelId: string | null = null;
       let sessionTitle = "";
+      let agentName = "";
+      let generatedTitle = "";
       if (existsSync(s.summaryPath)) {
         try {
           const meta = parseSummaryJson(readFileSync(s.summaryPath, "utf-8"), s.sessionId, s.projectPath);
           projectPath = meta.projectPath || projectPath;
           modelId = meta.modelId;
           sessionTitle = meta.title;
+          agentName = meta.agentName;
+          generatedTitle = meta.generatedTitle;
           void modelId;
         } catch {
           // tolerate
         }
       }
 
-      const { agent, parentSession } = resolveAgent(s.sessionId, parentMap);
+      const childMeta = subagentMetaMap.get(s.sessionId);
+      const { agent, parentSession } = resolveAgent(s.sessionId, subagentMetaMap);
       const ctx = {
         sessionId: s.sessionId,
         projectPath,
@@ -543,9 +586,16 @@ export function ingest(db: Db, opts: IngestOptions = {}): IngestStats {
           emit("session", stats.sessionDirsScanned, sessionsTotal);
           continue;
         }
-        // Derived title side store: write for every non-forgotten session so
-        // rebuildSessions can join it (incl. skipped-unchanged paths below).
+        // Derived title + facet side stores: write for every non-forgotten session
+        // so rebuildSessions / applySessionFacets can join them (incl. skipped-
+        // unchanged paths below).
         upsertSessionTitle(db, s.sessionId, sessionTitle);
+        upsertSessionMeta(db, s.sessionId, {
+          agentName,
+          subagentType: childMeta?.subagentType ?? "",
+          description: childMeta?.description ?? "",
+          generatedTitle,
+        });
       }
 
       let startOffset = 0;

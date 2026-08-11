@@ -122,6 +122,8 @@ describe("summary + subagent meta", () => {
         current_model_id: "grok-4",
         created_at: "2026-01-01T00:00:00Z",
         session_summary: "  Repeat Previous Single Word Reply Request  ",
+        agent_name: "  grok-build-plan  ",
+        generated_title: "  Harness Generated Title  ",
       }),
       "fallback",
       "C:\\fallback",
@@ -130,11 +132,15 @@ describe("summary + subagent meta", () => {
     expect(m.projectPath).toBe("C:\\work");
     expect(m.modelId).toBe("grok-4");
     expect(m.title).toBe("Repeat Previous Single Word Reply Request");
+    expect(m.agentName).toBe("grok-build-plan");
+    expect(m.generatedTitle).toBe("Harness Generated Title");
   });
 
   test("parseSummaryJson empty/non-string session_summary → empty title", () => {
     const absent = parseSummaryJson("{}", "fb", "/p");
     expect(absent.title).toBe("");
+    expect(absent.agentName).toBe("");
+    expect(absent.generatedTitle).toBe("");
     const empty = parseSummaryJson(
       JSON.stringify({ session_summary: "   " }),
       "fb",
@@ -142,11 +148,13 @@ describe("summary + subagent meta", () => {
     );
     expect(empty.title).toBe("");
     const nonStr = parseSummaryJson(
-      JSON.stringify({ session_summary: 42 }),
+      JSON.stringify({ session_summary: 42, agent_name: 7, generated_title: null }),
       "fb",
       "/p",
     );
     expect(nonStr.title).toBe("");
+    expect(nonStr.agentName).toBe("");
+    expect(nonStr.generatedTitle).toBe("");
   });
 
   test("parseSubagentMeta linkage", () => {
@@ -156,9 +164,12 @@ describe("summary + subagent meta", () => {
         parent_session_id: "parent-1",
         child_session_id: "child-1",
         subagent_type: "explore",
+        description: "look around",
       }),
     );
     expect(m?.parentSessionId).toBe("parent-1");
     expect(m?.childSessionId).toBe("child-1");
+    expect(m?.subagentType).toBe("explore");
+    expect(m?.description).toBe("look around");
   });
 });
