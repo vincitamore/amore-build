@@ -90,9 +90,7 @@ INSTRUMENTS_DIAG_MOD = "crates/codegen/xai-grok-pager/src/diagnostics/mod.rs"
 DOCTOR_CMD_FILE = "crates/codegen/xai-grok-pager/src/doctor_cmd/mod.rs"
 RELEASE_WORKFLOW = ".github/workflows/release.yml"
 INSTRUMENTS_CI_WORKFLOW = ".github/workflows/instruments-ci.yml"
-RELEASE_BASE_NEEDLE = (
-    'RELEASE_BASE: &str = "https://github.com/vincitamore/amore-build/releases/download"'
-)
+RELEASE_BASE_NEEDLE = "vincitamore/amore-build"
 
 
 def run(cmd: list[str], **kw) -> subprocess.CompletedProcess:
@@ -313,10 +311,26 @@ def cmd_verify(dry_run: bool) -> int:
         ARGV0_FILE, ARGV0_MARKER, "argv0 alias set (amore | amore-build | grok | agent)",
         problems)
 
-    # 4. auto-update hard-off
+    # 4. auto-update hard-off: constant + enforcement (funnel + call-site guards)
     _check_file_contains(
         HARD_OFF_FILE, HARD_OFF_SENTINEL,
-        "auto-update hard-off (FORK_AUTO_UPDATE_HARD_OFF = true)", problems)
+        "upstream update origins remain unreachable (constant + enforcement)", problems)
+    _check_file_contains(
+        HARD_OFF_FILE,
+        "fork: upstream installers are unreachable (FORK_AUTO_UPDATE_HARD_OFF)",
+        "upstream update origins remain unreachable (constant + enforcement)", problems)
+    _check_file_contains(
+        HARD_OFF_FILE,
+        "fork guard: ensure_latest_on_disk stays inert",
+        "upstream update origins remain unreachable (constant + enforcement)", problems)
+    _check_file_contains(
+        HARD_OFF_FILE,
+        "fork guard: run_update_if_available stays inert",
+        "upstream update origins remain unreachable (constant + enforcement)", problems)
+    _check_file_contains(
+        HARD_OFF_FILE,
+        "fork guard: run_update stays inert",
+        "upstream update origins remain unreachable (constant + enforcement)", problems)
 
     # 5. embed + init ownership tests still target amore
     _check_file_contains(

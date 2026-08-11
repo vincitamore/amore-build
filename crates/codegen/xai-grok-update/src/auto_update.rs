@@ -294,6 +294,7 @@ pub async fn ensure_latest_on_disk(update_config: &UpdateConfig) -> Result<Ensur
     };
     // Fork hard-off: never converge disk install toward upstream.
     if FORK_AUTO_UPDATE_HARD_OFF {
+        // fork guard: ensure_latest_on_disk stays inert
         return Ok(outcome);
     }
     let Some(installer) = get_installer().await else {
@@ -563,6 +564,7 @@ pub async fn run_update_if_available(
 ) -> Result<bool> {
     // Fork hard-off: never self-update back to upstream.
     if FORK_AUTO_UPDATE_HARD_OFF {
+        // fork guard: run_update_if_available stays inert
         return Ok(false);
     }
 
@@ -790,6 +792,10 @@ pub async fn run_install_script(
     target: Option<&str>,
     update_config: &UpdateConfig,
 ) -> Result<()> {
+    // Fork hard-off: install funnel never reaches upstream installers.
+    if FORK_AUTO_UPDATE_HARD_OFF {
+        anyhow::bail!("fork: upstream installers are unreachable (FORK_AUTO_UPDATE_HARD_OFF)");
+    }
     let result = match installer {
         "npm" => install_npm(
             target,
@@ -2449,6 +2455,7 @@ pub async fn run_update(
 ) -> Result<Option<String>> {
     // Fork hard-off: the user-facing update surface never pulls upstream.
     if FORK_AUTO_UPDATE_HARD_OFF {
+        // fork guard: run_update stays inert
         let _ = (force, pinned_version, channel_switch, update_config);
         eprintln!("{}", fork_update_notice(&get_installed_grok_version()));
         return Ok(None);
@@ -3696,6 +3703,32 @@ mod tests {
         assert!(!effective_auto_update(Some(true)));
         assert!(!effective_auto_update(Some(false)));
         assert!(FORK_AUTO_UPDATE_HARD_OFF);
+    }
+
+    #[tokio::test]
+    async fn test_run_install_script_hard_off_blocks_all_installers() {
+        // Install funnel is the single path to npm / gh-release / internal;
+        // hard-off must reject every arm before any installer runs. In-file
+        // so the check compiles on Windows (crate tests/ are unix-only).
+        let cfg = UpdateConfig {
+            proxy_base_url: "http://test.invalid/v1".to_string(),
+            auth_scope: "test".to_string(),
+            deployment_key: None,
+            alpha_test_key: None,
+            channel: "stable".to_string(),
+            npm_registry: None,
+        };
+        let msg = "fork: upstream installers are unreachable (FORK_AUTO_UPDATE_HARD_OFF)";
+        for installer in ["npm", "gh-release", "internal"] {
+            let err = run_install_script(installer, None, &cfg)
+                .await
+                .expect_err("hard-off must reject every installer arm");
+            let text = format!("{err:#}");
+            assert!(
+                text.contains(msg),
+                "installer {installer}: expected hard-off message, got: {text}"
+            );
+        }
     }
 
     #[test]
