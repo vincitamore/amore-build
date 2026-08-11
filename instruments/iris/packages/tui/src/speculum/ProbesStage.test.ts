@@ -7,23 +7,40 @@ import { createTestRenderer } from '@opentui/core/testing';
 import { createRoot } from '@opentui/react';
 import { ThemeProvider } from '../ThemeProvider';
 import {
+  aggregateHitsBySession,
+  brailleSparkline,
   budgetHitSlots,
   budgetProbeVisibleRows,
+  buildProbeBoard,
   clampHitScroll,
   clampRowScroll,
+  cycleProbeScope,
+  formatDegenerateBody,
   formatHitClock,
   formatHitLine,
+  formatScopeRow,
+  formatSeriesLine,
+  formatSessionAggLine,
   probeCardBody,
   formatProbeValue,
   formatWilsonRange,
   hitEventId,
   moveProbeCursor,
+  parseSeriesMap,
   probeCardRight,
+  probeCiWidth,
   probeVisibleRange,
+  rankSignalProbes,
+  scopeSinceIso,
+  seriesDeltaLabel,
+  seriesProbeList,
+  SERIES_EXCLUDE_PROBES,
+  REGISTRY_PROBE_NAMES,
   truncateHitLabel,
   ProbesStage,
   type ProbeHit,
   type ScanRow,
+  type SeriesWindowPoint,
 } from './ProbesStage';
 
 /**
@@ -257,6 +274,194 @@ describe('probe grid navigation helpers', () => {
   });
 });
 
+describe('signal ranking + degenerate collapse', () => {
+  test('rankSignalProbes: hits desc, then narrower CI first; drops n=0', () => {
+    const ranked = rankSignalProbes(SCAN_FIXTURE);
+    // sensitive-content n=0 excluded; apology hits=1 ciW=0.20; stuck hits=1 ciW=0.30
+    expect(ranked.map((r) => r.probe)).toEqual(['apology-rate', 'stuck-loop']);
+    expect(probeCiWidth(ranked[0]!)).toBeLessThan(probeCiWidth(ranked[1]!));
+  });
+
+  test('buildProbeBoard collapses n=0 into one degenerate unit', () => {
+    const board = buildProbeBoard(SCAN_FIXTURE);
+    expect(board).toHaveLength(3);
+    expect(board[0]).toMatchObject({ kind: 'probe', row: { probe: 'apology-rate' } });
+    expect(board[1]).toMatchObject({ kind: 'probe', row: { probe: 'stuck-loop' } });
+    expect(board[2]?.kind).toBe('degenerate');
+    if (board[2]?.kind === 'degenerate') {
+      expect(board[2].names).toEqual(['sensitive-content']);
+    }
+    expect(formatDegenerateBody(['a', 'b'])).toBe('no-signal probes (2): a · b');
+  });
+
+  test('hits dominate CI width in ranking', () => {
+    const rows: ScanRow[] = [
+      {
+        probe: 'few-hits-tight',
+        value: 0.1,
+        ciLow: 0.05,
+        ciHigh: 0.15,
+        n: 50,
+        partial: false,
+        unit: 'msg',
+        hits: [{ sessionId: 's1', evidence: 'e' }],
+        heuristic: true,
+      },
+      {
+        probe: 'many-hits-wide',
+        value: 0.5,
+        ciLow: 0.0,
+        ciHigh: 1.0,
+        n: 10,
+        partial: false,
+        unit: 'session',
+        hits: [
+          { sessionId: 's2', evidence: 'e' },
+          { sessionId: 's3', evidence: 'e' },
+          { sessionId: 's4', evidence: 'e' },
+        ],
+        heuristic: true,
+      },
+    ];
+    expect(rankSignalProbes(rows).map((r) => r.probe)).toEqual([
+      'many-hits-wide',
+      'few-hits-tight',
+    ]);
+  });
+});
+
+describe('scope row window arithmetic', () => {
+  test('cycleProbeScope wraps all → 30d → 7d → all', () => {
+    expect(cycleProbeScope('all', 1)).toBe('30d');
+    expect(cycleProbeScope('30d', 1)).toBe('7d');
+    expect(cycleProbeScope('7d', 1)).toBe('all');
+    expect(cycleProbeScope('all', -1)).toBe('7d');
+    expect(cycleProbeScope('7d', -1)).toBe('30d');
+  });
+
+  test('scopeSinceIso: all is null; 7d/30d are ISO floors at local midnight', () => {
+    const now = new Date(2026, 5, 15, 14, 30, 0); // local Jun 15 2026
+    expect(scopeSinceIso('all', now)).toBeNull();
+    const d7 = scopeSinceIso('7d', now)!;
+    const d30 = scopeSinceIso('30d', now)!;
+    expect(d7).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(d30).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    const t7 = new Date(d7).getTime();
+    const t30 = new Date(d30).getTime();
+    const day = 24 * 60 * 60 * 1000;
+    // 30d floor is ~23 days earlier than 7d floor
+    expect(t7 - t30).toBeGreaterThan(20 * day);
+    expect(t7 - t30).toBeLessThan(26 * day);
+    // floors land on local midnight (ms-of-day ≈ 0 in local, but ISO is UTC)
+    const local7 = new Date(d7);
+    expect(local7.getHours() + local7.getMinutes() + local7.getSeconds()).toBe(0);
+  });
+
+  test('formatScopeRow marks active chip in uppercase', () => {
+    expect(formatScopeRow('all')).toBe('ALL · 30d · 7d');
+    expect(formatScopeRow('7d')).toBe('all · 30d · 7D');
+  });
+});
+
+describe('series parse + sparkline + degrade', () => {
+  const windows: SeriesWindowPoint[] = Array.from({ length: 12 }, (_, i) => ({
+    since: `2026-0${Math.floor(i / 4) + 1}-01T00:00:00.000Z`,
+    until: `2026-0${Math.floor(i / 4) + 1}-08T00:00:00.000Z`,
+    value: i / 20,
+    ciLow: 0,
+    ciHigh: 1,
+    n: i === 0 ? 0 : 10,
+    partial: i === 11,
+  }));
+
+  test('brailleSparkline is 12 braille cells; empty n paints blank', () => {
+    const spark = brailleSparkline(windows, 12);
+    expect(spark.length).toBe(12);
+    // braille block is U+2800..U+28FF
+    for (const ch of spark) {
+      const code = ch.codePointAt(0)!;
+      expect(code).toBeGreaterThanOrEqual(0x2800);
+      expect(code).toBeLessThanOrEqual(0x28ff);
+    }
+  });
+
+  test('seriesDeltaLabel reports pp delta for rate-like windows', () => {
+    const short: SeriesWindowPoint[] = [
+      { since: 'a', until: 'b', value: 0.1, ciLow: 0, ciHigh: 1, n: 5, partial: false },
+      { since: 'b', until: 'c', value: 0.25, ciLow: 0, ciHigh: 1, n: 5, partial: true },
+    ];
+    expect(seriesDeltaLabel(short)).toMatch(/Δ \+15\.0pp/);
+    expect(seriesDeltaLabel([])).toBe('');
+  });
+
+  test('parseSeriesMap soft-degrades bad shapes to empty map', () => {
+    expect(parseSeriesMap(null).size).toBe(0);
+    expect(parseSeriesMap({}).size).toBe(0);
+    expect(parseSeriesMap([{ probe: 'x' }]).size).toBe(0); // no windows
+    const good = parseSeriesMap([
+      { probe: 'apology-rate', granularity: 'weekly', windows },
+    ]);
+    expect(good.get('apology-rate')).toHaveLength(12);
+    const line = formatSeriesLine(windows);
+    expect(line.length).toBeGreaterThan(12);
+    expect(line).toMatch(/Δ/);
+  });
+});
+
+describe('detail aggregation math', () => {
+  test('aggregateHitsBySession groups counts + latest + first hit', () => {
+    const hits: ProbeHit[] = [
+      {
+        sessionId: 'sess-a',
+        ts: '2026-01-01T10:00:00.000Z',
+        evidence: 'first',
+        eventId: 1,
+      },
+      {
+        sessionId: 'sess-b',
+        ts: '2026-01-02T12:00:00.000Z',
+        evidence: 'solo',
+        eventId: 2,
+      },
+      {
+        sessionId: 'sess-a',
+        ts: '2026-01-03T15:30:00.000Z',
+        evidence: 'later',
+        eventId: 3,
+      },
+    ];
+    const titles = new Map([['sess-a', 'Alpha Session'], ['sess-b', 'Beta']]);
+    const aggs = aggregateHitsBySession(hits, titles);
+    expect(aggs).toHaveLength(2);
+    // sess-a has 2 hits → first
+    expect(aggs[0]!.sessionId).toBe('sess-a');
+    expect(aggs[0]!.hitCount).toBe(2);
+    expect(aggs[0]!.latestTs).toBe('2026-01-03T15:30:00.000Z');
+    expect(aggs[0]!.firstHit.eventId).toBe(1);
+    expect(aggs[0]!.title).toContain('Alpha');
+    expect(aggs[1]!.hitCount).toBe(1);
+    const line = formatSessionAggLine(aggs[0]!, true);
+    expect(line.startsWith('>')).toBe(true);
+    expect(line).toMatch(/2 hits/);
+    expect(line).toMatch(/latest 15:30/);
+  });
+});
+
+describe('series exclusion list membership', () => {
+  test('sensitive-content is excluded; kin criterion is privacy-gate full-text', () => {
+    expect(SERIES_EXCLUDE_PROBES).toContain('sensitive-content');
+    expect(SERIES_EXCLUDE_PROBES).not.toContain('apology-rate');
+    expect(REGISTRY_PROBE_NAMES).toContain('sensitive-content');
+    const trend = seriesProbeList();
+    expect(trend).not.toContain('sensitive-content');
+    expect(trend.length).toBe(REGISTRY_PROBE_NAMES.length - SERIES_EXCLUDE_PROBES.length);
+    // every exclude is a known registry name
+    for (const n of SERIES_EXCLUDE_PROBES) {
+      expect(REGISTRY_PROBE_NAMES).toContain(n);
+    }
+  });
+});
+
 describe('probe drill budget + hit window', () => {
   test('budgetHitSlots fills residual body height (tall/short)', () => {
     // body residual: 30 − 10 grid − 1 header → 19 slots
@@ -342,11 +547,15 @@ describe('ProbesStage render', () => {
     const frame = captureCharFrame();
 
     expect(frame, `frame:\n${frame}`).toMatch(/apology-rate|APOLOGY-RATE/i);
-    expect(frame).toMatch(/sensitive-content|SENSITIVE-CONTENT/i);
+    // n=0 probes collapse into the no-signal card (not a full sensitive-content card)
+    expect(frame).toMatch(/no-signal|NO-SIGNAL|sensitive-content/i);
     expect(frame).toMatch(/\[heuristic\]|hits\s+\d+/i);
     expect(frame).toMatch(/probes\s+\d+–\d+\s+of\s+\d+/i);
-    // empty corpus still shows wide CI honesty somewhere (sensitive-content)
-    expect(frame).toMatch(/0\.0–100\.0%|hits\s+1/i);
+    // scope chips present (active ALL uppercase)
+    expect(frame).toMatch(/\bALL\b/);
+    expect(frame).toMatch(/30d|7d/i);
+    // empty corpus still shows wide CI honesty somewhere, or hits annotation
+    expect(frame).toMatch(/0\.0–100\.0%|hits\s+\d+|no-signal/i);
   });
 
   test('drill Enter opens hits; second Enter fires onOpenSession with eventId', async () => {
@@ -425,6 +634,130 @@ describe('ProbesStage render', () => {
 
     expect(frame, `frame:\n${frame}`).toMatch(/not installed|not-installed|not found/i);
     expect(frame).toMatch(/amore init --with-speculum/);
+  });
+
+  test('detail d opens aggregated sessions; L handoff fires onLensSession', async () => {
+    const multiHit: ScanRow[] = [
+      {
+        ...SCAN_FIXTURE[0]!,
+        hits: [
+          {
+            sessionId: 'sess-aaa',
+            ts: '2026-01-01T10:00:00.000Z',
+            category: 'self-correction',
+            evidence: 'sorry once',
+            eventId: 1,
+          },
+          {
+            sessionId: 'sess-aaa',
+            ts: '2026-01-01T11:00:00.000Z',
+            category: 'self-correction',
+            evidence: 'sorry twice',
+            eventId: 2,
+          },
+          {
+            sessionId: 'sess-ccc',
+            ts: '2026-01-02T09:00:00.000Z',
+            category: 'self-correction',
+            evidence: 'other',
+            eventId: 3,
+          },
+        ],
+      },
+      SCAN_FIXTURE[2]!,
+    ];
+    const bin = writeFakeBin(
+      [
+        `const verb = process.argv[2];`,
+        `if (verb === 'scan') {`,
+        `  console.log(JSON.stringify(${JSON.stringify(multiHit)}));`,
+        `  process.exit(0);`,
+        `}`,
+        `process.exit(2);`,
+        ``,
+      ].join('\n'),
+    );
+    process.env.SPECULUM_BIN = bin;
+
+    let lensId: string | null = null;
+    const { renderer, renderOnce, captureCharFrame, mockInput } = await createTestRenderer({
+      width: 110,
+      height: 36,
+    });
+    destroy = () => renderer.destroy();
+    const root = createRoot(renderer);
+    root.render(
+      createElement(
+        ThemeProvider,
+        { initial: 'horizon' },
+        createElement(ProbesStage, {
+          inputActive: true,
+          onLensSession: (sessionId) => {
+            lensId = sessionId;
+          },
+        }),
+      ),
+    );
+
+    await new Promise((r) => setTimeout(r, 600));
+    await renderOnce();
+
+    // Open detail on first ranked probe (apology-rate).
+    mockInput.pressKey('d');
+    await new Promise((r) => setTimeout(r, 100));
+    await renderOnce();
+    const detailFrame = captureCharFrame();
+    expect(detailFrame, `detail:\n${detailFrame}`).toMatch(/detail/i);
+    expect(detailFrame).toMatch(/apology-rate|APOLOGY-RATE/i);
+    // Aggregated: sess-aaa should show 2 hits (or title/id + hit count).
+    expect(detailFrame).toMatch(/2 hits|sessions\s*\(/i);
+
+    // L on the selected session row → lens handoff.
+    mockInput.pressKey('l');
+    await new Promise((r) => setTimeout(r, 80));
+    expect(lensId, 'onLensSession should fire').toBe('sess-aaa');
+  });
+
+  test('series degrade: board still paints when series spawn fails', async () => {
+    const bin = writeFakeBin(
+      [
+        `const args = process.argv.slice(2);`,
+        `const verb = args[0];`,
+        `if (verb === 'scan' && args.includes('--series')) {`,
+        `  console.error('series boom');`,
+        `  process.exit(3);`,
+        `}`,
+        `if (verb === 'scan') {`,
+        `  console.log(JSON.stringify(${JSON.stringify(SCAN_FIXTURE)}));`,
+        `  process.exit(0);`,
+        `}`,
+        `process.exit(2);`,
+        ``,
+      ].join('\n'),
+    );
+    process.env.SPECULUM_BIN = bin;
+
+    const { renderer, renderOnce, captureCharFrame } = await createTestRenderer({
+      width: 110,
+      height: 30,
+    });
+    destroy = () => renderer.destroy();
+    const root = createRoot(renderer);
+    root.render(
+      createElement(
+        ThemeProvider,
+        { initial: 'horizon' },
+        createElement(ProbesStage, { inputActive: true }),
+      ),
+    );
+
+    await new Promise((r) => setTimeout(r, 700));
+    await renderOnce();
+    const frame = captureCharFrame();
+    // Board still up despite series failure.
+    expect(frame, `frame:\n${frame}`).toMatch(/apology-rate|APOLOGY-RATE/i);
+    expect(frame).toMatch(/probes\s+\d+–\d+\s+of\s+\d+/i);
+    expect(frame).not.toMatch(/series boom/i);
   });
 
   test('nonzero fixture shows error kind + retry', async () => {

@@ -159,6 +159,83 @@ describe("scan hits presentation", () => {
     }
   });
 
+  test("scan --probe accepts comma-separated names", () => {
+    const corpus = writeTripwireCorpus();
+    const { home, dbPath, cleanup } = tempHome();
+    try {
+      const env = {
+        ...process.env,
+        SPECULUM_HOME: home,
+        SPECULUM_DB: dbPath,
+        SPECULUM_SESSIONS_DIR: corpus.root,
+      };
+
+      const ingest = Bun.spawnSync(["bun", "run", CLI, "ingest", "--json"], {
+        env,
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      expect(ingest.exitCode).toBe(0);
+
+      const scan = Bun.spawnSync(
+        [
+          "bun",
+          "run",
+          CLI,
+          "scan",
+          "--json",
+          "--probe",
+          "rage-rate, apology-rate",
+        ],
+        { env, stdout: "pipe", stderr: "pipe" },
+      );
+      expect(scan.exitCode).toBe(0);
+      const results = JSON.parse(scan.stdout.toString()) as Array<{
+        probe: string;
+      }>;
+      expect(Array.isArray(results)).toBe(true);
+      expect(results.map((r) => r.probe).sort()).toEqual(
+        ["apology-rate", "rage-rate"].sort(),
+      );
+    } finally {
+      corpus.cleanup();
+      cleanup();
+    }
+  });
+
+  test("scan --probe unknown name lists available probes", () => {
+    const corpus = writeTripwireCorpus();
+    const { home, dbPath, cleanup } = tempHome();
+    try {
+      const env = {
+        ...process.env,
+        SPECULUM_HOME: home,
+        SPECULUM_DB: dbPath,
+        SPECULUM_SESSIONS_DIR: corpus.root,
+      };
+
+      const ingest = Bun.spawnSync(["bun", "run", CLI, "ingest", "--json"], {
+        env,
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      expect(ingest.exitCode).toBe(0);
+
+      const scan = Bun.spawnSync(
+        ["bun", "run", CLI, "scan", "--json", "--probe", "rage-rate,no-such-probe"],
+        { env, stdout: "pipe", stderr: "pipe" },
+      );
+      expect(scan.exitCode).toBe(1);
+      const err = scan.stderr.toString();
+      expect(err).toMatch(/unknown probe/i);
+      expect(err).toMatch(/no-such-probe/);
+      expect(err).toMatch(/available:/i);
+    } finally {
+      corpus.cleanup();
+      cleanup();
+    }
+  });
+
   test("scan without --hits does not print hits block on human path", () => {
     const corpus = writeTripwireCorpus();
     const { home, dbPath, cleanup } = tempHome();

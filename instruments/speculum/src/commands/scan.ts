@@ -27,6 +27,20 @@ function opt(args: string[], name: string): string | undefined {
 }
 
 /**
+ * Parse `--probe` as a comma-separated name list.
+ * Trims each segment and drops empties (so `a, b,,c` → `["a","b","c"]`).
+ * Returns null when the flag is absent or yields no names.
+ */
+export function parseProbeList(raw: string | undefined): string[] | null {
+  if (raw == null || raw === "") return null;
+  const names = raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  return names.length > 0 ? names : null;
+}
+
+/**
  * Parse --policy flag. Bare `--policy` (no path, or next token is another
  * flag) uses the built-in default table. `--policy path.json` loads a table.
  */
@@ -183,7 +197,9 @@ export async function scanCommand(args: string[]): Promise<void> {
   const project = opt(args, "--project");
   const sinceStr = opt(args, "--since");
   const untilStr = opt(args, "--until");
-  const probeName = opt(args, "--probe");
+  const probeRaw = opt(args, "--probe");
+  /** Comma-separated probe names; empty/absent → full registry. */
+  const probeNames = parseProbeList(probeRaw);
 
   const opts: ProbeOptions = {};
   if (project) opts.project = project;
@@ -195,10 +211,12 @@ export async function scanCommand(args: string[]): Promise<void> {
     // ── Windowed series path ──────────────────────────────────────────
     if (seriesGranularity) {
       const windowCount = parseWindowsCount(opt(args, "--windows"));
-      const names = probeName ? [probeName] : listProbeNames();
-      if (probeName && !listProbeNames().includes(probeName)) {
+      const available = listProbeNames();
+      const names = probeNames ?? available;
+      const unknown = names.filter((n) => !available.includes(n));
+      if (unknown.length > 0) {
         console.error(
-          `unknown probe: ${probeName}\navailable: ${listProbeNames().join(", ")}`,
+          `unknown probe: ${unknown.join(", ")}\navailable: ${available.join(", ")}`,
         );
         process.exit(1);
       }
@@ -231,15 +249,20 @@ export async function scanCommand(args: string[]): Promise<void> {
 
     // ── Standard scan path ────────────────────────────────────────────
     let results: ProbeResult[];
-    if (probeName) {
-      const one = runProbe(db, probeName, opts);
-      if (!one) {
+    if (probeNames) {
+      const available = listProbeNames();
+      const unknown = probeNames.filter((n) => !available.includes(n));
+      if (unknown.length > 0) {
         console.error(
-          `unknown probe: ${probeName}\navailable: ${listProbeNames().join(", ")}`,
+          `unknown probe: ${unknown.join(", ")}\navailable: ${available.join(", ")}`,
         );
         process.exit(1);
       }
-      results = [one];
+      results = [];
+      for (const name of probeNames) {
+        const one = runProbe(db, name, opts);
+        if (one) results.push(one);
+      }
     } else {
       results = runAllProbes(db, opts);
     }

@@ -60,7 +60,7 @@ Commands:
                         --json
 
   scan                  Run heuristic probes over the index (local only)
-                        --probe <name> Limit to one probe
+                        --probe <names> Limit to one or more probes (comma-list)
                         --project P    Filter by project path
                         --since D      ISO / YYYY-MM-DD floor
                         --until D      ISO / YYYY-MM-DD ceiling
@@ -111,7 +111,7 @@ Commands:
                         --format json|csv|md  (default json)
                         --output <path>  Write to file (default stdout)
                         --project P    --since D  --until D
-                        --probe <name> (scan)  --model M (usage)
+                        --probe <names> (scan, comma-list)  --model M (usage)
                         --session <id> (session surface)
                         --json         Alias for --format json
 
