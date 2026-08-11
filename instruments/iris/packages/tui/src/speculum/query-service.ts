@@ -63,6 +63,44 @@ export type SessionListRow = {
    * Empty string on v4 indexes or when summary had no title.
    */
   title: string;
+  /**
+   * v6 facets from sessions columns. Empty string when the column is absent
+   * (v4/v5 indexes) or the row has no value.
+   */
+  cwdClass: string;
+  agentName: string;
+  subagentType: string;
+  description: string;
+  titleSource: string;
+};
+
+/** Sort modes for filtered session listing (default recent = started_at DESC). */
+export type SessionSort = 'recent' | 'turns' | 'errors';
+
+/**
+ * Filter / page / sort options for sessionList and sessionCount.
+ * All filters are AND-composed. Filters that need columns missing from the
+ * opened index are ignored (never throw).
+ */
+export type SessionListOpts = {
+  /** Exact match on sessions.cwd_class. */
+  cwdClass?: 'operator' | 'experiment' | 'harness' | 'unknown' | string;
+  /** Exact match on sessions.agent. */
+  agent?: 'primary' | 'subagent' | string;
+  /** Case-insensitive substring on project_path. */
+  project?: string;
+  /** Inclusive lower bound on started_at (ISO string). */
+  since?: string;
+  /** Inclusive upper bound on started_at (ISO string). */
+  until?: string;
+  /** Case-insensitive substring on resolved title. */
+  title?: string;
+  /** Sort order; default recent (started_at DESC). */
+  sort?: SessionSort;
+  /** Page size; default 50. */
+  limit?: number;
+  /** Page start; default 0. */
+  offset?: number;
 };
 
 export type TurnRow = {
@@ -73,6 +111,44 @@ export type TurnRow = {
   text: string | null;
   toolName: string | null;
   toolError: number | null;
+};
+
+/**
+ * Full untruncated turn payload for detail panes.
+ * All text-like fields normalize SQL null to '' (documented here).
+ * Never includes events.raw.
+ */
+export type TurnDetail = {
+  eventId: number;
+  sessionId: string;
+  kind: string;
+  ts: string;
+  /** events.text; null → ''. */
+  text: string;
+  /** events.tool_name; null → ''. */
+  toolName: string;
+  /** events.tool_input; null → ''. */
+  toolInput: string;
+  /** events.tool_output; null → ''. */
+  toolOutput: string;
+  /**
+   * events.tool_error rendered as string (integer columns become "0"/"1");
+   * SQL null → ''.
+   */
+  toolError: string;
+};
+
+/** Per-session derived annotation row (v6 session_annotations). */
+export type SessionAnnotation = {
+  phaseClass: string;
+  errorDensity: number;
+  /** Parsed probe_hits JSON-text; bad JSON → {}. */
+  probeHits: Record<string, number>;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  durationSec: number;
+  method: string;
 };
 
 export type SearchHit = {
@@ -94,11 +170,12 @@ export type SearchOpts = {
  * Evidence edge between two sessions (map-record only — never affinity/similarity).
  * - parentage: subagent session → its parent_session (both in the requested set)
  * - event: session-pair aggregation of event_links (both endpoints in the set)
+ * - resumed_from / shared_artifact: session_links rows (v6; both endpoints in set)
  */
 export type SessionMapLink = {
   source: string;
   target: string;
-  kind: 'parentage' | 'event';
+  kind: 'parentage' | 'event' | 'resumed_from' | 'shared_artifact';
   count: number;
 };
 
@@ -130,13 +207,36 @@ export interface QueryService {
   /** True after a read exhausted busy retries without success. */
   busy(): boolean;
   status(): QueryStatus;
+  /**
+   * Legacy form: sessionList(limit?, offset?) — unchanged call shape for map/microscope.
+   * Opts form: sessionList(opts) with filters, sort, limit, offset.
+   */
   sessionList(limit?: number, offset?: number): SessionListRow[];
+  sessionList(opts: SessionListOpts): SessionListRow[];
+  /** Count of sessions matching the same filters as sessionList (ignores limit/offset/sort). */
+  sessionCount(opts?: SessionListOpts): number;
   /**
    * Evidence edges among a co-visible session-id set: parentage + event_links aggregation.
    * Edges whose endpoints are outside the set are dropped. Empty input → [].
+   * Does not include session_links (see sessionLinks).
    */
   links(sessionIds: readonly string[]): SessionMapLink[];
+  /**
+   * links() plus v6 session_links rows (resumed_from / shared_artifact), same
+   * co-visible filter. When session_links is absent, equals links().
+   */
+  sessionLinks(sessionIds: readonly string[]): SessionMapLink[];
   turns(sessionId: string): TurnRow[];
+  /**
+   * Full untruncated event columns for a single turn. Null when the event id is
+   * missing. Never returns raw.
+   */
+  turnDetail(eventId: number): TurnDetail | null;
+  /**
+   * session_annotations rows for the given ids. Empty input or missing table → {}.
+   * probe_hits JSON-text is parsed defensively (bad JSON → {}).
+   */
+  annotations(sessionIds: readonly string[]): Record<string, SessionAnnotation>;
   search(query: string, opts?: SearchOpts): SearchHit[];
   close(): void;
   /** Close + reopen readonly (picks up rows written by the CLI since last open). */
@@ -214,17 +314,17 @@ export function prepareFtsQuery(raw: string): string {
   return tokens.map((t) => `"${t.replace(/"/g, '')}"`).join(' ');
 }
 
-/** True when sessions.title exists (schema v5+). Cached per open. */
-function sessionsHasTitleColumn(db: Database): boolean {
+/** Column names present on sessions for the opened index. */
+function sessionsColumnSet(db: Database): Set<string> {
   try {
     const cols = db.query<{ name: string }, []>(`PRAGMA table_info(sessions)`).all();
-    return cols.some((c) => c.name === 'title');
+    return new Set(cols.map((c) => c.name));
   } catch {
-    return false;
+    return new Set();
   }
 }
 
-/** True when a named table exists (event_links may be absent on stripped fixtures). */
+/** True when a named table exists (event_links / session_* may be absent on stripped fixtures). */
 function tableExists(db: Database, name: string): boolean {
   try {
     const row = db
@@ -238,6 +338,96 @@ function tableExists(db: Database, name: string): boolean {
   }
 }
 
+/** Normalize a filter/options bag from either legacy (limit, offset) or opts form. */
+function normalizeSessionListArgs(
+  limitOrOpts?: number | SessionListOpts,
+  offset?: number,
+): SessionListOpts {
+  if (limitOrOpts != null && typeof limitOrOpts === 'object') {
+    return limitOrOpts;
+  }
+  const opts: SessionListOpts = {};
+  if (typeof limitOrOpts === 'number') opts.limit = limitOrOpts;
+  if (typeof offset === 'number') opts.offset = offset;
+  return opts;
+}
+
+/**
+ * Shared WHERE builder for sessionList / sessionCount.
+ * Filters requiring absent columns are dropped (never throw). Parameters only.
+ */
+function buildSessionListWhere(
+  opts: SessionListOpts,
+  cols: Set<string>,
+): { whereSql: string; params: (string | number)[] } {
+  const wheres: string[] = [];
+  const params: (string | number)[] = [];
+
+  if (opts.cwdClass && cols.has('cwd_class')) {
+    wheres.push('s.cwd_class = ?');
+    params.push(opts.cwdClass);
+  }
+  if (opts.agent) {
+    wheres.push('s.agent = ?');
+    params.push(opts.agent);
+  }
+  if (opts.project) {
+    wheres.push("s.project_path LIKE '%' || ? || '%' COLLATE NOCASE");
+    params.push(opts.project);
+  }
+  if (opts.since !== undefined && opts.since !== '') {
+    wheres.push('s.started_at >= ?');
+    params.push(opts.since);
+  }
+  if (opts.until !== undefined && opts.until !== '') {
+    wheres.push('s.started_at <= ?');
+    params.push(opts.until);
+  }
+  if (opts.title && cols.has('title')) {
+    wheres.push("s.title LIKE '%' || ? || '%' COLLATE NOCASE");
+    params.push(opts.title);
+  }
+
+  const whereSql = wheres.length > 0 ? `WHERE ${wheres.join(' AND ')}` : '';
+  return { whereSql, params };
+}
+
+function sessionOrderBy(sort: SessionSort | undefined): string {
+  switch (sort) {
+    case 'turns':
+      return 'ORDER BY s.turn_count DESC, s.started_at DESC, s.id ASC';
+    case 'errors':
+      return 'ORDER BY s.tool_error_count DESC, s.started_at DESC, s.id ASC';
+    case 'recent':
+    default:
+      return 'ORDER BY s.started_at DESC, s.id ASC';
+  }
+}
+
+/** Defensive probe_hits JSON parse; bad JSON or non-object → {}. */
+function parseProbeHits(raw: string | null | undefined): Record<string, number> {
+  if (raw == null || raw === '') return {};
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (parsed == null || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    const out: Record<string, number> = {};
+    for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof v === 'number' && Number.isFinite(v)) out[k] = v;
+      else if (typeof v === 'string' && v.trim() !== '' && Number.isFinite(Number(v))) {
+        out[k] = Number(v);
+      }
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+function nullToEmpty(v: string | number | null | undefined): string {
+  if (v == null) return '';
+  return typeof v === 'string' ? v : String(v);
+}
+
 class SqliteQueryService implements QueryService {
   readonly path: string;
   private db: Database | null;
@@ -246,8 +436,8 @@ class SqliteQueryService implements QueryService {
   private readonly sleep: (ms: number) => void;
   private forceBusyRemaining: number;
   private _busy = false;
-  /** Cached sessions.title presence; null until first introspect. */
-  private _hasTitleCol: boolean | null = null;
+  /** Cached sessions column set; null until first introspect. */
+  private _sessionCols: Set<string> | null = null;
 
   constructor(path: string, opts: OpenQueryServiceOpts) {
     this.path = path;
@@ -258,15 +448,19 @@ class SqliteQueryService implements QueryService {
     this.db = openReadonly(path);
   }
 
-  private hasTitleColumn(): boolean {
-    if (this._hasTitleCol != null) return this._hasTitleCol;
+  private sessionColumns(): Set<string> {
+    if (this._sessionCols != null) return this._sessionCols;
     const db = this.db;
     if (!db) {
-      this._hasTitleCol = false;
-      return false;
+      this._sessionCols = new Set();
+      return this._sessionCols;
     }
-    this._hasTitleCol = sessionsHasTitleColumn(db);
-    return this._hasTitleCol;
+    this._sessionCols = sessionsColumnSet(db);
+    return this._sessionCols;
+  }
+
+  private hasTitleColumn(): boolean {
+    return this.sessionColumns().has('title');
   }
 
   getVersion(): number {
@@ -354,12 +548,39 @@ class SqliteQueryService implements QueryService {
     }, empty);
   }
 
-  sessionList(limit = 50, offset = 0): SessionListRow[] {
-    const lim = Math.max(0, Math.trunc(limit));
-    const off = Math.max(0, Math.trunc(offset));
+  sessionList(limitOrOpts?: number | SessionListOpts, offset?: number): SessionListRow[] {
+    const opts = normalizeSessionListArgs(limitOrOpts, offset);
+    const lim = Math.max(0, Math.trunc(opts.limit ?? 50));
+    const off = Math.max(0, Math.trunc(opts.offset ?? 0));
     return this.read(() => {
-      const withTitle = this.hasTitleColumn();
-      const titleSelect = withTitle ? 's.title AS title' : "'' AS title";
+      const cols = this.sessionColumns();
+      const titleSelect = cols.has('title') ? 's.title AS title' : "'' AS title";
+      const facet = (col: string, alias: string) =>
+        cols.has(col) ? `s.${col} AS ${alias}` : `'' AS ${alias}`;
+      const { whereSql, params } = buildSessionListWhere(opts, cols);
+      const sql = `SELECT
+             s.id,
+             s.project_path,
+             s.agent,
+             s.parent_session,
+             s.model_id,
+             s.started_at,
+             s.ended_at,
+             s.turn_count,
+             s.user_msg_count,
+             s.tool_call_count,
+             s.tool_error_count,
+             (SELECT COUNT(*) FROM events e WHERE e.session_id = s.id) AS event_count,
+             ${titleSelect},
+             ${facet('cwd_class', 'cwd_class')},
+             ${facet('agent_name', 'agent_name')},
+             ${facet('subagent_type', 'subagent_type')},
+             ${facet('description', 'description')},
+             ${facet('title_source', 'title_source')}
+           FROM sessions s
+           ${whereSql}
+           ${sessionOrderBy(opts.sort)}
+           LIMIT ? OFFSET ?`;
       const rows = this.requireDb()
         .query<
           {
@@ -376,101 +597,204 @@ class SqliteQueryService implements QueryService {
             tool_error_count: number;
             event_count: number;
             title: string;
+            cwd_class: string;
+            agent_name: string;
+            subagent_type: string;
+            description: string;
+            title_source: string;
           },
-          [number, number]
-        >(
-          `SELECT
-             s.id,
-             s.project_path,
-             s.agent,
-             s.parent_session,
-             s.model_id,
-             s.started_at,
-             s.ended_at,
-             s.turn_count,
-             s.user_msg_count,
-             s.tool_call_count,
-             s.tool_error_count,
-             (SELECT COUNT(*) FROM events e WHERE e.session_id = s.id) AS event_count,
-             ${titleSelect}
-           FROM sessions s
-           ORDER BY s.started_at DESC
-           LIMIT ? OFFSET ?`,
-        )
-        .all(lim, off);
-      return rows.map((r) => ({
-        id: r.id,
-        projectPath: r.project_path,
-        agent: r.agent,
-        parentSession: r.parent_session,
-        modelId: r.model_id,
-        startedAt: r.started_at,
-        endedAt: r.ended_at,
-        turnCount: r.turn_count,
-        userMsgCount: r.user_msg_count,
-        toolCallCount: r.tool_call_count,
-        toolErrorCount: r.tool_error_count,
-        eventCount: r.event_count,
-        title: r.title ?? '',
-      }));
+          (string | number)[]
+        >(sql)
+        .all(...params, lim, off);
+      return rows.map(mapSessionListRow);
     }, []);
+  }
+
+  sessionCount(opts: SessionListOpts = {}): number {
+    return this.read(() => {
+      const cols = this.sessionColumns();
+      const { whereSql, params } = buildSessionListWhere(opts, cols);
+      const row = this.requireDb()
+        .query<{ n: number }, (string | number)[]>(
+          `SELECT COUNT(*) AS n FROM sessions s ${whereSql}`,
+        )
+        .get(...params);
+      return row?.n ?? 0;
+    }, 0);
   }
 
   links(sessionIds: readonly string[]): SessionMapLink[] {
     const ids = [...new Set(sessionIds.map((s) => s.trim()).filter(Boolean))];
     if (ids.length === 0) return [];
+    return this.read(() => this.collectLinks(ids, false), []);
+  }
+
+  sessionLinks(sessionIds: readonly string[]): SessionMapLink[] {
+    const ids = [...new Set(sessionIds.map((s) => s.trim()).filter(Boolean))];
+    if (ids.length === 0) return [];
+    return this.read(() => this.collectLinks(ids, true), []);
+  }
+
+  /** Parentage + event_links (+ optional session_links). Shared by links/sessionLinks. */
+  private collectLinks(ids: string[], includeSessionLinks: boolean): SessionMapLink[] {
+    const db = this.requireDb();
+    const out: SessionMapLink[] = [];
+    const idSet = new Set(ids);
+    const placeholders = ids.map(() => '?').join(', ');
+    // Parentage: child (subagent) → parent, only when both endpoints are co-visible.
+    const parentRows = db
+      .query<{ id: string; parent_session: string | null }, string[]>(
+        `SELECT id, parent_session FROM sessions
+         WHERE parent_session IS NOT NULL
+           AND parent_session != ''
+           AND id IN (${placeholders})`,
+      )
+      .all(...ids);
+    for (const r of parentRows) {
+      const parent = (r.parent_session ?? '').trim();
+      if (!parent || !idSet.has(parent) || parent === r.id) continue;
+      out.push({ source: r.id, target: parent, kind: 'parentage', count: 1 });
+    }
+
+    // event_links → session pairs via events (table may be absent on stripped fixtures).
+    if (tableExists(db, 'event_links')) {
+      const eventRows = db
+        .query<{ source: string; target: string; n: number }, string[]>(
+          `SELECT
+             es.session_id AS source,
+             et.session_id AS target,
+             COUNT(*) AS n
+           FROM event_links el
+           JOIN events es ON es.id = el.source_event_id
+           JOIN events et ON et.id = el.target_event_id
+           WHERE es.session_id IN (${placeholders})
+             AND et.session_id IN (${placeholders})
+             AND es.session_id != et.session_id
+           GROUP BY es.session_id, et.session_id`,
+        )
+        .all(...ids, ...ids);
+      for (const r of eventRows) {
+        if (!idSet.has(r.source) || !idSet.has(r.target)) continue;
+        out.push({
+          source: r.source,
+          target: r.target,
+          kind: 'event',
+          count: Math.max(1, Number(r.n) || 1),
+        });
+      }
+    }
+
+    if (includeSessionLinks && tableExists(db, 'session_links')) {
+      const slRows = db
+        .query<
+          { source_session: string; target_session: string; kind: string },
+          string[]
+        >(
+          `SELECT source_session, target_session, kind
+           FROM session_links
+           WHERE source_session IN (${placeholders})
+             AND target_session IN (${placeholders})
+             AND source_session != target_session`,
+        )
+        .all(...ids, ...ids);
+      for (const r of slRows) {
+        if (!idSet.has(r.source_session) || !idSet.has(r.target_session)) continue;
+        // Only map known session_links kinds into the public union.
+        if (r.kind !== 'resumed_from' && r.kind !== 'shared_artifact') continue;
+        out.push({
+          source: r.source_session,
+          target: r.target_session,
+          kind: r.kind,
+          count: 1,
+        });
+      }
+    }
+    return out;
+  }
+
+  turnDetail(eventId: number): TurnDetail | null {
+    const id = Math.trunc(eventId);
+    if (!Number.isFinite(id) || id <= 0) return null;
+    return this.read(() => {
+      const row = this.requireDb()
+        .query<
+          {
+            id: number;
+            session_id: string;
+            kind: string;
+            ts: string;
+            text: string | null;
+            tool_name: string | null;
+            tool_input: string | null;
+            tool_output: string | null;
+            tool_error: number | null;
+          },
+          [number]
+        >(
+          // Never SELECT raw — privacy and size invariant for detail panes.
+          `SELECT id, session_id, kind, ts, text, tool_name, tool_input, tool_output, tool_error
+           FROM events
+           WHERE id = ?`,
+        )
+        .get(id);
+      if (!row) return null;
+      return {
+        eventId: row.id,
+        sessionId: row.session_id,
+        kind: row.kind,
+        ts: row.ts,
+        text: nullToEmpty(row.text),
+        toolName: nullToEmpty(row.tool_name),
+        toolInput: nullToEmpty(row.tool_input),
+        toolOutput: nullToEmpty(row.tool_output),
+        toolError: nullToEmpty(row.tool_error),
+      };
+    }, null);
+  }
+
+  annotations(sessionIds: readonly string[]): Record<string, SessionAnnotation> {
+    const ids = [...new Set(sessionIds.map((s) => s.trim()).filter(Boolean))];
+    if (ids.length === 0) return {};
     return this.read(() => {
       const db = this.requireDb();
-      const out: SessionMapLink[] = [];
-      const idSet = new Set(ids);
-      // Parentage: child (subagent) → parent, only when both endpoints are co-visible.
+      if (!tableExists(db, 'session_annotations')) return {};
       const placeholders = ids.map(() => '?').join(', ');
-      const parentRows = db
-        .query<{ id: string; parent_session: string | null }, string[]>(
-          `SELECT id, parent_session FROM sessions
-           WHERE parent_session IS NOT NULL
-             AND parent_session != ''
-             AND id IN (${placeholders})`,
+      const rows = db
+        .query<
+          {
+            session_id: string;
+            phase_class: string;
+            error_density: number;
+            probe_hits: string;
+            input_tokens: number;
+            output_tokens: number;
+            total_tokens: number;
+            duration_sec: number;
+            method: string;
+          },
+          string[]
+        >(
+          `SELECT session_id, phase_class, error_density, probe_hits,
+                  input_tokens, output_tokens, total_tokens, duration_sec, method
+           FROM session_annotations
+           WHERE session_id IN (${placeholders})`,
         )
         .all(...ids);
-      for (const r of parentRows) {
-        const parent = (r.parent_session ?? '').trim();
-        if (!parent || !idSet.has(parent) || parent === r.id) continue;
-        out.push({ source: r.id, target: parent, kind: 'parentage', count: 1 });
-      }
-
-      // event_links → session pairs via events (table may be absent on stripped fixtures).
-      if (tableExists(db, 'event_links')) {
-        const eventRows = db
-          .query<
-            { source: string; target: string; n: number },
-            string[]
-          >(
-            `SELECT
-               es.session_id AS source,
-               et.session_id AS target,
-               COUNT(*) AS n
-             FROM event_links el
-             JOIN events es ON es.id = el.source_event_id
-             JOIN events et ON et.id = el.target_event_id
-             WHERE es.session_id IN (${placeholders})
-               AND et.session_id IN (${placeholders})
-               AND es.session_id != et.session_id
-             GROUP BY es.session_id, et.session_id`,
-          )
-          .all(...ids, ...ids);
-        for (const r of eventRows) {
-          if (!idSet.has(r.source) || !idSet.has(r.target)) continue;
-          out.push({
-            source: r.source,
-            target: r.target,
-            kind: 'event',
-            count: Math.max(1, Number(r.n) || 1),
-          });
-        }
+      const out: Record<string, SessionAnnotation> = {};
+      for (const r of rows) {
+        out[r.session_id] = {
+          phaseClass: r.phase_class ?? '',
+          errorDensity: Number(r.error_density) || 0,
+          probeHits: parseProbeHits(r.probe_hits),
+          inputTokens: Number(r.input_tokens) || 0,
+          outputTokens: Number(r.output_tokens) || 0,
+          totalTokens: Number(r.total_tokens) || 0,
+          durationSec: Number(r.duration_sec) || 0,
+          method: r.method ?? '',
+        };
       }
       return out;
-    }, []);
+    }, {});
   }
 
   turns(sessionId: string): TurnRow[] {
@@ -596,7 +920,7 @@ class SqliteQueryService implements QueryService {
     this.close();
     this.db = openReadonly(this.path);
     this._busy = false;
-    this._hasTitleCol = null;
+    this._sessionCols = null;
   }
 
   /** @internal test seam — force upcoming read attempts to appear busy. */
@@ -635,6 +959,48 @@ class SqliteQueryService implements QueryService {
     this._busy = true;
     return fallback;
   }
+}
+
+function mapSessionListRow(r: {
+  id: string;
+  project_path: string;
+  agent: string;
+  parent_session: string | null;
+  model_id: string | null;
+  started_at: string;
+  ended_at: string;
+  turn_count: number;
+  user_msg_count: number;
+  tool_call_count: number;
+  tool_error_count: number;
+  event_count: number;
+  title: string;
+  cwd_class: string;
+  agent_name: string;
+  subagent_type: string;
+  description: string;
+  title_source: string;
+}): SessionListRow {
+  return {
+    id: r.id,
+    projectPath: r.project_path,
+    agent: r.agent,
+    parentSession: r.parent_session,
+    modelId: r.model_id,
+    startedAt: r.started_at,
+    endedAt: r.ended_at,
+    turnCount: r.turn_count,
+    userMsgCount: r.user_msg_count,
+    toolCallCount: r.tool_call_count,
+    toolErrorCount: r.tool_error_count,
+    eventCount: r.event_count,
+    title: r.title ?? '',
+    cwdClass: r.cwd_class ?? '',
+    agentName: r.agent_name ?? '',
+    subagentType: r.subagent_type ?? '',
+    description: r.description ?? '',
+    titleSource: r.title_source ?? '',
+  };
 }
 
 function mapSearchHit(r: {
