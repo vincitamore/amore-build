@@ -22,7 +22,7 @@ pub fn pager_toml_path() -> PathBuf {
     grok_home().join("pager.toml")
 }
 
-/// `~/.grok` or `$GROK_HOME`, decided by the resolved home rather than by
+/// `~/.amore` or `$GROK_HOME`, decided by the resolved home rather than by
 /// whether `GROK_HOME` is set in the environment.
 pub fn display_grok_home_prefix() -> String {
     display_grok_home_prefix_for(&grok_home())
@@ -31,13 +31,13 @@ pub fn display_grok_home_prefix() -> String {
 pub fn display_grok_home_prefix_for(home: &Path) -> String {
     let default = xai_grok_config::default_grok_home();
     if home == default || home == dunce::canonicalize(&default).unwrap_or(default) {
-        "~/.grok".to_string()
+        "~/.amore".to_string()
     } else {
         "$GROK_HOME".to_string()
     }
 }
 
-/// User-facing path under [`grok_home()`], e.g. ``~/.grok/config.toml``.
+/// User-facing path under [`grok_home()`], e.g. ``~/.amore/config.toml``.
 pub fn display_user_grok_path(relative: impl AsRef<Path>) -> String {
     display_user_grok_path_for(&grok_home(), relative)
 }
@@ -429,7 +429,7 @@ mod tests {
         if std::env::var("GROK_HOME").is_ok() {
             return;
         }
-        assert_eq!(display_grok_home_prefix(), "~/.grok");
+        assert_eq!(display_grok_home_prefix(), "~/.amore");
     }
 
     #[test]

@@ -1389,8 +1389,12 @@ fn minimal_update_notice_commits_a_system_block() {
     commit_minimal_update_notice(&mut app, "9.9.9");
     assert_eq!(agent_scrollback_len(&app), before + 1);
     let text = last_system_text(&app, AgentId(0));
-    assert!(text.contains("Update available: v9.9.9"), "got: {text:?}");
-    assert!(text.contains("restart to apply"), "got: {text:?}");
+    assert!(
+        text.contains("A new version of Amore Build is available"),
+        "got: {text:?}"
+    );
+    assert!(text.contains("-> 9.9.9"), "got: {text:?}");
+    assert!(text.contains("amore update"), "got: {text:?}");
 }
 
 #[test]
