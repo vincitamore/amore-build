@@ -9,6 +9,7 @@ pub mod discover;
 pub mod fetch;
 pub mod origin;
 pub mod state;
+pub mod swap;
 
 pub use check::{
     CHECK_CADENCE, CheckConfig, CheckOutcome, DoctorUpdateFacts, INSTALLER_ID, UpdateAvailable,
