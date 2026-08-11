@@ -9,16 +9,29 @@ import { createRoot } from '@opentui/react';
 import { ThemeProvider } from '../ThemeProvider';
 import { toPalette } from '../theme';
 import {
+  agentFilterToAgent,
+  agentGlyph,
   budgetSessionSlots,
   budgetTurnSlots,
+  buildListOpts,
+  classFilterToCwd,
+  classGlyph,
   collapseAbsolutePaths,
+  cycleChip,
+  CLASS_CYCLE,
+  AGENT_CYCLE,
+  WIN_CYCLE,
+  SORT_CYCLE,
   formatEventTs,
+  formatFilterRow,
   formatSessionInfo,
   formatSessionLine,
   formatSessionTitleLine,
   formatTurnLine,
+  isSubagentRow,
   kindColor,
   MicroscopeStage,
+  pageRangeLabel,
   paneGeometry,
   paneInnerWidth,
   PICKER_MAX_OUTER,
@@ -30,10 +43,11 @@ import {
   sessionPickerLabel,
   shortSessionId,
   STACK_BELOW_COLS,
+  winFilterSince,
 } from './MicroscopeStage';
 import type { SessionListRow, TurnRow } from './query-service';
 
-/** Schema with sessions.title (v5) so title fixtures exercise the real read path. */
+/** Schema with v6 session facets so filter chips exercise the real read path. */
 const SYNTHETIC_DDL = `
 CREATE TABLE events (
   id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -65,7 +79,12 @@ CREATE TABLE sessions (
   user_msg_count   INTEGER NOT NULL,
   tool_call_count  INTEGER NOT NULL,
   tool_error_count INTEGER NOT NULL,
-  title            TEXT NOT NULL DEFAULT ''
+  title            TEXT NOT NULL DEFAULT '',
+  cwd_class        TEXT NOT NULL DEFAULT '',
+  agent_name       TEXT NOT NULL DEFAULT '',
+  subagent_type    TEXT NOT NULL DEFAULT '',
+  description      TEXT NOT NULL DEFAULT '',
+  title_source     TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE usage (
   id                  INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -120,7 +139,62 @@ function baseSession(partial: Partial<SessionListRow> & { id: string }): Session
     toolErrorCount: partial.toolErrorCount ?? 1,
     eventCount: partial.eventCount ?? 4,
     title: partial.title ?? '',
+    cwdClass: partial.cwdClass ?? '',
+    agentName: partial.agentName ?? '',
+    subagentType: partial.subagentType ?? '',
+    description: partial.description ?? '',
+    titleSource: partial.titleSource ?? '',
   };
+}
+
+function insertSession(
+  db: Database,
+  row: {
+    id: string;
+    projectPath?: string;
+    agent?: string;
+    parentSession?: string | null;
+    modelId?: string | null;
+    startedAt: string;
+    endedAt?: string;
+    turnCount?: number;
+    userMsgCount?: number;
+    toolCallCount?: number;
+    toolErrorCount?: number;
+    title?: string;
+    cwdClass?: string;
+    agentName?: string;
+    subagentType?: string;
+    description?: string;
+    titleSource?: string;
+  },
+): void {
+  db.run(
+    `INSERT INTO sessions (
+       id, project_path, agent, parent_session, model_id,
+       started_at, ended_at, turn_count, user_msg_count, tool_call_count, tool_error_count,
+       title, cwd_class, agent_name, subagent_type, description, title_source
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      row.id,
+      row.projectPath ?? '/proj/microscope-demo',
+      row.agent ?? 'primary',
+      row.parentSession !== undefined ? row.parentSession : null,
+      row.modelId !== undefined ? row.modelId : 'model-x',
+      row.startedAt,
+      row.endedAt ?? row.startedAt,
+      row.turnCount ?? 1,
+      row.userMsgCount ?? 1,
+      row.toolCallCount ?? 0,
+      row.toolErrorCount ?? 0,
+      row.title ?? '',
+      row.cwdClass ?? 'operator',
+      row.agentName ?? '',
+      row.subagentType ?? '',
+      row.description ?? '',
+      row.titleSource ?? '',
+    ],
+  );
 }
 
 function seedGoodIndex(path: string): number {
@@ -128,48 +202,70 @@ function seedGoodIndex(path: string): number {
   let errId = 0;
   try {
     db.exec(SYNTHETIC_DDL);
-    db.run('PRAGMA user_version = 5');
+    db.run('PRAGMA user_version = 6');
 
-    db.run(
-      `INSERT INTO sessions (
-         id, project_path, agent, parent_session, model_id,
-         started_at, ended_at, turn_count, user_msg_count, tool_call_count, tool_error_count, title
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        'sess-alpha',
-        '/proj/microscope-demo',
-        'primary',
-        null,
-        'model-x',
-        '2026-06-02T12:00:00.000Z',
-        '2026-06-02T13:00:00.000Z',
-        3,
-        1,
-        2,
-        1,
-        'Repeat Previous Single Word Reply Request',
-      ],
-    );
-    db.run(
-      `INSERT INTO sessions (
-         id, project_path, agent, parent_session, model_id,
-         started_at, ended_at, turn_count, user_msg_count, tool_call_count, tool_error_count, title
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        'sess-beta',
-        '/proj/other',
-        'primary',
-        null,
-        'model-y',
-        '2026-06-01T08:00:00.000Z',
-        '2026-06-01T09:00:00.000Z',
-        1,
-        1,
-        0,
-        0,
-        '', // empty title → id fallback
-      ],
-    );
+    insertSession(db, {
+      id: 'sess-alpha',
+      projectPath: '/proj/microscope-demo',
+      agent: 'primary',
+      modelId: 'model-x',
+      startedAt: '2026-06-02T12:00:00.000Z',
+      endedAt: '2026-06-02T13:00:00.000Z',
+      turnCount: 3,
+      userMsgCount: 1,
+      toolCallCount: 2,
+      toolErrorCount: 1,
+      title: 'Repeat Previous Single Word Reply Request',
+      cwdClass: 'operator',
+      agentName: 'grok-build',
+      titleSource: 'summary',
+    });
+    insertSession(db, {
+      id: 'sess-beta',
+      projectPath: '/proj/other',
+      agent: 'primary',
+      modelId: 'model-y',
+      startedAt: '2026-06-01T08:00:00.000Z',
+      endedAt: '2026-06-01T09:00:00.000Z',
+      turnCount: 1,
+      title: '', // empty title → id fallback
+      cwdClass: 'experiment',
+    });
+    // Subagents of alpha (parentage nav). Older than alpha so sort:recent
+    // still lists the primary first (enter opens alpha's timeline).
+    insertSession(db, {
+      id: 'sess-alpha-child-a',
+      agent: 'subagent',
+      parentSession: 'sess-alpha',
+      startedAt: '2026-06-02T11:10:00.000Z',
+      title: '',
+      description: 'child explore map',
+      cwdClass: 'operator',
+      subagentType: 'explore',
+    });
+    insertSession(db, {
+      id: 'sess-alpha-child-b',
+      agent: 'subagent',
+      parentSession: 'sess-alpha',
+      startedAt: '2026-06-02T11:20:00.000Z',
+      title: 'Child Plan Turn',
+      cwdClass: 'operator',
+      subagentType: 'plan',
+    });
+    // Extra primaries for paging (newest first by started_at)
+    for (let i = 0; i < 12; i++) {
+      const n = String(i).padStart(2, '0');
+      insertSession(db, {
+        id: `sess-page-${n}`,
+        projectPath: '/proj/page-farm',
+        agent: 'primary',
+        startedAt: `2026-05-${String(20 - (i % 10)).padStart(2, '0')}T10:00:00.000Z`,
+        title: `Page Farm Session ${n}`,
+        cwdClass: i % 3 === 0 ? 'harness' : i % 3 === 1 ? 'operator' : 'experiment',
+        toolErrorCount: i % 4,
+        turnCount: i + 1,
+      });
+    }
 
     const insertEvent = (
       sessionId: string,
@@ -224,6 +320,12 @@ function seedGoodIndex(path: string): number {
       1,
     );
     insertEvent('sess-beta', '2026-06-01T08:30:00.000Z', 'user', 'unrelated weather chat');
+    insertEvent(
+      'sess-alpha',
+      '2026-06-02T12:04:00.000Z',
+      'user',
+      'unique-needle-alpha search token',
+    );
 
     db.run(
       `INSERT INTO ingest_state (
@@ -425,15 +527,140 @@ describe('Microscope pure helpers', () => {
     expect(line.match(/sess-beta/g)?.length).toBe(1);
   });
 
+  test('formatSessionLine uses description when title empty (subagent)', () => {
+    const now = new Date('2026-06-03T12:00:00.000Z').getTime();
+    const sub = baseSession({
+      id: 'sub-1',
+      title: '',
+      description: 'explore the map stage',
+      agent: 'subagent',
+      parentSession: 'sess-alpha',
+      cwdClass: 'operator',
+    });
+    const line = formatSessionLine(sub, true, now);
+    expect(line).toMatch(/explore the map stage/);
+    expect(line).toMatch(/OS/); // O class + S agent
+    expect(line).not.toMatch(/sub-1/);
+  });
+
+  test('formatSessionLine drop-order: counts → age → glyphs under narrow width', () => {
+    const now = new Date('2026-06-03T12:00:00.000Z').getTime();
+    const row = baseSession({
+      id: 'sess-drop',
+      title: 'Short Title',
+      cwdClass: 'operator',
+      turnCount: 12,
+      eventCount: 34,
+      startedAt: '2026-06-03T10:00:00.000Z',
+    });
+    const wide = formatSessionLine(row, false, now, 80);
+    expect(wide).toMatch(/t:12 e:34/);
+    expect(wide).toMatch(/\d+[mhd] ago/);
+    expect(wide).toMatch(/OP/);
+
+    const mid = formatSessionLine(row, false, now, 28);
+    // counts dropped first
+    expect(mid).not.toMatch(/t:12/);
+    expect(mid).toMatch(/Short Title/);
+
+    const tight = formatSessionLine(row, false, now, 18);
+    // title survives
+    expect(tight).toMatch(/Short/);
+    expect(tight.length).toBeLessThanOrEqual(18);
+  });
+
   test('sessionDisplayTitle / formatSessionTitleLine prefer rewritten title', () => {
     const titled = baseSession({ id: 'sess-alpha', title: '  Hello World  ' });
     expect(sessionDisplayTitle(titled)).toBe('Hello World');
     expect(formatSessionTitleLine(titled)).toBe('Hello World');
     const bare = baseSession({ id: 'sess-alpha-long-id-suffix', title: '' });
     expect(sessionDisplayTitle(bare)).toBe(shortSessionId(bare.id));
+    const withDesc = baseSession({
+      id: 'sub-x',
+      title: '',
+      description: '  child work  ',
+    });
+    expect(sessionDisplayTitle(withDesc)).toBe('child work');
     expect(sessionPickerLabel('Pipeline: dream-2026-02-14T08-19-40-project-health')).toBe(
       'project-health 2026-02-14',
     );
+  });
+
+  test('paging math + N-of-M honesty', () => {
+    expect(pageRangeLabel(0, 0, 0)).toBe('0–0 of 0');
+    expect(pageRangeLabel(0, 8, 100)).toBe('1–8 of 100');
+    expect(pageRangeLabel(8, 8, 100)).toBe('9–16 of 100');
+    expect(pageRangeLabel(96, 4, 100)).toBe('97–100 of 100');
+  });
+
+  test('filter chip cycles + list opts mapping', () => {
+    expect(cycleChip(CLASS_CYCLE, 'all')).toBe('op');
+    expect(cycleChip(CLASS_CYCLE, 'har')).toBe('all');
+    expect(cycleChip(AGENT_CYCLE, 'all')).toBe('prim');
+    expect(cycleChip(AGENT_CYCLE, 'sub')).toBe('all');
+    expect(cycleChip(WIN_CYCLE, 'all', 1)).toBe('7d');
+    expect(cycleChip(WIN_CYCLE, 'all', -1)).toBe('30d');
+    expect(cycleChip(SORT_CYCLE, 'recent')).toBe('turns');
+    expect(cycleChip(SORT_CYCLE, 'errors')).toBe('recent');
+
+    expect(classFilterToCwd('op')).toBe('operator');
+    expect(classFilterToCwd('all')).toBeUndefined();
+    expect(agentFilterToAgent('prim')).toBe('primary');
+    expect(agentFilterToAgent('all')).toBeUndefined();
+    const since7 = winFilterSince('7d', Date.parse('2026-06-10T00:00:00.000Z'));
+    expect(since7).toMatch(/^2026-06-03/);
+
+    const opts = buildListOpts({
+      classF: 'op',
+      agentF: 'sub',
+      winF: '30d',
+      sortF: 'errors',
+      titleFilter: 'hello',
+      limit: 5,
+      offset: 10,
+      now: Date.parse('2026-06-10T00:00:00.000Z'),
+    });
+    expect(opts.cwdClass).toBe('operator');
+    expect(opts.agent).toBe('subagent');
+    expect(opts.sort).toBe('errors');
+    expect(opts.title).toBe('hello');
+    expect(opts.limit).toBe(5);
+    expect(opts.offset).toBe(10);
+    expect(opts.since).toBeTruthy();
+
+    expect(formatFilterRow({ classF: 'op', agentF: 'all', winF: '7d', sortF: 'recent' })).toBe(
+      'class:op · agent:all · win:7d · sort:rec',
+    );
+    expect(classGlyph('operator')).toBe('O');
+    expect(classGlyph('')).toBe('·');
+    expect(agentGlyph(baseSession({ id: 'p', agent: 'primary' }))).toBe('P');
+    expect(
+      agentGlyph(baseSession({ id: 's', agent: 'subagent', parentSession: 'p' })),
+    ).toBe('S');
+    expect(isSubagentRow(baseSession({ id: 's', parentSession: 'p' }))).toBe(true);
+  });
+
+  test('formatSessionInfo includes facet middots when present', () => {
+    const now = new Date('2026-06-02T14:00:00.000Z').getTime();
+    const faceted = baseSession({
+      id: 'sess-alpha-long-id-suffix',
+      title: 'Named Session',
+      projectPath: '/proj/microscope-demo',
+      modelId: 'model-x',
+      startedAt: '2026-06-02T12:00:00.000Z',
+      turnCount: 100,
+      toolErrorCount: 3,
+      cwdClass: 'operator',
+      agentName: 'grok-build',
+      titleSource: 'generated',
+    });
+    const info = formatSessionInfo(faceted, now);
+    expect(info).toMatch(/operator/);
+    expect(info).toMatch(/grok-build/);
+    expect(info).toMatch(/model-x/);
+    expect(info).toMatch(/generated/);
+    expect(info).toMatch(/microscope-demo/);
+    expect(info).toMatch(/100 turns/);
   });
 
   test('formatTurnLine includes selection prefix + grain; basename tool paths', () => {
@@ -659,9 +886,8 @@ describe('MicroscopeStage render', () => {
     // Session-info: title first + facts (project / turns; errors may head-slice on tight timeline)
     expect(frame).toMatch(/Repeat Previous/);
     expect(frame).toMatch(/microscope-demo/);
-    expect(frame).toMatch(/\d+\s+turns/);
-    // errors count or a trailing ellipsis after head-slice on a tight timeline
-    expect(frame).toMatch(/\d+\s+errors|\d+\s+turns\u2026|\d+\u2026|\d+\.\.\./);
+    // facts may head-slice turns/errors under a wide facet line
+    expect(frame).toMatch(/\d+\s+turns|\d+\s+errors|operator|grok-build|mod\u2026|model/);
     // Picker remains visible in two-pane
     expect(frame).toMatch(/SESSIONS/);
     expect(frame).toMatch(/TIMELINE/);
@@ -712,7 +938,7 @@ describe('MicroscopeStage render', () => {
     expect(frame).toMatch(new RegExp(`#${errorEventId}`));
     // Session-info header shows opened session title + project
     expect(frame).toMatch(/microscope-demo/);
-    expect(frame).toMatch(/\d+\s+turns/);
+    expect(frame).toMatch(/\d+\s+turns|\d+\s+errors|operator|grok-build|mod\u2026|model/);
   });
 
   test('jump consume-once: same jumpKey does not re-open after land', async () => {
@@ -835,5 +1061,232 @@ describe('MicroscopeStage render', () => {
     const frame = captureCharFrame();
 
     expect(frame, `frame:\n${frame}`).toMatch(/no speculum index|speculum ingest/);
+  });
+
+  test('filter row + N-of-M label on ready corpus', async () => {
+    const { renderer, renderOnce, captureCharFrame } = await createTestRenderer({
+      width: 120,
+      height: 34,
+    });
+    destroy = () => renderer.destroy();
+    const root = createRoot(renderer);
+    root.render(
+      createElement(
+        ThemeProvider,
+        { initial: 'horizon' },
+        createElement(MicroscopeStage, { inputActive: true, path: goodDbPath }),
+      ),
+    );
+
+    await new Promise((r) => setTimeout(r, 250));
+    await renderOnce();
+    const frame = captureCharFrame();
+
+    expect(frame, `frame:\n${frame}`).toMatch(/class:all/);
+    expect(frame).toMatch(/agent:all/);
+    expect(frame).toMatch(/win:all/);
+    // recent abbreviates to rec so four chips fit picker min width
+    expect(frame).toMatch(/sort:rec/);
+    // N-of-M: total sessions = 2 primaries + 2 children + 12 page farm = 16
+    // (en-dash or hyphen depending on terminal cell rendering)
+    expect(frame).toMatch(/\d+[\-–—]\d+ of 16/);
+  });
+
+  test('filter chip keys cycle class/agent/window/sort', async () => {
+    const { renderer, renderOnce, captureCharFrame } = await createTestRenderer({
+      width: 120,
+      height: 34,
+    });
+    destroy = () => renderer.destroy();
+    const keys = createMockKeys(renderer);
+    const root = createRoot(renderer);
+    root.render(
+      createElement(
+        ThemeProvider,
+        { initial: 'horizon' },
+        createElement(MicroscopeStage, { inputActive: true, path: goodDbPath }),
+      ),
+    );
+
+    await new Promise((r) => setTimeout(r, 250));
+    await renderOnce();
+
+    keys.typeText('f');
+    await new Promise((r) => setTimeout(r, 120));
+    await renderOnce();
+    let frame = captureCharFrame();
+    expect(frame, `frame:\n${frame}`).toMatch(/class:op/);
+
+    keys.typeText('a');
+    await new Promise((r) => setTimeout(r, 120));
+    await renderOnce();
+    frame = captureCharFrame();
+    expect(frame).toMatch(/agent:prim/);
+
+    keys.typeText(']');
+    await new Promise((r) => setTimeout(r, 120));
+    await renderOnce();
+    frame = captureCharFrame();
+    expect(frame).toMatch(/win:7d/);
+
+    keys.typeText(',');
+    await new Promise((r) => setTimeout(r, 120));
+    await renderOnce();
+    frame = captureCharFrame();
+    expect(frame).toMatch(/sort:turns/);
+  });
+
+  test('title filter apply via t + enter; esc clears', async () => {
+    const { renderer, renderOnce, captureCharFrame } = await createTestRenderer({
+      width: 120,
+      height: 34,
+    });
+    destroy = () => renderer.destroy();
+    const keys = createMockKeys(renderer);
+    const root = createRoot(renderer);
+    root.render(
+      createElement(
+        ThemeProvider,
+        { initial: 'horizon' },
+        createElement(MicroscopeStage, { inputActive: true, path: goodDbPath }),
+      ),
+    );
+
+    await new Promise((r) => setTimeout(r, 250));
+    await renderOnce();
+
+    keys.typeText('t');
+    await new Promise((r) => setTimeout(r, 80));
+    keys.typeText('Repeat');
+    await new Promise((r) => setTimeout(r, 80));
+    await keys.pressKeys(['RETURN']);
+    await new Promise((r) => setTimeout(r, 150));
+    await renderOnce();
+    let frame = captureCharFrame();
+    expect(frame, `frame:\n${frame}`).toMatch(/Repeat Previous/);
+    expect(frame).toMatch(/of 1/);
+
+    await keys.pressKeys(['ESCAPE']);
+    await new Promise((r) => setTimeout(r, 150));
+    await renderOnce();
+    frame = captureCharFrame();
+    expect(frame).toMatch(/of 16/);
+  });
+
+  test('parentage: s on primary filters children; esc restores', async () => {
+    const { renderer, renderOnce, captureCharFrame } = await createTestRenderer({
+      width: 120,
+      height: 34,
+    });
+    destroy = () => renderer.destroy();
+    const keys = createMockKeys(renderer);
+    const root = createRoot(renderer);
+    root.render(
+      createElement(
+        ThemeProvider,
+        { initial: 'horizon' },
+        createElement(MicroscopeStage, { inputActive: true, path: goodDbPath }),
+      ),
+    );
+
+    await new Promise((r) => setTimeout(r, 250));
+    await renderOnce();
+    // sess-alpha is newest primary (started 06-02) — should be cursor 0
+    keys.typeText('s');
+    await new Promise((r) => setTimeout(r, 150));
+    await renderOnce();
+    let frame = captureCharFrame();
+    expect(frame, `frame:\n${frame}`).toMatch(/children of/i);
+    expect(frame).toMatch(/child explore map|Child Plan/);
+    expect(frame).toMatch(/of 2/);
+
+    await keys.pressKeys(['ESCAPE']);
+    await new Promise((r) => setTimeout(r, 150));
+    await renderOnce();
+    frame = captureCharFrame();
+    expect(frame).not.toMatch(/children of/i);
+    expect(frame).toMatch(/of 16/);
+  });
+
+  test('in-session search / + enter steps with n', async () => {
+    const { renderer, renderOnce, captureCharFrame } = await createTestRenderer({
+      width: 120,
+      height: 34,
+    });
+    destroy = () => renderer.destroy();
+    const keys = createMockKeys(renderer);
+    const root = createRoot(renderer);
+    root.render(
+      createElement(
+        ThemeProvider,
+        { initial: 'horizon' },
+        createElement(MicroscopeStage, { inputActive: true, path: goodDbPath }),
+      ),
+    );
+
+    await new Promise((r) => setTimeout(r, 250));
+    await renderOnce();
+    // Open alpha timeline
+    await keys.pressKeys(['RETURN']);
+    await new Promise((r) => setTimeout(r, 150));
+    await renderOnce();
+
+    keys.typeText('/');
+    await new Promise((r) => setTimeout(r, 80));
+    keys.typeText('unique-needle-alpha');
+    await new Promise((r) => setTimeout(r, 80));
+    await keys.pressKeys(['RETURN']);
+    await new Promise((r) => setTimeout(r, 200));
+    await renderOnce();
+    let frame = captureCharFrame();
+    expect(frame, `frame:\n${frame}`).toMatch(/unique-needle-alpha|#\d+/);
+
+    keys.typeText('n');
+    await new Promise((r) => setTimeout(r, 80));
+    await renderOnce();
+    frame = captureCharFrame();
+    // still on timeline with hit grain
+    expect(frame).toMatch(/TIMELINE|user|unique-needle/);
+  });
+
+  test('cursor past page edge fetches next page (N-of-M advances)', async () => {
+    const { renderer, renderOnce, captureCharFrame } = await createTestRenderer({
+      width: 120,
+      height: 28, // seed nest → fewer list slots → paging required
+    });
+    destroy = () => renderer.destroy();
+    const keys = createMockKeys(renderer);
+    const root = createRoot(renderer);
+    root.render(
+      createElement(
+        ThemeProvider,
+        { initial: 'horizon' },
+        createElement(MicroscopeStage, { inputActive: true, path: goodDbPath }),
+      ),
+    );
+
+    await new Promise((r) => setTimeout(r, 250));
+    await renderOnce();
+    let frame = captureCharFrame();
+    expect(frame, `frame:\n${frame}`).toMatch(/1[\-–—]\d+ of 16/);
+    const firstRange = frame.match(/(\d+)[\-–—](\d+) of 16/);
+    expect(firstRange).toBeTruthy();
+    const firstLast = Number(firstRange![2]);
+    expect(firstLast).toBeLessThan(16);
+
+    // Walk to the last row of the page (await each step so refs settle), then edge.
+    for (let i = 0; i < firstLast - 1; i++) {
+      await keys.pressKeys(['ARROW_DOWN']);
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    await renderOnce();
+    // One more down from the last visible row fetches the next page.
+    await keys.pressKeys(['ARROW_DOWN']);
+    await new Promise((r) => setTimeout(r, 200));
+    await renderOnce();
+    frame = captureCharFrame();
+    expect(frame, `frame:\n${frame}`).toMatch(
+      new RegExp(`${firstLast + 1}[\\-–—]\\d+ of 16`),
+    );
   });
 });

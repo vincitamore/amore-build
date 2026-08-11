@@ -2,9 +2,9 @@
  * Microscope stage — session picker + kind-colored turn timeline.
  * Reads the derived index through openQueryService (readonly); never writes.
  *
- * Two-pane craft: fixed-slot lists grow by measured height; picker leads with
- * session titles; bordered Cards carry titleColor chrome; empty-timeline prompt
- * lives in the session header only (no double copy).
+ * Two-pane craft: fixed-slot lists grow by measured height; picker pages the
+ * full corpus with filter chips and title search; bordered Cards carry
+ * titleColor chrome; empty-timeline prompt lives in the session header only.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useKeyboard } from '@opentui/react';
@@ -26,7 +26,10 @@ import {
   openQueryService,
   SUPPORTED_SCHEMA_VERSIONS,
   type QueryService,
+  type SearchHit,
+  type SessionListOpts,
   type SessionListRow,
+  type SessionSort,
   type TurnRow,
 } from './query-service';
 import { rewriteMachineTitle } from '../render/graph';
@@ -71,6 +74,11 @@ const EMPTY_CORPUS_COPY = "no ingested sessions — run 'speculum ingest'";
 const EMPTY_TIMELINE_PROMPT = 'enter a session to open its timeline';
 const NO_EVENTS_COPY = 'no events in session';
 
+/** Max rows to scan when resolving a single session (jump / parent). */
+const SESSION_RESOLVE_CAP = 5000;
+/** Cap when client-filtering children of a primary (no parent filter on list API). */
+const CHILDREN_FETCH_CAP = 5000;
+
 type SoftMode =
   | 'loading'
   | 'missing'
@@ -80,6 +88,28 @@ type SoftMode =
   | 'ready';
 
 type ViewMode = 'picker' | 'timeline';
+
+/** Class filter chip values (maps to cwd_class exact match). */
+export type ClassFilter = 'all' | 'op' | 'exp' | 'har';
+/** Agent filter chip values (maps to sessions.agent). */
+export type AgentFilter = 'all' | 'prim' | 'sub';
+/** Time-window chip values. */
+export type WinFilter = 'all' | '7d' | '30d';
+
+export const CLASS_CYCLE: ClassFilter[] = ['all', 'op', 'exp', 'har'];
+export const AGENT_CYCLE: AgentFilter[] = ['all', 'prim', 'sub'];
+export const WIN_CYCLE: WinFilter[] = ['all', '7d', '30d'];
+export const SORT_CYCLE: SessionSort[] = ['recent', 'turns', 'errors'];
+
+type FilterSnapshot = {
+  classF: ClassFilter;
+  agentF: AgentFilter;
+  winF: WinFilter;
+  sortF: SessionSort;
+  titleFilter: string;
+  pageOffset: number;
+  sessionCursor: number;
+};
 
 // ── Pure helpers (exported for unit tests) ───────────────────────────────────
 
@@ -188,10 +218,40 @@ export function sessionPickerLabel(title: string): string {
   return rewriteMachineTitle(title.replace(/\s+/g, ' ').trim());
 }
 
-/** Title when present (rewritten); otherwise the id prefix (honest empty-title fallback). */
+/** Whether a row is a subagent (parent_session set or agent flag). */
+export function isSubagentRow(s: SessionListRow): boolean {
+  if ((s.parentSession ?? '').trim()) return true;
+  return (s.agent ?? '').trim() === 'subagent';
+}
+
+/** Class glyph for picker rows (single cell). */
+export function classGlyph(cwdClass: string): string {
+  switch ((cwdClass ?? '').trim()) {
+    case 'operator':
+      return 'O';
+    case 'experiment':
+      return 'E';
+    case 'harness':
+      return 'H';
+    case 'unknown':
+      return '?';
+    default:
+      return (cwdClass ?? '').trim() ? '?' : '·';
+  }
+}
+
+/** Agent glyph: P primary, S subagent. */
+export function agentGlyph(s: SessionListRow): string {
+  return isSubagentRow(s) ? 'S' : 'P';
+}
+
+/** Title when present (rewritten); else description (subagents); else id prefix. */
 export function sessionDisplayTitle(s: SessionListRow): string {
   const title = (s.title ?? '').replace(/\s+/g, ' ').trim();
-  return title ? sessionPickerLabel(title) : shortSessionId(s.id);
+  if (title) return sessionPickerLabel(title);
+  const desc = (s.description ?? '').replace(/\s+/g, ' ').trim();
+  if (desc) return sessionPickerLabel(desc);
+  return shortSessionId(s.id);
 }
 
 /**
@@ -289,9 +349,8 @@ export function budgetTurnSlots(
 
 /**
  * Session-info facts line (middot register). Title is separate — see
- * formatSessionTitleLine — so this line never doubles the primary label when
- * a title is present; when title is empty the id already leads the title line
- * and is omitted here.
+ * formatSessionTitleLine. Facets (class · agent_name/subagent_type · model ·
+ * title_source) lead when present; operational project/age/turns/errors follow.
  */
 export function formatSessionInfo(s: SessionListRow, now = Date.now()): string {
   const title = (s.title ?? '').replace(/\s+/g, ' ').trim();
@@ -301,8 +360,19 @@ export function formatSessionInfo(s: SessionListRow, now = Date.now()): string {
   const age = relAge(s.startedAt, now);
   const parts: string[] = [];
   if (title) parts.push(id);
+  const cls = (s.cwdClass ?? '').trim();
+  if (cls) parts.push(cls);
+  if (isSubagentRow(s)) {
+    const st = (s.subagentType ?? '').trim();
+    parts.push(st || 'subagent');
+  } else {
+    const an = (s.agentName ?? '').trim();
+    if (an) parts.push(an);
+  }
   parts.push(proj);
   if (model) parts.push(model);
+  const tsrc = (s.titleSource ?? '').trim();
+  if (tsrc) parts.push(tsrc);
   parts.push(age);
   parts.push(`${s.turnCount} turns`);
   parts.push(`${s.toolErrorCount} errors`);
@@ -315,10 +385,9 @@ export function formatSessionTitleLine(s: SessionListRow): string {
 }
 
 /**
- * One-row session picker line. Title leads; meta is droppable under `width`.
- * Drop order when over budget: counts, then age, then title head-slice.
- * Id is never a secondary on titled rows (lives on the timeline open header).
- * When `width` is omitted, emit the full logical line.
+ * One-row session picker line. Title leads; glyphs + meta drop under `width`.
+ * Drop order when over budget: counts → age → glyphs (title head-slice last).
+ * Subagent rows use description when title is empty.
  */
 export function formatSessionLine(
   s: SessionListRow,
@@ -327,28 +396,31 @@ export function formatSessionLine(
   width?: number,
 ): string {
   const prefix = selected ? '>' : ' ';
-  const rawTitle = (s.title ?? '').replace(/\s+/g, ' ').trim();
-  const label = rawTitle ? sessionPickerLabel(rawTitle) : shortSessionId(s.id);
+  const label = sessionDisplayTitle(s);
+  const glyphs = `${classGlyph(s.cwdClass ?? '')}${agentGlyph(s)}`;
   const age = relAge(s.startedAt, now);
   const counts = `t:${s.turnCount} e:${s.eventCount}`;
-  // Meta only — never re-append id when title was empty (label is already id).
-  const segs = [`  ${age}`, `  ${counts}`];
 
-  if (width == null || width <= 0) {
-    return `${prefix}${label}${segs.join('')}`;
-  }
+  // Full logical line when unconstrained.
+  const full = `${prefix}${label} ${glyphs}  ${age}  ${counts}`;
+  if (width == null || width <= 0) return full;
 
   const budget = Math.floor(width);
-  let head = `${prefix}${label}`;
+  const head = `${prefix}${label}`;
   if (head.length > budget) {
     return padRow(head, budget);
   }
-  let out = head;
-  for (const seg of segs) {
-    if (out.length + seg.length <= budget) out += seg;
-    else break;
+  // Prefer fullest form that fits; drop counts, then age, then glyphs.
+  const candidates = [
+    `${head} ${glyphs}  ${age}  ${counts}`,
+    `${head} ${glyphs}  ${age}`,
+    `${head} ${glyphs}`,
+    head,
+  ];
+  for (const c of candidates) {
+    if (c.length <= budget) return c;
   }
-  return out;
+  return padRow(head, budget);
 }
 
 /**
@@ -402,14 +474,107 @@ export function paneInnerWidth(outerW: number): number {
   return Math.max(0, Math.floor(outerW) - CARD_CHROME);
 }
 
+/** Map UI class chip → sessionList cwdClass. */
+export function classFilterToCwd(classF: ClassFilter): string | undefined {
+  switch (classF) {
+    case 'op':
+      return 'operator';
+    case 'exp':
+      return 'experiment';
+    case 'har':
+      return 'harness';
+    default:
+      return undefined;
+  }
+}
+
+/** Map UI agent chip → sessionList agent. */
+export function agentFilterToAgent(agentF: AgentFilter): string | undefined {
+  switch (agentF) {
+    case 'prim':
+      return 'primary';
+    case 'sub':
+      return 'subagent';
+    default:
+      return undefined;
+  }
+}
+
+/** ISO lower bound for win chip (undefined = all). */
+export function winFilterSince(winF: WinFilter, now = Date.now()): string | undefined {
+  if (winF === '7d') return new Date(now - 7 * 86_400_000).toISOString();
+  if (winF === '30d') return new Date(now - 30 * 86_400_000).toISOString();
+  return undefined;
+}
+
+/** Build SessionListOpts from filter chips (limit/offset optional). */
+export function buildListOpts(args: {
+  classF: ClassFilter;
+  agentF: AgentFilter;
+  winF: WinFilter;
+  sortF: SessionSort;
+  titleFilter?: string;
+  limit?: number;
+  offset?: number;
+  now?: number;
+}): SessionListOpts {
+  const opts: SessionListOpts = {
+    sort: args.sortF,
+  };
+  const cwd = classFilterToCwd(args.classF);
+  if (cwd) opts.cwdClass = cwd;
+  const agent = agentFilterToAgent(args.agentF);
+  if (agent) opts.agent = agent;
+  const since = winFilterSince(args.winF, args.now);
+  if (since) opts.since = since;
+  const title = (args.titleFilter ?? '').trim();
+  if (title) opts.title = title;
+  if (args.limit != null) opts.limit = args.limit;
+  if (args.offset != null) opts.offset = args.offset;
+  return opts;
+}
+
+/** Cycle a chip value forward (or reverse when dir < 0). */
+export function cycleChip<T>(cycle: readonly T[], current: T, dir = 1): T {
+  const i = cycle.indexOf(current);
+  const base = i < 0 ? 0 : i;
+  const next = (base + (dir >= 0 ? 1 : -1) + cycle.length * 4) % cycle.length;
+  return cycle[next]!;
+}
+
+/** N-of-M range label for the picker card right. */
+export function pageRangeLabel(offset: number, pageLen: number, total: number): string {
+  if (total <= 0) return '0–0 of 0';
+  const first = pageLen <= 0 ? 0 : offset + 1;
+  const last = offset + pageLen;
+  return `${first}–${last} of ${total}`;
+}
+
+/** Compact sort label so the four-chip row fits picker min width (~44). */
+export function sortChipLabel(sortF: SessionSort): string {
+  return sortF === 'recent' ? 'rec' : sortF;
+}
+
+/** Filter chip row text (middot register). */
+export function formatFilterRow(args: {
+  classF: ClassFilter;
+  agentF: AgentFilter;
+  winF: WinFilter;
+  sortF: SessionSort;
+}): string {
+  return `class:${args.classF} · agent:${args.agentF} · win:${args.winF} · sort:${sortChipLabel(args.sortF)}`;
+}
+
 function FixedClearRow({
   text,
   width,
   color,
+  onMouseDown,
 }: {
   text: string;
   width: number;
   color: RGBA;
+  onMouseDown?: () => void;
 }) {
   const t = usePalette();
   const cell = text.length === width ? text : padRow(text, width);
@@ -420,6 +585,7 @@ function FixedClearRow({
       flexShrink={0}
       overflow="hidden"
       backgroundColor={t.background}
+      onMouseDown={onMouseDown}
     >
       <text fg={color} wrapMode="none">
         {cell}
@@ -431,6 +597,17 @@ function FixedClearRow({
 function isMissingIndexError(err: unknown): boolean {
   const msg = err instanceof Error ? err.message : String(err ?? '');
   return /not found|ENOENT/i.test(msg);
+}
+
+function resolveSessionRow(
+  svc: QueryService,
+  sessionId: string,
+  page: SessionListRow[],
+): SessionListRow | null {
+  const hit = page.find((s) => s.id === sessionId);
+  if (hit) return hit;
+  const scan = svc.sessionList({ limit: SESSION_RESOLVE_CAP, offset: 0 });
+  return scan.find((s) => s.id === sessionId) ?? null;
 }
 
 // ── Component ────────────────────────────────────────────────────────────────
@@ -457,7 +634,6 @@ export function MicroscopeStage({
   /** Residual host box from SessionsMember; optional for isolated stage smokes. */
   stageBox?: MeasuredSize;
 }) {
-  void onCapture;
   const t = usePalette();
   const dims = useStableDimensions();
   const stageBox = stageBoxProp ?? seedStageBox(dims.width, dims.height);
@@ -465,20 +641,43 @@ export function MicroscopeStage({
   const aliveRef = useRef(true);
   const onFlashRef = useRef(onFlash);
   onFlashRef.current = onFlash;
+  const onCaptureRef = useRef(onCapture);
+  onCaptureRef.current = onCapture;
   const lastJumpKey = useRef<number | undefined>(undefined);
+  const titleInputRef = useRef<{ value?: string; focus?: () => void } | null>(null);
+  const searchInputRef = useRef<{ value?: string; focus?: () => void } | null>(null);
+  /** After loading a prev page via edge-up, park cursor at end. */
+  const pendingCursorEnd = useRef(false);
 
   const [mode, setMode] = useState<SoftMode>('loading');
   const [schemaVersion, setSchemaVersion] = useState(0);
   const [sessions, setSessions] = useState<SessionListRow[]>([]);
   const [sessionCursor, setSessionCursor] = useState(0);
-  const [sessionScroll, setSessionScroll] = useState(0);
+  const [totalCount, setTotalCount] = useState(0);
+  const [pageOffset, setPageOffset] = useState(0);
   const [view, setView] = useState<ViewMode>('picker');
   // Turn detail pane over the timeline card (enter opens; the pane owns keys while open).
   const [detailOpen, setDetailOpen] = useState(false);
   const [openSessionId, setOpenSessionId] = useState<string | null>(null);
+  const [openSessionRow, setOpenSessionRow] = useState<SessionListRow | null>(null);
   const [turns, setTurns] = useState<TurnRow[]>([]);
   const [turnCursor, setTurnCursor] = useState(0);
   const [turnScroll, setTurnScroll] = useState(0);
+
+  // Corpus navigator filters
+  const [classF, setClassF] = useState<ClassFilter>('all');
+  const [agentF, setAgentF] = useState<AgentFilter>('all');
+  const [winF, setWinF] = useState<WinFilter>('all');
+  const [sortF, setSortF] = useState<SessionSort>('recent');
+  const [titleFilter, setTitleFilter] = useState('');
+  const [titleTyping, setTitleTyping] = useState(false);
+  const [childrenOf, setChildrenOf] = useState<{ id: string; label: string } | null>(null);
+  const [savedFilters, setSavedFilters] = useState<FilterSnapshot | null>(null);
+
+  // In-session search (timeline focus)
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchHits, setSearchHits] = useState<SearchHit[]>([]);
+  const [searchHitIdx, setSearchHitIdx] = useState(0);
 
   const { twoPane, contentW, pickerW, timelineW } = paneGeometry(stageBox.width);
   const listHostH = Math.max(1, stageBox.height - MICRO_STAGE_CHROME);
@@ -489,6 +688,41 @@ export function MicroscopeStage({
   // Live slot counts for openTimeline / jump scroll (avoid stale closures).
   const turnSlotsRef = useRef(turnSlots);
   turnSlotsRef.current = turnSlots;
+
+  // Filter/title/children row needs ≥2 content rows so list still gets ≥1.
+  const softOnlyPreview =
+    mode === 'missing' || mode === 'schema' || mode === 'loading';
+  const showChromeRow = !softOnlyPreview && sessionSlots >= 2;
+  const listSlots = Math.max(1, sessionSlots - (showChromeRow ? 1 : 0));
+  const listSlotsRef = useRef(listSlots);
+  listSlotsRef.current = listSlots;
+  const pageOffsetRef = useRef(pageOffset);
+  pageOffsetRef.current = pageOffset;
+  const totalCountRef = useRef(totalCount);
+  totalCountRef.current = totalCount;
+  const sessionCursorRef = useRef(sessionCursor);
+  sessionCursorRef.current = sessionCursor;
+  const sessionsLenRef = useRef(sessions.length);
+  sessionsLenRef.current = sessions.length;
+  const sessionsRef = useRef(sessions);
+  sessionsRef.current = sessions;
+  const turnsLenRef = useRef(turns.length);
+  turnsLenRef.current = turns.length;
+  const turnCursorRef = useRef(turnCursor);
+  turnCursorRef.current = turnCursor;
+  const searchHitsRef = useRef(searchHits);
+  searchHitsRef.current = searchHits;
+  const searchHitIdxRef = useRef(searchHitIdx);
+  searchHitIdxRef.current = searchHitIdx;
+
+  // Capture bridge while either typing context is active.
+  useEffect(() => {
+    const capturing = titleTyping || searchOpen;
+    onCaptureRef.current?.(capturing);
+    return () => {
+      onCaptureRef.current?.(false);
+    };
+  }, [titleTyping, searchOpen]);
 
   useEffect(() => {
     aliveRef.current = true;
@@ -514,17 +748,29 @@ export function MicroscopeStage({
         setMode('missing');
         setSessions([]);
         setTurns([]);
+        setTotalCount(0);
         return null;
       }
       setMode('missing');
       setSessions([]);
       setTurns([]);
+      setTotalCount(0);
       return null;
     }
   }, [path]);
 
-  const load = useCallback(
-    (opts?: { keepOpen?: boolean }) => {
+  const loadPage = useCallback(
+    (opts?: {
+      keepOpen?: boolean;
+      classF?: ClassFilter;
+      agentF?: AgentFilter;
+      winF?: WinFilter;
+      sortF?: SessionSort;
+      titleFilter?: string;
+      pageOffset?: number;
+      childrenOf?: { id: string; label: string } | null;
+      flashCount?: boolean;
+    }) => {
       const svc = ensureService();
       if (!svc) return;
       if (!aliveRef.current) return;
@@ -533,71 +779,135 @@ export function MicroscopeStage({
         setSchemaVersion(svc.getVersion());
         setMode('schema');
         setSessions([]);
+        setTotalCount(0);
         if (!opts?.keepOpen) {
           setTurns([]);
           setOpenSessionId(null);
+          setOpenSessionRow(null);
           setView('picker');
         }
         return;
       }
 
-      const list = svc.sessionList();
-      if (!aliveRef.current) return;
+      const cf = opts?.classF ?? classF;
+      const af = opts?.agentF ?? agentF;
+      const wf = opts?.winF ?? winF;
+      const sf = opts?.sortF ?? sortF;
+      const tf = opts?.titleFilter !== undefined ? opts.titleFilter : titleFilter;
+      const off = opts?.pageOffset !== undefined ? opts.pageOffset : pageOffsetRef.current;
+      const kids = opts?.childrenOf !== undefined ? opts.childrenOf : childrenOf;
+      const pageSize = Math.max(1, listSlotsRef.current);
 
-      if (svc.busy()) {
-        setMode('busy');
-        // Keep prior rows if any; still surface the busy banner via mode.
-        if (list.length === 0 && sessions.length === 0) {
-          setSessions([]);
-        } else if (list.length > 0) {
-          setSessions(list);
+      let list: SessionListRow[] = [];
+      let total = 0;
+
+      if (kids) {
+        // No parent_session filter on the list API — fetch subagents and client-filter.
+        const base = buildListOpts({
+          classF: cf,
+          agentF: 'sub',
+          winF: wf,
+          sortF: sf,
+          titleFilter: tf,
+          limit: CHILDREN_FETCH_CAP,
+          offset: 0,
+        });
+        const raw = svc.sessionList(base);
+        if (!aliveRef.current) return;
+        if (svc.busy()) {
+          setMode('busy');
+          return;
         }
-        return;
+        const filtered = raw.filter((s) => (s.parentSession ?? '') === kids.id);
+        total = filtered.length;
+        list = filtered.slice(off, off + pageSize);
+      } else {
+        const base = buildListOpts({
+          classF: cf,
+          agentF: af,
+          winF: wf,
+          sortF: sf,
+          titleFilter: tf,
+          limit: pageSize,
+          offset: off,
+        });
+        total = svc.sessionCount(base);
+        if (!aliveRef.current) return;
+        if (svc.busy()) {
+          setMode('busy');
+          return;
+        }
+        list = svc.sessionList(base);
+        if (!aliveRef.current) return;
+        if (svc.busy()) {
+          setMode('busy');
+          return;
+        }
       }
 
       setSessions(list);
+      setTotalCount(total);
       setSchemaVersion(svc.getVersion());
-      if (list.length === 0) {
+      setPageOffset(off);
+
+      if (pendingCursorEnd.current) {
+        pendingCursorEnd.current = false;
+        setSessionCursor(Math.max(0, list.length - 1));
+      } else {
+        setSessionCursor((c) => Math.min(c, Math.max(0, list.length - 1)));
+      }
+
+      if (opts?.flashCount) {
+        onFlashRef.current?.(`${list.length} of ${total}`);
+      }
+
+      if (list.length === 0 && total === 0) {
         setMode('empty');
-        setTurns([]);
         if (!opts?.keepOpen) {
-          setOpenSessionId(null);
-          setView('picker');
+          setTurns([]);
+          // keep open session if keepOpen
         }
         return;
       }
 
-      setMode('ready');
-      setSessionCursor((c) => Math.min(c, Math.max(0, list.length - 1)));
+      setMode(svc.busy() ? 'busy' : 'ready');
 
-      // Refresh open timeline if still present.
-      const openId = opts?.keepOpen ? openSessionId : openSessionId;
-      if (openId) {
-        const still = list.some((s) => s.id === openId);
-        if (still) {
-          const nextTurns = svc.turns(openId);
-          if (!aliveRef.current) return;
-          if (svc.busy()) {
-            setMode('busy');
-            return;
-          }
-          setTurns(nextTurns);
-          setTurnCursor((c) => Math.min(c, Math.max(0, nextTurns.length - 1)));
-        } else if (!opts?.keepOpen) {
-          setOpenSessionId(null);
-          setTurns([]);
-          setView('picker');
+      const openId = openSessionId;
+      if (openId && opts?.keepOpen) {
+        const nextTurns = svc.turns(openId);
+        if (!aliveRef.current) return;
+        if (svc.busy()) {
+          setMode('busy');
+          return;
         }
+        setTurns(nextTurns);
+        setTurnCursor((c) => Math.min(c, Math.max(0, nextTurns.length - 1)));
       }
     },
-    [ensureService, openSessionId, sessions.length],
+    [
+      ensureService,
+      classF,
+      agentF,
+      winF,
+      sortF,
+      titleFilter,
+      childrenOf,
+      openSessionId,
+    ],
   );
 
   // Initial open + load
   useEffect(() => {
-    load();
+    loadPage({ pageOffset: 0 });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- mount once; path changes remount tests
   }, [path]);
+
+  // Reload when page size changes (resize) — keep offset, clamp later.
+  useEffect(() => {
+    if (mode === 'loading' || mode === 'missing' || mode === 'schema') return;
+    loadPage({ keepOpen: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- listSlots drives page size
+  }, [listSlots]);
 
   const refresh = useCallback(() => {
     try {
@@ -611,19 +921,40 @@ export function MicroscopeStage({
         setMode('missing');
         setSessions([]);
         setTurns([]);
+        setTotalCount(0);
         return;
       }
     }
-    load({ keepOpen: true });
+    loadPage({ keepOpen: true });
     onFlashRef.current?.('microscope refreshed');
-  }, [ensureService, load]);
+  }, [ensureService, loadPage]);
 
   useRefreshOnActive(inputActive, () => {
     refresh();
   });
 
+  const resetPagingAndLoad = useCallback(
+    (patch: {
+      classF?: ClassFilter;
+      agentF?: AgentFilter;
+      winF?: WinFilter;
+      sortF?: SessionSort;
+      titleFilter?: string;
+      childrenOf?: { id: string; label: string } | null;
+    }) => {
+      setPageOffset(0);
+      setSessionCursor(0);
+      loadPage({
+        ...patch,
+        pageOffset: 0,
+        flashCount: true,
+      });
+    },
+    [loadPage],
+  );
+
   const openTimeline = useCallback(
-    (sessionId: string, eventId?: string | number) => {
+    (sessionId: string, eventId?: string | number, rowHint?: SessionListRow | null) => {
       const svc = ensureService();
       if (!svc || !svc.schemaOK()) return;
       const nextTurns = svc.turns(sessionId);
@@ -631,12 +962,20 @@ export function MicroscopeStage({
         setMode('busy');
         return;
       }
+      const row =
+        rowHint ??
+        resolveSessionRow(svc, sessionId, sessions) ??
+        openSessionRow;
       setOpenSessionId(sessionId);
+      setOpenSessionRow(row && row.id === sessionId ? row : rowHint ?? null);
       setTurns(nextTurns);
       setView('timeline');
       setDetailOpen(false);
+      setSearchOpen(false);
+      setSearchHits([]);
+      setSearchHitIdx(0);
 
-      // Select the session in the picker + focus detail (master-detail).
+      // Select the session on the current page when present.
       setSessions((prev) => {
         const idx = prev.findIndex((s) => s.id === sessionId);
         if (idx >= 0) setSessionCursor(idx);
@@ -663,7 +1002,7 @@ export function MicroscopeStage({
           : `opened ${sessionId.slice(0, 12)}`,
       );
     },
-    [ensureService],
+    [ensureService, sessions, openSessionRow],
   );
 
   // Consume-once jump (D7: does not sticky-fight cursor after landing).
@@ -672,7 +1011,6 @@ export function MicroscopeStage({
     if (jumpKey === lastJumpKey.current) return;
     lastJumpKey.current = jumpKey;
     if (!jump?.sessionId) return;
-    // Ensure data is loaded before jumping.
     const svc = ensureService();
     if (!svc) return;
     if (!svc.schemaOK()) {
@@ -680,17 +1018,12 @@ export function MicroscopeStage({
       setMode('schema');
       return;
     }
-    const list = svc.sessionList();
-    if (svc.busy()) {
-      setMode('busy');
-      return;
-    }
-    setSessions(list);
-    setMode(list.length === 0 ? 'empty' : 'ready');
-    openTimeline(jump.sessionId, jump.eventId);
-  }, [jumpKey, jump?.sessionId, jump?.eventId, ensureService, openTimeline]);
+    // Ensure a page is loaded for picker chrome, then open the target.
+    loadPage({ keepOpen: true });
+    const row = resolveSessionRow(svc, jump.sessionId, sessions);
+    openTimeline(jump.sessionId, jump.eventId, row);
+  }, [jumpKey, jump?.sessionId, jump?.eventId, ensureService, openTimeline, loadPage, sessions]);
 
-  // Keep session cursor in range + scroll window (slot count from height).
   useEffect(() => {
     if (sessionCursor >= sessions.length) {
       setSessionCursor(Math.max(0, sessions.length - 1));
@@ -698,20 +1031,10 @@ export function MicroscopeStage({
   }, [sessions.length, sessionCursor]);
 
   useEffect(() => {
-    // slot count 0 is a legal fit-clamp at tiny hosts — do not scroll-loop.
-    if (sessionSlots <= 0) return;
-    if (sessionCursor < sessionScroll) setSessionScroll(sessionCursor);
-    else if (sessionCursor >= sessionScroll + sessionSlots) {
-      setSessionScroll(sessionCursor - sessionSlots + 1);
-    }
-  }, [sessionCursor, sessionScroll, sessionSlots]);
-
-  useEffect(() => {
     if (turnCursor >= turns.length) setTurnCursor(Math.max(0, turns.length - 1));
   }, [turns.length, turnCursor]);
 
   useEffect(() => {
-    // slot count 0 is a legal fit-clamp at tiny hosts — do not scroll-loop.
     if (turnSlots <= 0) return;
     if (turnCursor < turnScroll) setTurnScroll(turnCursor);
     else if (turnCursor >= turnScroll + turnSlots) {
@@ -719,11 +1042,158 @@ export function MicroscopeStage({
     }
   }, [turnCursor, turnScroll, turnSlots]);
 
-  useKeyboard((key: { name?: string }) => {
+  const exitTitleTyping = useCallback(
+    (apply: boolean) => {
+      const raw = (titleInputRef.current?.value ?? '').trim();
+      setTitleTyping(false);
+      if (apply) {
+        setTitleFilter(raw);
+        resetPagingAndLoad({ titleFilter: raw });
+      } else {
+        setTitleFilter('');
+        if (titleInputRef.current) titleInputRef.current.value = '';
+        resetPagingAndLoad({ titleFilter: '' });
+      }
+    },
+    [resetPagingAndLoad],
+  );
+
+  const exitSearch = useCallback(() => {
+    setSearchOpen(false);
+    setSearchHits([]);
+    setSearchHitIdx(0);
+    if (searchInputRef.current) searchInputRef.current.value = '';
+  }, []);
+
+  const runSessionSearch = useCallback(
+    (query: string) => {
+      const q = query.trim();
+      if (!q || !openSessionId) {
+        setSearchHits([]);
+        setSearchHitIdx(0);
+        return;
+      }
+      const svc = ensureService();
+      if (!svc || !svc.schemaOK()) return;
+      const hits = svc.search(q, { sessionId: openSessionId, limit: 100 });
+      setSearchHits(hits);
+      setSearchHitIdx(0);
+      if (hits.length > 0) {
+        const want = hits[0]!.eventId;
+        const found = turns.findIndex((r) => r.eventId === want);
+        if (found >= 0) setTurnCursor(found);
+        onFlashRef.current?.(`search ${1}/${hits.length}`);
+      } else {
+        onFlashRef.current?.('no search hits');
+      }
+    },
+    [ensureService, openSessionId, turns],
+  );
+
+  const stepSearchHit = useCallback((dir: 1 | -1) => {
+    const hits = searchHitsRef.current;
+    if (hits.length === 0) return;
+    const next = (searchHitIdxRef.current + dir + hits.length * 4) % hits.length;
+    searchHitIdxRef.current = next;
+    setSearchHitIdx(next);
+    const want = hits[next]!.eventId;
+    const found = turns.findIndex((r) => r.eventId === want);
+    // turns may be stale in closure — scan live state via service is overkill;
+    // open timeline keeps turns in state; findIndex on last rendered turns is fine.
+    if (found >= 0) {
+      turnCursorRef.current = found;
+      setTurnCursor(found);
+    }
+    onFlashRef.current?.(`search ${next + 1}/${hits.length}`);
+  }, [turns]);
+
+  const enterChildrenOf = useCallback(
+    (row: SessionListRow) => {
+      setSavedFilters({
+        classF,
+        agentF,
+        winF,
+        sortF,
+        titleFilter,
+        pageOffset: pageOffsetRef.current,
+        sessionCursor,
+      });
+      const label = sessionDisplayTitle(row);
+      const short =
+        label.length > 18 ? `${label.slice(0, 17)}\u2026` : label;
+      const kids = { id: row.id, label: short };
+      setChildrenOf(kids);
+      setPageOffset(0);
+      setSessionCursor(0);
+      loadPage({ childrenOf: kids, pageOffset: 0, flashCount: true });
+      onFlashRef.current?.(`children of ${short}`);
+    },
+    [classF, agentF, winF, sortF, titleFilter, sessionCursor, loadPage],
+  );
+
+  const restoreFromChildren = useCallback(() => {
+    const snap = savedFilters;
+    setChildrenOf(null);
+    setSavedFilters(null);
+    if (snap) {
+      setClassF(snap.classF);
+      setAgentF(snap.agentF);
+      setWinF(snap.winF);
+      setSortF(snap.sortF);
+      setTitleFilter(snap.titleFilter);
+      setPageOffset(snap.pageOffset);
+      setSessionCursor(snap.sessionCursor);
+      loadPage({
+        childrenOf: null,
+        classF: snap.classF,
+        agentF: snap.agentF,
+        winF: snap.winF,
+        sortF: snap.sortF,
+        titleFilter: snap.titleFilter,
+        pageOffset: snap.pageOffset,
+        flashCount: true,
+      });
+    } else {
+      loadPage({ childrenOf: null, pageOffset: 0, flashCount: true });
+    }
+  }, [savedFilters, loadPage]);
+
+  useKeyboard((key: { name?: string; sequence?: string }) => {
     if (!inputActive) return;
     // While the turn detail pane is open it owns the keys (esc/step/scroll/copy).
     if (detailOpen) return;
-    const n = (key.name ?? '').toLowerCase().replace('arrow', '');
+
+    const rawName = (key.name ?? '').toLowerCase();
+    const n = rawName.replace('arrow', '');
+
+    // ── Title type-to-filter (uncontrolled input owns printables) ──────────
+    if (titleTyping) {
+      if (n === 'escape') {
+        exitTitleTyping(false);
+        return;
+      }
+      if (n === 'return' || n === 'enter') {
+        exitTitleTyping(true);
+        return;
+      }
+      // Printables fall through to the focused input.
+      return;
+    }
+
+    // ── In-session search input ────────────────────────────────────────────
+    if (searchOpen && view === 'timeline') {
+      if (n === 'escape') {
+        exitSearch();
+        return;
+      }
+      if (n === 'return' || n === 'enter') {
+        const q = searchInputRef.current?.value ?? '';
+        runSessionSearch(q);
+        setSearchOpen(false);
+        return;
+      }
+      return;
+    }
 
     if (n === 'r') {
       refresh();
@@ -732,11 +1202,30 @@ export function MicroscopeStage({
 
     // Soft states that refuse navigation (still allow r).
     if (mode === 'missing' || mode === 'schema' || mode === 'loading') return;
-    // busy/empty still allow picker nav if rows exist; empty has none.
 
     if (view === 'timeline') {
       if (n === 'escape' || n === 'backspace') {
+        if (searchHits.length > 0) {
+          exitSearch();
+          return;
+        }
         setView('picker');
+        return;
+      }
+      if (n === '/' || key.sequence === '/') {
+        setSearchOpen(true);
+        setTimeout(() => searchInputRef.current?.focus?.(), 0);
+        return;
+      }
+      if (
+        (n === 'n' || key.sequence === 'n' || key.sequence === 'N') &&
+        searchHitsRef.current.length > 0
+      ) {
+        const shift =
+          !!(key as { shift?: boolean }).shift ||
+          key.sequence === 'N' ||
+          (key.name ?? '') === 'N';
+        stepSearchHit(shift ? -1 : 1);
         return;
       }
       if (n === 'up' || n === 'k') {
@@ -744,38 +1233,159 @@ export function MicroscopeStage({
         return;
       }
       if (n === 'down' || n === 'j') {
-        setTurnCursor((c) => Math.min(Math.max(0, turns.length - 1), c + 1));
+        setTurnCursor((c) => Math.min(Math.max(0, turnsLenRef.current - 1), c + 1));
         return;
       }
-      if ((n === 'return' || n === 'enter') && turns.length > 0) {
+      if ((n === 'return' || n === 'enter') && turnsLenRef.current > 0) {
         setDetailOpen(true);
         return;
       }
       return;
     }
 
-    // Picker view
+    // ── Picker view ────────────────────────────────────────────────────────
+    if (n === 'escape') {
+      if (childrenOf) {
+        restoreFromChildren();
+        return;
+      }
+      if (titleFilter) {
+        setTitleFilter('');
+        resetPagingAndLoad({ titleFilter: '' });
+        return;
+      }
+      return;
+    }
+
+    if (n === 't') {
+      setTitleTyping(true);
+      setTimeout(() => {
+        if (titleInputRef.current) {
+          titleInputRef.current.value = titleFilter;
+          titleInputRef.current.focus?.();
+        }
+      }, 0);
+      return;
+    }
+
+    if (n === 'f') {
+      const next = cycleChip(CLASS_CYCLE, classF, 1);
+      setClassF(next);
+      resetPagingAndLoad({ classF: next });
+      return;
+    }
+    if (n === 'a') {
+      const next = cycleChip(AGENT_CYCLE, agentF, 1);
+      setAgentF(next);
+      resetPagingAndLoad({ agentF: next });
+      return;
+    }
+    if (n === '[' || n === 'left') {
+      // Window cycle reverse
+      const next = cycleChip(WIN_CYCLE, winF, -1);
+      setWinF(next);
+      resetPagingAndLoad({ winF: next });
+      return;
+    }
+    if (n === ']' || n === 'right') {
+      const next = cycleChip(WIN_CYCLE, winF, 1);
+      setWinF(next);
+      resetPagingAndLoad({ winF: next });
+      return;
+    }
+    if (n === ',' || key.sequence === ',') {
+      const next = cycleChip(SORT_CYCLE, sortF, 1);
+      setSortF(next);
+      resetPagingAndLoad({ sortF: next });
+      return;
+    }
+
+    if (n === 's') {
+      const sel = sessionsRef.current[sessionCursorRef.current];
+      if (!sel) return;
+      if (isSubagentRow(sel) && sel.parentSession) {
+        openTimeline(sel.parentSession);
+        return;
+      }
+      // Primary → filter to children
+      enterChildrenOf(sel);
+      return;
+    }
+
+    const pageSize = Math.max(1, listSlotsRef.current);
+    const total = totalCountRef.current;
+    const off = pageOffsetRef.current;
+    const cur = sessionCursorRef.current;
+    const pageLen = sessionsLenRef.current;
+
+    if (n === 'pageup' || n === 'page_up' || n === 'page up') {
+      const newOff = Math.max(0, off - pageSize);
+      setPageOffset(newOff);
+      setSessionCursor(0);
+      sessionCursorRef.current = 0;
+      loadPage({ pageOffset: newOff });
+      return;
+    }
+    if (n === 'pagedown' || n === 'page_down' || n === 'page down') {
+      const maxOff = Math.max(0, total - pageSize);
+      const newOff = Math.min(maxOff, off + pageSize);
+      setPageOffset(newOff);
+      setSessionCursor(0);
+      sessionCursorRef.current = 0;
+      loadPage({ pageOffset: newOff });
+      return;
+    }
+    if (n === 'home') {
+      setPageOffset(0);
+      setSessionCursor(0);
+      sessionCursorRef.current = 0;
+      loadPage({ pageOffset: 0 });
+      return;
+    }
+    if (n === 'end') {
+      const maxOff = Math.max(0, total - pageSize);
+      pendingCursorEnd.current = true;
+      setPageOffset(maxOff);
+      loadPage({ pageOffset: maxOff });
+      return;
+    }
+
     if (n === 'up' || n === 'k') {
-      setSessionCursor((c) => Math.max(0, c - 1));
+      if (cur > 0) {
+        const next = cur - 1;
+        sessionCursorRef.current = next;
+        setSessionCursor(next);
+      } else if (off > 0) {
+        const newOff = Math.max(0, off - pageSize);
+        pendingCursorEnd.current = true;
+        setPageOffset(newOff);
+        pageOffsetRef.current = newOff;
+        loadPage({ pageOffset: newOff });
+      }
       return;
     }
     if (n === 'down' || n === 'j') {
-      setSessionCursor((c) => Math.min(Math.max(0, sessions.length - 1), c + 1));
+      if (cur < pageLen - 1) {
+        const next = cur + 1;
+        sessionCursorRef.current = next;
+        setSessionCursor(next);
+      } else if (off + pageLen < total) {
+        const newOff = off + pageSize;
+        setPageOffset(newOff);
+        pageOffsetRef.current = newOff;
+        setSessionCursor(0);
+        sessionCursorRef.current = 0;
+        loadPage({ pageOffset: newOff });
+      }
       return;
     }
     if (n === 'return' || n === 'enter' || n === 'o') {
-      const sel = sessions[sessionCursor];
-      if (sel) openTimeline(sel.id);
+      const sel = sessionsRef.current[sessionCursorRef.current];
+      if (sel) openTimeline(sel.id, undefined, sel);
     }
   });
 
-  const sessionSlice = sessions.slice(sessionScroll, sessionScroll + sessionSlots);
-  const turnSlice = turns.slice(turnScroll, turnScroll + turnSlots);
-
-  const openSession = useMemo(
-    () => (openSessionId ? sessions.find((s) => s.id === openSessionId) ?? null : null),
-    [openSessionId, sessions],
-  );
+  const openSession = openSessionRow;
 
   const banners = useMemo(() => {
     const lines: { text: string; color: RGBA }[] = [];
@@ -799,6 +1409,133 @@ export function MicroscopeStage({
 
   const softOnly = mode === 'missing' || mode === 'schema' || mode === 'loading';
 
+  // ── Chrome row: filter chips | title input | children banner ─────────────
+  const chromeRow = useMemo(() => {
+    if (!showChromeRow) return null;
+    if (titleTyping) {
+      return (
+        <box
+          height={1}
+          width={pickerInnerW}
+          flexShrink={0}
+          flexDirection="row"
+          overflow="hidden"
+          backgroundColor={t.background}
+        >
+          <text fg={t.info} wrapMode="none">
+            {'title:'}
+          </text>
+          <input
+            ref={titleInputRef as never}
+            focused={!!inputActive && titleTyping}
+            placeholder="substring…"
+            backgroundColor={t.background}
+            textColor={t.foreground}
+            onInput={() => {
+              /* uncontrolled — value read on enter */
+            }}
+          />
+        </box>
+      );
+    }
+    if (childrenOf) {
+      const banner = `children of ${childrenOf.label}`;
+      return (
+        <FixedClearRow
+          width={pickerInnerW}
+          color={t.info}
+          text={padRow(banner, pickerInnerW)}
+          onMouseDown={() => restoreFromChildren()}
+        />
+      );
+    }
+    // Middot chip register — one row, chips clickable (cycle on click).
+    const chips: { key: string; label: string; active: boolean; onClick: () => void }[] = [
+      {
+        key: 'class',
+        label: `class:${classF}`,
+        active: classF !== 'all',
+        onClick: () => {
+          const next = cycleChip(CLASS_CYCLE, classF, 1);
+          setClassF(next);
+          resetPagingAndLoad({ classF: next });
+        },
+      },
+      {
+        key: 'agent',
+        label: `agent:${agentF}`,
+        active: agentF !== 'all',
+        onClick: () => {
+          const next = cycleChip(AGENT_CYCLE, agentF, 1);
+          setAgentF(next);
+          resetPagingAndLoad({ agentF: next });
+        },
+      },
+      {
+        key: 'win',
+        label: `win:${winF}`,
+        active: winF !== 'all',
+        onClick: () => {
+          const next = cycleChip(WIN_CYCLE, winF, 1);
+          setWinF(next);
+          resetPagingAndLoad({ winF: next });
+        },
+      },
+      {
+        key: 'sort',
+        label: `sort:${sortChipLabel(sortF)}`,
+        active: sortF !== 'recent',
+        onClick: () => {
+          const next = cycleChip(SORT_CYCLE, sortF, 1);
+          setSortF(next);
+          resetPagingAndLoad({ sortF: next });
+        },
+      },
+    ];
+    return (
+      <box
+        height={1}
+        width={pickerInnerW}
+        flexShrink={0}
+        flexDirection="row"
+        overflow="hidden"
+        backgroundColor={t.background}
+      >
+        {chips.map((c, i) => (
+          <box
+            key={c.key}
+            flexShrink={0}
+            flexDirection="row"
+            onMouseDown={c.onClick}
+            backgroundColor={t.background}
+          >
+            {i > 0 ? (
+              <text fg={t.muted} wrapMode="none">
+                {' · '}
+              </text>
+            ) : null}
+            <text fg={c.active ? t.info : t.muted} wrapMode="none">
+              {c.label}
+            </text>
+          </box>
+        ))}
+      </box>
+    );
+  }, [
+    showChromeRow,
+    titleTyping,
+    childrenOf,
+    pickerInnerW,
+    t,
+    inputActive,
+    classF,
+    agentF,
+    winF,
+    sortF,
+    resetPagingAndLoad,
+    restoreFromChildren,
+  ]);
+
   const pickerBody = useMemo(() => {
     if (softOnly) {
       return (
@@ -814,30 +1551,9 @@ export function MicroscopeStage({
         </box>
       );
     }
-    if (mode === 'empty') {
-      return (
-        <box flexDirection="column" flexShrink={0}>
-          {banners.map((b, i) => (
-            <FixedClearRow
-              key={`b-${i}`}
-              width={pickerInnerW}
-              color={b.color}
-              text={padRow(b.text, pickerInnerW)}
-            />
-          ))}
-          {Array.from({ length: Math.max(0, sessionSlots - 1) }, (_, i) => (
-            <FixedClearRow
-              key={`e-${i}`}
-              width={pickerInnerW}
-              color={t.muted}
-              text={emptyRow(pickerInnerW)}
-            />
-          ))}
-        </box>
-      );
-    }
     return (
       <box flexDirection="column" flexShrink={0} overflow="hidden">
+        {chromeRow}
         {mode === 'busy'
           ? banners.map((b, i) => (
               <FixedClearRow
@@ -848,36 +1564,56 @@ export function MicroscopeStage({
               />
             ))
           : null}
-        {Array.from({ length: sessionSlots }, (_, i) => {
-          const row = sessionSlice[i];
-          if (!row) {
-            return (
+        {mode === 'empty' && sessions.length === 0 ? (
+          <>
+            {banners.map((b, i) => (
               <FixedClearRow
-                key={`s-${i}`}
+                key={`e-${i}`}
+                width={pickerInnerW}
+                color={b.color}
+                text={padRow(b.text, pickerInnerW)}
+              />
+            ))}
+            {Array.from({ length: Math.max(0, listSlots - 1) }, (_, i) => (
+              <FixedClearRow
+                key={`ep-${i}`}
                 width={pickerInnerW}
                 color={t.muted}
-                text={
-                  i === 0 && sessions.length === 0
-                    ? padRow(EMPTY_CORPUS_COPY, pickerInnerW)
-                    : emptyRow(pickerInnerW)
-                }
+                text={emptyRow(pickerInnerW)}
+              />
+            ))}
+          </>
+        ) : (
+          Array.from({ length: listSlots }, (_, i) => {
+            const row = sessions[i];
+            if (!row) {
+              return (
+                <FixedClearRow
+                  key={`s-${i}`}
+                  width={pickerInnerW}
+                  color={t.muted}
+                  text={
+                    i === 0 && sessions.length === 0
+                      ? padRow(EMPTY_CORPUS_COPY, pickerInnerW)
+                      : emptyRow(pickerInnerW)
+                  }
+                />
+              );
+            }
+            const selected = i === sessionCursor && view === 'picker';
+            return (
+              <FixedClearRow
+                key={`s-${row.id}-${i}`}
+                width={pickerInnerW}
+                color={selected ? t.info : t.foreground}
+                text={padRow(
+                  formatSessionLine(row, selected, Date.now(), pickerInnerW),
+                  pickerInnerW,
+                )}
               />
             );
-          }
-          const absIdx = sessionScroll + i;
-          const selected = absIdx === sessionCursor && view === 'picker';
-          return (
-            <FixedClearRow
-              key={`s-${row.id}-${i}`}
-              width={pickerInnerW}
-              color={selected ? t.info : t.foreground}
-              text={padRow(
-                formatSessionLine(row, selected, Date.now(), pickerInnerW),
-                pickerInnerW,
-              )}
-            />
-          );
-        })}
+          })
+        )}
       </box>
     );
   }, [
@@ -886,12 +1622,11 @@ export function MicroscopeStage({
     banners,
     pickerInnerW,
     t,
-    sessionSlice,
-    sessions.length,
-    sessionScroll,
+    sessions,
     sessionCursor,
-    sessionSlots,
+    listSlots,
     view,
+    chromeRow,
   ]);
 
   // Two fixed info rows: title (or empty prompt) + facts (or blank).
@@ -920,6 +1655,31 @@ export function MicroscopeStage({
       factsColor: t.muted as RGBA,
     };
   }, [openSession, mode, t]);
+
+  const timelineSearchRow = searchOpen ? (
+    <box
+      height={1}
+      width={timelineInnerW}
+      flexShrink={0}
+      flexDirection="row"
+      overflow="hidden"
+      backgroundColor={t.background}
+    >
+      <text fg={t.info} wrapMode="none">
+        {'/'}
+      </text>
+      <input
+        ref={searchInputRef as never}
+        focused={!!inputActive && searchOpen}
+        placeholder="in-session search…"
+        backgroundColor={t.background}
+        textColor={t.foreground}
+        onInput={() => {
+          /* uncontrolled */
+        }}
+      />
+    </box>
+  ) : null;
 
   const timelineBody = useMemo(() => {
     if (!openSessionId) {
@@ -955,6 +1715,7 @@ export function MicroscopeStage({
         </box>
       );
     }
+    const turnSlice = turns.slice(turnScroll, turnScroll + turnSlots);
     return (
       <box flexDirection="column" flexShrink={0} overflow="hidden">
         {Array.from({ length: turnSlots }, (_, i) => {
@@ -990,8 +1751,7 @@ export function MicroscopeStage({
   }, [
     view,
     openSessionId,
-    turns.length,
-    turnSlice,
+    turns,
     turnScroll,
     turnCursor,
     turnSlots,
@@ -1011,8 +1771,8 @@ export function MicroscopeStage({
             : mode === 'empty'
               ? 'empty'
               : openSessionId
-                ? `${sessions.length} sess · ${turns.length} evt`
-                : `${sessions.length} sessions`;
+                ? `${totalCount} sess · ${turns.length} evt`
+                : `${totalCount} sessions`;
 
   // Footer is two-pane-aware but keeps E2E tokens (↑↓ / select / enter timeline / j/k).
   const footer =
@@ -1021,22 +1781,30 @@ export function MicroscopeStage({
       : view === 'timeline'
         ? detailOpen
           ? TURN_DETAIL_FOOTER
-          : twoPane
-            ? '↑↓ j/k turns · esc sessions · r refresh'
-            : '↑↓ j/k turns · esc picker · r refresh'
-        : '↑↓ select · enter timeline · r refresh';
+          : searchOpen
+            ? 'type query · enter search · esc cancel'
+            : searchHits.length > 0
+              ? `n/N hits · ↑↓ j/k turns · esc sessions · r refresh`
+              : twoPane
+                ? '↑↓ j/k turns · / search · esc sessions · r refresh'
+                : '↑↓ j/k turns · / search · esc picker · r refresh'
+        : titleTyping
+          ? 'type title · enter apply · esc clear'
+          : childrenOf
+            ? '↑↓ select · enter timeline · esc restore · r refresh'
+            : '↑↓ select · enter timeline · f/a/[ ]/, filters · t title · r refresh';
 
   const pickerRight =
-    mode === 'ready' || mode === 'busy'
-      ? `${sessions.length}`
-      : mode === 'empty'
-        ? '0'
-        : undefined;
+    mode === 'ready' || mode === 'busy' || mode === 'empty'
+      ? pageRangeLabel(pageOffset, sessions.length, totalCount)
+      : undefined;
 
   const timelineRight = openSessionId
-    ? turns.length > 0
-      ? `${turns.length} evt`
-      : '0 evt'
+    ? searchHits.length > 0
+      ? `${searchHitIdx + 1}/${searchHits.length}`
+      : turns.length > 0
+        ? `${turns.length} evt`
+        : '0 evt'
     : undefined;
 
   const pickerColumn = (
@@ -1069,11 +1837,15 @@ export function MicroscopeStage({
           color={infoRows.titleColor}
           text={padRow(infoRows.title, timelineInnerW)}
         />
-        <FixedClearRow
-          width={timelineInnerW}
-          color={infoRows.factsColor}
-          text={padRow(infoRows.facts, timelineInnerW)}
-        />
+        {searchOpen ? (
+          timelineSearchRow
+        ) : (
+          <FixedClearRow
+            width={timelineInnerW}
+            color={infoRows.factsColor}
+            text={padRow(infoRows.facts, timelineInnerW)}
+          />
+        )}
         {timelineBody}
       </box>
     </Card>

@@ -44,7 +44,12 @@ CREATE TABLE sessions (
   user_msg_count   INTEGER NOT NULL,
   tool_call_count  INTEGER NOT NULL,
   tool_error_count INTEGER NOT NULL,
-  title            TEXT NOT NULL DEFAULT ''
+  title            TEXT NOT NULL DEFAULT '',
+  cwd_class        TEXT NOT NULL DEFAULT '',
+  agent_name       TEXT NOT NULL DEFAULT '',
+  subagent_type    TEXT NOT NULL DEFAULT '',
+  description      TEXT NOT NULL DEFAULT '',
+  title_source     TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE usage (
   id                  INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -85,17 +90,38 @@ function seed(): void {
   const db = new Database(dbPath);
   try {
     db.exec(SYNTHETIC_DDL);
-    db.run('PRAGMA user_version = 5');
+    db.run('PRAGMA user_version = 6');
+    // Lead session (opened by Enter)
     db.run(
       `INSERT INTO sessions (
          id, project_path, agent, parent_session, model_id,
-         started_at, ended_at, turn_count, user_msg_count, tool_call_count, tool_error_count, title
+         started_at, ended_at, turn_count, user_msg_count, tool_call_count, tool_error_count,
+         title, cwd_class, agent_name, subagent_type, description, title_source
        ) VALUES (
          'smoke-sess', '/proj/smoke-app', 'primary', NULL, 'model-s',
          '2026-06-02T12:00:00.000Z', '2026-06-02T13:00:00.000Z', 2, 1, 1, 1,
-         'Smoke Session Title'
+         'Smoke Session Title', 'operator', 'smoke-agent', '', '', 'summary'
        )`,
     );
+    // Extra rows so the picker pages and the N-of-M label is non-trivial.
+    for (let i = 0; i < 10; i++) {
+      const n = String(i).padStart(2, '0');
+      db.run(
+        `INSERT INTO sessions (
+           id, project_path, agent, parent_session, model_id,
+           started_at, ended_at, turn_count, user_msg_count, tool_call_count, tool_error_count,
+           title, cwd_class, agent_name, subagent_type, description, title_source
+         ) VALUES (?, '/proj/smoke-app', 'primary', NULL, 'model-s',
+           ?, ?, 1, 1, 0, 0,
+           ?, 'operator', '', '', '', '')`,
+        [
+          `smoke-extra-${n}`,
+          `2026-05-${String(10 + (i % 15)).padStart(2, '0')}T08:00:00.000Z`,
+          `2026-05-${String(10 + (i % 15)).padStart(2, '0')}T09:00:00.000Z`,
+          `Smoke Extra ${n}`,
+        ],
+      );
+    }
     const insert = (
       ts: string,
       kind: string,
@@ -157,6 +183,8 @@ type FrameCheck = {
   hasFooter: boolean;
   hasTwoPane: boolean;
   hasStacked: boolean;
+  hasFilterRow: boolean;
+  hasNofM: boolean;
 };
 
 async function runAt(width: number, height: number, openTimeline: boolean): Promise<FrameCheck> {
@@ -179,7 +207,7 @@ async function runAt(width: number, height: number, openTimeline: boolean): Prom
   }
 
   const geo = paneGeometry(width);
-  const hasPicker = /smoke-sess|Smoke Session/.test(frame);
+  const hasPicker = /smoke-sess|Smoke Session|Smoke Extra/.test(frame);
   const hasTitle = /Smoke Session/.test(frame);
   const hasSessionsLabel = /SESSIONS/.test(frame);
   const hasTimelineLabel = /TIMELINE/.test(frame);
@@ -196,10 +224,12 @@ async function runAt(width: number, height: number, openTimeline: boolean): Prom
       /smoke-app/.test(frame) &&
       (/\d+\s+turns/.test(frame) || /\d+\s+errors/.test(frame) || /model-s/.test(frame))
     : /enter a session to open its timeline/i.test(frame);
-  const hasFooter = /enter timeline|j\/k|refresh/i.test(frame);
+  const hasFooter = /enter timeline|j\/k|refresh|select/i.test(frame);
   const hasTwoPane =
     !geo.twoPane || (hasSessionsLabel && hasPicker && (!openTimeline || hasTimeline) && hasInfoHeader);
   const hasStacked = geo.twoPane || (hasSessionsLabel && hasPicker && hasInfoHeader);
+  const hasFilterRow = /class:all/.test(frame) && /agent:all/.test(frame) && /sort:rec/.test(frame);
+  const hasNofM = /\d+–\d+ of \d+/.test(frame);
 
   r.renderer.destroy();
   return {
@@ -219,6 +249,8 @@ async function runAt(width: number, height: number, openTimeline: boolean): Prom
     hasFooter,
     hasTwoPane,
     hasStacked,
+    hasFilterRow,
+    hasNofM,
   };
 }
 
@@ -236,7 +268,7 @@ const narrowOpen = await runAt(80, 24, true);
 console.log(`\n── ${narrowOpen.label} ──`);
 console.log(narrowOpen.frame);
 
-// ── Pass 3: wide idle (chrome + empty prompt, no double copy) ───────────────
+// ── Pass 3: wide idle (filter row + paged picker N-of-M) ────────────────────
 const wideIdle = await runAt(120, 40, false);
 console.log(`\n── ${wideIdle.label} ──`);
 console.log(wideIdle.frame);
@@ -258,6 +290,8 @@ function okCheck(c: FrameCheck, requireOpen: boolean): boolean {
     c.hasTimeline &&
     c.hasError &&
     (c.height < 34 || c.hasErrorBody);
+  // Filter row + N-of-M need height for the chrome row (skip on very short hosts).
+  const filterOk = c.height < 28 || (c.hasFilterRow && c.hasNofM);
   return (
     c.hasPicker &&
     c.hasTitle &&
@@ -268,6 +302,7 @@ function okCheck(c: FrameCheck, requireOpen: boolean): boolean {
     c.hasFooter &&
     c.hasTwoPane &&
     c.hasStacked &&
+    filterOk &&
     (!requireOpen || openOk)
   );
 }
@@ -281,7 +316,7 @@ const results = [
 
 for (const [name, ok, c] of results) {
   console.log(
-    `${name}: ok=${ok} picker:${c.hasPicker} title:${c.hasTitle} SESSIONS:${c.hasSessionsLabel} TIMELINE:${c.hasTimelineLabel} timeline:${c.hasTimeline} info:${c.hasInfoHeader} footer:${c.hasFooter} twoPane:${c.hasTwoPane} error:${c.hasErrorBody} grain:${c.hasError} borders:${c.hasBorders}`,
+    `${name}: ok=${ok} picker:${c.hasPicker} title:${c.hasTitle} SESSIONS:${c.hasSessionsLabel} TIMELINE:${c.hasTimelineLabel} timeline:${c.hasTimeline} info:${c.hasInfoHeader} footer:${c.hasFooter} twoPane:${c.hasTwoPane} filter:${c.hasFilterRow} NofM:${c.hasNofM} error:${c.hasErrorBody} grain:${c.hasError} borders:${c.hasBorders}`,
   );
 }
 
