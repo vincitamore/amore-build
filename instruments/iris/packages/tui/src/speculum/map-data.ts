@@ -700,9 +700,50 @@ export function formatLinksStatus(drawn: number, loaded: number): string {
 
 /** Canvas body rows for graph glyphs — timeline reserves the bottom row as axis strip. */
 export function mapCanvasBodyRows(canvasRows: number, mode: MapMode): number {
-  const n = Math.max(1, canvasRows);
+  const n = Math.max(0, Math.floor(canvasRows));
+  if (n <= 0) return 0;
   if (mode === 'density' && n > 1) return n - 1;
   return n;
+}
+
+/**
+ * Fit-clamp canvas rows from the residual stage host.
+ * stageH is the MapStage host (includes panel title/borders + legend + status + canvas).
+ * baseChrome = panel title/borders (~3) + status/control lines (2).
+ * legendRows = actual legend block height (0 before ready).
+ * Never returns a negative; 0 means the host cannot hold a canvas.
+ */
+export function budgetMapCanvasRows(
+  stageH: number,
+  legendRows: number,
+  baseChrome: number = 5,
+): number {
+  const h = Math.max(0, Math.floor(stageH));
+  const legend = Math.max(0, Math.floor(legendRows));
+  const chrome = Math.max(0, Math.floor(baseChrome));
+  return Math.max(0, h - chrome - legend);
+}
+
+/** Minimum canvas rows to paint honestly: timeline needs body+axis (2), structure needs 1. */
+export function minMapCanvasRows(mode: MapMode): number {
+  return mode === 'density' ? 2 : 1;
+}
+
+/** True when the budgeted canvas cannot paint glyphs for the active mode. */
+export function mapCanvasTooSmall(canvasRows: number, mode: MapMode): boolean {
+  return Math.max(0, Math.floor(canvasRows)) < minMapCanvasRows(mode);
+}
+
+/**
+ * Subpixel padding for fitViewport so short canvases keep a positive scale.
+ * Default graph padding (4) zeroes the scale when bodyHeight ≤ 8 (2 cell rows).
+ */
+export function mapFitPadding(subpixelH: number, subpixelW: number): number {
+  const h = Math.max(0, subpixelH);
+  const w = Math.max(0, subpixelW);
+  if (h < 8 || w < 8) return 1;
+  if (h < 16 || w < 16) return 2;
+  return 4;
 }
 
 /**

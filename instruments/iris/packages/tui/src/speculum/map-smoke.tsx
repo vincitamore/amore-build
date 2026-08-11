@@ -12,6 +12,7 @@ import { ThemeProvider } from '../ThemeProvider';
 import { fitViewport, worldToScreen } from '../render/viewport';
 import { renderView } from '../render/graph';
 import {
+  budgetMapCanvasRows,
   buildMapLegendRows,
   buildSessionWorld,
   DEFAULT_ALLOWED_AGENTS,
@@ -28,6 +29,7 @@ import {
   sessionLabel,
   sessionWorldToGraph,
 } from './map-data';
+import { seedStageBox } from './sessions-layout';
 import { MapStage } from './MapStage';
 import { openQueryService, type SessionListRow, type SessionMapLink } from './query-service';
 
@@ -620,15 +622,18 @@ const hasLegendPrimaryLine = /primary\s*\(\d+\)/i.test(frame);
 const hasASen = /A-sen-/i.test(frame);
 const hasTitleInInfo = /Alpha Primary|dream-digest|Primary Session|Deep Forge/i.test(frame);
 const hasOpPrim = /op·prim|op\+/.test(frame);
-const hasLightnessCtrl = /volume-halo|error-density/.test(frame);
-// Axis strip: month labels from May span (May 1–20) — actually fixtures span May 1–20
-// which is < 60d → week labels MM-DD, OR broader if fit shows them. Also accept │ ticks.
+const hasLightnessCtrl = /volume-halo|error-density|\[e\]/.test(frame);
+// Axis strip: month labels or week MM-DD.
 const hasAxisChrome =
   /\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\b/.test(frame) ||
-  /\d{2}-\d{2}/.test(frame) ||
-  /│/.test(frame);
+  /\d{2}-\d{2}/.test(frame);
 // React legend must not paint onto the panel top border (old blit defect signature).
 const topBorderHasLegend = /^┌.*parentage/m.test(frame) || /^┌.*event links/m.test(frame);
+// Node glyphs: exclude legend ● operator / ● primary false positives.
+const hasNodeGlyph =
+  /[◉◆◇]/.test(frame) ||
+  /[⠀-⣿]/.test(frame) ||
+  (/●/.test(frame) && !/^│\s*●\s*(operator|primary)/m.test(frame) && /●/.test(frame.replace(/●\s*(operator|primary|subagent)/g, '')));
 log(`frame title Map:${hasTitle}`, hasTitle);
 log(`frame showing N of M:${hasShowing}`, hasShowing);
 log(`frame links drawn/loaded status:${hasLinksStatus}`, hasLinksStatus);
@@ -643,7 +648,7 @@ log(`frame React legend primary line:${hasLegendPrimaryLine}`, hasLegendPrimaryL
 log(`frame has no A-sen- labels:${!hasASen}`, !hasASen);
 log(`frame title in info line:${hasTitleInInfo}`, hasTitleInInfo || /◉/.test(frame));
 log(`frame filter short (op·prim):${hasOpPrim}`, hasOpPrim);
-log(`frame lightness control (${hasLightnessCtrl}):${hasLightnessCtrl}`, hasLightnessCtrl);
+log(`frame lightness control or [e] key:${hasLightnessCtrl}`, hasLightnessCtrl);
 log(`frame axis strip chrome:${hasAxisChrome}`, hasAxisChrome);
 log(`legend not on panel top border:${!topBorderHasLegend}`, !topBorderHasLegend);
 log(
@@ -670,6 +675,88 @@ if (worldNodes.length > 0) {
 log(`seeded title field present`, seeded.every((r) => typeof r.title === 'string'));
 
 renderer.destroy();
+
+// ── 5. Tight profile 100×30 nested under Sessions-like chrome ───────────────
+// Regression: blank canvas under showing-N when Map sits below status/chips
+// (renderAfter setCell is screen-absolute — blit must offset by _screenX/Y).
+const TIGHT_W = 100;
+const TIGHT_H = 30;
+const tightStage = seedStageBox(TIGHT_W, TIGHT_H);
+const tightLegendN = legend.length; // 9 with unknown omitted
+const tightCanvasRows = budgetMapCanvasRows(tightStage.height, tightLegendN, 5);
+log(
+  `tight budget host=${tightStage.height} legend=${tightLegendN} canvasRows=${tightCanvasRows}`,
+  tightCanvasRows >= 2,
+);
+
+const tightRt = await createTestRenderer({ width: TIGHT_W, height: TIGHT_H });
+const tightRoot = createRoot(tightRt.renderer);
+// Nest chrome above the map so the canvas is NOT at terminal origin (0,0).
+tightRoot.render(
+  <ThemeProvider initial="horizon">
+    <box width={TIGHT_W} height={TIGHT_H} flexDirection="column">
+      <box height={1} flexShrink={0}>
+        <text>shell</text>
+      </box>
+      <box height={4} flexShrink={0} borderStyle="single" border>
+        <text>Sessions status</text>
+      </box>
+      <box height={1} flexShrink={0}>
+        <text>  Probes  Usage  Microscope  · Map ·  Search</text>
+      </box>
+      <box flexGrow={1} minHeight={0} flexDirection="column" overflow="hidden">
+        <MapStage inputActive stageBox={tightStage} initialSelected="map-sess-000" />
+      </box>
+    </box>
+  </ThemeProvider>,
+);
+await new Promise((r) => setTimeout(r, 600));
+await tightRt.renderOnce();
+const tightFrame = tightRt.captureCharFrame();
+console.log('--- TIGHT 100x30 MAP FRAME ---');
+console.log(tightFrame);
+console.log('--- END TIGHT FRAME ---');
+
+const tightLines = tightFrame.split('\n');
+const tightHasShowing = /showing\s+\d+\s+of\s+\d+/i.test(tightFrame);
+const tightTooSmall = /too small|needs more vertical space/i.test(tightFrame);
+const tightTitleIdx = tightLines.findIndex(
+  (l) => /\bMap\b/.test(l) && /timeline|structure|\d+\/\d+/.test(l),
+);
+const tightAxisIdx = tightLines.findIndex(
+  (l) =>
+    /\d{2}-\d{2}/.test(l) ||
+    /\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\b/.test(l),
+);
+// Axis must sit below the Map title (not painted onto the panel top border).
+const tightAxisBelowTitle =
+  tightTooSmall ||
+  (tightAxisIdx > tightTitleIdx && tightTitleIdx >= 0);
+// Body node glyph: braille edge or ●/◉ not on a legend/status facts line.
+const tightHasNode =
+  tightLines.some((l, i) => {
+    if (tightTitleIdx >= 0 && i <= tightTitleIdx) return false;
+    if (/parentage|event links|resumed|shared artifact|operator|primary|subagent|showing |drag pan/.test(l))
+      return false;
+    return /[●◉◇]/.test(l) || /[⠀-⣿]/.test(l);
+  }) || /[⠀-⣿]/.test(tightFrame);
+const tightHonest = tightTooSmall || (tightHasShowing && tightHasNode);
+log(
+  `tight 100x30 canvas paints nodes or too-small:${tightHasNode || tightTooSmall}`,
+  tightHasNode || tightTooSmall,
+);
+log(
+  `tight 100x30 axis below Map title:${tightAxisBelowTitle}`,
+  tightAxisBelowTitle,
+);
+log(`tight 100x30 no showing-N without paint:${tightHonest}`, tightHonest);
+log(
+  `tight 100x30 has showing or too-small status`,
+  tightHasShowing || tightTooSmall,
+);
+
+tightRt.renderer.destroy();
+
 if (prevDb === undefined) delete process.env.SPECULUM_DB;
 else process.env.SPECULUM_DB = prevDb;
 try {

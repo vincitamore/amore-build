@@ -14,12 +14,8 @@ import { usePalette } from '../ThemeProvider';
 import { Panel } from '../components/Panel';
 import { useRefreshOnActive } from '../use-refresh-on-active';
 import { useStableDimensions } from '../use-stable-dimensions';
-import { useMeasuredSize, type MeasuredSize } from '../use-measured-size';
-import {
-  MIN_MAP_CANVAS_COLS,
-  MIN_MAP_CANVAS_ROWS,
-  seedStageBox,
-} from './sessions-layout';
+import type { MeasuredSize } from '../use-measured-size';
+import { seedStageBox } from './sessions-layout';
 import {
   renderView,
   type Cell,
@@ -50,6 +46,7 @@ import {
   type SessionMapLink,
 } from './query-service';
 import {
+  budgetMapCanvasRows,
   buildMapLegendRows,
   buildSessionWorld,
   DEFAULT_ALLOWED_AGENTS,
@@ -66,6 +63,9 @@ import {
   legendToggleTarget,
   lightnessStatusLabel,
   mapCanvasBodyRows,
+  mapCanvasTooSmall,
+  mapFitPadding,
+  minMapCanvasRows,
   modeStatusLabel,
   neighborhoodIds,
   partitionDrawnLinks,
@@ -253,11 +253,14 @@ function softCopy(state: SoftState): { title: string; lines: string[] } {
  * Interactive session map. Opens the readonly query-service, places sessions with
  * one-house world builders, draws via Graph `renderView` with evidence links.
  *
- * Local map chrome against residual host:
- * panel title/border ~3 + 2 status lines + legend rows (≤ LEGEND_MAX_ROWS).
- * Legend is React chrome (not canvas blit), so it is budgeted here.
+ * Canvas height is an EXPLICIT fit-clamp from the residual stage host (not a
+ * flexGrow measure fight against the React legend). Legend is fixed-slot React
+ * chrome budgeted before the canvas so the blit rows always match the box.
  */
+/** Panel title+borders (~3) + status/control lines (2). */
 const MAP_BASE_CHROME = 5;
+/** Panel paddingLeft+Right — content width is host width minus this. */
+const MAP_PANEL_PAD_COLS = 2;
 
 export function MapStage({
   inputActive = true,
@@ -277,24 +280,6 @@ export function MapStage({
   const t = usePalette();
   const dims = useStableDimensions();
   const stageBox = stageBoxProp ?? seedStageBox(dims.width, dims.height);
-  // Seed from residual host (fit-clamp). MIN_* are seed preferences only when
-  // the host can hold them — never force a canvas past the measured box.
-  const fittedCanvasH = Math.max(1, stageBox.height - MAP_BASE_CHROME - LEGEND_MAX_ROWS);
-  const fittedCanvasW = Math.max(1, stageBox.width);
-  const canvasSeed = {
-    width: fittedCanvasW >= MIN_MAP_CANVAS_COLS ? Math.max(MIN_MAP_CANVAS_COLS, fittedCanvasW) : fittedCanvasW,
-    height: fittedCanvasH >= MIN_MAP_CANVAS_ROWS ? Math.max(MIN_MAP_CANVAS_ROWS, fittedCanvasH) : fittedCanvasH,
-  };
-  const {
-    ref: canvasRef,
-    width: canvasW,
-    height: canvasH,
-  } = useMeasuredSize(canvasSeed);
-  // Measured path: fit-clamp only — never lift past what the box holds.
-  const cols = Math.max(1, canvasW);
-  const rows = Math.max(1, canvasH);
-  const width = cols * 2;
-  const height = rows * 4;
 
   const [soft, setSoft] = useState<SoftState>({ kind: 'loading' });
   /** density = timeline (default); cluster = structure. */
@@ -456,6 +441,25 @@ export function MapStage({
     );
   }, [sessions, evidenceLinks, allowedOrigins, allowedAgents, hiddenEdgeKinds]);
 
+  // ── Explicit canvas budget (fit-clamp from residual host) ─────────────────
+  // Legend is real fixed-slot height; reserve it before the canvas so the blit
+  // rows always match the box. Never flexGrow-measure against the legend.
+  const legendRows = soft.kind === 'ready' ? Math.min(LEGEND_MAX_ROWS, legend.length) : 0;
+  // Pre-ready: reserve a mid legend so the first ready paint does not jump from
+  // a huge seed into a squeezed box (the blank-canvas-under-showing-N defect).
+  const legendReserve =
+    soft.kind === 'ready' ? legendRows : Math.min(LEGEND_MAX_ROWS, 8);
+  const canvasRowsBudget = budgetMapCanvasRows(stageBox.height, legendReserve, MAP_BASE_CHROME);
+  const cols = Math.max(1, stageBox.width - MAP_PANEL_PAD_COLS);
+  const rows = Math.max(0, canvasRowsBudget);
+  const tooSmall = soft.kind === 'ready' && mapCanvasTooSmall(rows, mode);
+  // Timeline reserves the bottom canvas row as the axis strip.
+  const bodyRows = mapCanvasBodyRows(rows, mode);
+  const bodyHeight = Math.max(0, bodyRows * 4);
+  const width = cols * 2;
+  const hasAxis = mode === 'density' && rows >= minMapCanvasRows('density');
+  const fitPad = mapFitPadding(bodyHeight, width);
+
   // Structure-invalidating mode change → reset viewport (GraphView pattern).
   const lastMode = useRef(mode);
   if (lastMode.current !== mode) {
@@ -468,6 +472,14 @@ export function MapStage({
   const lastFilterSig = useRef(filterSig);
   if (lastFilterSig.current !== filterSig) {
     lastFilterSig.current = filterSig;
+    if (viewport) setViewport(null);
+  }
+
+  // Host size change → re-fit (tight↔operator profile, nest residual).
+  const hostSig = `${stageBox.width}x${stageBox.height}|${rows}x${cols}`;
+  const lastHostSig = useRef(hostSig);
+  if (lastHostSig.current !== hostSig) {
+    lastHostSig.current = hostSig;
     if (viewport) setViewport(null);
   }
 
@@ -487,18 +499,20 @@ export function MapStage({
     }
   }, [selected, sessionWorld]);
 
-  // Timeline reserves the bottom canvas row as the axis strip.
-  const bodyRows = mapCanvasBodyRows(rows, mode);
-  const bodyHeight = bodyRows * 4;
-  const hasAxis = mode === 'density' && rows > 1;
-
   const vp = useMemo(
-    () => viewport ?? fitViewport(worldNodes, width, bodyHeight),
-    [viewport, worldNodes, width, bodyHeight],
+    () =>
+      viewport ??
+      (bodyHeight > 0 && width > 0
+        ? fitViewport(worldNodes, width, bodyHeight, fitPad)
+        : { cx: 0, cy: 0, scale: 1 }),
+    [viewport, worldNodes, width, bodyHeight, fitPad],
   );
   const fitScale = useMemo(
-    () => fitViewport(worldNodes, width, bodyHeight).scale,
-    [worldNodes, width, bodyHeight],
+    () =>
+      bodyHeight > 0 && width > 0
+        ? fitViewport(worldNodes, width, bodyHeight, fitPad).scale
+        : 1,
+    [worldNodes, width, bodyHeight, fitPad],
   );
   const zoomFactor = fitScale > 0 ? vp.scale / fitScale : 1;
 
@@ -521,6 +535,13 @@ export function MapStage({
   }, [selected, neighbors]);
 
   const { grid, nodes: screenNodes } = useMemo(() => {
+    // Empty grid when the host cannot hold a paintable canvas — caller shows soft too-small.
+    if (tooSmall || bodyRows <= 0 || cols <= 0) {
+      return {
+        grid: { cols: Math.max(1, cols), rows: Math.max(1, rows), cells: [] as (Cell | null)[] },
+        nodes: [] as { id: string; x: number; y: number }[],
+      };
+    }
     const result = renderView(
       graph,
       worldNodes,
@@ -683,17 +704,40 @@ export function MapStage({
     hasAxis,
     width,
     bodyHeight,
+    tooSmall,
   ]);
 
   const gridRef = useRef(grid);
   gridRef.current = grid;
 
-  // Canvas blit is glyphs + axis strip — legend is React fixed rows below.
+  // Keep-mounted stages load while parent height is 0; when the stage becomes
+  // active (or the residual host settles), bump paintGen so renderAfter rebinds.
+  const [paintGen, setPaintGen] = useState(0);
+  useEffect(() => {
+    if (!inputActive || rows <= 0 || soft.kind !== 'ready') return;
+    setPaintGen((g) => g + 1);
+    const t = setTimeout(() => setPaintGen((g) => g + 1), 80);
+    return () => clearTimeout(t);
+  }, [inputActive, rows, cols, soft.kind, stageBox.width, stageBox.height]);
+
+  /**
+   * Canvas blit. OpenTUI invokes renderAfter as `fn.call(renderable, buffer)` and
+   * setCell on the root buffer is screen-absolute — so we MUST offset by the
+   * element's `_screenX/_screenY`. Blitting at (0,0) only looks correct when the
+   * canvas sits at the terminal origin (isolated smoke); nested under Sessions
+   * the map sits lower and a (0,0) blit vanishes (blank canvas under showing-N).
+   */
   const draw = useCallback(
-    (buffer: DrawBuffer) => {
-      blitGrid(buffer, gridRef.current, 0, 0, cols, rows);
-    },
-    [cols, rows],
+    function mapDraw(
+      this: { _screenX?: number; _screenY?: number },
+      buffer: DrawBuffer,
+    ) {
+      if (rows <= 0 || cols <= 0) return;
+      const ox = Math.max(0, Math.floor(this?._screenX ?? 0));
+      const oy = Math.max(0, Math.floor(this?._screenY ?? 0));
+      blitGrid(buffer, gridRef.current, ox, oy, cols, rows);
+    } as (buffer: DrawBuffer) => void,
+    [cols, rows, grid, paintGen, inputActive],
   );
 
   const hitTest = useCallback(
@@ -860,7 +904,7 @@ export function MapStage({
     [vp, width, bodyHeight, sub],
   );
 
-  const rowW = Math.max(16, stageBox.width - 2);
+  const rowW = Math.max(16, stageBox.width - MAP_PANEL_PAD_COLS);
   const selNode = selected ? sessionWorld?.nodes.find((n) => n.id === selected) : undefined;
   const hoverNode =
     !selected && hovered ? sessionWorld?.nodes.find((n) => n.id === hovered) : undefined;
@@ -871,15 +915,18 @@ export function MapStage({
   const linksStatus = formatLinksStatus(drawnLinkCount, loadedLinkCount);
   const lightnessLabel = lightnessStatusLabel(lightness);
 
-  const headerRight =
-    soft.kind === 'ready'
+  // Honest status: never claim "showing N" when the canvas cannot paint.
+  const headerRight = tooSmall
+    ? `too small · ${modeLabel}`
+    : soft.kind === 'ready'
       ? `${showing}/${totalSessions} · ${modeLabel}`
       : soft.kind === 'loading'
         ? 'loading'
         : soft.kind;
 
-  const infoLine =
-    soft.kind === 'ready'
+  const infoLine = tooSmall
+    ? ` terminal too small for map canvas (need ≥${minMapCanvasRows(mode)} rows; have ${rows})`
+    : soft.kind === 'ready'
       ? ` showing ${showing} of ${totalSessions} · ${linksStatus} · ${modeLabel} · ${filterLabel} · ${zoomFactor.toFixed(1)}× zoom` +
         (selNode
           ? `   ${formatSelectionReadout(selNode)}`
@@ -888,8 +935,9 @@ export function MapStage({
             : '')
       : ` ${softCopy(soft).title}`;
 
-  const controlLine =
-    soft.kind === 'ready'
+  const controlLine = tooSmall
+    ? ' enlarge the terminal · r reload'
+    : soft.kind === 'ready'
       ? ` drag pan · scroll zoom · click select · legend filter · click·click / ⏎ open · [d] timeline/structure · [e] ${lightnessLabel} · [f]it [c]enter [r]eload`
       : ' r retry';
 
@@ -906,6 +954,55 @@ export function MapStage({
         ))}
       </box>
     ) : null;
+
+  /** Canvas body: glyphs, or a short honest "too small" stack (never blank under showing-N). */
+  const canvasBody = tooSmall ? (
+    <box
+      height={Math.max(1, rows)}
+      width="100%"
+      flexShrink={0}
+      overflow="hidden"
+      flexDirection="column"
+      backgroundColor={GRAPH_BG}
+    >
+      <FixedClearRow
+        width={rowW}
+        color={t.muted}
+        text={padRow('Map canvas needs more vertical space.', rowW)}
+      />
+      {rows >= 2 ? (
+        <FixedClearRow
+          width={rowW}
+          color={t.muted}
+          text={padRow(
+            `host ${stageBox.height} · legend ${legendRows} · chrome ${MAP_BASE_CHROME} → canvas ${rows} (min ${minMapCanvasRows(mode)})`,
+            rowW,
+          )}
+        />
+      ) : null}
+    </box>
+  ) : inputActive ? (
+    <box
+      // Only mount the blit surface while the stage is active. Keep-mounted
+      // parents are height 0 when hidden; a blit bound then never recovers on
+      // some OpenTUI paths (blank canvas under showing-N at tight profiles).
+      key={`map-canvas-${paintGen}-${rows}x${cols}`}
+      height={Math.max(1, rows)}
+      width={cols}
+      flexShrink={0}
+      flexGrow={0}
+      overflow="hidden"
+      backgroundColor={GRAPH_BG}
+      renderAfter={draw}
+      onMouseDown={onMouseDown}
+      onMouseDrag={onMouseDrag}
+      onMouseUp={onMouseUp}
+      onMouseMove={onMouseMove}
+      onMouseScroll={onMouseScroll}
+    />
+  ) : (
+    <box height={Math.max(1, rows)} width={cols} flexShrink={0} backgroundColor={GRAPH_BG} />
+  );
 
   const legendBlock =
     soft.kind === 'ready' && legend.length > 0 ? (
@@ -931,20 +1028,12 @@ export function MapStage({
   return (
     <Panel title="Map" headerRight={headerRight} flexGrow={1} minHeight={0} active={!!inputActive}>
       {softBody ?? (
-        <box flexDirection="column" flexGrow={1} width="100%" minHeight={0}>
-          <box
-            ref={canvasRef as never}
-            flexGrow={1}
-            width="100%"
-            minHeight={0}
-            backgroundColor={GRAPH_BG}
-            renderAfter={draw}
-            onMouseDown={onMouseDown}
-            onMouseDrag={onMouseDrag}
-            onMouseUp={onMouseUp}
-            onMouseMove={onMouseMove}
-            onMouseScroll={onMouseScroll}
-          />
+        <box flexDirection="column" flexGrow={1} width="100%" minHeight={0} overflow="hidden">
+          {/*
+            Explicit height from residual budget — never flexGrow+measure against the
+            legend (that path left a blank canvas under a showing-N claim at 100×30).
+          */}
+          {canvasBody}
           {legendBlock}
           <box width="100%" height={1} flexShrink={0} overflow="hidden" backgroundColor={STATUS_BG}>
             <FixedClearRow width={rowW} color={STATUS_FG} text={padRow(infoLine.trimStart(), rowW)} />

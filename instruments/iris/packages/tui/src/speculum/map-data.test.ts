@@ -29,7 +29,11 @@ import {
   LEGEND_ORIGIN_LABELS,
   legendToggleTarget,
   lightnessStatusLabel,
+  budgetMapCanvasRows,
   mapCanvasBodyRows,
+  mapCanvasTooSmall,
+  mapFitPadding,
+  minMapCanvasRows,
   modeStatusLabel,
   neighborhoodIds,
   ORIGIN_ORDER,
@@ -796,6 +800,36 @@ describe('time axis (timeline mode)', () => {
     expect(mapCanvasBodyRows(12, 'density')).toBe(11);
     expect(mapCanvasBodyRows(12, 'cluster')).toBe(12);
     expect(mapCanvasBodyRows(1, 'density')).toBe(1);
+    expect(mapCanvasBodyRows(0, 'density')).toBe(0);
+  });
+
+  test('budgetMapCanvasRows fit-clamps host minus chrome minus legend', () => {
+    // tight residual host ~21, chrome 5, legend 9 → canvas 7
+    expect(budgetMapCanvasRows(21, 9, 5)).toBe(7);
+    expect(budgetMapCanvasRows(21, 10, 5)).toBe(6);
+    // host too small → 0, never negative
+    expect(budgetMapCanvasRows(10, 9, 5)).toBe(0);
+    expect(budgetMapCanvasRows(5, 0, 5)).toBe(0);
+  });
+
+  test('mapCanvasTooSmall / minMapCanvasRows', () => {
+    expect(minMapCanvasRows('density')).toBe(2);
+    expect(minMapCanvasRows('cluster')).toBe(1);
+    expect(mapCanvasTooSmall(0, 'density')).toBe(true);
+    expect(mapCanvasTooSmall(1, 'density')).toBe(true);
+    expect(mapCanvasTooSmall(2, 'density')).toBe(false);
+    expect(mapCanvasTooSmall(0, 'cluster')).toBe(true);
+    expect(mapCanvasTooSmall(1, 'cluster')).toBe(false);
+  });
+
+  test('mapFitPadding keeps positive scale budget on short canvases', () => {
+    expect(mapFitPadding(4, 100)).toBe(1);
+    expect(mapFitPadding(12, 100)).toBe(2);
+    expect(mapFitPadding(40, 200)).toBe(4);
+    // bodyHeight 8 with pad 1 → span room 6 > 0 (unlike default pad 4 → 0)
+    const h = 8;
+    const pad = mapFitPadding(h, 100);
+    expect(h - 2 * pad).toBeGreaterThan(0);
   });
 });
 
