@@ -1,12 +1,17 @@
 /**
  * Governed side-effect surface for the Sessions member.
  * All side-effects shell the speculum CLI via runSpeculum — never local writers.
+ * Lens + summarize are the only egress verbs; both fail-closed through scrub
+ * and the two-step dry-run → confirm chain.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { existsSync, readFileSync, statSync } from 'node:fs';
+import { basename } from 'node:path';
 import { useKeyboard } from '@opentui/react';
 import { usePalette } from '../ThemeProvider';
 import { Panel } from '../components/Panel';
-import { ConfirmModal } from '../components/Modal';
+import { ConfirmModal, Modal } from '../components/Modal';
+import { MarkdownView } from '../components/MarkdownView';
 import { useStableDimensions } from '../use-stable-dimensions';
 import {
   emptyDisplayRow,
@@ -70,6 +75,8 @@ export type LensEnvelope = {
   refusedReason?: string | null;
   dryRun?: boolean;
   modelId?: string | null;
+  /** Dated markdown report written by a live lens run (null on dry-run/refuse). */
+  reportPath?: string | null;
   scrub?: {
     ok?: boolean;
     counts?: ScrubCounts;
@@ -94,6 +101,27 @@ export type AuditRecord = {
   reason?: string | null;
   payloadBytes?: number;
   modelId?: string | null;
+  /** Present when a live lens/summarize run wrote a report file. */
+  reportPath?: string | null;
+  [k: string]: unknown;
+};
+
+/** Machine-readable summarize --json shape (subset the CLI prints). */
+export type SummarizeEnvelope = {
+  attempted?: number;
+  generated?: number;
+  refused_scrub?: number;
+  failed_parse?: number;
+  failed_spawn?: number;
+  empty_digest?: number;
+  dry_run?: boolean;
+  results?: Array<{
+    sessionId?: string;
+    outcome?: string;
+    title?: string;
+    estimatedTokens?: number;
+    modelId?: string | null;
+  }>;
   [k: string]: unknown;
 };
 
@@ -447,17 +475,104 @@ export function loadRecentSessions(limit = RECENT_SESSION_LIMIT): SessionListRow
   }
 }
 
-function formatAuditRow(r: AuditRecord): string {
+function formatAuditRow(r: AuditRecord, selected = false): string {
+  const mark = selected ? '>' : ' ';
   const ts = typeof r.ts === 'string' ? r.ts.slice(11, 19) : '??:??:??';
   const lens = typeof r.lens === 'string' ? r.lens : '?';
   const decision = typeof r.decision === 'string' ? r.decision : '?';
+  const hasReport =
+    typeof r.reportPath === 'string' && r.reportPath.length > 0 ? ' · md' : '';
   const reason =
     typeof r.reason === 'string' && r.reason.length > 0
       ? r.reason.length > 36
         ? `${r.reason.slice(0, 35)}\u2026`
         : r.reason
       : '';
-  return `${ts} ${decision} ${lens}${reason ? ` (${reason})` : ''}`;
+  return `${mark}${ts} ${decision} ${lens}${hasReport}${reason ? ` (${reason})` : ''}`;
+}
+
+/** True when path exists and is a regular file (stat before open). */
+export function reportFileExists(path: string | null | undefined): boolean {
+  if (typeof path !== 'string' || path.length === 0) return false;
+  try {
+    if (!existsSync(path)) return false;
+    return statSync(path).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/** Read a report file for the markdown overlay; null when gone. */
+export function readReportBody(path: string): string | null {
+  try {
+    if (!reportFileExists(path)) return null;
+    return readFileSync(path, 'utf-8');
+  } catch {
+    return null;
+  }
+}
+
+/** Build CLI argv for `speculum summarize` (includes --json). */
+export function buildSummarizeArgv(opts?: {
+  dryRun?: boolean;
+  limit?: number;
+  sessionId?: string | null;
+  all?: boolean;
+  force?: boolean;
+}): string[] {
+  const args: string[] = [];
+  if (opts?.sessionId) {
+    args.push('--session', opts.sessionId);
+  } else if (opts?.all) {
+    args.push('--all');
+  } else if (opts?.limit != null && Number.isFinite(opts.limit) && opts.limit > 0) {
+    args.push('--limit', String(Math.floor(opts.limit)));
+  }
+  if (opts?.force) args.push('--force');
+  if (opts?.dryRun) args.push('--dry-run');
+  args.push('--json');
+  return args;
+}
+
+/** Confirm copy for summarize plan — names egress plainly. */
+export function formatSummarizePlan(env: SummarizeEnvelope | null | undefined): string {
+  const n =
+    typeof env?.attempted === 'number' && Number.isFinite(env.attempted)
+      ? env.attempted
+      : Array.isArray(env?.results)
+        ? env!.results!.length
+        : 0;
+  const refused =
+    typeof env?.refused_scrub === 'number' ? env.refused_scrub : 0;
+  const bits = [`Generate titles for ${n} session(s)`];
+  if (refused > 0) bits.push(`${refused} scrub-refused in plan`);
+  // Cost shape: count only — CLI --json subset does not emit token estimates.
+  bits.push('model routes via local config');
+  return `${bits.join(' · ')}. Content leaves this machine scrubbed and audited.`;
+}
+
+export function formatSummarizeFlash(
+  env: SummarizeEnvelope | null | undefined,
+  live: boolean,
+): string {
+  if (!env) return live ? 'summarize failed' : 'summarize dry-run failed';
+  const attempted =
+    typeof env.attempted === 'number' ? env.attempted : env.results?.length ?? 0;
+  if (!live) return `summarize plan · ${attempted} session(s)`;
+  const gen = typeof env.generated === 'number' ? env.generated : 0;
+  return `summarize · ${gen} titled · ${attempted} attempted`;
+}
+
+/** Whether a summarize dry-run plan is worth offering for live confirm. */
+export function canSummarizeSend(env: SummarizeEnvelope | null | undefined): boolean {
+  if (!env) return false;
+  const n =
+    typeof env.attempted === 'number'
+      ? env.attempted
+      : Array.isArray(env.results)
+        ? env.results.length
+        : 0;
+  return n > 0;
 }
 
 function errorFlash(r: SpeculumResult<unknown>, verb: string): string {
@@ -597,7 +712,7 @@ function SelectionChrome({
 
 // ── Component ──
 
-type PanelMode = 'none' | 'picker' | 'dry-run' | 'audit';
+type PanelMode = 'none' | 'picker' | 'dry-run' | 'audit' | 'summarize';
 
 export function SpeculumActions({
   inputActive,
@@ -614,7 +729,6 @@ export function SpeculumActions({
    */
   lensPrefill?: { sessionId: string; key: number } | null;
 }) {
-  void lensPrefill;
   const t = usePalette();
   const dims = useStableDimensions();
   const rowW = Math.max(24, dims.width - 4);
@@ -633,7 +747,13 @@ export function SpeculumActions({
   const [selectedLens, setSelectedLens] = useState<BuiltinLens | null>(null);
   const [confirm, setConfirm] = useState<{ msg: string; run: () => void } | null>(null);
   const [auditRows, setAuditRows] = useState<AuditRecord[]>([]);
+  const [auditCursor, setAuditCursor] = useState(0);
   const [localFlash, setLocalFlash] = useState<string | null>(null);
+  const [reportView, setReportView] = useState<{ path: string; body: string } | null>(
+    null,
+  );
+  const [summarizeEnv, setSummarizeEnv] = useState<SummarizeEnvelope | null>(null);
+  const prefillKeyRef = useRef<number | null>(null);
 
   const dryGenRef = useRef(0);
   const dryRerunTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -667,7 +787,13 @@ export function SpeculumActions({
   );
 
   const capturing =
-    !!busy || panel === 'picker' || panel === 'dry-run' || panel === 'audit' || !!confirm;
+    !!busy ||
+    panel === 'picker' ||
+    panel === 'dry-run' ||
+    panel === 'audit' ||
+    panel === 'summarize' ||
+    !!confirm ||
+    !!reportView;
 
   useEffect(() => {
     onCapture?.(capturing);
@@ -679,9 +805,51 @@ export function SpeculumActions({
     if (!inputActive) {
       setConfirm(null);
       setSessionPickOpen(false);
-      if (panel === 'picker' || panel === 'dry-run') setPanel('none');
+      if (panel === 'picker' || panel === 'dry-run' || panel === 'summarize') {
+        setPanel('none');
+      }
     }
   }, [inputActive, panel]);
+
+  /** Open a report path in the shared markdown overlay (stat first; soft flash if gone). */
+  const openReportPath = useCallback(
+    (path: string | null | undefined) => {
+      if (typeof path !== 'string' || path.length === 0) {
+        flash('no report path');
+        return;
+      }
+      const body = readReportBody(path);
+      if (body == null) {
+        flash('report gone');
+        return;
+      }
+      setReportView({ path, body });
+    },
+    [flash],
+  );
+
+  // Lens prefill seam: on key bump, open picker with that session preselected.
+  // Repeat bumps re-fire even for the same sessionId.
+  useEffect(() => {
+    if (!lensPrefill) return;
+    if (prefillKeyRef.current === lensPrefill.key) return;
+    prefillKeyRef.current = lensPrefill.key;
+    const id = lensPrefill.sessionId?.trim();
+    if (!id) return;
+    setSessionId(id);
+    sessionIdRef.current = id;
+    setLastN(DEFAULT_LAST_N);
+    lastNRef.current = DEFAULT_LAST_N;
+    setNoSubagents(false);
+    noSubRef.current = false;
+    setSessionPickOpen(false);
+    setDryRunEnv(null);
+    setSelectedLens(null);
+    setConfirm(null);
+    setPickerIdx(0);
+    setReportView(null);
+    setPanel('picker');
+  }, [lensPrefill]);
 
   // Probe install once on mount (audit is read-only JSON).
   useEffect(() => {
@@ -723,6 +891,7 @@ export function SpeculumActions({
     setSelectedLens(null);
     setConfirm(null);
     setSessionPickOpen(false);
+    setSummarizeEnv(null);
   }, []);
 
   const runIngest = useCallback(async () => {
@@ -760,6 +929,16 @@ export function SpeculumActions({
         setInstalled(true);
         setDryRunEnv(r.json);
         flash(formatLensFlash(r.json, true));
+        // Live lens writes a dated report — open it in the shared markdown view.
+        const path =
+          typeof r.json.reportPath === 'string' && r.json.reportPath.length > 0
+            ? r.json.reportPath
+            : null;
+        if (path) {
+          const body = readReportBody(path);
+          if (body != null) setReportView({ path, body });
+          else flash('lens accepted · report gone');
+        }
       } finally {
         setBusy(null);
         setConfirm(null);
@@ -770,6 +949,67 @@ export function SpeculumActions({
     },
     [flash, currentSel],
   );
+
+  const runSummarizeLive = useCallback(async () => {
+    if (busyRef.current || installedRef.current === false) return;
+    setBusy('summarize…');
+    try {
+      const r = await runSpeculum<SummarizeEnvelope>(
+        'summarize',
+        buildSummarizeArgv({ dryRun: false }),
+      );
+      if (!r.ok) {
+        if (r.error.kind === 'not-installed') setInstalled(false);
+        flash(errorFlash(r, 'summarize'));
+        return;
+      }
+      setInstalled(true);
+      setSummarizeEnv(r.json);
+      flash(formatSummarizeFlash(r.json, true));
+    } finally {
+      setBusy(null);
+      setConfirm(null);
+      setPanel('none');
+    }
+  }, [flash]);
+
+  const runSummarizeDry = useCallback(async () => {
+    if (installedRef.current === false || busyRef.current) return;
+    const gen = ++dryGenRef.current;
+    setBusy('summarize dry-run…');
+    setPanel('summarize');
+    setSummarizeEnv(null);
+    setConfirm(null);
+    setSessionPickOpen(false);
+    try {
+      const r = await runSpeculum<SummarizeEnvelope>(
+        'summarize',
+        buildSummarizeArgv({ dryRun: true }),
+      );
+      if (gen !== dryGenRef.current) return;
+      if (!r.ok) {
+        if (r.error.kind === 'not-installed') setInstalled(false);
+        flash(errorFlash(r, 'summarize dry-run'));
+        setPanel('none');
+        return;
+      }
+      setInstalled(true);
+      setSummarizeEnv(r.json);
+      flash(formatSummarizeFlash(r.json, false));
+      if (canSummarizeSend(r.json)) {
+        setConfirm({
+          msg: formatSummarizePlan(r.json),
+          run: () => {
+            void runSummarizeLive();
+          },
+        });
+      } else {
+        flash('summarize plan · no sessions matched');
+      }
+    } finally {
+      if (gen === dryGenRef.current) setBusy(null);
+    }
+  }, [flash, runSummarizeLive]);
 
   const runLensDry = useCallback(
     async (name: BuiltinLens, sel?: LensSelection) => {
@@ -916,6 +1156,7 @@ export function SpeculumActions({
               reason: null,
             })),
           );
+          setAuditCursor(0);
           setPanel('audit');
           return;
         }
@@ -924,7 +1165,9 @@ export function SpeculumActions({
       }
       setInstalled(true);
       const rows = Array.isArray(r.json.records) ? r.json.records : [];
-      setAuditRows(rows.slice(-AUDIT_SHOW_SLOTS));
+      const slice = rows.slice(-AUDIT_SHOW_SLOTS);
+      setAuditRows(slice);
+      setAuditCursor(Math.max(0, slice.length - 1));
       setPanel('audit');
     } finally {
       setBusy(null);
@@ -940,6 +1183,16 @@ export function SpeculumActions({
     const shift = !!key.shift;
     const isL = (n === 'l' && shift) || seq === 'L';
     const isA = (n === 'a' && shift) || seq === 'A';
+    const isT = (n === 't' && shift) || seq === 'T';
+
+    // Report markdown overlay owns esc (and swallows other keys while open).
+    if (reportView) {
+      if (n === 'escape') {
+        setReportView(null);
+        return;
+      }
+      return;
+    }
 
     // Session target picker owns navigation while open.
     if (sessionPickOpen && (panel === 'picker' || panel === 'dry-run')) {
@@ -1068,6 +1321,38 @@ export function SpeculumActions({
       return;
     }
 
+    // Summarize plan panel: esc closes (confirm owns y/n while up).
+    if (panel === 'summarize') {
+      return;
+    }
+
+    // Audit tail: ↑↓ select · enter opens report when file still exists.
+    if (panel === 'audit') {
+      if (n === 'up' || n === 'k') {
+        setAuditCursor((i) => Math.max(0, i - 1));
+        return;
+      }
+      if (n === 'down' || n === 'j') {
+        setAuditCursor((i) => Math.min(Math.max(0, auditRows.length - 1), i + 1));
+        return;
+      }
+      if (n === 'return' || n === 'enter') {
+        const row = auditRows[auditCursor];
+        if (!row) return;
+        const path =
+          typeof row.reportPath === 'string' && row.reportPath.length > 0
+            ? row.reportPath
+            : null;
+        if (!path) {
+          flash('no report for this row');
+          return;
+        }
+        openReportPath(path);
+        return;
+      }
+      return;
+    }
+
     if (installed === false) return; // keys inert when not installed
 
     if (n === 'i' && !shift) {
@@ -1087,6 +1372,10 @@ export function SpeculumActions({
       setSelectedLens(null);
       setConfirm(null);
       setPanel('picker');
+      return;
+    }
+    if (isT) {
+      void runSummarizeDry();
       return;
     }
     if (isA) {
@@ -1130,12 +1419,21 @@ export function SpeculumActions({
       }
       return 'slice not sendable · ←/→ re-slice · n no-sub · t session · esc close';
     }
-    if (panel === 'audit') return 'A close audit · ↑↓ scroll';
+    if (panel === 'summarize') {
+      if (canSummarizeSend(summarizeEnv)) {
+        return 'confirm: y run · n/esc cancel · content leaves scrubbed';
+      }
+      return 'no sessions matched · esc close';
+    }
+    if (panel === 'audit') {
+      return '↑↓ row · enter open report · A close';
+    }
     return '';
   })();
 
   // Idle + installed: no strip (keyboard still lives on this component).
   // Flash for idle work lands on the member footer via onFlash.
+  // Report overlay is keep-mounted on both idle and context paths.
   const contextOpen =
     panel !== 'none' || !!busy || !!confirm || installed === false;
 
@@ -1169,21 +1467,49 @@ export function SpeculumActions({
   const showPicker = panel === 'picker';
   const showDryRun = panel === 'dry-run';
   const showAudit = panel === 'audit';
+  const showSummarize = panel === 'summarize';
   const auditSlice = auditRows.slice(-AUDIT_SHOW_SLOTS);
   const headerRight = sessionId
     ? `--session ${shortSessionId(sessionId)}${noSubagents ? ' · no-sub' : ''}`
     : `--last-n ${lastN}${noSubagents ? ' · no-sub' : ''}`;
 
-  // Idle path: zero chrome (no margin, no footer strip). Confirm stays available
-  // if it ever mounts without a panel (capture already includes confirm).
+  const reportModalW = Math.min(Math.max(40, dims.width - 4), 100);
+  const reportModalH = Math.min(Math.max(10, dims.height - 4), 36);
+
+  // Keep-mounted report overlay + confirm (OpenTUI crash law: never mount/unmount).
+  const reportOverlay = (
+    <Modal
+      title={reportView ? basename(reportView.path) : 'Report'}
+      width={reportModalW}
+      height={reportModalH}
+      visible={!!reportView}
+    >
+      <box flexDirection="column" flexGrow={1} minHeight={0}>
+        <MarkdownView
+          body={reportView?.body ?? ''}
+          inputActive={!!reportView && !!inputActive}
+        />
+        <box flexShrink={0} height={1} overflow="hidden" backgroundColor={t.background}>
+          <text fg={t.muted} wrapMode="none">
+            {formatLucernaDisplayLine('esc close · read-only report', reportModalW - 4)}
+          </text>
+        </box>
+      </box>
+    </Modal>
+  );
+
+  // Idle path: zero chrome (no margin, no footer strip). Confirm + report stay mounted.
   if (!contextOpen) {
     return (
-      <ConfirmModal
-        active={false}
-        message=""
-        onConfirm={() => {}}
-        onCancel={() => {}}
-      />
+      <>
+        {reportOverlay}
+        <ConfirmModal
+          active={false}
+          message=""
+          onConfirm={() => {}}
+          onCancel={() => {}}
+        />
+      </>
     );
   }
 
@@ -1372,6 +1698,51 @@ export function SpeculumActions({
         </Panel>
       ) : null}
 
+      {showSummarize ? (
+        <Panel title="Summarize plan" flexShrink={0} headerRight="dry-run">
+          <box flexDirection="column" flexShrink={0}>
+            {busy && !summarizeEnv ? (
+              <FixedClearRow
+                width={rowW}
+                color={t.info}
+                text={formatLucernaDisplayLine('running summarize dry-run…', rowW)}
+              />
+            ) : (
+              <>
+                <FixedClearRow
+                  width={rowW}
+                  color={t.foreground}
+                  text={formatLucernaDisplayLine(
+                    `attempted ${summarizeEnv?.attempted ?? 0} · scrub-refused ${summarizeEnv?.refused_scrub ?? 0} · parse-fail ${summarizeEnv?.failed_parse ?? 0}`,
+                    rowW,
+                  )}
+                />
+                <FixedClearRow
+                  width={rowW}
+                  color={t.muted}
+                  text={formatLucernaDisplayLine(
+                    'Content leaves this machine scrubbed and audited.',
+                    rowW,
+                  )}
+                />
+                <FixedClearRow
+                  width={rowW}
+                  color={
+                    canSummarizeSend(summarizeEnv) ? t.success : t.warning
+                  }
+                  text={formatLucernaDisplayLine(
+                    canSummarizeSend(summarizeEnv)
+                      ? 'sendable — confirm to invoke model'
+                      : 'no sessions matched — confirm disabled',
+                    rowW,
+                  )}
+                />
+              </>
+            )}
+          </box>
+        </Panel>
+      ) : null}
+
       {showAudit ? (
         <Panel title="Audit tail" flexShrink={0} headerRight={`${auditSlice.length} rec`}>
           <box flexDirection="column" flexShrink={0}>
@@ -1391,18 +1762,21 @@ export function SpeculumActions({
                   />
                 );
               }
+              const selected = i === auditCursor;
               return (
                 <FixedClearRow
                   key={`a-${i}`}
                   width={rowW}
                   color={
-                    r.decision === 'refused'
-                      ? t.warning
-                      : r.decision === 'accepted'
-                        ? t.success
-                        : t.muted
+                    selected
+                      ? t.info
+                      : r.decision === 'refused'
+                        ? t.warning
+                        : r.decision === 'accepted'
+                          ? t.success
+                          : t.muted
                   }
-                  text={formatLucernaDisplayLine(formatAuditRow(r), rowW)}
+                  text={formatLucernaDisplayLine(formatAuditRow(r, selected), rowW)}
                 />
               );
             })}
@@ -1415,7 +1789,9 @@ export function SpeculumActions({
         flexShrink={0}
         height={1}
         overflow="hidden"
-        marginTop={showPicker || showDryRun || showAudit || busy ? 1 : 0}
+        marginTop={
+          showPicker || showDryRun || showAudit || showSummarize || busy ? 1 : 0
+        }
         backgroundColor={t.background}
       >
         <text fg={localFlash || busy ? t.success : t.muted} wrapMode="none">
@@ -1423,8 +1799,10 @@ export function SpeculumActions({
         </text>
       </box>
 
+      {reportOverlay}
+
       <ConfirmModal
-        active={!!confirm && !!inputActive}
+        active={!!confirm && !!inputActive && !reportView}
         message={confirm?.msg ?? ''}
         onConfirm={() => {
           confirm?.run();

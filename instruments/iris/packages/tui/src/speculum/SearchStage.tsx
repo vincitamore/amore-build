@@ -1,6 +1,8 @@
 /**
  * Sessions Search stage — debounced FTS over the derived index.
  * Open-on-hit hands the shell's openSession spine (sessionId + eventId).
+ * Chip filters (kind / window / scope) compose after FTS; the always-focused
+ * input owns plain keys — chips are click or ctrl-key driven.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useKeyboard } from '@opentui/react';
@@ -22,14 +24,32 @@ export const SEARCH_DEBOUNCE_MS = 200;
 
 /**
  * Local stage chrome against residual host:
- * padTop 1 + panel 3 + input 1 + status 1 + stage footer 1 = 7.
+ * padTop 1 + panel 3 + input 1 + chip row 1 + status 1 + stage footer 1 = 8.
  */
-export const SEARCH_STAGE_CHROME = 7;
+export const SEARCH_STAGE_CHROME = 8;
 const IDLE_HINT = 'type to search sessions';
 const NO_MATCH = 'no matches';
 const PENDING = 'pending…';
 const MISSING_COPY = "index not found — run 'speculum ingest'";
 const BUSY_COPY = 'corpus busy';
+
+/** Kind chip options (post-filter on hit.kind). */
+export const SEARCH_KIND_OPTIONS = ['all', 'user', 'assistant', 'tool'] as const;
+export type SearchKind = (typeof SEARCH_KIND_OPTIONS)[number];
+
+/** Window chip options (post-filter on hit.ts when present). */
+export const SEARCH_WIN_OPTIONS = ['all', '30d', '7d'] as const;
+export type SearchWin = (typeof SEARCH_WIN_OPTIONS)[number];
+
+/** Scope chip: corpus vs a handed-in session id. */
+export type SearchScope = 'corpus' | 'session';
+
+/**
+ * Hit shape for post-filters. `ts` is optional — the query-service surface
+ * currently omits it; window filtering applies only when present. Kind always
+ * post-filters; session scope uses the existing `search(q, { sessionId })`.
+ */
+export type FilterableSearchHit = SearchHit & { ts?: string };
 
 export type SearchStageProps = {
   inputActive?: boolean;
@@ -41,11 +61,73 @@ export type SearchStageProps = {
   ) => void;
   /** Residual host box from SessionsMember; optional for isolated stage smokes. */
   stageBox?: MeasuredSize;
+  /**
+   * Session context when Search was reached from an open session / jump path.
+   * When null, the scope chip stays corpus-only (session arm gated off).
+   */
+  scopeSession?: { id: string; title?: string } | null;
 };
 
 /** Trim; empty / whitespace → '' (skip FTS). */
 export function parseQuery(raw: string): string {
   return (raw ?? '').trim();
+}
+
+/** Cycle a chip option list (wraps). */
+export function cycleOption<T extends string>(
+  options: readonly T[],
+  current: T,
+  dir: 1 | -1 = 1,
+): T {
+  const idx = options.indexOf(current);
+  const i = idx < 0 ? 0 : idx;
+  return options[(i + dir + options.length) % options.length]!;
+}
+
+/** Short label for a session scope chip. */
+export function scopeChipLabel(
+  scope: SearchScope,
+  scopeSession: { id: string; title?: string } | null | undefined,
+): string {
+  if (scope !== 'session' || !scopeSession?.id) return 'corpus';
+  const title = (scopeSession.title ?? '').replace(/\s+/g, ' ').trim();
+  if (title) return title.length > 14 ? `${title.slice(0, 13)}\u2026` : title;
+  const id = scopeSession.id;
+  return id.length > 12 ? `${id.slice(0, 11)}\u2026` : id;
+}
+
+/** Inclusive lower bound ISO for a window chip (null = all). */
+export function searchWinSince(win: SearchWin, now = new Date()): string | null {
+  if (win === 'all') return null;
+  const days = win === '7d' ? 7 : 30;
+  const start = new Date(now.getTime());
+  start.setUTCDate(start.getUTCDate() - (days - 1));
+  start.setUTCHours(0, 0, 0, 0);
+  return start.toISOString();
+}
+
+/**
+ * Post-filter FTS hits by kind + window. Session scope is applied at the
+ * query-service call (`search(q, { sessionId })`), not here.
+ * Window needs `hit.ts`; hits without ts pass the window arm (fail-open on
+ * missing timestamp so kind filters still work on today's index shape).
+ */
+export function filterSearchHits(
+  hits: readonly FilterableSearchHit[],
+  opts: { kind: SearchKind; win: SearchWin; now?: Date },
+): FilterableSearchHit[] {
+  const since = searchWinSince(opts.win, opts.now);
+  return hits.filter((h) => {
+    if (opts.kind !== 'all' && h.kind !== opts.kind) return false;
+    if (since) {
+      const ts = h.ts;
+      if (typeof ts === 'string' && ts.length > 0) {
+        if (ts < since) return false;
+      }
+      // no ts → keep (query-service does not yet surface event timestamps)
+    }
+    return true;
+  });
 }
 
 /** Max title width in a search hit row (id stays secondary). */
@@ -130,6 +212,7 @@ export function SearchStage({
   onFlash,
   onOpenSession,
   stageBox: stageBoxProp,
+  scopeSession = null,
 }: SearchStageProps) {
   const t = usePalette();
   const dims = useStableDimensions();
@@ -146,7 +229,7 @@ export function SearchStage({
   onOpenRef.current = onOpenSession;
 
   const [query, setQuery] = useState('');
-  const [hits, setHits] = useState<SearchHit[]>([]);
+  const [rawHits, setRawHits] = useState<FilterableSearchHit[]>([]);
   const [pending, setPending] = useState(false);
   const [cursor, setCursor] = useState(0);
   const [scroll, setScroll] = useState(0);
@@ -154,6 +237,19 @@ export function SearchStage({
   const [schemaOk, setSchemaOk] = useState(true);
   const [schemaVersion, setSchemaVersion] = useState(0);
   const [busy, setBusy] = useState(false);
+  const [kind, setKind] = useState<SearchKind>('all');
+  const [win, setWin] = useState<SearchWin>('all');
+  const [scope, setScope] = useState<SearchScope>('corpus');
+
+  // Session scope only when a session context was handed in.
+  const sessionScopeAvailable = !!(scopeSession && scopeSession.id);
+  const effectiveScope: SearchScope =
+    scope === 'session' && sessionScopeAvailable ? 'session' : 'corpus';
+
+  // Drop session scope when the handoff clears.
+  useEffect(() => {
+    if (!sessionScopeAvailable && scope === 'session') setScope('corpus');
+  }, [sessionScopeAvailable, scope]);
 
   // Open readonly query-service once; never write; close on unmount.
   useEffect(() => {
@@ -195,64 +291,81 @@ export function SearchStage({
     }
   }, [inputActive]);
 
-  const runSearch = useCallback((q: string) => {
-    const qs = qsRef.current;
-    if (!qs || missing) {
-      if (aliveRef.current) {
-        setHits([]);
-        setPending(false);
-        setBusy(false);
+  const runSearch = useCallback(
+    (q: string, sessionId: string | undefined) => {
+      const qs = qsRef.current;
+      if (!qs || missing) {
+        if (aliveRef.current) {
+          setRawHits([]);
+          setPending(false);
+          setBusy(false);
+        }
+        return;
       }
-      return;
-    }
-    if (!qs.schemaOK()) {
-      if (aliveRef.current) {
-        setSchemaOk(false);
+      if (!qs.schemaOK()) {
+        if (aliveRef.current) {
+          setSchemaOk(false);
+          setSchemaVersion(qs.getVersion());
+          setRawHits([]);
+          setPending(false);
+        }
+        return;
+      }
+      try {
+        // Over-fetch so post-filters (kind/window) still have room after FTS rank.
+        const rows = qs.search(q, {
+          limit: 80,
+          ...(sessionId ? { sessionId } : {}),
+        }) as FilterableSearchHit[];
+        if (!aliveRef.current) return;
+        setRawHits(rows);
+        setCursor(0);
+        setScroll(0);
+        setBusy(qs.busy());
+        setSchemaOk(qs.schemaOK());
         setSchemaVersion(qs.getVersion());
-        setHits([]);
-        setPending(false);
+      } catch {
+        if (!aliveRef.current) return;
+        setRawHits([]);
+        setBusy(true);
+      } finally {
+        if (aliveRef.current) setPending(false);
       }
-      return;
-    }
-    try {
-      const rows = qs.search(q, { limit: 40 });
-      if (!aliveRef.current) return;
-      setHits(rows);
-      setCursor(0);
-      setScroll(0);
-      setBusy(qs.busy());
-      setSchemaOk(qs.schemaOK());
-      setSchemaVersion(qs.getVersion());
-    } catch {
-      if (!aliveRef.current) return;
-      setHits([]);
-      setBusy(true);
-    } finally {
-      if (aliveRef.current) setPending(false);
-    }
-  }, [missing]);
+    },
+    [missing],
+  );
 
   // Debounced FTS — skip empty/whitespace; show pending while waiting + in flight.
+  // Session scope re-runs the query (QS already supports { sessionId }).
+  const scopeSessionId =
+    effectiveScope === 'session' && scopeSession?.id ? scopeSession.id : undefined;
+
   useEffect(() => {
     const q = parseQuery(query);
     if (!q) {
-      setHits([]);
+      setRawHits([]);
       setPending(false);
       setCursor(0);
       setScroll(0);
       return;
     }
     if (missing || !schemaOk) {
-      setHits([]);
+      setRawHits([]);
       setPending(false);
       return;
     }
     setPending(true);
     const timer = setTimeout(() => {
-      runSearch(q);
+      runSearch(q, scopeSessionId);
     }, SEARCH_DEBOUNCE_MS);
     return () => clearTimeout(timer);
-  }, [query, missing, schemaOk, runSearch]);
+  }, [query, missing, schemaOk, runSearch, scopeSessionId]);
+
+  // Kind / window post-filter (compose with FTS results).
+  const hits = useMemo(
+    () => filterSearchHits(rawHits, { kind, win }),
+    [rawHits, kind, win],
+  );
 
   useEffect(() => {
     if (cursor >= hits.length) setCursor(Math.max(0, hits.length - 1));
@@ -263,15 +376,52 @@ export function SearchStage({
     else if (cursor >= scroll + hitSlots) setScroll(cursor - hitSlots + 1);
   }, [cursor, scroll, hitSlots]);
 
+  // Reset cursor when filters change.
+  useEffect(() => {
+    setCursor(0);
+    setScroll(0);
+  }, [kind, win, effectiveScope]);
+
   const openHit = useCallback((hit: SearchHit | undefined) => {
     if (!hit) return;
     onOpenRef.current?.(hit.sessionId, { eventId: hit.eventId });
     onFlashRef.current?.(`open ${hit.sessionId} #${hit.eventId}`);
   }, []);
 
-  useKeyboard((key: { name?: string }) => {
+  const cycleKind = useCallback((dir: 1 | -1 = 1) => {
+    setKind((k) => cycleOption(SEARCH_KIND_OPTIONS, k, dir));
+  }, []);
+  const cycleWin = useCallback((dir: 1 | -1 = 1) => {
+    setWin((w) => cycleOption(SEARCH_WIN_OPTIONS, w, dir));
+  }, []);
+  const cycleScope = useCallback(() => {
+    if (!sessionScopeAvailable) {
+      onFlashRef.current?.('session scope needs a session context');
+      return;
+    }
+    setScope((s) => (s === 'session' ? 'corpus' : 'session'));
+  }, [sessionScopeAvailable]);
+
+  useKeyboard((key: { name?: string; ctrl?: boolean; sequence?: string }) => {
     if (!inputActive) return;
     const n = (key.name ?? '').toLowerCase().replace('arrow', '');
+    const ctrl = !!key.ctrl;
+
+    // Chip chords — plain keys stay with the always-focused input.
+    // Ctrl+K kind · Ctrl+W window · Ctrl+O scope (reliable in OpenTUI/Windows).
+    if (ctrl && (n === 'k' || key.sequence === '\u000b')) {
+      cycleKind(1);
+      return;
+    }
+    if (ctrl && (n === 'w' || key.sequence === '\u0017')) {
+      cycleWin(1);
+      return;
+    }
+    if (ctrl && (n === 'o' || key.sequence === '\u000f')) {
+      cycleScope();
+      return;
+    }
+
     if (n === 'up') {
       setCursor((c) => Math.max(0, c - 1));
       return;
@@ -390,7 +540,42 @@ export function SearchStage({
     ? `run 'speculum ingest'`
     : !schemaOk
       ? 'schema mismatch — upgrade index'
-      : 'type · up/dn · enter open';
+      : 'type · ^k kind · ^w win · ^o scope · up/dn · enter open';
+
+  const scopeLabel = scopeChipLabel(effectiveScope, scopeSession);
+  const chipKind = (k: SearchKind) => {
+    const on = k === kind;
+    const label = k === 'assistant' ? 'asst' : k;
+    return (
+      <box
+        key={`k-${k}`}
+        flexShrink={0}
+        marginRight={1}
+        backgroundColor={on ? t.selection : t.background}
+        onMouseDown={inputActive ? () => setKind(k) : undefined}
+      >
+        <text fg={on ? t.primary : t.muted} wrapMode="none">
+          {on ? `[${label}]` : label}
+        </text>
+      </box>
+    );
+  };
+  const chipWin = (w: SearchWin) => {
+    const on = w === win;
+    return (
+      <box
+        key={`w-${w}`}
+        flexShrink={0}
+        marginRight={1}
+        backgroundColor={on ? t.selection : t.background}
+        onMouseDown={inputActive ? () => setWin(w) : undefined}
+      >
+        <text fg={on ? t.primary : t.muted} wrapMode="none">
+          {on ? `[${w}]` : w}
+        </text>
+      </box>
+    );
+  };
 
   return (
     <box
@@ -420,6 +605,61 @@ export function SearchStage({
             setCursor(0);
           }}
         />
+        {/* Budgeted chip row: kind · win · scope (click / ctrl-key; input owns plain keys). */}
+        <box
+          flexDirection="row"
+          flexShrink={0}
+          height={1}
+          overflow="hidden"
+          backgroundColor={t.background}
+        >
+          <text fg={t.muted} wrapMode="none">
+            kind:
+          </text>
+          {SEARCH_KIND_OPTIONS.map((k) => chipKind(k))}
+          <text fg={t.muted} wrapMode="none">
+            {' · win:'}
+          </text>
+          {SEARCH_WIN_OPTIONS.map((w) => chipWin(w))}
+          <text fg={t.muted} wrapMode="none">
+            {' · scope:'}
+          </text>
+          <box
+            flexShrink={0}
+            marginLeft={1}
+            backgroundColor={
+              effectiveScope === 'session' ? t.selection : t.background
+            }
+            onMouseDown={
+              inputActive
+                ? () => {
+                    if (!sessionScopeAvailable) {
+                      onFlashRef.current?.('session scope needs a session context');
+                      return;
+                    }
+                    setScope((s) => (s === 'session' ? 'corpus' : 'session'));
+                  }
+                : undefined
+            }
+          >
+            <text
+              fg={
+                effectiveScope === 'session'
+                  ? t.primary
+                  : sessionScopeAvailable
+                    ? t.muted
+                    : t.muted
+              }
+              wrapMode="none"
+            >
+              {effectiveScope === 'session'
+                ? `[${scopeLabel}]`
+                : sessionScopeAvailable
+                  ? `corpus|${scopeChipLabel('session', scopeSession)}`
+                  : 'corpus'}
+            </text>
+          </box>
+        </box>
         <box flexShrink={0} backgroundColor={t.background}>
           <text fg={t.muted} wrapMode="none">
             {padRow(statusLine, rowW)}

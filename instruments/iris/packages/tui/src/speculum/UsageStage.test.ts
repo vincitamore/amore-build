@@ -6,7 +6,17 @@ import { join } from 'node:path';
 import { createTestRenderer } from '@opentui/core/testing';
 import { createRoot } from '@opentui/react';
 import { ThemeProvider } from '../ThemeProvider';
-import { buildUsageCards, formatTokens, UsageStage, type UsageJson } from './UsageStage';
+import {
+  buildUsageArgv,
+  buildUsageCards,
+  cycleUsageWindow,
+  formatTokens,
+  formatUsageWindowLabel,
+  usageWindowBounds,
+  UsageStage,
+  type UsageJson,
+  type UsageWindow,
+} from './UsageStage';
 
 let tmp: string;
 let prevBin: string | undefined;
@@ -98,6 +108,51 @@ describe('formatTokens', () => {
     expect(formatTokens(1200)).toBe('1.2K');
     expect(formatTokens(3400000)).toBe('3.4M');
     expect(formatTokens(1_000_000)).toBe('1.0M');
+  });
+});
+
+describe('usage window arithmetic', () => {
+  const now = new Date(2026, 7, 11); // local Aug 11 2026
+
+  test('all → null bounds; today/7d/30d inclusive calendar dates', () => {
+    expect(usageWindowBounds('all', now)).toEqual({ since: null, until: null });
+    expect(usageWindowBounds('today', now)).toEqual({
+      since: '2026-08-11',
+      until: '2026-08-11',
+    });
+    const w7 = usageWindowBounds('7d', now);
+    expect(w7.until).toBe('2026-08-11');
+    expect(w7.since).toBe('2026-08-05'); // inclusive 7 days
+    const w30 = usageWindowBounds('30d', now);
+    expect(w30.until).toBe('2026-08-11');
+    expect(w30.since).toBe('2026-07-13');
+  });
+
+  test('buildUsageArgv wires --since/--until/--json', () => {
+    expect(buildUsageArgv('all', now)).toEqual(['--json']);
+    expect(buildUsageArgv('today', now)).toEqual([
+      '--since',
+      '2026-08-11',
+      '--until',
+      '2026-08-11',
+      '--json',
+    ]);
+    expect(buildUsageArgv('7d', now)).toEqual([
+      '--since',
+      '2026-08-05',
+      '--until',
+      '2026-08-11',
+      '--json',
+    ]);
+  });
+
+  test('labels + cycle wrap', () => {
+    expect(formatUsageWindowLabel('today')).toBe('today');
+    expect(formatUsageWindowLabel('all')).toBe('all time');
+    expect(cycleUsageWindow('all', 1)).toBe('today');
+    expect(cycleUsageWindow('today', -1)).toBe('all');
+    const order: UsageWindow[] = ['today', '7d', '30d', 'all'];
+    expect(order.map((w) => cycleUsageWindow(w, 1))).toEqual(['7d', '30d', 'all', 'today']);
   });
 });
 
@@ -214,5 +269,106 @@ describe('UsageStage render', () => {
 
     expect(frame, `frame:\n${frame}`).toMatch(/not installed|not-installed|not found/i);
     expect(frame).toMatch(/amore init --with-speculum/);
+  });
+
+  test('window chips render and spawn carries --since for 7d', async () => {
+    const calls: string[][] = [];
+    const bin = writeFakeBin(
+      [
+        `const args = process.argv.slice(2);`,
+        `const verb = args[0];`,
+        `const rest = args.slice(1);`,
+        // log via stderr so the test binary can be observed via fixture only — we assert frame chips
+        `if (verb === 'usage') {`,
+        `  const fixture = ${JSON.stringify(USAGE_FIXTURE)};`,
+        `  if (rest.includes('--since')) {`,
+        `    fixture.window = { since: rest[rest.indexOf('--since')+1] || null, until: rest.includes('--until') ? rest[rest.indexOf('--until')+1] : null };`,
+        `  }`,
+        `  console.log(JSON.stringify(fixture));`,
+        `  process.exit(0);`,
+        `}`,
+        `process.exit(2);`,
+        ``,
+      ].join('\n'),
+    );
+    process.env.SPECULUM_BIN = bin;
+    void calls;
+
+    const { renderer, renderOnce, captureCharFrame, mockInput } = await createTestRenderer({
+      width: 110,
+      height: 30,
+    });
+    destroy = () => renderer.destroy();
+    const root = createRoot(renderer);
+    root.render(
+      createElement(
+        ThemeProvider,
+        { initial: 'horizon' },
+        createElement(UsageStage, { inputActive: true }),
+      ),
+    );
+
+    await new Promise((r) => setTimeout(r, 500));
+    await renderOnce();
+    let frame = captureCharFrame();
+    expect(frame, `frame:\n${frame}`).toMatch(/today|7d|30d|all/);
+    expect(frame).toMatch(/\[all\]|all time/i);
+
+    // Cycle window with ] (shell owns digits — never use 1-9 here)
+    // all → today → 7d
+    await mockInput.pressKey(']');
+    await new Promise((r) => setTimeout(r, 600));
+    await renderOnce();
+    await mockInput.pressKey(']');
+    await new Promise((r) => setTimeout(r, 600));
+    await renderOnce();
+    frame = captureCharFrame();
+    expect(frame, `frame:\n${frame}`).toMatch(/\[7d\]|last 7 days/i);
+    expect(frame).toMatch(/totals/i);
+    expect(frame).toMatch(/\[\/\] window|click chip/i);
+  });
+
+  test('spawn failure degrades to last good grid with soft status', async () => {
+    const flagPath = join(tmp, `fail-flag-${Date.now()}`);
+    const bin = writeFakeBin(
+      [
+        `import { existsSync } from 'node:fs';`,
+        `const fail = existsSync(${JSON.stringify(flagPath)});`,
+        `if (fail) { console.error('boom'); process.exit(2); }`,
+        `console.log(JSON.stringify(${JSON.stringify(USAGE_FIXTURE)}));`,
+        ``,
+      ].join('\n'),
+    );
+    process.env.SPECULUM_BIN = bin;
+
+    const { renderer, renderOnce, captureCharFrame, mockInput } = await createTestRenderer({
+      width: 110,
+      height: 30,
+    });
+    destroy = () => renderer.destroy();
+    const root = createRoot(renderer);
+    root.render(
+      createElement(
+        ThemeProvider,
+        { initial: 'horizon' },
+        createElement(UsageStage, { inputActive: true }),
+      ),
+    );
+
+    await new Promise((r) => setTimeout(r, 500));
+    await renderOnce();
+    let frame = captureCharFrame();
+    expect(frame).toMatch(/gpt-test-1|1\.2K/i);
+
+    // Trip failure on next load, then refresh
+    writeFileSync(flagPath, '1', 'utf8');
+    await mockInput.pressKey('r');
+    await new Promise((r) => setTimeout(r, 600));
+    await renderOnce();
+    frame = captureCharFrame();
+    // Last good grid still visible
+    expect(frame, `frame:\n${frame}`).toMatch(/gpt-test-1|1\.2K|Turns/i);
+    // Soft degrade copy (not a hard wipe)
+    expect(frame).toMatch(/failed|last good|degraded/i);
   });
 });

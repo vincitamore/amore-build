@@ -21,7 +21,9 @@ import { ThemeProvider } from '../ThemeProvider';
 import {
   SpeculumActions,
   buildLensArgv,
+  buildSummarizeArgv,
   canSend,
+  canSummarizeSend,
   defaultLensSelection,
   formatComposition,
   formatFitsVerdict,
@@ -31,10 +33,13 @@ import {
   formatOversizeMessage,
   formatScrubSummary,
   formatSelectionLabel,
+  formatSummarizeFlash,
+  formatSummarizePlan,
   isOversizeRefuse,
   lastNFromDigit,
   lensDecision,
   lensRefuseReason,
+  reportFileExists,
   stepLastN,
   LAST_N_OPTIONS,
 } from './SpeculumActions';
@@ -173,6 +178,7 @@ function log(line) {
 log(JSON.stringify({ verb, args }));
 
 if (verb === "audit") {
+  const reportPath = ${JSON.stringify(join(tmp, 'lens-report-accepted.md'))};
   const records = [
     {
       ts: "2026-08-10T12:00:01.000Z",
@@ -181,6 +187,7 @@ if (verb === "audit") {
       reason: "dry-run: scrub ok (1200 bytes); model not invoked",
       payloadBytes: 1200,
       scrubCounts: { secret: 0, email: 1, "home-path": 2, "password-assignment": 0 },
+      reportPath: null,
     },
     {
       ts: "2026-08-10T12:05:00.000Z",
@@ -190,6 +197,7 @@ if (verb === "audit") {
       payloadBytes: 2400,
       scrubCounts: { secret: 0, email: 0, "home-path": 1, "password-assignment": 0 },
       modelId: "test-model",
+      reportPath,
     },
     {
       ts: "2026-08-10T12:10:00.000Z",
@@ -198,9 +206,42 @@ if (verb === "audit") {
       reason: "payload exceeds cap",
       payloadBytes: 200000,
       scrubCounts: { secret: 0, email: 0, "home-path": 0, "password-assignment": 0 },
+      reportPath: ${JSON.stringify(join(tmp, 'gone-report.md'))},
     },
   ];
   console.log(JSON.stringify({ path: "/tmp/fake-audit.jsonl", n: 20, records }, null, 2));
+  process.exit(0);
+}
+
+if (verb === "summarize") {
+  const dry = args.includes("--dry-run");
+  if (dry) {
+    console.log(JSON.stringify({
+      attempted: 3,
+      generated: 0,
+      refused_scrub: 0,
+      failed_parse: 0,
+      dry_run: true,
+      results: [
+        { sessionId: "s1", outcome: "dry-run" },
+        { sessionId: "s2", outcome: "dry-run" },
+        { sessionId: "s3", outcome: "dry-run" },
+      ],
+    }, null, 2));
+    process.exit(0);
+  }
+  console.log(JSON.stringify({
+    attempted: 3,
+    generated: 2,
+    refused_scrub: 1,
+    failed_parse: 0,
+    dry_run: false,
+    results: [
+      { sessionId: "s1", outcome: "generated", title: "Fix Mount Path" },
+      { sessionId: "s2", outcome: "generated", title: "Probe Tuning" },
+      { sessionId: "s3", outcome: "refused_scrub" },
+    ],
+  }, null, 2));
   process.exit(0);
 }
 
@@ -346,6 +387,7 @@ if (verb === "lens") {
     dryRun: false,
     spawned: true,
     modelId: "test-model",
+    reportPath: ${JSON.stringify(join(tmp, 'lens-report-accepted.md'))},
     scrub: {
       ok: true,
       counts: { secret: 0, email: 1, "home-path": 3, "password-assignment": 0 },
@@ -418,6 +460,7 @@ function setOversizeDry(on: boolean) {
 async function mount(opts?: {
   onFlash?: (m: string) => void;
   onCapture?: (b: boolean) => void;
+  lensPrefill?: { sessionId: string; key: number } | null;
 }) {
   destroy?.();
   destroy = undefined;
@@ -434,6 +477,7 @@ async function mount(opts?: {
     <ThemeProvider initial="horizon">
       <SpeculumActions
         inputActive
+        lensPrefill={opts?.lensPrefill ?? null}
         onFlash={(m) => {
           flashes.push(m);
           opts?.onFlash?.(m);
@@ -448,13 +492,19 @@ async function mount(opts?: {
   // Allow install probe (audit) to settle.
   await new Promise((r) => setTimeout(r, 200));
   await renderOnce();
-  return { renderer, renderOnce, captureCharFrame, keys, flashes, captures };
+  return { renderer, renderOnce, captureCharFrame, keys, flashes, captures, root };
 }
 
 beforeAll(() => {
   tmp = mkdtempSync(join(tmpdir(), 'speculum-actions-'));
   logPath = join(tmp, 'spawn-log.jsonl');
   writeFileSync(logPath, '', 'utf8');
+  // Real report file for audit enter-to-open + live lens open.
+  writeFileSync(
+    join(tmp, 'lens-report-accepted.md'),
+    '# Lens report\n\nSynthetic accepted report body.\n',
+    'utf8',
+  );
   seedDbPath = join(tmp, 'seed.sqlite');
   seedSessionIndex(seedDbPath);
   prevBin = process.env.SPECULUM_BIN;
@@ -1050,5 +1100,170 @@ describe('SpeculumActions render', () => {
     expect(live).toBeDefined();
     expect(live!.args).toContain('--last-n');
     expect(live!.args).toContain('5');
+  });
+
+  test('audit enter-to-open stats report; soft flash when gone', async () => {
+    expect(reportFileExists(join(tmp, 'lens-report-accepted.md'))).toBe(true);
+    expect(reportFileExists(join(tmp, 'gone-report.md'))).toBe(false);
+
+    const { keys, renderOnce, captureCharFrame, flashes } = await mount();
+    clearLog();
+    keys.pressKey('a', { shift: true });
+    await new Promise((r) => setTimeout(r, 400));
+    await renderOnce();
+    let frame = captureCharFrame();
+    expect(frame).toMatch(/Audit tail|pattern-extraction|accepted/i);
+
+    // Cursor defaults to last row (refused with gone path). Enter → soft flash.
+    keys.pressKey('\r');
+    await new Promise((r) => setTimeout(r, 120));
+    await renderOnce();
+    expect(flashes.some((f) => /report gone|no report/i.test(f))).toBe(true);
+
+    // Move up to accepted row (index 1 of 3) and open.
+    keys.pressKey('ARROW_UP');
+    await new Promise((r) => setTimeout(r, 40));
+    await renderOnce();
+    keys.pressKey('\r');
+    await new Promise((r) => setTimeout(r, 200));
+    await renderOnce();
+    frame = captureCharFrame();
+    expect(frame, `frame:\n${frame}`).toMatch(/Lens report|Synthetic accepted|read-only report/i);
+  });
+
+  test('summarize chain: dry-run → confirm → cancel never lives', async () => {
+    const { keys, renderOnce, captureCharFrame, flashes } = await mount();
+    clearLog();
+    keys.pressKey('t', { shift: true });
+    await new Promise((r) => setTimeout(r, 500));
+    await renderOnce();
+
+    let log = readLog();
+    const dry = log.find(
+      (e) => e.verb === 'summarize' && e.args.includes('--dry-run') && e.args.includes('--json'),
+    );
+    expect(dry).toBeDefined();
+    expect(log.some((e) => e.verb === 'summarize' && !e.args.includes('--dry-run'))).toBe(
+      false,
+    );
+
+    const frame = captureCharFrame();
+    expect(frame).toMatch(/Summarize plan|attempted 3|scrubbed and audited/i);
+    expect(frame).toMatch(/Generate titles|Confirm|y confirm|content leaves/i);
+    expect(flashes.some((f) => /summarize plan/i.test(f))).toBe(true);
+
+    // Cancel — never live
+    keys.pressKey('n');
+    await new Promise((r) => setTimeout(r, 200));
+    await renderOnce();
+    log = readLog();
+    expect(log.filter((e) => e.verb === 'summarize').length).toBe(1);
+    expect(log.every((e) => e.verb !== 'summarize' || e.args.includes('--dry-run'))).toBe(
+      true,
+    );
+  });
+
+  test('summarize chain: confirm runs live batch and flashes', async () => {
+    const { keys, renderOnce, flashes } = await mount();
+    clearLog();
+    keys.pressKey('t', { shift: true });
+    await new Promise((r) => setTimeout(r, 500));
+    await renderOnce();
+    keys.pressKey('y');
+    await new Promise((r) => setTimeout(r, 500));
+    await renderOnce();
+
+    const log = readLog();
+    const live = log.find(
+      (e) =>
+        e.verb === 'summarize' && !e.args.includes('--dry-run') && e.args.includes('--json'),
+    );
+    expect(live).toBeDefined();
+    expect(flashes.some((f) => /summarize.*titled|2 titled/i.test(f))).toBe(true);
+  });
+
+  test('lensPrefill key-bump re-fires even for same session', async () => {
+    destroy?.();
+    destroy = undefined;
+    const { renderer, renderOnce, captureCharFrame } = await createTestRenderer({
+      width: 90,
+      height: 28,
+    });
+    destroy = () => renderer.destroy();
+    const root = createRoot(renderer);
+    const keys = createMockKeys(renderer);
+
+    const paint = (prefill: { sessionId: string; key: number } | null) => {
+      root.render(
+        <ThemeProvider initial="horizon">
+          <SpeculumActions inputActive lensPrefill={prefill} />
+        </ThemeProvider>,
+      );
+    };
+
+    // Install probe
+    paint(null);
+    await new Promise((r) => setTimeout(r, 200));
+    await renderOnce();
+
+    // First handoff
+    paint({ sessionId: 'sess-target-aaa', key: 1 });
+    await new Promise((r) => setTimeout(r, 80));
+    await renderOnce();
+    let frame = captureCharFrame();
+    expect(frame).toMatch(/Lens picker|--session|sess-target/i);
+
+    // Close picker
+    keys.pressKey('ESCAPE');
+    await new Promise((r) => setTimeout(r, 60));
+    await renderOnce();
+    frame = captureCharFrame();
+    expect(frame).not.toMatch(/Lens picker/);
+
+    // Same session, new key — must re-open
+    paint({ sessionId: 'sess-target-aaa', key: 2 });
+    await new Promise((r) => setTimeout(r, 80));
+    await renderOnce();
+    frame = captureCharFrame();
+    expect(frame).toMatch(/Lens picker|--session|sess-target/i);
+
+    // Close + third bump
+    keys.pressKey('ESCAPE');
+    await new Promise((r) => setTimeout(r, 60));
+    await renderOnce();
+    paint({ sessionId: 'sess-target-aaa', key: 3 });
+    await new Promise((r) => setTimeout(r, 80));
+    await renderOnce();
+    frame = captureCharFrame();
+    expect(frame).toMatch(/Lens picker|--session|sess-target/i);
+  });
+});
+
+describe('summarize helpers', () => {
+  test('buildSummarizeArgv dry-run + json', () => {
+    expect(buildSummarizeArgv({ dryRun: true })).toEqual(['--dry-run', '--json']);
+    expect(buildSummarizeArgv({ dryRun: true, limit: 10 })).toEqual([
+      '--limit',
+      '10',
+      '--dry-run',
+      '--json',
+    ]);
+    expect(buildSummarizeArgv({ sessionId: 'abc', dryRun: false })).toEqual([
+      '--session',
+      'abc',
+      '--json',
+    ]);
+  });
+
+  test('formatSummarizePlan names egress; canSummarizeSend gates empty', () => {
+    expect(canSummarizeSend({ attempted: 0, results: [] })).toBe(false);
+    expect(canSummarizeSend({ attempted: 3 })).toBe(true);
+    const plan = formatSummarizePlan({ attempted: 3, refused_scrub: 1 });
+    expect(plan).toMatch(/3 session/);
+    expect(plan).toMatch(/scrubbed and audited/i);
+    expect(plan).toMatch(/leaves this machine/i);
+    expect(formatSummarizeFlash({ attempted: 3, generated: 2 }, true)).toMatch(
+      /2 titled/,
+    );
   });
 });

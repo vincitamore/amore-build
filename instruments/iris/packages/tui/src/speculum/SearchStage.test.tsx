@@ -8,10 +8,17 @@ import { createTestRenderer } from '@opentui/core/testing';
 import { createRoot } from '@opentui/react';
 import { ThemeProvider } from '../ThemeProvider';
 import {
+  cycleOption,
+  filterSearchHits,
   hitRowText,
   parseQuery,
+  scopeChipLabel,
+  searchWinSince,
   SEARCH_DEBOUNCE_MS,
+  SEARCH_KIND_OPTIONS,
+  SEARCH_WIN_OPTIONS,
   SearchStage,
+  type FilterableSearchHit,
 } from './SearchStage';
 import type { SearchHit } from './query-service';
 
@@ -255,6 +262,91 @@ describe('parseQuery / hitRowText', () => {
   });
 });
 
+describe('chip filter composition + session-scope gating', () => {
+  const hits: FilterableSearchHit[] = [
+    {
+      eventId: 1,
+      sessionId: 'sess-a',
+      title: 'Alpha',
+      kind: 'user',
+      snippet: 'hello',
+      ts: '2026-08-10T12:00:00.000Z',
+    },
+    {
+      eventId: 2,
+      sessionId: 'sess-a',
+      title: 'Alpha',
+      kind: 'assistant',
+      snippet: 'world',
+      ts: '2026-08-10T12:01:00.000Z',
+    },
+    {
+      eventId: 3,
+      sessionId: 'sess-b',
+      title: 'Beta',
+      kind: 'tool',
+      snippet: 'run',
+      ts: '2026-06-01T08:00:00.000Z',
+    },
+    {
+      eventId: 4,
+      sessionId: 'sess-b',
+      title: 'Beta',
+      kind: 'user',
+      snippet: 'old',
+      // no ts — window arm fail-open
+    },
+  ];
+
+  test('kind post-filter keeps matching kinds only', () => {
+    const users = filterSearchHits(hits, { kind: 'user', win: 'all' });
+    expect(users.every((h) => h.kind === 'user')).toBe(true);
+    expect(users).toHaveLength(2);
+    const tools = filterSearchHits(hits, { kind: 'tool', win: 'all' });
+    expect(tools).toHaveLength(1);
+    expect(tools[0]!.eventId).toBe(3);
+  });
+
+  test('window post-filter uses hit.ts when present', () => {
+    const now = new Date('2026-08-11T00:00:00.000Z');
+    const since7 = searchWinSince('7d', now);
+    expect(since7).toBeTruthy();
+    const recent = filterSearchHits(hits, { kind: 'all', win: '7d', now });
+    // June tool row drops; August rows keep; no-ts row fail-open keeps
+    expect(recent.map((h) => h.eventId).sort()).toEqual([1, 2, 4]);
+    const all = filterSearchHits(hits, { kind: 'all', win: 'all', now });
+    expect(all).toHaveLength(4);
+  });
+
+  test('kind + window compose', () => {
+    const now = new Date('2026-08-11T00:00:00.000Z');
+    const rows = filterSearchHits(hits, { kind: 'assistant', win: '30d', now });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.kind).toBe('assistant');
+  });
+
+  test('cycleOption wraps chip lists', () => {
+    expect(cycleOption(SEARCH_KIND_OPTIONS, 'all', 1)).toBe('user');
+    expect(cycleOption(SEARCH_KIND_OPTIONS, 'tool', 1)).toBe('all');
+    expect(cycleOption(SEARCH_WIN_OPTIONS, '7d', 1)).toBe('all');
+    expect(cycleOption(SEARCH_WIN_OPTIONS, 'all', -1)).toBe('7d');
+  });
+
+  test('scopeChipLabel gates session arm without handoff', () => {
+    expect(scopeChipLabel('corpus', null)).toBe('corpus');
+    expect(scopeChipLabel('session', null)).toBe('corpus');
+    expect(scopeChipLabel('session', { id: 'sess-abc-long-id', title: '' })).toMatch(
+      /sess-abc/,
+    );
+    expect(
+      scopeChipLabel('session', {
+        id: 'sess-x',
+        title: 'Very Long Session Title Here',
+      }),
+    ).toMatch(/Very Long|…/);
+  });
+});
+
 describe('SearchStage render', () => {
   test('empty query shows idle hint', async () => {
     process.env.SPECULUM_DB = goodDbPath;
@@ -279,6 +371,34 @@ describe('SearchStage render', () => {
     expect(frame, `frame:\n${frame}`).toMatch(/type to search sessions/);
     expect(idleCount, `idle hint must appear exactly once; frame:\n${frame}`).toBe(1);
     expect(frame).toMatch(/Search/);
+    // Chip row present (kind · win · scope)
+    expect(frame).toMatch(/kind:/i);
+    expect(frame).toMatch(/win:/i);
+    expect(frame).toMatch(/scope:/i);
+  });
+
+  test('session scope chip shows short title when handed a context', async () => {
+    process.env.SPECULUM_DB = goodDbPath;
+    const { renderer, renderOnce, captureCharFrame } = await createTestRenderer({
+      width: 110,
+      height: 32,
+    });
+    destroy = () => renderer.destroy();
+    const root = createRoot(renderer);
+    root.render(
+      createElement(
+        ThemeProvider,
+        { initial: 'horizon' },
+        createElement(SearchStage, {
+          inputActive: true,
+          scopeSession: { id: 'sess-search-a', title: 'Mount Path Fix' },
+        }),
+      ),
+    );
+    await new Promise((r) => setTimeout(r, 120));
+    await renderOnce();
+    const frame = captureCharFrame();
+    expect(frame, `frame:\n${frame}`).toMatch(/Mount Path Fix|corpus\|Mount/i);
   });
 
   test('typed token + debounce yields matching hit rows', async () => {

@@ -18,10 +18,66 @@ import {
 } from './Card';
 
 /**
- * Local stage chrome against residual host (pad + panel + totals block + note + footer).
+ * Local stage chrome against residual host (pad + panel + chip row + totals + note + footer).
  * Model region budgets from residual − this constant only.
  */
-export const USAGE_STAGE_CHROME = 11;
+export const USAGE_STAGE_CHROME = 12;
+
+/** Window chip options for usage --since/--until. */
+export const USAGE_WINDOW_OPTIONS = ['today', '7d', '30d', 'all'] as const;
+export type UsageWindow = (typeof USAGE_WINDOW_OPTIONS)[number];
+
+/** YYYY-MM-DD in local calendar. */
+export function formatLocalYmd(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+/**
+ * Bounds for a usage window as calendar dates (YYYY-MM-DD).
+ * Inclusive N-day windows: today, last 7 days, last 30 days, or all-time.
+ */
+export function usageWindowBounds(
+  win: UsageWindow,
+  now = new Date(),
+): { since: string | null; until: string | null } {
+  if (win === 'all') return { since: null, until: null };
+  const until = formatLocalYmd(now);
+  if (win === 'today') return { since: until, until };
+  const days = win === '7d' ? 7 : 30;
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  start.setDate(start.getDate() - (days - 1));
+  return { since: formatLocalYmd(start), until };
+}
+
+/** CLI argv for usage --json with optional --since/--until. */
+export function buildUsageArgv(win: UsageWindow, now = new Date()): string[] {
+  const { since, until } = usageWindowBounds(win, now);
+  const args: string[] = [];
+  if (since) {
+    args.push('--since', since);
+    if (until) args.push('--until', until);
+  }
+  args.push('--json');
+  return args;
+}
+
+/** Operator label for the active window (totals row / header). */
+export function formatUsageWindowLabel(win: UsageWindow): string {
+  if (win === 'today') return 'today';
+  if (win === '7d') return 'last 7 days';
+  if (win === '30d') return 'last 30 days';
+  return 'all time';
+}
+
+export function cycleUsageWindow(current: UsageWindow, dir: 1 | -1 = 1): UsageWindow {
+  const opts = USAGE_WINDOW_OPTIONS;
+  const idx = opts.indexOf(current);
+  const i = idx < 0 ? 0 : idx;
+  return opts[(i + dir + opts.length) % opts.length]!;
+}
 
 export interface UsageTokens {
   input: number;
@@ -213,9 +269,15 @@ export function UsageStage({
   const [error, setError] = useState<UsageError | null>(null);
   const [loading, setLoading] = useState(true);
   const [scroll, setScroll] = useState(0);
+  const [window, setWindow] = useState<UsageWindow>('all');
+  const [softStatus, setSoftStatus] = useState<string | null>(null);
   const aliveRef = useRef(true);
   const onFlashRef = useRef(onFlash);
   onFlashRef.current = onFlash;
+  const dataRef = useRef<UsageJson | null>(null);
+  dataRef.current = data;
+  const windowRef = useRef(window);
+  windowRef.current = window;
 
   useEffect(() => {
     aliveRef.current = true;
@@ -224,30 +286,44 @@ export function UsageStage({
     };
   }, []);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (win?: UsageWindow) => {
+    const useWin = win ?? windowRef.current;
     setLoading(true);
-    const r = await runSpeculum<UsageJson>('usage', ['--json']);
+    setSoftStatus(null);
+    const r = await runSpeculum<UsageJson>('usage', buildUsageArgv(useWin));
     if (!aliveRef.current) return;
     if (r.ok) {
       setData(r.json);
       setError(null);
+      setSoftStatus(null);
       setScroll(0);
-      onFlashRef.current?.('usage updated');
+      onFlashRef.current?.(`usage ${formatUsageWindowLabel(useWin)}`);
     } else {
-      setData(null);
-      setError(r.error);
-      onFlashRef.current?.(`usage failed: ${r.error.message}`);
+      // Degrade: keep last good grid when we have one; soft status, never crash.
+      if (dataRef.current) {
+        const msg = `usage failed · showing last good (${formatUsageWindowLabel(useWin)})`;
+        setSoftStatus(msg);
+        onFlashRef.current?.(msg);
+      } else {
+        setData(null);
+        setError(r.error);
+        onFlashRef.current?.(`usage failed: ${r.error.message}`);
+      }
     }
     setLoading(false);
   }, []);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    void load(window);
+  }, [load, window]);
 
   useRefreshOnActive(inputActive, () => {
     void load();
   });
+
+  const applyWindow = useCallback((win: UsageWindow) => {
+    setWindow(win);
+  }, []);
 
   const rowW = Math.max(16, stageBox.width - 4);
   const cards = useMemo(() => (data ? buildUsageCards(data) : []), [data]);
@@ -270,14 +346,25 @@ export function UsageStage({
   const totalInner = cardInnerWidth(totalW);
   const modelInner = cardInnerWidth(modelW);
 
-  useKeyboard((key: { name?: string }) => {
+  useKeyboard((key: { name?: string; sequence?: string }) => {
     if (!inputActive) return;
     const n = (key.name ?? '').toLowerCase().replace('arrow', '');
+    const seq = key.sequence ?? '';
     if (n === 'r') {
       void load();
       return;
     }
-    if (error || !data) return;
+    // Window chips: [ / ] cycle today→7d→30d→all (shell owns digits 1-9 —
+    // never bind plain digits here). Matches probes scope-row convention.
+    if (n === '[' || n === 'leftbracket' || seq === '[') {
+      applyWindow(cycleUsageWindow(windowRef.current, -1));
+      return;
+    }
+    if (n === ']' || n === 'rightbracket' || seq === ']') {
+      applyWindow(cycleUsageWindow(windowRef.current, 1));
+      return;
+    }
+    if (error && !data) return;
     if (n === 'up') {
       setScroll((s) => Math.max(0, s - perModel));
       return;
@@ -287,24 +374,21 @@ export function UsageStage({
     }
   });
 
-  const windowLabel = useMemo(() => {
-    if (!data) return '';
-    const { since, until } = data.window ?? { since: null, until: null };
-    if (!since && !until) return 'all time';
-    return `${since ?? '…'} → ${until ?? '…'}`;
-  }, [data]);
+  const activeWindowLabel = formatUsageWindowLabel(window);
 
-  const headerRight = error
+  const headerRight = error && !data
     ? error.kind
-    : loading && !data
-      ? 'loading'
-      : windowLabel || 'usage';
+    : loading
+      ? `… ${activeWindowLabel}`
+      : softStatus
+        ? 'degraded'
+        : activeWindowLabel;
 
-  const footer = error
+  const footer = error && !data
     ? `r retry · ${error.kind}`
     : modelCards.length > modelSlots
-      ? 'up/dn scroll models · r refresh'
-      : 'r refresh';
+      ? `[/] window · up/dn models · r · ${activeWindowLabel}`
+      : `[/] window · click chip · r · ${activeWindowLabel}`;
 
   return (
     <box
@@ -323,11 +407,43 @@ export function UsageStage({
         minHeight={0}
         active={!!inputActive}
       >
+        {/* Window chips: today · 7d · 30d · all */}
+        <box
+          flexDirection="row"
+          flexShrink={0}
+          height={1}
+          overflow="hidden"
+          backgroundColor={t.background}
+          marginBottom={1}
+        >
+          {USAGE_WINDOW_OPTIONS.map((w) => {
+            const on = w === window;
+            return (
+              <box
+                key={w}
+                flexShrink={0}
+                marginRight={1}
+                backgroundColor={on ? t.selection : t.background}
+                onMouseDown={inputActive ? () => applyWindow(w) : undefined}
+              >
+                <text fg={on ? t.primary : t.muted} wrapMode="none">
+                  {on ? `[${w}]` : w}
+                </text>
+              </box>
+            );
+          })}
+          {loading ? (
+            <text fg={t.info} wrapMode="none">
+              {' …'}
+            </text>
+          ) : null}
+        </box>
+
         {loading && !data && !error ? (
           <FixedClearRow width={rowW} color={t.muted} text={padRow('loading usage…', rowW)} />
         ) : null}
 
-        {error ? (
+        {error && !data ? (
           <box flexDirection="column" flexShrink={0}>
             {errorCopy(error).lines.map((line, i) => (
               <FixedClearRow
@@ -340,8 +456,22 @@ export function UsageStage({
           </box>
         ) : null}
 
+        {softStatus && data ? (
+          <FixedClearRow
+            width={rowW}
+            color={t.warning}
+            text={padRow(softStatus, rowW)}
+          />
+        ) : null}
+
         {data ? (
           <box flexDirection="column" flexGrow={1} flexShrink={1} minHeight={0}>
+            {/* Totals row names the active window. */}
+            <FixedClearRow
+              width={rowW}
+              color={t.muted}
+              text={padRow(`totals · ${activeWindowLabel}`, rowW)}
+            />
             <CardGrid width={rowW} minCardWidth={MIN_STAT_CARD} gap={GRID_GAP}>
               {totalCards.map((c) => (
                 <Card key={c.key} title={c.title} width={totalW} marginBottom={1}>
