@@ -31,6 +31,7 @@ import {
   lightnessStatusLabel,
   budgetMapCanvasRows,
   clampMapLegendEntries,
+  countCoVisibleLinks,
   eventToCanvasCell,
   eventToCanvasSubpixel,
   mapCanvasBodyRows,
@@ -40,8 +41,11 @@ import {
   mapLegendHitAt,
   mapLegendRowWidth,
   mapLegendX0,
+  mapNodePaintPriority,
   minMapCanvasRows,
   paintMapLegendOntoGrid,
+  resolveMapCellWinners,
+  worldNodeIdSet,
   modeStatusLabel,
   neighborhoodIds,
   ORIGIN_ORDER,
@@ -384,6 +388,101 @@ describe('sessionWorldToGraph / evidence / edge honesty (§7.7–§7.9)', () => 
     const { graph } = sessionWorldToGraph(w);
     expect(graph.nodes.find((n) => n.id === 'p')!.type).toBe('knowledge');
     expect(graph.nodes.find((n) => n.id === 's')!.type).toBe('other');
+  });
+
+  test('countCoVisibleLinks / selectDrawnLinks: both endpoints must be in world', () => {
+    const sessions = [
+      row({ id: 'op-a', projectPath: OP, agent: 'primary' }),
+      row({ id: 'op-b', projectPath: OP, agent: 'primary' }),
+      row({ id: 'exp-a', projectPath: EXP, agent: 'primary' }),
+      row({ id: 'exp-b', projectPath: EXP, agent: 'primary' }),
+    ];
+    const links: SessionMapLink[] = [
+      { source: 'op-a', target: 'op-b', kind: 'shared_artifact', count: 1 },
+      { source: 'op-a', target: 'exp-a', kind: 'shared_artifact', count: 1 },
+      { source: 'exp-a', target: 'exp-b', kind: 'shared_artifact', count: 1 },
+      { source: 'op-a', target: 'op-b', kind: 'resumed_from', count: 1 },
+    ];
+    const opWorld = buildSessionWorld(sessions, 'density', defaultFilters);
+    const opIds = worldNodeIdSet(opWorld);
+    expect(opIds.has('exp-a')).toBe(false);
+    // Loaded denominator drops when experiments leave the population.
+    expect(countCoVisibleLinks(links, opIds)).toBe(2); // op-a↔op-b shared + resumed
+    const drawn = selectDrawnLinks(opWorld, links, { subagentsVisible: false });
+    expect(drawn.every((l) => opIds.has(l.source) && opIds.has(l.target))).toBe(true);
+    expect(drawn.some((l) => l.source === 'exp-a' || l.target === 'exp-a')).toBe(false);
+    expect(drawn).toHaveLength(2);
+
+    const allWorld = buildSessionWorld(sessions, 'density', {
+      origins: new Set(['operator', 'experiment']),
+      agents: DEFAULT_ALLOWED_AGENTS,
+    });
+    expect(countCoVisibleLinks(links, worldNodeIdSet(allWorld))).toBe(4);
+    expect(
+      selectDrawnLinks(allWorld, links, { subagentsVisible: false }).length,
+    ).toBe(4);
+  });
+
+  test('mapNodePaintPriority: rare-over-common contract', () => {
+    expect(mapNodePaintPriority('operator', 'primary', { selected: true })).toBeGreaterThan(
+      mapNodePaintPriority('operator', 'primary'),
+    );
+    expect(mapNodePaintPriority('operator', 'primary')).toBeGreaterThan(
+      mapNodePaintPriority('operator', 'subagent'),
+    );
+    expect(mapNodePaintPriority('operator', 'subagent')).toBeGreaterThan(
+      mapNodePaintPriority('harness', 'primary'),
+    );
+    expect(mapNodePaintPriority('harness', 'primary')).toBeGreaterThan(
+      mapNodePaintPriority('experiment', 'primary'),
+    );
+  });
+
+  test('resolveMapCellWinners: operator wins cell over experiment stack', () => {
+    const winners = resolveMapCellWinners(
+      [
+        {
+          id: 'e1',
+          cx: 5,
+          cy: 3,
+          origin: 'experiment',
+          agent: 'primary',
+          glyph: '●',
+          fg: { r: 100, g: 100, b: 100 },
+        },
+        {
+          id: 'e2',
+          cx: 5,
+          cy: 3,
+          origin: 'experiment',
+          agent: 'primary',
+          glyph: '●',
+          fg: { r: 100, g: 100, b: 100 },
+        },
+        {
+          id: 'op',
+          cx: 5,
+          cy: 3,
+          origin: 'operator',
+          agent: 'primary',
+          glyph: '●',
+          fg: { r: 200, g: 50, b: 50 },
+        },
+        {
+          id: 'sub',
+          cx: 5,
+          cy: 3,
+          origin: 'operator',
+          agent: 'subagent',
+          glyph: '◇',
+          fg: { r: 50, g: 200, b: 50 },
+        },
+      ],
+      { cols: 20, rows: 10 },
+    );
+    expect(winners).toHaveLength(1);
+    expect(winners[0]!.id).toBe('op'); // operator primary beats subagent + experiments
+    expect(winners[0]!.stack).toBe(4);
   });
 
   test('selectDrawnLinks: default draws resumed/shared only; parentage when subagents on', () => {

@@ -8,7 +8,7 @@
  */
 import type { SessionListRow, SessionMapLink } from './query-service';
 import { displayLabel, type GraphData, type GraphLink, type GraphNode, type WorldNode } from '../render/graph';
-import { clusterColor, dim, type RGB } from '../render/color';
+import { clusterColor, dim, lighten, type RGB } from '../render/color';
 import type { LegendEntry } from '../graph-view/blit';
 import { classifyCwd, type CwdOrigin } from './cwd-class';
 import type { Viewport } from '../render/viewport';
@@ -397,10 +397,34 @@ export function buildSessionWorld(
 }
 
 /**
- * Evidence edges to draw under the current policy:
+ * Edges whose BOTH endpoints sit in `visibleIds` (current population / world).
+ * Status `links drawn/loaded` uses this for the loaded denominator so hiding a
+ * class drops both numbers; never counts edges into filtered-out sessions.
+ */
+export function countCoVisibleLinks(
+  links: readonly SessionMapLink[],
+  visibleIds: ReadonlySet<string>,
+): number {
+  let n = 0;
+  for (const l of links) {
+    if (l.source === l.target) continue;
+    if (visibleIds.has(l.source) && visibleIds.has(l.target)) n += 1;
+  }
+  return n;
+}
+
+/** Ids of nodes currently on the canvas (population filters applied). */
+export function worldNodeIdSet(world: SessionWorld): Set<string> {
+  return new Set(world.nodes.map((n) => n.id));
+}
+
+/**
+ * Evidence edges to draw under the current policy.
+ * HARD RULE: an edge draws only when BOTH endpoints are in the current world
+ * (visible population). Hiding a class removes every edge that touched it.
  * - default (no selection): co-visible `resumed_from` + `shared_artifact`
  * - subagents visible, no selection: those plus parentage
- * - selection active: all co-visible evidence kinds among the neighborhood
+ * - selection active: all co-visible kinds among the neighborhood
  * Event links stay selection-scoped. Never invents affinity.
  */
 export function selectDrawnLinks(
@@ -412,22 +436,20 @@ export function selectDrawnLinks(
     hiddenEdgeKinds?: ReadonlySet<MapEdgeKind>;
   },
 ): SessionMapLink[] {
-  const nodeIds = new Set(world.nodes.map((n) => n.id));
+  const nodeIds = worldNodeIdSet(world);
   const hidden = opts.hiddenEdgeKinds ?? new Set<MapEdgeKind>();
+  // Population gate first — never draw an edge into a filtered-out endpoint.
+  const coVisible = evidenceLinks.filter(
+    (l) =>
+      l.source !== l.target && nodeIds.has(l.source) && nodeIds.has(l.target),
+  );
   let candidates: SessionMapLink[];
 
   if (opts.selected && nodeIds.has(opts.selected)) {
     const sel = opts.selected;
-    candidates = evidenceLinks.filter(
-      (l) =>
-        (l.source === sel || l.target === sel) &&
-        nodeIds.has(l.source) &&
-        nodeIds.has(l.target) &&
-        l.source !== l.target,
-    );
+    candidates = coVisible.filter((l) => l.source === sel || l.target === sel);
   } else {
-    candidates = evidenceLinks.filter((l) => {
-      if (!nodeIds.has(l.source) || !nodeIds.has(l.target) || l.source === l.target) return false;
+    candidates = coVisible.filter((l) => {
       if (l.kind === 'resumed_from' || l.kind === 'shared_artifact') return true;
       if (l.kind === 'parentage' && opts.subagentsVisible) return true;
       return false;
@@ -435,6 +457,106 @@ export function selectDrawnLinks(
   }
 
   return filterEvidenceLinks(candidates, hidden);
+}
+
+// ── Node paint priority (collision contract) ─────────────────────────────────
+/**
+ * Per-cell paint priority when multiple nodes collapse into one glyph cell.
+ *
+ * Contract (higher wins; rare-over-common so dense classes never erase sparse):
+ *   selected > hovered > operator(primary) > subagent > harness > experiment > unknown
+ *
+ * Links always paint under nodes (never overwrite a node glyph cell).
+ * Stack size > MAP_STACK_BRIGHTEN_AT slightly lightens the winner via lighten().
+ */
+export const MAP_STACK_BRIGHTEN_AT = 4;
+
+export function mapNodePaintPriority(
+  origin: MapOrigin,
+  agent: MapAgent,
+  opts?: { selected?: boolean; hovered?: boolean },
+): number {
+  if (opts?.selected) return 100;
+  if (opts?.hovered) return 90;
+  if (agent === 'subagent') return 70;
+  if (origin === 'operator') return 80;
+  if (origin === 'harness') return 60;
+  if (origin === 'experiment') return 50;
+  return 40; // unknown
+}
+
+export interface MapPaintCandidate {
+  id: string;
+  cx: number;
+  cy: number;
+  origin: MapOrigin;
+  agent: MapAgent;
+  glyph: string;
+  fg: RGB;
+  selected?: boolean;
+  hovered?: boolean;
+}
+
+export interface MapPaintWinner {
+  id: string;
+  cx: number;
+  cy: number;
+  glyph: string;
+  fg: RGB;
+  /** How many nodes collapsed into this cell (1 = alone). */
+  stack: number;
+}
+
+/**
+ * Resolve one winner per cell by mapNodePaintPriority. Deterministic on ties (id asc).
+ * Applies stack brighten when stack ≥ MAP_STACK_BRIGHTEN_AT (existing lighten channel).
+ */
+export function resolveMapCellWinners(
+  candidates: readonly MapPaintCandidate[],
+  opts?: { cols?: number; rows?: number },
+): MapPaintWinner[] {
+  const cols = opts?.cols;
+  const rows = opts?.rows;
+  type Acc = MapPaintCandidate & { priority: number; stack: number };
+  const best = new Map<string, Acc>();
+  for (const c of candidates) {
+    if (cols != null && (c.cx < 0 || c.cx >= cols)) continue;
+    if (rows != null && (c.cy < 0 || c.cy >= rows)) continue;
+    const key = `${c.cx},${c.cy}`;
+    const priority = mapNodePaintPriority(c.origin, c.agent, {
+      selected: c.selected,
+      hovered: c.hovered,
+    });
+    const prev = best.get(key);
+    if (!prev) {
+      best.set(key, { ...c, priority, stack: 1 });
+      continue;
+    }
+    prev.stack += 1;
+    if (
+      priority > prev.priority ||
+      (priority === prev.priority && c.id.localeCompare(prev.id) < 0)
+    ) {
+      best.set(key, { ...c, priority, stack: prev.stack });
+    }
+  }
+  const out: MapPaintWinner[] = [];
+  for (const w of best.values()) {
+    let fg = w.fg;
+    if (w.stack >= MAP_STACK_BRIGHTEN_AT) {
+      // Density cue within the existing lightness channel — no new palette.
+      fg = lighten(fg, Math.min(0.22, 0.06 * (w.stack - MAP_STACK_BRIGHTEN_AT + 1)));
+    }
+    out.push({
+      id: w.id,
+      cx: w.cx,
+      cy: w.cy,
+      glyph: w.glyph,
+      fg,
+      stack: w.stack,
+    });
+  }
+  return out;
 }
 
 /** Solid straight edge (everything except faint shared-artifact). */

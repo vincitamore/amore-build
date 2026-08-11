@@ -61,6 +61,7 @@ import {
   layoutAxisStrip,
   legendToggleTarget,
   lightnessStatusLabel,
+  countCoVisibleLinks,
   eventToCanvasCell,
   eventToCanvasSubpixel,
   mapCanvasBodyRows,
@@ -72,9 +73,11 @@ import {
   neighborhoodIds,
   paintMapLegendOntoGrid,
   partitionDrawnLinks,
+  resolveMapCellWinners,
   selectDrawnLinks,
   selectZoomTierLabels,
   sessionWorldToGraph,
+  worldNodeIdSet,
   ZOOM_TIER_MIN,
   type MapAgent,
   type MapCanvasOrigin,
@@ -82,8 +85,10 @@ import {
   type MapLightness,
   type MapMode,
   type MapOrigin,
+  type MapPaintCandidate,
   type SessionWorld,
 } from './map-data';
+import { nodeGlyph } from '../render/graph';
 
 const STATUS_BG = RGBA.fromInts(30, 34, 42);
 const STATUS_FG = RGBA.fromInts(205, 211, 220);
@@ -363,7 +368,6 @@ export function MapStage({
   const evidenceLinks = soft.kind === 'ready' ? soft.links : [];
   const annotationMap = soft.kind === 'ready' ? soft.annotations : {};
   const totalSessions = soft.kind === 'ready' ? soft.total : 0;
-  const loadedLinkCount = evidenceLinks.length;
 
   const populationFilters = useMemo(
     () => ({ origins: allowedOrigins, agents: allowedAgents }),
@@ -376,6 +380,18 @@ export function MapStage({
   }, [sessions, mode, populationFilters]);
 
   const subagentsVisible = allowedAgents.has('subagent');
+
+  /** Visible node ids = current population (filters applied). Links load/draw only here. */
+  const visibleNodeIds = useMemo(
+    () => (sessionWorld ? worldNodeIdSet(sessionWorld) : new Set<string>()),
+    [sessionWorld],
+  );
+
+  /** Loaded denominator: both endpoints in the current population (not the raw corpus fetch). */
+  const loadedLinkCount = useMemo(
+    () => countCoVisibleLinks(evidenceLinks, visibleNodeIds),
+    [evidenceLinks, visibleNodeIds],
+  );
 
   const drawnLinks = useMemo(() => {
     if (!sessionWorld) return [] as SessionMapLink[];
@@ -529,6 +545,7 @@ export function MapStage({
     );
 
     // Faint shared_artifact edges under glyphs (EDGE_FAINT).
+    // Never overwrite a node glyph — only empty cells or other edge braille.
     if (faintLinks.length > 0 && sessionWorld) {
       const byId = new Map(worldNodes.map((n) => [n.id, n]));
       const canvas = new BrailleCanvas(width, bodyHeight);
@@ -536,6 +553,8 @@ export function MapStage({
         const a = byId.get(l.source);
         const b = byId.get(l.target);
         if (!a || !b) continue;
+        // Both endpoints already co-visible (selectDrawnLinks); double-check.
+        if (!visibleNodeIds.has(l.source) || !visibleNodeIds.has(l.target)) continue;
         const sa = worldToScreen(a, vp, width, bodyHeight);
         const sb = worldToScreen(b, vp, width, bodyHeight);
         canvas.line(sa.x, sa.y, sb.x, sb.y);
@@ -546,7 +565,13 @@ export function MapStage({
           if (mask === 0) continue;
           const idx = cy * cols + cx;
           const existing = result.grid.cells[idx];
-          // Only paint into empty cells or overwrite other dim edge braille.
+          // Links never overwrite node glyphs (●◇◉ etc.) — only empty / edge braille.
+          const isNodeGlyph =
+            existing &&
+            existing.char !== ' ' &&
+            !(existing.char >= '⠀' && existing.char <= '⣿') &&
+            existing.char !== '░';
+          if (isNodeGlyph) continue;
           if (
             !existing ||
             (existing.char >= '⠀' && existing.char <= '⣿' && existing.fg.r <= EDGE_FAINT.r + 40)
@@ -557,6 +582,51 @@ export function MapStage({
             };
           }
         }
+      }
+    }
+
+    // ── Node paint priority (collision contract) ────────────────────────────
+    // Links already painted. Re-resolve node cells so rare classes win over
+    // dense ones: selected > hovered > operator > subagent > harness > experiment.
+    // A cell that holds any node glyph is never left as link texture.
+    if (sessionWorld && bodyRows > 0) {
+      const byId = new Map(sessionWorld.nodes.map((n) => [n.id, n]));
+      const candidates: MapPaintCandidate[] = [];
+      for (const sn of result.nodes) {
+        const wn = byId.get(sn.id);
+        if (!wn) continue;
+        const cx = Math.floor(sn.x / 2);
+        const cy = Math.floor(sn.y / 4);
+        if (cx < 0 || cy < 0 || cx >= cols || cy >= bodyRows) continue;
+        const isSel = selected === sn.id;
+        const isHov = !selected && hovered === sn.id;
+        const hue = clusterColor(wn.cluster);
+        let fg = hue;
+        if (lightness === 'error') {
+          const density = annotationMap[sn.id]?.errorDensity ?? 0;
+          fg = attentionShade(hue, errorDensityTier(density));
+        }
+        let glyph = nodeGlyph(wn.agent === 'subagent' ? 'other' : 'knowledge');
+        if (isSel) {
+          glyph = '◉';
+          fg = { r: 240, g: 244, b: 250 };
+        }
+        candidates.push({
+          id: sn.id,
+          cx,
+          cy,
+          origin: wn.origin,
+          agent: wn.agent,
+          glyph,
+          fg,
+          selected: isSel,
+          hovered: isHov,
+        });
+      }
+      const winners = resolveMapCellWinners(candidates, { cols, rows: bodyRows });
+      for (const w of winners) {
+        const idx = w.cy * cols + w.cx;
+        result.grid.cells[idx] = { char: w.glyph, fg: w.fg };
       }
     }
 
@@ -703,6 +773,8 @@ export function MapStage({
     tooSmall,
     legendDrawn,
     legendDrawnCount,
+    hovered,
+    visibleNodeIds,
   ]);
 
   const gridRef = useRef(grid);

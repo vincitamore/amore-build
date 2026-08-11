@@ -16,6 +16,7 @@ import {
   buildMapLegendRows,
   clampMapLegendEntries,
   buildSessionWorld,
+  countCoVisibleLinks,
   DEFAULT_ALLOWED_AGENTS,
   DEFAULT_ALLOWED_ORIGINS,
   deriveAxisTicks,
@@ -29,13 +30,18 @@ import {
   mapCanvasBodyRows,
   mapLegendHitAt,
   mapLegendX0,
+  resolveMapCellWinners,
   selectDrawnLinks,
   sessionLabel,
   sessionWorldToGraph,
+  worldNodeIdSet,
+  type MapPaintCandidate,
 } from './map-data';
 import { seedStageBox } from './sessions-layout';
 import { MapStage } from './MapStage';
 import { openQueryService, type SessionListRow, type SessionMapLink } from './query-service';
+import { nodeGlyph } from '../render/graph';
+import { clusterColor } from '../render/color';
 
 const W = Number(process.env.SMOKE_W ?? 140);
 const H = Number(process.env.SMOKE_H ?? 48);
@@ -533,6 +539,225 @@ if (screenNodes.length > 0) {
   const cellY = Math.floor(probe.y / 4);
   const hit = hitTestSession(screenNodes, cellX, cellY);
   log(`hit-test selects session (${hit})`, hit === probe.id);
+}
+
+// ── 1b. Dense corpus-shape fixture (~1700 nodes / ~1400 links) ───────────────
+// Real-scale regression wall: experiments in time bursts, shared_artifact dense.
+{
+  const OP_PRIM = 66;
+  const SUB_N = 192;
+  const EXP_N = 1471;
+  const HAR_N = 4;
+  const dense: SessionListRow[] = [];
+  const denseLinks: SessionMapLink[] = [];
+  // Operator primaries + subagents (~258 total, live-corpus shape)
+  for (let i = 0; i < OP_PRIM; i++) {
+    dense.push({
+      id: `op-p-${i}`,
+      projectPath: OP,
+      agent: 'primary',
+      parentSession: null,
+      modelId: 'm',
+      startedAt: `2026-01-${String(1 + (i % 28)).padStart(2, '0')}T10:00:00.000Z`,
+      endedAt: `2026-01-${String(1 + (i % 28)).padStart(2, '0')}T11:00:00.000Z`,
+      turnCount: 5 + (i % 40),
+      userMsgCount: 1,
+      toolCallCount: 0,
+      toolErrorCount: 0,
+      eventCount: 1,
+      title: `Op ${i}`,
+    });
+  }
+  for (let i = 0; i < SUB_N; i++) {
+    const parent = `op-p-${i % OP_PRIM}`;
+    dense.push({
+      id: `op-s-${i}`,
+      projectPath: OP,
+      agent: 'subagent',
+      parentSession: parent,
+      modelId: 'm',
+      startedAt: `2026-01-${String(1 + (i % 28)).padStart(2, '0')}T12:00:00.000Z`,
+      endedAt: `2026-01-${String(1 + (i % 28)).padStart(2, '0')}T13:00:00.000Z`,
+      turnCount: 2,
+      userMsgCount: 1,
+      toolCallCount: 0,
+      toolErrorCount: 0,
+      eventCount: 1,
+      title: `Sub ${i}`,
+    });
+    denseLinks.push({
+      source: `op-s-${i}`,
+      target: parent,
+      kind: 'parentage',
+      count: 1,
+    });
+  }
+  // Experiments in tight time bursts (same day clusters → cell collision)
+  for (let i = 0; i < EXP_N; i++) {
+    const burst = Math.floor(i / 50); // ~50 per burst
+    dense.push({
+      id: `exp-${i}`,
+      projectPath: EXP,
+      agent: 'primary',
+      parentSession: null,
+      modelId: 'm',
+      startedAt: `2026-03-${String(1 + (burst % 28)).padStart(2, '0')}T${String(i % 24).padStart(2, '0')}:00:00.000Z`,
+      endedAt: `2026-03-${String(1 + (burst % 28)).padStart(2, '0')}T${String(i % 24).padStart(2, '0')}:30:00.000Z`,
+      turnCount: 1 + (i % 5),
+      userMsgCount: 1,
+      toolCallCount: 0,
+      toolErrorCount: 0,
+      eventCount: 1,
+      title: `Exp ${i}`,
+    });
+  }
+  for (let i = 0; i < HAR_N; i++) {
+    dense.push({
+      id: `har-${i}`,
+      projectPath: HAR,
+      agent: 'primary',
+      parentSession: null,
+      modelId: 'm',
+      startedAt: `2026-02-0${1 + i}T10:00:00.000Z`,
+      endedAt: `2026-02-0${1 + i}T11:00:00.000Z`,
+      turnCount: 1,
+      userMsgCount: 1,
+      toolCallCount: 0,
+      toolErrorCount: 0,
+      eventCount: 1,
+      title: `Har ${i}`,
+    });
+  }
+  // ~1100 shared_artifact among experiments + ~60 among operators + cross edges
+  for (let i = 0; i < 1100; i++) {
+    denseLinks.push({
+      source: `exp-${i}`,
+      target: `exp-${(i + 7) % EXP_N}`,
+      kind: 'shared_artifact',
+      count: 1,
+    });
+  }
+  for (let i = 0; i < 60; i++) {
+    denseLinks.push({
+      source: `op-p-${i % OP_PRIM}`,
+      target: `op-p-${(i + 3) % OP_PRIM}`,
+      kind: 'shared_artifact',
+      count: 1,
+    });
+  }
+  for (let i = 0; i < 40; i++) {
+    denseLinks.push({
+      source: `op-p-${i % OP_PRIM}`,
+      target: `exp-${i}`,
+      kind: 'shared_artifact',
+      count: 1,
+    });
+  }
+  console.log(
+    `DENSE_FIXTURE nodes=${dense.length} links=${denseLinks.length} (target ~1700/~1400)`,
+  );
+
+  const opFilters = {
+    origins: new Set(['operator'] as const),
+    agents: new Set(['primary', 'subagent'] as const),
+  };
+  const allFilters = {
+    origins: new Set(['operator', 'experiment', 'harness'] as const),
+    agents: new Set(['primary', 'subagent'] as const),
+  };
+  const wOp = buildSessionWorld(dense, 'density', opFilters);
+  const wAll = buildSessionWorld(dense, 'density', allFilters);
+  const idsOp = worldNodeIdSet(wOp);
+  const idsAll = worldNodeIdSet(wAll);
+  const loadedOp = countCoVisibleLinks(denseLinks, idsOp);
+  const loadedAll = countCoVisibleLinks(denseLinks, idsAll);
+  const drawnOp = selectDrawnLinks(wOp, denseLinks, { subagentsVisible: true });
+  const drawnAll = selectDrawnLinks(wAll, denseLinks, { subagentsVisible: true });
+  // (i) experiments hidden → no experiment-endpoint edges in drawn/loaded
+  const noExpEndpoint = drawnOp.every(
+    (l) => !l.source.startsWith('exp-') && !l.target.startsWith('exp-'),
+  );
+  log(
+    `dense (i) exp-hidden loaded=${loadedOp} drawn=${drawnOp.length} (no exp endpoints)`,
+    noExpEndpoint && loadedOp === drawnOp.length && loadedOp < loadedAll,
+  );
+  log(
+    `dense (i) loaded drops vs all (${loadedOp} < ${loadedAll})`,
+    loadedOp < loadedAll,
+  );
+
+  // (ii) paint priority: with all visible, operator+subagent still win cells
+  const colsD = 100;
+  const rowsD = 24;
+  const gOp = sessionWorldToGraph(wOp, drawnOp);
+  const gAll = sessionWorldToGraph(wAll, drawnAll);
+  const vpOp = fitViewport(gOp.worldNodes, colsD * 2, rowsD * 4);
+  const vpAll = fitViewport(gAll.worldNodes, colsD * 2, rowsD * 4);
+  const toCandidates = (
+    world: typeof wOp,
+    g: typeof gOp,
+    vp: typeof vpOp,
+  ): MapPaintCandidate[] => {
+    const out: MapPaintCandidate[] = [];
+    for (const wn of world.nodes) {
+      const pos = g.worldNodes.find((n) => n.id === wn.id);
+      if (!pos) continue;
+      const s = worldToScreen(pos, vp, colsD * 2, rowsD * 4);
+      const cx = Math.floor(s.x / 2);
+      const cy = Math.floor(s.y / 4);
+      if (cx < 0 || cy < 0 || cx >= colsD || cy >= rowsD) continue;
+      out.push({
+        id: wn.id,
+        cx,
+        cy,
+        origin: wn.origin,
+        agent: wn.agent,
+        glyph: nodeGlyph(wn.agent === 'subagent' ? 'other' : 'knowledge'),
+        fg: clusterColor(wn.cluster),
+      });
+    }
+    return out;
+  };
+  const winOp = resolveMapCellWinners(toCandidates(wOp, gOp, vpOp), {
+    cols: colsD,
+    rows: rowsD,
+  });
+  const winAll = resolveMapCellWinners(toCandidates(wAll, gAll, vpAll), {
+    cols: colsD,
+    rows: rowsD,
+  });
+  const rareOp = winOp.filter(
+    (w) => w.id.startsWith('op-p-') || w.id.startsWith('op-s-'),
+  ).length;
+  const rareAll = winAll.filter(
+    (w) => w.id.startsWith('op-p-') || w.id.startsWith('op-s-'),
+  ).length;
+  const expWins = winAll.filter((w) => w.id.startsWith('exp-')).length;
+  console.log(
+    `DENSE_PAINT rareCells op-only=${rareOp} with-exp=${rareAll} expCells=${expWins} (priority keeps rare > 0)`,
+  );
+  log(
+    `dense (ii) operator/subagent still paint when experiments join (${rareAll} rare cells)`,
+    rareAll > 0 && rareAll >= Math.min(20, Math.floor(rareOp * 0.3)),
+  );
+  // Layout: rare nodes stay in fitted world (finite coords both modes)
+  const rareInWorld = wAll.nodes.filter(
+    (n) => n.origin === 'operator' || n.agent === 'subagent',
+  );
+  const rareOnScreen = rareInWorld.filter((n) => {
+    const pos = gAll.worldNodes.find((w) => w.id === n.id)!;
+    const s = worldToScreen(pos, vpAll, colsD * 2, rowsD * 4);
+    const cx = Math.floor(s.x / 2);
+    const cy = Math.floor(s.y / 4);
+    return cx >= 0 && cy >= 0 && cx < colsD && cy < rowsD;
+  }).length;
+  console.log(
+    `DENSE_LAYOUT rareNodes=${rareInWorld.length} onScreen=${rareOnScreen} (fitted world keeps them in frame)`,
+  );
+  log(
+    `dense layout: rare classes stay in fitted viewport (${rareOnScreen}/${rareInWorld.length})`,
+    rareOnScreen > 0,
+  );
 }
 
 // ── 2. Source hygiene: MapStage must not import force layout / d3-force ───────
