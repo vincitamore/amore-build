@@ -80,21 +80,39 @@ fn env_version(var: &str) -> Option<String> {
 
 /// `cli.<key>` across the config layers. `managed_only` excludes the user's own
 /// `config.toml` so a user-set bound can't count as organization policy.
+///
+/// Hard `required_*` keys from remote-synced layers (`managed` =
+/// `$GROK_HOME/managed_config.toml`, `user_requirements` =
+/// `$GROK_HOME/requirements.toml`) are refused so a deployment-config response
+/// cannot gate process exit. Soft `minimum_version` / `maximum_version` from
+/// those layers still steer the updater. Local system/MDM layers remain
+/// authoritative for `required_*`.
 fn version_candidates(
     layers: &crate::config::ConfigLayers,
     key: &str,
     managed_only: bool,
 ) -> Vec<String> {
+    // fork: remote-synced layers cannot gate startup
+    let refuse_remote_required = matches!(
+        key,
+        "required_minimum_version" | "required_maximum_version"
+    );
     [
         cli_version_from_toml(&layers.system_managed, key),
-        cli_version_from_toml(&layers.managed, key),
+        (!refuse_remote_required)
+            .then(|| cli_version_from_toml(&layers.managed, key))
+            .flatten(),
         (!managed_only)
             .then(|| cli_version_from_toml(&layers.user, key))
             .flatten(),
-        layers
-            .user_requirements
-            .as_ref()
-            .and_then(|l| cli_version_from_toml(l, key)),
+        (!refuse_remote_required)
+            .then(|| {
+                layers
+                    .user_requirements
+                    .as_ref()
+                    .and_then(|l| cli_version_from_toml(l, key))
+            })
+            .flatten(),
         layers
             .system_requirements
             .as_ref()
@@ -293,24 +311,42 @@ mod tests {
         None
     }
 
+    fn parse_toml(s: &str) -> TomlValue {
+        if s.is_empty() {
+            TomlValue::Table(Default::default())
+        } else {
+            toml::from_str(s).unwrap()
+        }
+    }
+
     fn layers(managed: &str, user: &str, mdm: &str) -> crate::config::ConfigLayers {
-        let parse = |s: &str| {
-            if s.is_empty() {
-                TomlValue::Table(Default::default())
-            } else {
-                toml::from_str(s).unwrap()
-            }
-        };
         crate::config::ConfigLayers {
             system_managed: TomlValue::Table(Default::default()),
-            managed: parse(managed),
-            user: parse(user),
+            managed: parse_toml(managed),
+            user: parse_toml(user),
             user_requirements: None,
             system_requirements: None,
             mdm_requirements: if mdm.is_empty() {
                 None
             } else {
-                Some(parse(mdm))
+                Some(parse_toml(mdm))
+            },
+            ..Default::default()
+        }
+    }
+
+    /// Local admin policy (`system_managed`) rather than server-synced `managed`.
+    fn layers_system(system_managed: &str, user: &str, mdm: &str) -> crate::config::ConfigLayers {
+        crate::config::ConfigLayers {
+            system_managed: parse_toml(system_managed),
+            managed: TomlValue::Table(Default::default()),
+            user: parse_toml(user),
+            user_requirements: None,
+            system_requirements: None,
+            mdm_requirements: if mdm.is_empty() {
+                None
+            } else {
+                Some(parse_toml(mdm))
             },
             ..Default::default()
         }
@@ -360,11 +396,15 @@ mod tests {
 
     #[test]
     fn every_knob_fails_open_on_an_invalid_value() {
-        let l = layers(
-            "[cli]\nminimum_version = \"nope\"\nmaximum_version = \"bad\"\n\
-             required_minimum_version = \"junk\"\nrequired_maximum_version = \"0.2.150\"\n",
+        // Soft knobs may live on the server-synced managed layer; hard required_*
+        // knobs under test here use system_managed (local admin policy).
+        let mut l = layers(
+            "[cli]\nminimum_version = \"nope\"\nmaximum_version = \"bad\"\n",
             "",
             "",
+        );
+        l.system_managed = parse_toml(
+            "[cli]\nrequired_minimum_version = \"junk\"\nrequired_maximum_version = \"0.2.150\"\n",
         );
         let p = VersionPolicy::from_layers(&l, &no_env);
         assert_eq!(p.minimum, None);
@@ -375,25 +415,25 @@ mod tests {
 
     #[test]
     fn a_user_bound_cannot_cancel_a_managed_hard_bound() {
-        // Managed floor; an env ceiling below it would make the range
-        // contradictory and naively drop both. The managed floor must survive.
-        let l = layers("[cli]\nrequired_minimum_version = \"0.2.100\"\n", "", "");
+        // system_managed floor; an env ceiling below it would make the range
+        // contradictory and naively drop both. The local admin floor must survive.
+        let l = layers_system("[cli]\nrequired_minimum_version = \"0.2.100\"\n", "", "");
         let low_ceiling =
             |var: &str| (var == "GROK_REQUIRED_MAXIMUM_VERSION").then(|| "0.2.50".to_string());
         let p = VersionPolicy::from_layers(&l, &low_ceiling);
         assert_eq!(p.required_minimum, Some(v("0.2.100")));
         assert_eq!(p.required_maximum, None);
 
-        // Symmetric: a user floor can't cancel a managed ceiling.
-        let l = layers("[cli]\nrequired_maximum_version = \"0.2.100\"\n", "", "");
+        // Symmetric: a user floor can't cancel a system_managed ceiling.
+        let l = layers_system("[cli]\nrequired_maximum_version = \"0.2.100\"\n", "", "");
         let high_floor =
             |var: &str| (var == "GROK_REQUIRED_MINIMUM_VERSION").then(|| "0.2.200".to_string());
         let p = VersionPolicy::from_layers(&l, &high_floor);
         assert_eq!(p.required_maximum, Some(v("0.2.100")));
         assert_eq!(p.required_minimum, None);
 
-        // Tightening BOTH sides into a contradiction must not drop the managed floor.
-        let l = layers("[cli]\nrequired_minimum_version = \"0.2.100\"\n", "", "");
+        // Tightening BOTH sides into a contradiction must not drop the system_managed floor.
+        let l = layers_system("[cli]\nrequired_minimum_version = \"0.2.100\"\n", "", "");
         let both = |var: &str| match var {
             "GROK_REQUIRED_MINIMUM_VERSION" => Some("99.0.0".to_string()),
             "GROK_REQUIRED_MAXIMUM_VERSION" => Some("0.0.1".to_string()),
@@ -404,14 +444,77 @@ mod tests {
         assert_eq!(p.required_maximum, None);
         assert!(!p.has_contradictory_required_range());
 
-        // A purely managed contradiction still fails open (ignored, not reverted).
-        let l = layers(
+        // A purely system_managed contradiction still fails open (ignored, not reverted).
+        let l = layers_system(
             "[cli]\nrequired_minimum_version = \"0.3.0\"\nrequired_maximum_version = \"0.2.0\"\n",
             "",
             "",
         );
         let p = VersionPolicy::from_layers(&l, &no_env);
         assert!(p.has_contradictory_required_range());
+    }
+
+    /// Remote-synced layers cannot surface `required_*` as version-policy
+    /// candidates; local system_managed and MDM still can. Proves both directions.
+    #[test]
+    fn remote_synced_required_keys_cannot_gate_startup() {
+        // user_requirements ($GROK_HOME/requirements.toml) must not gate.
+        let mut l = layers("", "", "");
+        l.user_requirements = Some(parse_toml(
+            "[cli]\nrequired_minimum_version = \"99.0.0\"\n",
+        ));
+        let p = VersionPolicy::from_layers(&l, &no_env);
+        assert_eq!(
+            p.required_minimum, None,
+            "user_requirements required_minimum must not surface as a candidate"
+        );
+
+        // managed ($GROK_HOME/managed_config.toml) must not gate.
+        let l = layers("[cli]\nrequired_minimum_version = \"99.0.0\"\n", "", "");
+        let p = VersionPolicy::from_layers(&l, &no_env);
+        assert_eq!(
+            p.required_minimum, None,
+            "managed required_minimum must not surface as a candidate"
+        );
+
+        // Soft bounds from the same remote-synced layers still apply.
+        let l = layers("[cli]\nminimum_version = \"0.2.100\"\n", "", "");
+        let p = VersionPolicy::from_layers(&l, &no_env);
+        assert_eq!(
+            p.minimum,
+            Some(v("0.2.100")),
+            "soft minimum from managed must still steer the updater"
+        );
+
+        // system_managed (local admin) must still be honored.
+        let l = layers_system("[cli]\nrequired_minimum_version = \"99.0.0\"\n", "", "");
+        let p = VersionPolicy::from_layers(&l, &no_env);
+        assert_eq!(
+            p.required_minimum,
+            Some(v("99.0.0")),
+            "system_managed required_minimum must still gate"
+        );
+
+        // mdm_requirements must still be honored.
+        let l = layers("", "", "[cli]\nrequired_minimum_version = \"99.0.0\"\n");
+        let p = VersionPolicy::from_layers(&l, &no_env);
+        assert_eq!(
+            p.required_minimum,
+            Some(v("99.0.0")),
+            "mdm_requirements required_minimum must still gate"
+        );
+
+        // system_requirements must still be honored.
+        let mut l = layers("", "", "");
+        l.system_requirements = Some(parse_toml(
+            "[cli]\nrequired_minimum_version = \"99.0.0\"\n",
+        ));
+        let p = VersionPolicy::from_layers(&l, &no_env);
+        assert_eq!(
+            p.required_minimum,
+            Some(v("99.0.0")),
+            "system_requirements required_minimum must still gate"
+        );
     }
 
     fn pol(

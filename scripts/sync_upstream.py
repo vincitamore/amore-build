@@ -563,6 +563,12 @@ def cmd_verify(dry_run: bool) -> int:
         "crates/codegen/xai-grok-pager/src/app/effects/mod.rs", "// start identity filled in by register()",
         "RegisterActiveSession effect literal names the started_at field", problems)
 
+    # remote startup-gate refusal: server-synced layers cannot set required_* that exit at launch
+    _check_file_contains(
+        "crates/codegen/xai-grok-shell/src/util/config/resolve/version.rs",
+        "// fork: remote-synced layers cannot gate startup",
+        "remote-synced required_* keys cannot gate startup", problems)
+
     # 7. build + smoke (this host). Build is the long pole; allow skipping.
     #    The full Linux pager suite remains CI-owned (UPSTREAM.md §5).
     if dry_run:

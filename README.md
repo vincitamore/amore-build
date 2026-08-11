@@ -342,11 +342,13 @@ hints); to upgrade, re-run the installer; it keeps an `amore.prev` rollback.
 ## Egress
 
 On the wire, the shipped binary talks to the endpoints you configure and
-nothing else. The telemetry subsystem inherited from upstream ships inert:
-disabled by default, no client constructed while disabled, no token baked
-into any release build, and every upstream sync re-verifies that posture
-mechanically. Both credential rails of the shipped binaries were captured
-under syscall-level tracing before this claim was written: the method is
+nothing else. A configured endpoint cannot gate startup; remote-synced policy
+keys that could block launch are refused. The telemetry subsystem inherited
+from upstream ships inert: disabled by default, no client constructed while
+disabled, no token baked into any release build, and every upstream sync
+re-verifies that posture mechanically. Both credential rails of the shipped
+binaries were captured under syscall-level tracing before this claim was
+written: the method is
 [`scripts/egress_capture.sh`](scripts/egress_capture.sh) and the receipts
 are in [`docs/egress.md`](docs/egress.md). One Lucerna dream cycle under the
 same harness: [`scripts/lucerna_egress_capture.sh`](scripts/lucerna_egress_capture.sh).

@@ -476,7 +476,7 @@ fn deployment_key_fingerprint(key: &str) -> String {
     blake3::hash(key.as_bytes()).to_hex().to_string()
 }
 
-/// Whether managed config fetching is enabled (env > config.toml > default true).
+/// Whether managed config fetching is enabled (env > config.toml > default false).
 /// Callers doing auto-fetch should check this; explicit user actions (grok setup) skip it.
 pub fn is_fetch_enabled() -> bool {
     if let Some(v) = crate::agent::config::env_bool("GROK_MANAGED_CONFIG") {
@@ -485,7 +485,7 @@ pub fn is_fetch_enabled() -> bool {
     crate::config::load_effective_config()
         .ok()
         .and_then(|cfg| cfg.get("features")?.get("managed_config")?.as_bool())
-        .unwrap_or(true)
+        .unwrap_or(false)
 }
 
 /// Fetch managed config + requirements and write to `~/.grok/`, trying the

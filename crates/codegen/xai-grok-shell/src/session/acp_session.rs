@@ -455,6 +455,7 @@ mod is_busy_tests {
             combine_edit_holds: std::collections::HashSet::new(),
             notifications_suppressed: false,
             rewindable: false,
+            front_message_committed: false,
             nudges_used_this_session: 0,
         }
     }
