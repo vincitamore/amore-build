@@ -129,11 +129,13 @@ installs its release binaries into a house by default (`--no-iris` opts out;
 a failed download never fails the house); `amore setup` records PATH
 detection. Never required to run Amore Build; absence is quiet.
 
-**Auto-update hard-off.** Compile-time policy in `xai-grok-update`
-(`FORK_AUTO_UPDATE_HARD_OFF`): auto-update is forced ineffective so the fork cannot
-self-update back to upstream. Newer builds come from Amore Build release
-artifacts, not upstream installers. The upgrade path is re-running the
-installer; it keeps an `amore.prev` rollback of the previous copy.
+**Upstream update origins stay unreachable.** Compile-time policy in
+`xai-grok-update` (`FORK_AUTO_UPDATE_HARD_OFF`) keeps the inherited upstream
+installer path inert so the fork cannot self-update back into xAI releases.
+The fork's own update path lives under `self_update/` and checks only
+Amore Build GitHub Releases (default-on version check; apply path ships
+separately). Upgrade today by re-running the installer (`amore.prev`
+rollback) or inspecting with `amore update --check`.
 
 **Test-suite platform coverage (inherited).** The upstream suite is written
 against unix hosts: a substantial set of tests assert unix path shapes, unix
@@ -169,16 +171,19 @@ python scripts/sync_upstream.py --update-pin # SOURCE_REV -> upstream/main
 ```
 
 `--apply` refuses a dirty working tree and never commits; the merge is left
-for human review. `--verify` checks the fork surfaces mechanically, nine of them
-check groups as of 2026-08-04: `.amore`/`.grok` precedence, `~/.amore`
-default home, identity/binary naming (argv0 aliases), auto-update hard-off
-(`FORK_AUTO_UPDATE_HARD_OFF`), the embed + `init` ownership tests, the
-brand-boundary gate, the `resolved_bin_name()` branding call-site pins
-(resume-hint / titles / completions), the doctor-namespace migration
-pins, and the egress pins (telemetry mode defaults to `Disabled`; no
-`GROK_TELEMETRY_BUILD_*` reporting token referenced in any workflow), and
-then builds and smokes `amore` on the host. The egress pins re-verify the
-shipped posture at every sync, so the public egress statement is
+for human review. `--verify` checks the fork surfaces mechanically across
+eleven check groups: `.amore`/`.grok` precedence, `~/.amore` default home,
+identity/binary naming (argv0 aliases), upstream-installer hard-off
+(`FORK_AUTO_UPDATE_HARD_OFF`; the fork's own `self_update` path is separate),
+the embed + `init` ownership tests, the brand-boundary gate, the
+`resolved_bin_name()` branding call-site pins (resume-hint / titles /
+completions), the doctor-namespace migration pins, the egress pins
+(telemetry mode defaults to `Disabled`; no `GROK_TELEMETRY_BUILD_*`
+reporting token referenced in any workflow), companion/instrument pins,
+and the self-update origin lock (group 11: origin constants, module wiring,
+and lacks-pins that forbid xAI endpoints in `self_update/**`). It then
+builds and smokes `amore` on the host. The egress and origin pins re-verify
+the shipped posture at every sync, so the public egress statement is
 re-checked mechanically rather than trusted to memory. The script is the
 authoritative list; keep this sentence in sync when it grows. The Linux
 pager suite and full crate suite remain CI's job (see §5); `--verify` says

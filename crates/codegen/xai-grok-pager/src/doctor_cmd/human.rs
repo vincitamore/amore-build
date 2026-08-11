@@ -141,6 +141,35 @@ pub(super) fn format(report: &DiagnosticReport) -> String {
     out.push_str("\nInstruments\n");
     format_instruments(&mut out, &facts.instruments);
 
+    if let Some(ref update) = facts.update {
+        out.push_str("\nUpdate\n");
+        fact(
+            &mut out,
+            "checks",
+            if update.checks_permitted {
+                "permitted"
+            } else {
+                "blocked"
+            },
+        );
+        if let Some(ref reason) = update.block_reason {
+            fact(&mut out, "reason", reason);
+        }
+        fact(
+            &mut out,
+            "last check",
+            update.last_check_at.as_deref().unwrap_or("never"),
+        );
+        fact(
+            &mut out,
+            "last seen",
+            update.last_seen_tag.as_deref().unwrap_or("none"),
+        );
+        if let Some(ref dir) = update.install_dir {
+            fact(&mut out, "install dir", dir);
+        }
+    }
+
     if !report.findings.is_empty() {
         out.push_str("\nFindings\n");
         for finding in &report.findings {

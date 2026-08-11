@@ -138,6 +138,10 @@ pub fn format_doctor(report: &DiagnosticReport) -> String {
     out.push_str("\nInstruments\n");
     format_instruments_section(&facts.instruments, &mut out);
 
+    if let Some(ref update) = facts.update {
+        crate::diagnostics::format_update_section(update, &mut out);
+    }
+
     format_findings(report, &mut out);
     out
 }

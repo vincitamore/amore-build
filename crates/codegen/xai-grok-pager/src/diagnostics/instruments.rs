@@ -1006,6 +1006,7 @@ mod tests {
                 },
                 voice: None,
                 instruments: InstrumentsFacts::default(),
+                update: None,
             },
             findings: Vec::new(),
             probe_notes: Vec::new(),

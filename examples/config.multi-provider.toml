@@ -24,6 +24,14 @@
 #   crates/codegen/xai-grok-shell/src/agent/config.rs (ConfigModelOverride)
 # Shared blocks: [model_providers.<id>] → ModelProviderConfig
 #   crates/codegen/xai-grok-shell/src/agent/model_providers.rs
+#
+# Version checks (optional; compiled default is on):
+#   [cli]
+#   update_check = true          # false, or AMORE_UPDATE_CHECK=0, disables probes
+#   auto_update = false          # auto-apply stays off; checks are separate
+#   update_channel = "stable"    # only stable is published
+#   # update_pin = "1.0.0"       # optional: report against a pin, not latest
+#   # dismissed_version = "1.0.1"
 
 # ---------------------------------------------------------------------------
 # Default: pick ONE headline path after you set the matching env var.

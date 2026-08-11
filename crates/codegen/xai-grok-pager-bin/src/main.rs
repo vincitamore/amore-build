@@ -2279,15 +2279,22 @@ async fn async_main(args: PagerArgs) -> Result<()> {
         std::sync::Arc::new(tokio::sync::Mutex::new(None));
     let bg_update_rx: Option<tokio::sync::oneshot::Receiver<Option<auto_update::UpdateAvailable>>> =
         if should_check_for_updates(args.no_auto_update) {
-            let update_config = update_config.clone();
-            let wait_slot = bg_update_wait.clone();
+            let cli_disable = args.no_auto_update;
             let (tx, rx) = tokio::sync::oneshot::channel();
             tokio::spawn(async move {
-                let check = auto_update::check_update_background(&update_config).await;
-                if let Some(mut child) = check.download {
-                    *wait_slot.lock().await = Some(tokio::spawn(async move { child.wait().await }));
-                }
-                let _ = tx.send(check.update);
+                // Fork self-update: read-only check against our release origin.
+                // No background download child; apply is a separate user action.
+                let cfg = xai_grok_pager::self_update::CheckConfig::from_disk(cli_disable, true);
+                let update = tokio::task::spawn_blocking(move || {
+                    xai_grok_pager::self_update::check_background(&cfg)
+                })
+                .await
+                .ok()
+                .flatten();
+                let mapped = update.map(|u| auto_update::UpdateAvailable {
+                    latest_version: u.latest_version,
+                });
+                let _ = tx.send(mapped);
             });
             Some(rx)
         } else {
@@ -2449,10 +2456,34 @@ async fn run_update_command(
         if version.is_some() {
             anyhow::bail!("--version cannot be used with --check");
         }
-        auto_update::apply_channel_switch(channel_switch, &mut update_config).await;
-        let status = auto_update::check_update_status(&update_config).await;
-        auto_update::print_update_status(&status, json)?;
+        if let Some(ch) = channel_switch {
+            if let Some(msg) = xai_grok_pager::self_update::channel_refusal_message(ch) {
+                eprintln!("{msg}");
+                std::process::exit(2);
+            }
+        }
+        let mut cfg = xai_grok_pager::self_update::CheckConfig::from_disk(false, false);
+        if let Some(ch) = channel_switch {
+            cfg.channel = Some(ch.to_string());
+        }
+        // Blocking HTTP (reqwest::blocking) must not run on the tokio worker.
+        let outcome = tokio::task::spawn_blocking(move || {
+            xai_grok_pager::self_update::check_status(&cfg)
+        })
+        .await
+        .map_err(|e| anyhow::anyhow!("update check task failed: {e}"))?;
+        xai_grok_pager::self_update::print_status(outcome.status(), json);
+        let code = outcome.exit_code();
+        if code != 0 {
+            std::process::exit(code);
+        }
         return Ok(());
+    }
+    if let Some(ch) = channel_switch {
+        if let Some(msg) = xai_grok_pager::self_update::channel_refusal_message(ch) {
+            eprintln!("{msg}");
+            std::process::exit(2);
+        }
     }
     if let Some(ref v) = version
         && semver::Version::parse(v).is_err()

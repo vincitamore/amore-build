@@ -412,7 +412,9 @@ pub(crate) fn commit_minimal_update_notice(app: &mut AppView, latest_version: &s
         && let Some(agent) = app.agents.get_mut(&id)
     {
         agent.scrollback.push_block(RenderBlock::system(format!(
-            "Update available: v{latest_version} — restart to apply."
+            "A new version of Amore Build is available: {current} -> v{latest_version}. \
+             Run 'amore update' to install it.",
+            current = xai_grok_version::VERSION,
         )));
     }
 }

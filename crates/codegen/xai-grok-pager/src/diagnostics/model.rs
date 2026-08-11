@@ -100,6 +100,9 @@ pub struct DiagnosticFacts {
     /// Companion instrument presence (iris / lucerna / speculum). Always filled
     /// by the instruments probe on standalone and TUI doctor paths.
     pub instruments: InstrumentsFacts,
+    /// Cached self-update check state. Filled by the update probe; `None` when
+    /// the probe has not run (for example pure terminal diagnostics).
+    pub update: Option<crate::diagnostics::UpdateFacts>,
 }
 
 /// Result of a passive input-device lookup (does not open a capture stream).

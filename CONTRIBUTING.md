@@ -24,9 +24,12 @@ not an upstream contribution queue and not an xAI project. See
    wins when both exist). Home is `~/.amore`; env surface is `AMORE_*`
    primary with `GROK_*` legacy aliases (`XAI_API_KEY` unchanged: it names
    the provider).
-3. **Auto-update and upstream reinjection stay off.** A fork must never
-   update itself back into upstream. Users upgrade by re-running the
-   installer, which keeps an `amore.prev` rollback.
+3. **Updates come only from this fork's own releases.** A fork must never
+   update itself back into upstream. The origin module
+   (`self_update/origin.rs`) and verify group 11 pin the release host; the
+   check path never reaches an xAI installer. Users upgrade from Amore Build
+   GitHub Releases (installer today; `amore update --check` reports
+   availability).
 4. **Changelog doctrine.** Any user-visible change updates BOTH
    `crates/codegen/xai-grok-shell-base/assets/amore-changelog.md` and
    `amore-changelog.json` in the same commit: the welcome screen and

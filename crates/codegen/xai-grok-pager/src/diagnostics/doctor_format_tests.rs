@@ -735,6 +735,7 @@ fn keyboard_fact_formats_from_explicit_target_evidence() {
             },
             voice: None,
             instruments: crate::diagnostics::InstrumentsFacts::default(),
+            update: None,
         },
         findings: Vec::new(),
         probe_notes: Vec::new(),

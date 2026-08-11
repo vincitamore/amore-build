@@ -171,3 +171,46 @@ else `amore` on `PATH`.
 - Syscall capture for one `amore` prompt: `scripts/egress_capture.sh`
 - Syscall capture for one Lucerna dream cycle: `scripts/lucerna_egress_capture.sh`
 - Component inventory: [`docs/egress.md`](docs/egress.md)
+
+## Release integrity and residual risks
+
+Amore Build publishes release assets on GitHub Releases for this repository.
+The interactive client may check that origin for a newer version (default on;
+kill with `AMORE_UPDATE_CHECK=0` or `AMORE_DISABLE_UPDATES=1`). The following
+risks are accepted residual properties of the design, not temporary omissions.
+
+1. **The trust root is GitHub.** An attacker with repository write publishes a
+   build with a valid digest; signing binds identity and integrity, never
+   virtue. Only an offline-key signature would close this, and it is deferred
+   with named triggers (first release cut by anyone other than the operator,
+   or first known third-party production use; drop rather than degrade).
+2. **The bootstrap is trust-on-first-use across two operator-controlled
+   origins.** The install one-liners are served from the site's storage host
+   (measured redirect chain ends at storage with HTTP 200), distinct from the
+   GitHub release assets that carry the binaries. The pinned-origin design
+   makes every subsequent update safe against a larger attacker class than the
+   first install was; it does not make the first install safer.
+3. **`latest` sorts by tag-creation time, not semver.** Never cut a release
+   for an older line after a newer one is tagged. The version floor catches a
+   downgrade, but discovery would wrongly report no update.
+4. **Companions ship three targets; amore ships five.** darwin-x64 and
+   linux-arm64 users get an honest fleet-coherence warning they cannot
+   resolve, reported, never silently skipped.
+5. **Windows is the riskiest platform with the thinnest coverage.** The test
+   matrix raises the bar; it does not erase the gap.
+6. **Because the hard-off constant stays true, the old verify check stays
+   green while the egress claim changed.** The new origin/wiring group
+   (group 11 in `scripts/sync_upstream.py --verify`) is the replacement
+   forcing function. If it is removed or misread as obsolete, a false claim
+   ships under a passing gate.
+7. **A transaction that fails mid-activation leaves a mixed fleet** until the
+   next launch resumes it. Reverting already-good work buys complexity for no
+   benefit.
+8. **A compromised build-time dependency (the xz shape) is defended by no
+   release mechanism.** The lockfile and crates.io immutability substantially
+   narrow it; the documentation must not imply otherwise.
+
+**Explicitly rejected mitigation: no native-roots TLS.** Bundled webpki roots
+mean a corporate MITM proxy fails loudly instead of silently intercepting.
+The answer for intercepting environments is `AMORE_UPDATE_CHECK=0`, not a TLS
+downgrade that would re-open interception for every request the binary makes.

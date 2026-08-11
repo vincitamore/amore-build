@@ -89,6 +89,8 @@ struct JsonFacts<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     voice: Option<JsonVoiceFacts<'a>>,
     instruments: JsonInstrumentsFacts<'a>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    update: Option<JsonUpdateFacts<'a>>,
 }
 
 impl<'a> From<&'a DiagnosticReport> for JsonFacts<'a> {
@@ -123,6 +125,33 @@ impl<'a> From<&'a DiagnosticReport> for JsonFacts<'a> {
             clipboard: JsonClipboardFacts::from(&facts.clipboard),
             voice: facts.voice.as_ref().map(JsonVoiceFacts::from),
             instruments: JsonInstrumentsFacts::from(&facts.instruments),
+            update: facts.update.as_ref().map(JsonUpdateFacts::from),
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct JsonUpdateFacts<'a> {
+    checks_permitted: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    block_reason: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    last_check_at: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    last_seen_tag: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    install_dir: Option<&'a str>,
+}
+
+impl<'a> From<&'a crate::diagnostics::UpdateFacts> for JsonUpdateFacts<'a> {
+    fn from(f: &'a crate::diagnostics::UpdateFacts) -> Self {
+        Self {
+            checks_permitted: f.checks_permitted,
+            block_reason: f.block_reason.as_deref(),
+            last_check_at: f.last_check_at.as_deref(),
+            last_seen_tag: f.last_seen_tag.as_deref(),
+            install_dir: f.install_dir.as_deref(),
         }
     }
 }

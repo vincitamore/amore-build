@@ -282,7 +282,7 @@ def _check_file_contains(path: str, needle: str, what: str, problems: list[str])
 
 def _check_file_lacks(path_glob: str, needle: str, what: str, problems: list[str]) -> None:
     """Report a problem when any file matching path_glob contains needle."""
-    matches = sorted(REPO.glob(path_glob))
+    matches = sorted(p for p in REPO.glob(path_glob) if p.is_file())
     if not matches:
         problems.append(f"MISSING {path_glob} — cannot verify {what}")
         return
@@ -598,14 +598,45 @@ def cmd_verify(dry_run: bool) -> int:
         "// fork: remote-synced layers cannot gate startup",
         "remote-synced required_* keys cannot gate startup", problems)
 
-    # 11. self-update origin lock (partial: 11a/11b/11g land here; 11c-11f later).
-    #     Exactly one place names the release origin; instrument_fetch derives.
+    # 11. self-update origin lock.
+    #     Exactly one place names the release origin; instrument_fetch derives;
+    #     the check path is wired; no xAI host or runtime origin parameter.
     _check_file_contains(
         SELF_UPDATE_ORIGIN_FILE, RELEASE_BASE_NEEDLE,
         "11a: self_update origin names the fork release repo", problems)
     _check_file_contains(
         SELF_UPDATE_ORIGIN_FILE, "UPDATE_ORIGIN_HOST",
         "11b: self_update origin defines UPDATE_ORIGIN_HOST", problems)
+    _check_file_contains(
+        "crates/codegen/xai-grok-pager/src/lib.rs", "pub mod self_update;",
+        "11c: pager lib.rs declares pub mod self_update", problems)
+    _check_file_contains(
+        "crates/codegen/xai-grok-pager-bin/src/main.rs",
+        "self_update::check_background",
+        "11d: main.rs wires self_update::check_background", problems)
+    _check_file_contains(
+        "crates/codegen/xai-grok-pager-bin/src/main.rs",
+        "self_update::check_status",
+        "11d: main.rs wires self_update::check_status", problems)
+    for needle in (
+        "x.ai",
+        "storage.googleapis.com",
+        "xai-org",
+        "grok-build-public-artifacts",
+    ):
+        _check_file_lacks(
+            "crates/codegen/xai-grok-pager/src/self_update/**",
+            needle,
+            f"11e: self_update/** must not contain {needle!r}",
+            problems,
+        )
+    for needle in ("base_url", "from_base"):
+        _check_file_lacks(
+            "crates/codegen/xai-grok-pager/src/self_update/**",
+            needle,
+            f"11f: self_update/** must not contain {needle!r}",
+            problems,
+        )
     _check_file_contains(
         INSTRUMENT_FETCH_FILE, "origin::",
         "11g: instrument_fetch RELEASE_BASE derives from origin::", problems)

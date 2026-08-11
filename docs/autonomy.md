@@ -192,6 +192,7 @@ seconds. A timeout is a failed action, not a hang.
 | Iris is loopback only | [ports.md](ports.md); default `127.0.0.1:3853` |
 | Model traffic uses operator config only | [egress.md](egress.md); capture scripts below |
 | No daemon-owned provider endpoints | no SDK/keys/model ids in Lucerna sources |
+| Version check is kill-switchable | `AMORE_UPDATE_CHECK=0` or `AMORE_DISABLE_UPDATES=1`; see [egress.md](egress.md) |
 
 Capture scripts (Linux + strace):
 

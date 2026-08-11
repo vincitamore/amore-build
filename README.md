@@ -55,10 +55,15 @@ glibc 2.35+ (Ubuntu 22.04 or newer, Debian 12 or newer). They are
 [`scripts/install.ps1`](scripts/install.ps1) in this repository if you prefer
 to read before you run.
 
-**To upgrade, re-run the same installer**: it fetches and verifies the newest
-release and keeps the previous binary beside it as `amore.prev` for rollback.
-(In-app auto-update is compiled off in this fork; the installer is the upgrade
-path.)
+**To check for a newer release:** `amore update --check` (add `--json` for
+machine-readable output). Checks are on by default at interactive startup
+(at most once per 24 hours against this repository's GitHub Releases); turn
+them off with `AMORE_UPDATE_CHECK=0` or `cli.update_check = false`.
+
+**To upgrade today, re-run the same installer**: it fetches and verifies the
+newest release and keeps the previous binary beside it as `amore.prev` for
+rollback. The in-app apply path (`amore update` without `--check`) ships when
+ready; until then the installer remains the install path.
 
 ### First session
 
@@ -334,21 +339,25 @@ home is `~/.amore` and the public binary is `amore`.
 Product env surface: **`AMORE_*` primary** with silent `GROK_*` legacy
 aliases (`AMORE_HOME`, `AMORE_DEFAULT_MODEL`, `AMORE_SYSTEM_PROMPT_LABEL`,
 `AMORE_AUTH_*`, …). Provider keys (`XAI_API_KEY`, other vendor keys) stay
-unaliased. Auto-update is hard-off in this fork (no in-app xAI reinstall
-hints); to upgrade, re-run the installer; it keeps an `amore.prev` rollback.
+unaliased. Version checks use this repository's GitHub Releases only (never an
+upstream vendor installer). `amore update --check` reports availability;
+upgrade by re-running the installer (keeps `amore.prev` for rollback) until
+the in-app apply path ships.
 
 ---
 
 ## Egress
 
 On the wire, the shipped binary talks to the endpoints you configure and
-nothing else. A configured endpoint cannot gate startup; remote-synced policy
-keys that could block launch are refused. The telemetry subsystem inherited
-from upstream ships inert: disabled by default, no client constructed while
-disabled, no token baked into any release build, and every upstream sync
-re-verifies that posture mechanically. Both credential rails of the shipped
-binaries were captured under syscall-level tracing before this claim was
-written: the method is
+nothing else, plus deliberate disclosed fetches (companion install from this
+repository's GitHub Releases, and the default-on version check against the
+same release origin; kill with `AMORE_UPDATE_CHECK=0`). A configured endpoint
+cannot gate startup; remote-synced policy keys that could block launch are
+refused. The telemetry subsystem inherited from upstream ships inert:
+disabled by default, no client constructed while disabled, no token baked
+into any release build, and every upstream sync re-verifies that posture
+mechanically. Both credential rails of the shipped binaries were captured
+under syscall-level tracing before this claim was written: the method is
 [`scripts/egress_capture.sh`](scripts/egress_capture.sh) and the receipts
 are in [`docs/egress.md`](docs/egress.md). One Lucerna dream cycle under the
 same harness: [`scripts/lucerna_egress_capture.sh`](scripts/lucerna_egress_capture.sh).

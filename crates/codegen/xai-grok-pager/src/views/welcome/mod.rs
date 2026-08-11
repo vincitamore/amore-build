@@ -2133,7 +2133,7 @@ fn render_welcome_done(
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
-                    format!("v{ver} available \u{2014} press {key_name} to restart"),
+                    format!("v{ver} available. Press {key_name} to download and restart."),
                     Style::default().fg(theme.accent_user),
                 ),
             ]);

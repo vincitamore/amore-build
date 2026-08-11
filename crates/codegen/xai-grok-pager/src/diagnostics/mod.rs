@@ -16,6 +16,8 @@ mod fix;
 pub mod instruments;
 mod model;
 pub mod probes;
+/// Cached self-update facts for doctor (fork surface; no network).
+pub mod update;
 mod view;
 
 pub use doctor_format::format_doctor;
@@ -48,6 +50,7 @@ pub use model::{
     QmdRuntimeFact, QmdSearchFacts, RuntimeFact, TmuxColorPassthrough, TmuxFacts, TmuxOptionFact,
     TmuxSupportFact, VoiceFacts,
 };
+pub use update::{UpdateFacts, apply_update_probe, format_update_section, probe_update_facts};
 pub use view::{DiagnosticSnapshot, view};
 
 /// Passive input-device probe for `grok doctor` / `/doctor`.
