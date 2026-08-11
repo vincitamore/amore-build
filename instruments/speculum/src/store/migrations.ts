@@ -143,6 +143,94 @@ export const MIGRATIONS: readonly Migration[] = [
       `);
     },
   },
+  {
+    version: 6,
+    name: "v6-session-facets-links-annotations",
+    up: (db) => {
+      // Additive session columns (populated at ingest rebuild; '' until then).
+      const cols = db.query<{ name: string }, []>(`PRAGMA table_info(sessions)`).all();
+      const addCol = (name: string, ddl: string) => {
+        if (!cols.some((c) => c.name === name)) db.run(ddl);
+      };
+      addCol("cwd_class", "ALTER TABLE sessions ADD COLUMN cwd_class TEXT NOT NULL DEFAULT ''");
+      addCol("agent_name", "ALTER TABLE sessions ADD COLUMN agent_name TEXT NOT NULL DEFAULT ''");
+      addCol(
+        "subagent_type",
+        "ALTER TABLE sessions ADD COLUMN subagent_type TEXT NOT NULL DEFAULT ''",
+      );
+      addCol(
+        "description",
+        "ALTER TABLE sessions ADD COLUMN description TEXT NOT NULL DEFAULT ''",
+      );
+      addCol(
+        "title_source",
+        "ALTER TABLE sessions ADD COLUMN title_source TEXT NOT NULL DEFAULT ''",
+      );
+
+      // Harvested per-session metadata (summary.json + subagent meta.json).
+      // Derived side store: wiped and re-derived by ingest --full.
+      db.run(`
+        CREATE TABLE IF NOT EXISTS session_meta (
+          session_id       TEXT PRIMARY KEY,
+          agent_name       TEXT NOT NULL DEFAULT '',
+          subagent_type    TEXT NOT NULL DEFAULT '',
+          description      TEXT NOT NULL DEFAULT '',
+          generated_title  TEXT NOT NULL DEFAULT ''
+        )
+      `);
+
+      // Per-session derived annotations (ingest post-pass; re-derived).
+      // method is a required heuristic banner on every row.
+      db.run(`
+        CREATE TABLE IF NOT EXISTS session_annotations (
+          session_id     TEXT PRIMARY KEY,
+          phase_class    TEXT NOT NULL DEFAULT '',
+          error_density  REAL NOT NULL DEFAULT 0,
+          probe_hits     TEXT NOT NULL DEFAULT '{}',
+          input_tokens   INTEGER NOT NULL DEFAULT 0,
+          output_tokens  INTEGER NOT NULL DEFAULT 0,
+          total_tokens   INTEGER NOT NULL DEFAULT 0,
+          duration_sec   REAL NOT NULL DEFAULT 0,
+          method         TEXT NOT NULL DEFAULT ''
+        )
+      `);
+
+      // Evidence-only cross-session edges (resumed_from | shared_artifact).
+      // Derived at ingest post-pass; never affinity or similarity.
+      db.run(`
+        CREATE TABLE IF NOT EXISTS session_links (
+          id              INTEGER PRIMARY KEY AUTOINCREMENT,
+          source_session  TEXT NOT NULL,
+          target_session  TEXT NOT NULL,
+          kind            TEXT NOT NULL,
+          method          TEXT NOT NULL,
+          confidence      REAL NOT NULL DEFAULT 1.0,
+          heuristic       INTEGER NOT NULL DEFAULT 0,
+          evidence        TEXT NOT NULL DEFAULT '',
+          UNIQUE(source_session, target_session, kind)
+        )
+      `);
+      db.run(
+        "CREATE INDEX IF NOT EXISTS idx_session_links_source ON session_links(source_session)",
+      );
+      db.run(
+        "CREATE INDEX IF NOT EXISTS idx_session_links_target ON session_links(target_session)",
+      );
+
+      // Model-generated titles: intentionally NOT derived from session files,
+      // so ingest --full must never wipe this table.
+      db.run(`
+        CREATE TABLE IF NOT EXISTS generated_titles (
+          session_id     TEXT PRIMARY KEY,
+          title          TEXT NOT NULL,
+          summary        TEXT NOT NULL DEFAULT '',
+          model_id       TEXT NOT NULL DEFAULT '',
+          created_at     TEXT NOT NULL,
+          source_events  INTEGER NOT NULL DEFAULT 0
+        )
+      `);
+    },
+  },
 ];
 
 /** Look up the step that lands on `version` (from version-1). */

@@ -37,10 +37,67 @@ CREATE TABLE IF NOT EXISTS sessions (
   user_msg_count   INTEGER NOT NULL,
   tool_call_count  INTEGER NOT NULL,
   tool_error_count INTEGER NOT NULL,
-  title            TEXT NOT NULL DEFAULT ''
+  title            TEXT NOT NULL DEFAULT '',
+  cwd_class        TEXT NOT NULL DEFAULT '',  -- operator|experiment|harness|unknown (from project_path)
+  agent_name       TEXT NOT NULL DEFAULT '',  -- summary.json agent_name
+  subagent_type    TEXT NOT NULL DEFAULT '',  -- subagents/<id>/meta.json subagent_type
+  description      TEXT NOT NULL DEFAULT '',  -- subagent meta description
+  title_source     TEXT NOT NULL DEFAULT ''   -- generated|harness|summary|''
 );
 
 CREATE INDEX IF NOT EXISTS idx_sessions_project ON sessions(project_path, started_at);
+
+-- Harvested per-session metadata (summary.json + subagent meta.json).
+-- Derived side store: wiped and re-derived by ingest --full.
+CREATE TABLE IF NOT EXISTS session_meta (
+  session_id       TEXT PRIMARY KEY,
+  agent_name       TEXT NOT NULL DEFAULT '',
+  subagent_type    TEXT NOT NULL DEFAULT '',
+  description      TEXT NOT NULL DEFAULT '',
+  generated_title  TEXT NOT NULL DEFAULT ''
+);
+
+-- Per-session derived annotations (ingest post-pass; re-derived on ingest).
+-- method is a required heuristic banner on every row.
+CREATE TABLE IF NOT EXISTS session_annotations (
+  session_id     TEXT PRIMARY KEY,
+  phase_class    TEXT NOT NULL DEFAULT '',
+  error_density  REAL NOT NULL DEFAULT 0,
+  probe_hits     TEXT NOT NULL DEFAULT '{}',
+  input_tokens   INTEGER NOT NULL DEFAULT 0,
+  output_tokens  INTEGER NOT NULL DEFAULT 0,
+  total_tokens   INTEGER NOT NULL DEFAULT 0,
+  duration_sec   REAL NOT NULL DEFAULT 0,
+  method         TEXT NOT NULL DEFAULT ''
+);
+
+-- Evidence-only cross-session edges (resumed_from | shared_artifact).
+-- Derived at ingest post-pass; never affinity or similarity.
+CREATE TABLE IF NOT EXISTS session_links (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  source_session  TEXT NOT NULL,
+  target_session  TEXT NOT NULL,
+  kind            TEXT NOT NULL,
+  method          TEXT NOT NULL,
+  confidence      REAL NOT NULL DEFAULT 1.0,
+  heuristic       INTEGER NOT NULL DEFAULT 0,
+  evidence        TEXT NOT NULL DEFAULT '',
+  UNIQUE(source_session, target_session, kind)
+);
+
+CREATE INDEX IF NOT EXISTS idx_session_links_source ON session_links(source_session);
+CREATE INDEX IF NOT EXISTS idx_session_links_target ON session_links(target_session);
+
+-- Model-generated titles. Intentionally NOT derived from session files:
+-- ingest --full must never wipe this table.
+CREATE TABLE IF NOT EXISTS generated_titles (
+  session_id     TEXT PRIMARY KEY,
+  title          TEXT NOT NULL,
+  summary        TEXT NOT NULL DEFAULT '',
+  model_id       TEXT NOT NULL DEFAULT '',
+  created_at     TEXT NOT NULL,
+  source_events  INTEGER NOT NULL DEFAULT 0
+);
 
 -- Per-session title side store (derived from summary.json session_summary at ingest).
 -- sessions.title is joined from this table during rebuildSessions; never hand-maintained.

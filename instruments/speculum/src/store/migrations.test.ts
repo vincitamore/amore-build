@@ -189,7 +189,7 @@ describe("migrations framework", () => {
     const db = openDb(":memory:");
     try {
       expect(getUserVersion(db)).toBe(SCHEMA_VERSION);
-      expect(SCHEMA_VERSION).toBe(5);
+      expect(SCHEMA_VERSION).toBe(6);
       expect(isFreshDb(db)).toBe(false);
 
       const tables = db
@@ -267,7 +267,7 @@ describe("migrations framework", () => {
       const db = openDb(scratch.path);
       try {
         expect(getUserVersion(db)).toBe(SCHEMA_VERSION);
-        expect(SCHEMA_VERSION).toBe(5);
+        expect(SCHEMA_VERSION).toBe(6);
         expect(tableHasColumn(db, "events", "sensitive")).toBe(true);
         const row = db
           .query<{ text: string; sensitive: number }, []>(
@@ -333,7 +333,7 @@ describe("migrations framework", () => {
       const db = openDb(scratch.path);
       try {
         expect(getUserVersion(db)).toBe(SCHEMA_VERSION);
-        expect(SCHEMA_VERSION).toBe(5);
+        expect(SCHEMA_VERSION).toBe(6);
         // Column untouched, row survives, single events row (no dupes).
         expect(tableHasColumn(db, "events", "sensitive")).toBe(true);
         const row = db
@@ -596,8 +596,8 @@ describe("migrations framework", () => {
 
       const db = openDb(scratch.path);
       try {
-        expect(getUserVersion(db)).toBe(5);
-        expect(SCHEMA_VERSION).toBe(5);
+        expect(getUserVersion(db)).toBe(SCHEMA_VERSION);
+        expect(SCHEMA_VERSION).toBe(6);
         expect(tableHasColumn(db, "sessions", "title")).toBe(true);
         const event = db
           .query<{ text: string }, []>(

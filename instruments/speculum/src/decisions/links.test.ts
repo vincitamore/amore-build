@@ -172,7 +172,7 @@ describe("links + decisions", () => {
     const db = openDb(":memory:");
     try {
       expect(getUserVersion(db)).toBe(SCHEMA_VERSION);
-      expect(SCHEMA_VERSION).toBe(5);
+      expect(SCHEMA_VERSION).toBe(6);
 
       ingest(db, { sessionsDir: corpus.root });
 

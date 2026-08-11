@@ -3,7 +3,7 @@ import { EventEmitter } from "node:events";
 import { join } from "node:path";
 import { mkdirSync, rmSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import type { spawn as SpawnFn } from "node:child_process";
+import type { spawn as SpawnFn, SpawnOptions } from "node:child_process";
 import { openDb } from "./store/db";
 import { ingest } from "./ingest";
 import { writeCorpus, cleanCorpus, CWD_DEC } from "./test/fixtures";
@@ -311,7 +311,7 @@ describe("runLens dry-run and fail-closed", () => {
     const envCaptureSpawn = ((
       _bin: string,
       argv: string[],
-      opts?: NodeJS.SpawnOptions,
+      opts?: SpawnOptions,
     ) => {
       if (argv[0] === "/T" || argv.includes("/PID")) {
         return new EventEmitter() as ReturnType<typeof SpawnFn>;

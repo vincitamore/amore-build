@@ -31,6 +31,9 @@ import {
 } from "./parser";
 import { matchSensitivePatterns } from "../probes/sensitive-content";
 import { rebuildEventLinksAndDecisions } from "../decisions";
+import { applySessionFacets } from "./facets";
+import { rebuildSessionAnnotations } from "./annotations";
+import { rebuildSessionLinks } from "./session-links";
 
 // progress callback shape (per-file / per-stage, not a pipeline).
 export type IngestPhase = "list" | "session" | "rebuild" | "done";
@@ -180,7 +183,7 @@ function rebuildSessions(db: Db): void {
     INSERT INTO sessions (
       id, project_path, agent, parent_session, model_id,
       started_at, ended_at, turn_count, user_msg_count, tool_call_count, tool_error_count,
-      title
+      title, title_source
     )
     SELECT
       e.session_id,
@@ -194,10 +197,19 @@ function rebuildSessions(db: Db): void {
       SUM(CASE WHEN e.kind = 'user' AND e.is_boilerplate = 0 THEN 1 ELSE 0 END),
       SUM(CASE WHEN e.kind = 'tool_use' THEN 1 ELSE 0 END),
       SUM(CASE WHEN e.kind = 'tool_result' AND e.tool_error = 1 THEN 1 ELSE 0 END),
+      -- Title precedence: model-generated > harness generated_title > summary.
       COALESCE(
-        (SELECT t.title FROM session_titles t WHERE t.session_id = e.session_id),
+        (SELECT NULLIF(g.title, '') FROM generated_titles g WHERE g.session_id = e.session_id),
+        (SELECT NULLIF(m.generated_title, '') FROM session_meta m WHERE m.session_id = e.session_id),
+        (SELECT NULLIF(t.title, '') FROM session_titles t WHERE t.session_id = e.session_id),
         ''
-      )
+      ),
+      CASE
+        WHEN (SELECT NULLIF(g.title, '') FROM generated_titles g WHERE g.session_id = e.session_id) IS NOT NULL THEN 'generated'
+        WHEN (SELECT NULLIF(m.generated_title, '') FROM session_meta m WHERE m.session_id = e.session_id) IS NOT NULL THEN 'harness'
+        WHEN (SELECT NULLIF(t.title, '') FROM session_titles t WHERE t.session_id = e.session_id) IS NOT NULL THEN 'summary'
+        ELSE ''
+      END
     FROM events e
     GROUP BY e.session_id
   `);
@@ -476,8 +488,13 @@ export function ingest(db: Db, opts: IngestOptions = {}): IngestStats {
     db.run("DELETE FROM events");
     db.run("DELETE FROM usage");
     db.run("DELETE FROM sessions");
-    // Side store is derived — wipe + re-derive with everything else on --full.
+    // Side stores are derived — wipe + re-derive with everything else on --full.
+    // generated_titles is deliberately NOT wiped: model output is not derived
+    // from session files and must survive a full rebuild.
     db.run("DELETE FROM session_titles");
+    db.run("DELETE FROM session_meta");
+    db.run("DELETE FROM session_annotations");
+    db.run("DELETE FROM session_links");
     // Reset byte offsets so every non-forgotten file re-reads from 0.
     db.run("UPDATE ingest_state SET byte_offset = 0, size_bytes = 0 WHERE forgotten = 0");
     // clear FTS with the events wipe so --full rebuilds the sparse index too.
@@ -610,9 +627,16 @@ export function ingest(db: Db, opts: IngestOptions = {}): IngestStats {
       emit("rebuild", sessionsTotal, sessionsTotal);
       const tRebuild0 = Date.now();
       rebuildSessions(db);
+      // Facets fill sessions columns (cwd_class, agent_name, subagent fields)
+      // from project_path + the session_meta side store after the rebuild.
+      applySessionFacets(db);
       // re-derive event_links + decisions after events/sessions settle.
       // Single ordered scan → wipe + bulk insert; never hand-maintained.
       rebuildEventLinksAndDecisions(db);
+      // Per-session annotations + evidence-only cross-session links re-derive
+      // after events, sessions and event_links settle.
+      rebuildSessionAnnotations(db);
+      rebuildSessionLinks(db);
       stats.rebuildMs = Date.now() - tRebuild0;
     }
   };

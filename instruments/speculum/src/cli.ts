@@ -4,7 +4,9 @@
  */
 
 import { ingestCommand } from "./commands/ingest";
+import { sessionsCommand } from "./commands/sessions";
 import { statusCommand } from "./commands/status";
+import { summarizeCommand } from "./commands/summarize";
 import { doctorCommand } from "./commands/doctor";
 import { forgetCommand } from "./commands/forget";
 import { scanCommand } from "./commands/scan";
@@ -33,6 +35,19 @@ Commands:
                         --limit N      Cap session dirs (debug)
                         --json         Machine-readable stats
 
+  sessions              List sessions with filters and paging (local only)
+                        --class C      operator|experiment|harness|unknown
+                        --agent A      primary|subagent
+                        --project P    Substring filter on project path
+                        --since D      ISO / YYYY-MM-DD floor
+                        --until D      Inclusive ceiling
+                        --title T      Substring filter on resolved title
+                        --sort S       recent|turns|errors (default recent)
+                        --limit N      Page size (default 50)
+                        --offset N     Page start (default 0)
+                        --count        Print the matching total only
+                        --json         Machine-readable rows + total
+
   status                Corpus counts, ingest freshness, probe registry
                         --json
 
@@ -54,6 +69,8 @@ Commands:
                         --policy [path] Evaluate threshold gates (default table;
                                         optional JSON path). Exit 1 on violations
                         --policy-report Print policy verdict table; always exit 0
+                        --series W     Windowed rates over time: weekly|daily
+                        --windows N    Cap window count for --series (default 12)
                         --json         Machine-readable (includes hits)
 
   usage                 Per-model token and turn aggregation (no prices)
@@ -67,6 +84,15 @@ Commands:
                         See: speculum lens --help
 
   lenses                List available lenses and egress notes
+
+  summarize             Generate one-line titles for untitled sessions through
+                        the local amore binary (opt-in egress, scrubbed digest)
+                        --limit N      Cap sessions per run (default 25)
+                        --session ID   One session (regenerates its title)
+                        --all          Remove the cap
+                        --force        Regenerate model-generated titles too
+                        --dry-run      Selection + scrub + cost plan; no calls
+                        --json         Machine-readable results
 
   audit                 Tail the append-only lens audit log
                         -n N           Last N records (default 20)
@@ -101,10 +127,11 @@ Commands:
   --help, -h            Show this message
   --version, -V, version  Print package version and exit
 
-Privacy (dual posture): ingest, status, doctor, forget, scan, search, export,
-graph, decisions, and usage NEVER egress — local only. The ONLY egress is opt-in
-lens: each \`speculum lens\` command sends a scrubbed slice to the model the local
-amore configuration routes to. Scrub fails closed; every invocation is audited.
+Privacy (dual posture): ingest, sessions, status, doctor, forget, scan, search,
+export, graph, decisions, and usage NEVER egress — local only. The ONLY egress
+is opt-in \`lens\` and \`summarize\`: each sends a scrubbed slice or digest to the
+model the local amore configuration routes to. Scrub fails closed; every
+invocation is audited.
 Audit log: ${defaultAuditPath()}
 
 Probe rates and extracted decisions are heuristic — pattern banks are unvalidated
@@ -118,7 +145,9 @@ function printVersion(): void {
 
 const COMMANDS: Record<string, (args: string[]) => Promise<void>> = {
   ingest: ingestCommand,
+  sessions: sessionsCommand,
   status: statusCommand,
+  summarize: summarizeCommand,
   doctor: doctorCommand,
   forget: forgetCommand,
   scan: scanCommand,
