@@ -632,6 +632,12 @@ def build_child_env(
     env["IRIS_ORG_ROOT"] = str(org_root.resolve())
     env["SPECULUM_DB"] = str(db_path.resolve())
     env["SPECULUM_HOME"] = str(spec_home.resolve())
+    # The drive verifies the repo's built artifact set: prefer the freshly
+    # built speculum companion over whatever PATH resolves (an installed
+    # copy can predate the features the dash under test spawns).
+    spec_bin = REPO_ROOT / "instruments" / "speculum" / "dist" / "speculum-windows-x64.exe"
+    if spec_bin.exists():
+        env["SPECULUM_BIN"] = str(spec_bin.resolve())
     # Scratch daemon port, UNIQUE per run so consecutive drives never collide
     # (a stale run's daemon on a fixed port made the next run's dash probe a
     # daemon serving a different org root and spill its error into the frame).
