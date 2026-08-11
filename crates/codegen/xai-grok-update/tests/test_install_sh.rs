@@ -1,18 +1,21 @@
-//! Blitz harness for the bash installer (`install.sh`), the second client that
-//! can brick a machine. Runs the REAL shipped `install.sh` against a fake
-//! `curl` that can serve the good artifact, truncate it, or serve a right-length
-//! garbage body, and asserts the same invariant as the Rust blitz:
+//! Blitz harness for the bash installer (`scripts/install.sh`), the second
+//! client that can brick a machine. Runs the REAL shipped repo-root installer
+//! against a fake `curl` that serves a release archive plus its `.sha256`
+//! sidecar (good, truncated, or right-length garbage), and asserts:
 //!
-//! > After any install attempt, `$BIN_DIR/grok` resolves to a binary that runs,
-//! > OR is still the previous-good binary — never a partial/garbage binary.
+//! > After any install attempt, `$AMORE_INSTALL_DIR/amore` resolves to a
+//! > binary that runs and prints a version, OR is still the previous-good
+//! > binary — never a partial/garbage binary left active.
 //!
-//! Also covers shell-rc rewrite: stowed/symlinked `~/.bashrc` etc. must survive
-//! reinstall without being replaced by a plain file.
+//! Contract under test (repo-root `scripts/install.sh`):
+//! - downloads `amore-{os}-{arch}.tar.gz` then the `.sha256` sidecar
+//! - hard-exits on digest mismatch (before touching the install dir)
+//! - extracts the archive, installs `amore` (not a bare executable download)
+//! - moves any prior binary to `amore.prev` and restores it if smoke fails
+//! - smoke requires run-and-print (`--version` exits 0 with non-empty stdout)
 //!
-//! The installer lives in the sibling `xai-grok-pager` crate; it is resolved by
-//! relative path. If it cannot be found (e.g. a sandbox that does not vendor it)
-//! the test skips rather than fail — under the repo's `cargo nextest` workflow
-//! the path resolves and the installer is exercised end to end.
+//! The installer path must resolve under cargo from this crate; a missing
+//! script is a hard failure (not a skip).
 
 #![cfg(unix)]
 
@@ -20,294 +23,237 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-fn script_path(name: &str) -> Option<PathBuf> {
-    dunce::canonicalize(
-        Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("../xai-grok-pager/scripts/{name}")),
-    )
-    .ok()
-    .filter(|p| p.exists())
+/// Resolve the shipped installer. `CARGO_MANIFEST_DIR` is
+/// `crates/codegen/xai-grok-update`; three parents reach the repo root.
+fn install_sh_path() -> PathBuf {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../scripts/install.sh");
+    let path = dunce::canonicalize(&path).unwrap_or_else(|e| {
+        panic!(
+            "scripts/install.sh must resolve relative to the crate (looked for {}): {e}",
+            path.display()
+        );
+    });
+    assert!(
+        path.is_file(),
+        "scripts/install.sh must exist at {}",
+        path.display()
+    );
+    path
 }
 
-fn install_sh_path() -> Option<PathBuf> {
-    script_path("install.sh")
-}
-
-fn host_platform() -> String {
+/// Host triple as named by `scripts/install.sh` (`linux`/`darwin` + `x64`/`arm64`).
+fn host_artifact() -> String {
     let os = if cfg!(target_os = "macos") {
-        "macos"
+        "darwin"
     } else {
         "linux"
     };
     let arch = if cfg!(target_arch = "x86_64") {
-        "x86_64"
+        "x64"
     } else {
-        "aarch64"
+        "arm64"
     };
-    format!("{os}-{arch}")
+    format!("amore-{os}-{arch}")
 }
 
-const GOOD_SCRIPT: &str = "#!/bin/sh\nexit 0\n";
-const INSTALLER_BLOCK_START: &str = "# >>> grok installer >>>";
+/// New good binary: must print a version line (installer's smoke gate).
+const GOOD_SCRIPT: &str = "#!/bin/sh\necho 'amore 0.2.0-test'\n";
+/// Previous-good binary left in place before a corrupt attempt.
+const PREV_SCRIPT: &str = "#!/bin/sh\necho 'amore 0.1.0-prev'\n";
 
-/// Write a fake `curl` that intercepts every download `install.sh` performs.
-/// `$FAKE_MODE` (full|truncate|garbage) selects the corruption.
-fn write_fake_curl(dir: &Path) {
+fn hash_file(path: &Path) -> String {
+    for (bin, extra) in [("sha256sum", &[][..]), ("shasum", &["-a", "256"][..])] {
+        let mut cmd = Command::new(bin);
+        for a in extra {
+            cmd.arg(a);
+        }
+        if let Ok(out) = cmd.arg(path).output() {
+            if out.status.success() {
+                let line = String::from_utf8_lossy(&out.stdout);
+                return line
+                    .split_whitespace()
+                    .next()
+                    .expect("hash output")
+                    .to_string();
+            }
+        }
+    }
+    panic!("neither sha256sum nor shasum produced a digest for {}", path.display());
+}
+
+fn write_tar_gz_with_amore(archive: &Path, script_body: &str) {
+    let parent = archive.parent().unwrap();
+    let staging = parent.join(format!(
+        "staging-{}",
+        archive.file_stem().unwrap().to_string_lossy()
+    ));
+    let _ = std::fs::remove_dir_all(&staging);
+    std::fs::create_dir_all(&staging).unwrap();
+    let bin_path = staging.join("amore");
+    std::fs::write(&bin_path, script_body).unwrap();
+    std::fs::set_permissions(&bin_path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let status = Command::new("tar")
+        .arg("-czf")
+        .arg(archive)
+        .arg("-C")
+        .arg(&staging)
+        .arg("amore")
+        .status()
+        .expect("spawn tar");
+    assert!(status.success(), "tar -czf {} failed", archive.display());
+    let _ = std::fs::remove_dir_all(&staging);
+}
+
+/// Write a fake `curl` plus pre-built good archive/sidecar under `dir`.
+/// `$FAKE_MODE` (full|truncate|garbage) selects the corruption on the archive
+/// body; the sidecar always carries the good archive's digest so corrupt
+/// bodies fail the installer's hard sha256 check before the install dir is
+/// touched.
+fn write_fake_curl(dir: &Path, artifact: &str) {
+    let artifacts = dir.join("artifacts");
+    std::fs::create_dir_all(&artifacts).unwrap();
+
+    let archive = artifacts.join(format!("{artifact}.tar.gz"));
+    write_tar_gz_with_amore(&archive, GOOD_SCRIPT);
+    let hash = hash_file(&archive);
+    let sidecar = artifacts.join(format!("{artifact}.tar.gz.sha256"));
+    std::fs::write(&sidecar, format!("{hash}  {artifact}.tar.gz\n")).unwrap();
+    let fullsize = std::fs::metadata(&archive).unwrap().len();
+
     let body = format!(
         r#"#!/bin/bash
+set -e
 mode="${{FAKE_MODE:-full}}"
+artifacts="{artifacts}"
+artifact="{artifact}"
 fullsize={fullsize}
-head=0; out=""; want_code=0; url=""
+out=""
+url=""
 while [ $# -gt 0 ]; do
   case "$1" in
-    --head) head=1 ;;
     -o) shift; out="$1" ;;
-    -w) shift; [ "$1" = '%{{http_code}}' ] && want_code=1 ;;
-    -*) : ;;
+    -fsSL|-f|-s|-S|-L) ;;
+    -*) ;;
     *) url="$1" ;;
   esac
   shift
 done
-if [ "$head" = 1 ]; then
-  if [ "$want_code" = 1 ]; then printf '200'; else printf 'HTTP/1.1 200 OK\r\nContent-Length: %s\r\n\r\n' "$fullsize"; fi
-  exit 0
+if [ -z "$out" ]; then
+  echo "fake curl: expected -o <path>" >&2
+  exit 1
 fi
-if [ -n "$out" ]; then
-  case "$mode" in
-    full)     printf '%s' '{good}' > "$out" ;;
-    truncate) printf '\0\0\0\0' > "$out" ;;
-    garbage)  head -c "$fullsize" /dev/zero | tr '\0' 'X' > "$out" ;;
-  esac
-  exit 0
-fi
-printf '0.1.181'
+case "$url" in
+  *.sha256)
+    cat "$artifacts/${{artifact}}.tar.gz.sha256" > "$out"
+    ;;
+  *.tar.gz|*.zip)
+    case "$mode" in
+      full)
+        cp "$artifacts/${{artifact}}.tar.gz" "$out"
+        ;;
+      truncate)
+        printf '\0\0\0\0' > "$out"
+        ;;
+      garbage)
+        head -c "$fullsize" /dev/zero | tr '\0' 'X' > "$out"
+        ;;
+      *)
+        echo "fake curl: unknown FAKE_MODE=$mode" >&2
+        exit 1
+        ;;
+    esac
+    ;;
+  *)
+    echo "fake curl: unexpected url=$url" >&2
+    exit 1
+    ;;
+esac
 exit 0
 "#,
-        fullsize = GOOD_SCRIPT.len(),
-        good = GOOD_SCRIPT,
+        artifacts = artifacts.display(),
+        artifact = artifact,
+        fullsize = fullsize,
     );
     let path = dir.join("curl");
     std::fs::write(&path, body).unwrap();
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
 }
 
-/// Seed a valid previous-good binary + symlink in the isolated home.
-fn seed_previous_good(home: &Path, platform: &str) -> PathBuf {
-    let downloads = home.join(".grok").join("downloads");
-    let bin = home.join(".grok").join("bin");
-    std::fs::create_dir_all(&downloads).unwrap();
-    std::fs::create_dir_all(&bin).unwrap();
-    let prev = downloads.join(format!("grok-{platform}"));
-    std::fs::write(&prev, GOOD_SCRIPT).unwrap();
-    std::fs::set_permissions(&prev, std::fs::Permissions::from_mode(0o755)).unwrap();
-    let link = bin.join("grok");
-    let _ = std::fs::remove_file(&link);
-    std::os::unix::fs::symlink(format!("../downloads/grok-{platform}"), &link).unwrap();
-    dunce::canonicalize(&prev).unwrap()
+/// Seed a valid previous-good `amore` in the isolated install dir.
+fn seed_previous_good(install_dir: &Path) {
+    std::fs::create_dir_all(install_dir).unwrap();
+    let bin = install_dir.join("amore");
+    std::fs::write(&bin, PREV_SCRIPT).unwrap();
+    std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
 }
 
-/// Re-resolve `$BIN_DIR/grok` from disk and re-run it: the active grok must
-/// always execute, and never be a `.tmp`/partial file.
-fn assert_active_grok_runs(home: &Path) {
-    let link = home.join(".grok").join("bin").join("grok");
-    assert!(link.is_symlink(), "grok must remain a symlink");
-    let resolved =
-        dunce::canonicalize(&link).unwrap_or_else(|e| panic!("grok symlink dangles: {e}"));
-    let name = resolved.file_name().unwrap().to_string_lossy().to_string();
+/// Re-resolve `$AMORE_INSTALL_DIR/amore` from disk and re-run it: the active
+/// binary must always execute and print a version (installer's own smoke gate).
+fn assert_active_amore_runs(install_dir: &Path) {
+    let bin = install_dir.join("amore");
+    assert!(
+        bin.is_file(),
+        "amore must exist as a file at {}",
+        bin.display()
+    );
+    let name = bin.file_name().unwrap().to_string_lossy();
     assert!(
         !name.contains(".tmp"),
-        "active grok must not be a temp file: {name}"
+        "active amore must not be a temp file: {name}"
     );
-    let ok = Command::new(&resolved)
+    let output = Command::new(&bin)
         .arg("--version")
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false);
-    assert!(ok, "active grok must run: {}", resolved.display());
+        .output()
+        .unwrap_or_else(|e| panic!("spawn active amore: {e}"));
+    assert!(
+        output.status.success(),
+        "active amore must exit 0: {}",
+        bin.display()
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        !stdout.trim().is_empty(),
+        "active amore must print a version: {}",
+        bin.display()
+    );
 }
 
-fn run_installer(install_sh: &Path, home: &Path, fakebin: &Path, mode: &str, shell: &str) -> bool {
+fn active_version(install_dir: &Path) -> String {
+    let output = Command::new(install_dir.join("amore"))
+        .arg("--version")
+        .output()
+        .expect("spawn amore --version");
+    String::from_utf8_lossy(&output.stdout).into_owned()
+}
+
+fn run_installer(
+    install_sh: &Path,
+    home: &Path,
+    install_dir: &Path,
+    fakebin: &Path,
+    mode: &str,
+) -> bool {
     let path_env = format!("{}:/usr/bin:/bin", fakebin.display());
     let status = Command::new("/bin/bash")
         .arg(install_sh)
-        .arg("0.1.181")
         .env_clear()
         .env("HOME", home)
         .env("PATH", path_env)
-        .env("SHELL", shell)
-        .env("GROK_BIN_DIR", home.join(".grok").join("bin"))
-        .env("GROK_CHANNEL", "stable")
+        .env("AMORE_INSTALL_DIR", install_dir)
+        // Pin version so the download URL is deterministic for the fake curl.
+        .env("AMORE_VERSION", "v0.0.0-test")
         .env("FAKE_MODE", mode)
         .status()
         .expect("spawn bash install.sh");
     status.success()
 }
 
-fn installer_block_count(body: &str) -> usize {
-    body.matches(INSTALLER_BLOCK_START).count()
-}
-
-fn assert_single_installer_block(path: &Path, preserved: Option<&str>) {
-    let body = std::fs::read_to_string(path).unwrap_or_else(|e| {
-        panic!("read {}: {e}", path.display());
-    });
-    let n = installer_block_count(&body);
-    assert_eq!(
-        n,
-        1,
-        "{} must contain exactly one grok installer block, got {n}:\n{body}",
-        path.display()
-    );
-    if let Some(marker) = preserved {
-        assert!(
-            body.contains(marker),
-            "{} must keep pre-existing content ({marker:?}):\n{body}",
-            path.display()
-        );
-    }
-}
-
-#[derive(Clone, Copy)]
-enum RcLayout {
-    Missing,
-    Plain,
-    StowAbsolute,
-    StowRelative,
-    /// `$root/user/.bashrc` → `../packages/bash/bashrc` (physical relative arm).
-    StowRelativeDotDot,
-}
-
-struct ShellRcCase {
-    name: &'static str,
-    script: &'static str,
-    shell: &'static str,
-    rc_name: &'static str,
-    stow_name: &'static str,
-    layout: RcLayout,
-    reinstall: bool,
-}
-
-/// Returns `(installer_home, rc_path, stow_target, expected_link_value)`.
-fn setup_rc(
-    root: &Path,
-    case: &ShellRcCase,
-) -> (PathBuf, PathBuf, Option<PathBuf>, Option<PathBuf>) {
-    let marker = "# user shell rc\n";
-    match case.layout {
-        RcLayout::Missing => {
-            let home = root.to_path_buf();
-            (home.clone(), home.join(case.rc_name), None, None)
-        }
-        RcLayout::Plain => {
-            let home = root.to_path_buf();
-            let rc_link = home.join(case.rc_name);
-            std::fs::write(&rc_link, marker).unwrap();
-            (home, rc_link, None, None)
-        }
-        RcLayout::StowAbsolute | RcLayout::StowRelative => {
-            let home = root.to_path_buf();
-            let stow_dir = home.join("dotfiles");
-            std::fs::create_dir_all(&stow_dir).unwrap();
-            let target = stow_dir.join(case.stow_name);
-            std::fs::write(&target, marker).unwrap();
-            let link_value = if matches!(case.layout, RcLayout::StowAbsolute) {
-                target.clone()
-            } else {
-                PathBuf::from(format!("dotfiles/{}", case.stow_name))
-            };
-            let rc_link = home.join(case.rc_name);
-            std::os::unix::fs::symlink(&link_value, &rc_link).unwrap();
-            (home, rc_link, Some(target), Some(link_value))
-        }
-        RcLayout::StowRelativeDotDot => {
-            // $HOME = root/user; package is a sibling of user (relative needs `..`).
-            let home = root.join("user");
-            std::fs::create_dir_all(&home).unwrap();
-            let target = root.join("packages/bash/bashrc");
-            std::fs::create_dir_all(target.parent().unwrap()).unwrap();
-            std::fs::write(&target, marker).unwrap();
-            let link_value = PathBuf::from("../packages/bash/bashrc");
-            let rc_link = home.join(case.rc_name);
-            std::os::unix::fs::symlink(&link_value, &rc_link).unwrap();
-            (home, rc_link, Some(target), Some(link_value))
-        }
-    }
-}
-
-fn run_shell_rc_case(case: &ShellRcCase) {
-    let Some(script) = script_path(case.script) else {
-        eprintln!(
-            "skipping {}: {} not found relative to crate",
-            case.name, case.script
-        );
-        return;
-    };
-    let platform = host_platform();
-    let fakedir = tempfile::tempdir().unwrap();
-    write_fake_curl(fakedir.path());
-
-    let root = tempfile::tempdir().unwrap();
-    let (home_path, rc_path, stow_target, expected_link) = setup_rc(root.path(), case);
-    seed_previous_good(&home_path, &platform);
-
-    assert!(
-        run_installer(&script, &home_path, fakedir.path(), "full", case.shell),
-        "{}: first install should succeed",
-        case.name
-    );
-
-    if case.reinstall {
-        assert!(
-            run_installer(&script, &home_path, fakedir.path(), "full", case.shell),
-            "{}: reinstall should succeed",
-            case.name
-        );
-    }
-
-    match case.layout {
-        RcLayout::Missing | RcLayout::Plain => {
-            assert!(
-                rc_path.is_file() && !rc_path.is_symlink(),
-                "{}: {} must be a regular file",
-                case.name,
-                case.rc_name
-            );
-            let preserved = match case.layout {
-                RcLayout::Plain => Some("# user shell rc"),
-                _ => None,
-            };
-            assert_single_installer_block(&rc_path, preserved);
-        }
-        RcLayout::StowAbsolute | RcLayout::StowRelative | RcLayout::StowRelativeDotDot => {
-            assert!(
-                rc_path.is_symlink(),
-                "{}: {} must remain a symlink after install",
-                case.name,
-                case.rc_name
-            );
-            let link = std::fs::read_link(&rc_path).unwrap();
-            assert_eq!(
-                link,
-                *expected_link.as_ref().unwrap(),
-                "{}: symlink target must be unchanged",
-                case.name
-            );
-            let target = stow_target.as_ref().unwrap();
-            assert_single_installer_block(target, Some("# user shell rc"));
-        }
-    }
-
-    assert_active_grok_runs(&home_path);
-}
-
 #[test]
-fn install_sh_blitz_keeps_grok_runnable_under_corruption() {
-    let Some(install_sh) = install_sh_path() else {
-        eprintln!("skipping: install.sh not found relative to crate; run under cargo");
-        return;
-    };
-    let platform = host_platform();
+fn install_sh_blitz_keeps_amore_runnable_under_corruption() {
+    let install_sh = install_sh_path();
+    let artifact = host_artifact();
     let fakedir = tempfile::tempdir().unwrap();
-    write_fake_curl(fakedir.path());
+    write_fake_curl(fakedir.path(), &artifact);
 
     // Each entry: (mode, should the installer succeed?). Loop a few rounds so a
     // re-install over an existing good install is also exercised.
@@ -323,82 +269,107 @@ fn install_sh_blitz_keeps_grok_runnable_under_corruption() {
 
     for (mode, expect_ok) in cases {
         let home = tempfile::tempdir().unwrap();
-        seed_previous_good(home.path(), &platform);
+        let install_dir = home.path().join(".local").join("bin");
+        seed_previous_good(&install_dir);
 
-        let ok = run_installer(&install_sh, home.path(), fakedir.path(), mode, "/bin/bash");
+        let ok = run_installer(
+            &install_sh,
+            home.path(),
+            &install_dir,
+            fakedir.path(),
+            mode,
+        );
         assert_eq!(
             ok, expect_ok,
             "install.sh mode={mode} exit success mismatch"
         );
 
         // The invariant holds regardless of which path was taken: the active
-        // grok always runs (new good binary on success, previous-good on
-        // rejection).
-        assert_active_grok_runs(home.path());
+        // amore always runs (new good binary on success, previous-good on
+        // rejection at the digest check).
+        assert_active_amore_runs(&install_dir);
+
+        let ver = active_version(&install_dir);
+        if expect_ok {
+            assert!(
+                ver.contains("0.2.0-test"),
+                "successful install should leave the new binary, got {ver:?}"
+            );
+        } else {
+            assert!(
+                ver.contains("0.1.0-prev"),
+                "failed install must preserve previous-good, got {ver:?}"
+            );
+        }
     }
 }
 
-/// Shell-rc rewrite matrix: stow absolute/relative/`..`, plain, first-create, enterprise.
+/// Digest passes but the extracted binary fails the run-and-print smoke gate.
+/// Installer must restore `amore.prev`.
 #[test]
-fn install_sh_shell_rc_rewrite_matrix() {
-    let cases = [
-        ShellRcCase {
-            name: "stow absolute bashrc reinstall",
-            script: "install.sh",
-            shell: "/bin/bash",
-            rc_name: ".bashrc",
-            stow_name: "bashrc",
-            layout: RcLayout::StowAbsolute,
-            reinstall: true,
-        },
-        ShellRcCase {
-            name: "stow relative bashrc reinstall",
-            script: "install.sh",
-            shell: "/bin/bash",
-            rc_name: ".bashrc",
-            stow_name: "bashrc",
-            layout: RcLayout::StowRelative,
-            reinstall: true,
-        },
-        ShellRcCase {
-            name: "stow relative ../ bashrc reinstall",
-            script: "install.sh",
-            shell: "/bin/bash",
-            rc_name: ".bashrc",
-            stow_name: "bashrc",
-            layout: RcLayout::StowRelativeDotDot,
-            reinstall: true,
-        },
-        ShellRcCase {
-            name: "plain bashrc reinstall",
-            script: "install.sh",
-            shell: "/bin/bash",
-            rc_name: ".bashrc",
-            stow_name: "bashrc",
-            layout: RcLayout::Plain,
-            reinstall: true,
-        },
-        ShellRcCase {
-            name: "missing bashrc first install",
-            script: "install.sh",
-            shell: "/bin/bash",
-            rc_name: ".bashrc",
-            stow_name: "bashrc",
-            layout: RcLayout::Missing,
-            reinstall: false,
-        },
-        ShellRcCase {
-            name: "enterprise stow absolute bashrc reinstall",
-            script: "install-enterprise.sh",
-            shell: "/bin/bash",
-            rc_name: ".bashrc",
-            stow_name: "bashrc",
-            layout: RcLayout::StowAbsolute,
-            reinstall: true,
-        },
-    ];
+fn install_sh_restores_prev_when_smoke_fails() {
+    let install_sh = install_sh_path();
+    let artifact = host_artifact();
+    let fakedir = tempfile::tempdir().unwrap();
+    let artifacts = fakedir.path().join("artifacts");
+    std::fs::create_dir_all(&artifacts).unwrap();
 
-    for case in &cases {
-        run_shell_rc_case(case);
-    }
+    // Silent-exit binary: extract succeeds, `--version` prints nothing → smoke fails.
+    let archive = artifacts.join(format!("{artifact}.tar.gz"));
+    write_tar_gz_with_amore(&archive, "#!/bin/sh\nexit 0\n");
+    let hash = hash_file(&archive);
+    std::fs::write(
+        artifacts.join(format!("{artifact}.tar.gz.sha256")),
+        format!("{hash}  {artifact}.tar.gz\n"),
+    )
+    .unwrap();
+
+    let body = format!(
+        r#"#!/bin/bash
+set -e
+artifacts="{artifacts}"
+artifact="{artifact}"
+out=""
+url=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -o) shift; out="$1" ;;
+    -fsSL|-f|-s|-S|-L) ;;
+    -*) ;;
+    *) url="$1" ;;
+  esac
+  shift
+done
+case "$url" in
+  *.sha256) cat "$artifacts/${{artifact}}.tar.gz.sha256" > "$out" ;;
+  *.tar.gz|*.zip) cp "$artifacts/${{artifact}}.tar.gz" "$out" ;;
+  *) echo "fake curl: unexpected url=$url" >&2; exit 1 ;;
+esac
+exit 0
+"#,
+        artifacts = artifacts.display(),
+        artifact = artifact,
+    );
+    let curl = fakedir.path().join("curl");
+    std::fs::write(&curl, body).unwrap();
+    std::fs::set_permissions(&curl, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    let home = tempfile::tempdir().unwrap();
+    let install_dir = home.path().join(".local").join("bin");
+    seed_previous_good(&install_dir);
+
+    let ok = run_installer(
+        &install_sh,
+        home.path(),
+        &install_dir,
+        fakedir.path(),
+        "full",
+    );
+    assert!(!ok, "silent binary must fail the run-and-print smoke gate");
+    assert_active_amore_runs(&install_dir);
+    let ver = active_version(&install_dir);
+    assert!(
+        ver.contains("0.1.0-prev"),
+        "smoke failure must restore amore.prev, got {ver:?}"
+    );
 }
