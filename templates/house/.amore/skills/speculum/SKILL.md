@@ -57,7 +57,7 @@ Compiled single-file binary: `bun run build:compile` → `dist/speculum-<os>-<ar
 | `speculum status` | Session/event counts, ingest freshness, probe registry |
 | `speculum doctor` | Operational health checks on the local index (db integrity, schema version, ingest freshness, probe registry) |
 | `speculum forget <prefix>` | Purge one session from the index (disk files untouched); append the purge to the `forget-audit.jsonl` ledger |
-| `speculum scan` | Run all probes (or `--probe <name>`), `--project`/`--since`/`--until` filtered; `--hits`/`--verbose` print hit evidence; `--policy [path]` exits 1 on threshold violations, `--policy-report` annotates; `--series weekly\|daily [--windows N]` emits per-window rates with intervals (newest window partial) |
+| `speculum scan` | Run all probes (or `--probe <names>`, comma-list), `--project`/`--since`/`--until` filtered; `--hits`/`--verbose` print hit evidence; `--policy [path]` exits 1 on threshold violations, `--policy-report` annotates; `--series weekly\|daily [--windows N]` emits per-window rates with intervals (newest window partial) |
 | `speculum usage` | Per-model token and turn totals (no prices) |
 | `speculum search <query>` | Sparse FTS5 search over the index (BM25 + recency RRF); `--limit`/`--since`/`--until`/`--project`/`--session`/`--fts-only`; `--json` |
 | `speculum export <surface>` | Snapshot a surface (scan/status/usage/session) as `json`/`csv`/`md` with a metadata envelope + sensitive warning |
