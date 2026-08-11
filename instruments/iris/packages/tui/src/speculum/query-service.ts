@@ -8,7 +8,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 /** Schema versions this reader understands (column set it actually queries). */
-export const SUPPORTED_SCHEMA_VERSIONS: readonly number[] = [4, 5];
+export const SUPPORTED_SCHEMA_VERSIONS: readonly number[] = [4, 5, 6];
 
 /** Staleness threshold aligned with `speculum status` (hours since newest session). */
 export const STALE_THRESHOLD_HOURS = 24;

@@ -299,8 +299,8 @@ describe('prepareFtsQuery / busy helpers', () => {
 });
 
 describe('openQueryService readonly + version gate', () => {
-  test('SUPPORTED_SCHEMA_VERSIONS is pinned to [4, 5]', () => {
-    expect([...SUPPORTED_SCHEMA_VERSIONS]).toEqual([4, 5]);
+  test('SUPPORTED_SCHEMA_VERSIONS is pinned to [4, 5, 6]', () => {
+    expect([...SUPPORTED_SCHEMA_VERSIONS]).toEqual([4, 5, 6]);
   });
 
   test('readonly: INSERT on opened db throws', () => {
