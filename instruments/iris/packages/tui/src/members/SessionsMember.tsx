@@ -329,6 +329,7 @@ export function SessionsMember({
             onCapture={setSearchCapture}
             onOpenSession={onOpenSession}
             stageBox={stageBox}
+            scopeSession={focus?.sessionId ? { id: focus.sessionId } : null}
           />
         </box>
       </box>

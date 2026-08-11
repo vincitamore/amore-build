@@ -159,6 +159,8 @@ export type SearchHit = {
   kind: string;
   /** Short FTS snippet (or text fallback). */
   snippet: string;
+  /** Event timestamp (ISO); enables time-window filtering on hits. */
+  ts?: string;
 };
 
 export type SearchOpts = {
@@ -861,7 +863,8 @@ class SqliteQueryService implements QueryService {
                ${titleExpr},
                e.kind AS kind,
                snippet(events_fts, 0, '', '', '…', 12) AS snippet,
-               e.text AS text
+               e.text AS text,
+               e.ts AS ts
              FROM events_fts
              JOIN events e ON e.id = events_fts.rowid
              ${joinSessions}
@@ -891,7 +894,8 @@ class SqliteQueryService implements QueryService {
              ${titleExpr},
              e.kind AS kind,
              snippet(events_fts, 0, '', '', '…', 12) AS snippet,
-             e.text AS text
+             e.text AS text,
+             e.ts AS ts
            FROM events_fts
            JOIN events e ON e.id = events_fts.rowid
            ${joinSessions}
@@ -1010,6 +1014,7 @@ function mapSearchHit(r: {
   kind: string;
   snippet: string | null;
   text: string | null;
+  ts?: string | null;
 }): SearchHit {
   const snip = (r.snippet ?? '').trim();
   const text = (r.text ?? '').trim();
@@ -1019,6 +1024,7 @@ function mapSearchHit(r: {
     title: (r.title ?? '').trim(),
     kind: r.kind,
     snippet: snip || text.slice(0, 120),
+    ...(r.ts ? { ts: r.ts } : {}),
   };
 }
 
