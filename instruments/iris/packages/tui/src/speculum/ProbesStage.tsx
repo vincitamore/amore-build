@@ -397,6 +397,7 @@ export function ProbesStage({
   inputActive,
   onFlash,
   onOpenSession,
+  onLensSession,
   stageBox: stageBoxProp,
 }: {
   inputActive?: boolean;
@@ -405,9 +406,12 @@ export function ProbesStage({
     sessionId: string,
     opts?: { eventId?: string | number; ts?: string },
   ) => void;
+  /** Hand a session to the lens picker (preselects it in the actions surface). */
+  onLensSession?: (sessionId: string) => void;
   /** Residual host box from SessionsMember; optional for isolated stage smokes. */
   stageBox?: MeasuredSize;
 }) {
+  void onLensSession;
   const t = usePalette();
   const dims = useStableDimensions();
   const stageBox = stageBoxProp ?? seedStageBox(dims.width, dims.height);

@@ -16,6 +16,7 @@ import { useStableDimensions } from '../use-stable-dimensions';
 import type { MeasuredSize } from '../use-measured-size';
 import { useRefreshOnActive } from '../use-refresh-on-active';
 import { Card, CARD_CHROME } from './Card';
+import { TurnDetail, TURN_DETAIL_FOOTER } from './TurnDetail';
 import {
   MIN_SESSION_SLOTS as LAYOUT_MIN_SESSION_SLOTS,
   MIN_TURN_SLOTS as LAYOUT_MIN_TURN_SLOTS,
@@ -468,6 +469,8 @@ export function MicroscopeStage({
   const [sessionCursor, setSessionCursor] = useState(0);
   const [sessionScroll, setSessionScroll] = useState(0);
   const [view, setView] = useState<ViewMode>('picker');
+  // Turn detail pane over the timeline card (enter opens; the pane owns keys while open).
+  const [detailOpen, setDetailOpen] = useState(false);
   const [openSessionId, setOpenSessionId] = useState<string | null>(null);
   const [turns, setTurns] = useState<TurnRow[]>([]);
   const [turnCursor, setTurnCursor] = useState(0);
@@ -627,6 +630,7 @@ export function MicroscopeStage({
       setOpenSessionId(sessionId);
       setTurns(nextTurns);
       setView('timeline');
+      setDetailOpen(false);
 
       // Select the session in the picker + focus detail (master-detail).
       setSessions((prev) => {
@@ -713,6 +717,8 @@ export function MicroscopeStage({
 
   useKeyboard((key: { name?: string }) => {
     if (!inputActive) return;
+    // While the turn detail pane is open it owns the keys (esc/step/scroll/copy).
+    if (detailOpen) return;
     const n = (key.name ?? '').toLowerCase().replace('arrow', '');
 
     if (n === 'r') {
@@ -735,6 +741,10 @@ export function MicroscopeStage({
       }
       if (n === 'down' || n === 'j') {
         setTurnCursor((c) => Math.min(Math.max(0, turns.length - 1), c + 1));
+        return;
+      }
+      if ((n === 'return' || n === 'enter') && turns.length > 0) {
+        setDetailOpen(true);
         return;
       }
       return;
@@ -1005,9 +1015,11 @@ export function MicroscopeStage({
     mode === 'missing' || mode === 'schema'
       ? 'r refresh'
       : view === 'timeline'
-        ? twoPane
-          ? '↑↓ j/k turns · esc sessions · r refresh'
-          : '↑↓ j/k turns · esc picker · r refresh'
+        ? detailOpen
+          ? TURN_DETAIL_FOOTER
+          : twoPane
+            ? '↑↓ j/k turns · esc sessions · r refresh'
+            : '↑↓ j/k turns · esc picker · r refresh'
         : '↑↓ select · enter timeline · r refresh';
 
   const pickerRight =
@@ -1063,6 +1075,31 @@ export function MicroscopeStage({
     </Card>
   );
 
+  // Detail pane rides the timeline card's slot; the pane itself stays mounted
+  // (visible toggle) and owns the keys while open.
+  const detailPane = (
+    <TurnDetail
+      visible={detailOpen}
+      eventId={turns[turnCursor]?.eventId ?? null}
+      sessionTitle={openSession ? sessionDisplayTitle(openSession) : ''}
+      inputActive={!!inputActive && detailOpen}
+      onClose={() => setDetailOpen(false)}
+      onStep={(d) =>
+        setTurnCursor((c) => Math.min(Math.max(0, turns.length - 1), Math.max(0, c + d)))
+      }
+      onFlash={onFlash}
+      path={path}
+      width={twoPane ? timelineW : contentW}
+      height={listHostH}
+    />
+  );
+  const timelineSlot = (
+    <>
+      {detailOpen ? null : timelineColumn}
+      {detailPane}
+    </>
+  );
+
   const stageBody = softOnly ? (
     <box flexDirection="column" flexShrink={0}>
       {banners.map((b, i) => (
@@ -1078,13 +1115,13 @@ export function MicroscopeStage({
     <box flexDirection="row" flexShrink={0} overflow="hidden" backgroundColor={t.background}>
       {pickerColumn}
       <box width={PANE_GAP} flexShrink={0} backgroundColor={t.background} />
-      {timelineColumn}
+      {timelineSlot}
     </box>
   ) : (
     <box flexDirection="column" flexShrink={0} backgroundColor={t.background}>
       {pickerColumn}
       <box height={1} flexShrink={0} backgroundColor={t.background} />
-      {timelineColumn}
+      {timelineSlot}
     </box>
   );
 

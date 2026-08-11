@@ -103,6 +103,8 @@ export function SessionsMember({
   const stageBox = { width: stageW, height: stageH };
   const [status, setStatus] = useState<DerivedSessionsState | null>(null);
   const [stage, setStage] = useState<StageId>('probes');
+  // Stage → lens handoff: a probe hit row preselects its session in the lens picker.
+  const [lensPrefill, setLensPrefill] = useState<{ sessionId: string; key: number } | null>(null);
   const [actionsCapture, setActionsCapture] = useState(false);
   const [searchCapture, setSearchCapture] = useState(false);
   const [flash, setFlash] = useFlash();
@@ -114,6 +116,10 @@ export function SessionsMember({
     return () => {
       aliveRef.current = false;
     };
+  }, []);
+
+  const handleLensSession = useCallback((sessionId: string) => {
+    setLensPrefill((p) => ({ sessionId, key: (p?.key ?? 0) + 1 }));
   }, []);
 
   const refreshStatus = useCallback(() => {
@@ -258,6 +264,7 @@ export function SessionsMember({
             inputActive={!!inputActive && stage === 'probes' && !actionsCapture}
             onFlash={setFlash}
             onOpenSession={onOpenSession}
+            onLensSession={handleLensSession}
             stageBox={stageBox}
           />
         </box>
@@ -328,6 +335,7 @@ export function SessionsMember({
         inputActive={!!inputActive}
         onFlash={setFlash}
         onCapture={setActionsCapture}
+        lensPrefill={lensPrefill}
       />
 
       <box

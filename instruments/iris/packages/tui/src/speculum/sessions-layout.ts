@@ -31,6 +31,8 @@ export const MIN_MAP_CANVAS_COLS = 16;
 export const MIN_SEARCH_HIT_SLOTS = 4;
 /** Pre-measure seed fallback for usage model cards. */
 export const MIN_USAGE_MODEL_SLOTS = 1;
+/** Pre-measure seed fallback for turn-detail content lines (measured path fit-clamps). */
+export const MIN_TURN_DETAIL_LINES = 4;
 
 /**
  * Nest rows outside the stage flex host.

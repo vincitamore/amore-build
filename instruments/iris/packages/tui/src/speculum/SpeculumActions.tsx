@@ -603,11 +603,18 @@ export function SpeculumActions({
   inputActive,
   onFlash,
   onCapture,
+  lensPrefill,
 }: {
   inputActive?: boolean;
   onFlash?: (msg: string) => void;
   onCapture?: (b: boolean) => void;
+  /**
+   * Session handed off from a stage (probe hit rows): opens the lens picker
+   * with this session preselected. `key` bumps per handoff so repeats fire.
+   */
+  lensPrefill?: { sessionId: string; key: number } | null;
 }) {
+  void lensPrefill;
   const t = usePalette();
   const dims = useStableDimensions();
   const rowW = Math.max(24, dims.width - 4);
