@@ -318,7 +318,7 @@ mod tests {
         );
         // Must not have re-written flow output as if a full run happened.
         assert!(
-            !text.contains("Step 1/3"),
+            !text.contains("Step 1/4") && !text.contains("Step 1/3"),
             "blocked re-run must not execute flow:\n{text}"
         );
     }

@@ -10,6 +10,11 @@
 #   AMORE_VERSION      install a specific tag (e.g. v0.2.120) instead of latest
 #   AMORE_INSTALL_DIR  target directory (default: ~/.local/bin, or ~/amore/bin
 #                      under Git Bash to match the Windows convention)
+#   AMORE_INSTALL_NO_UPDATE_CHECK=1
+#                      write cli.update_check = false into the user config
+#                      before the binary runs (air-gapped / no startup check)
+#   AMORE_HOME         config home (default: ~/.amore); used when writing the
+#                      update-check opt-out above
 set -euo pipefail
 
 REPO="vincitamore/amore-build"
@@ -93,6 +98,37 @@ chmod +x "$install_dir/$bin"
 for f in LICENSE NOTICE; do
   [ -f "$tmp/pkg/$f" ] && cp "$tmp/pkg/$f" "$install_dir/$f.amore" || true
 done
+
+# Install-time opt-out of startup update checks (before the binary is invoked).
+if [ "${AMORE_INSTALL_NO_UPDATE_CHECK:-}" = "1" ]; then
+  amore_home="${AMORE_HOME:-$HOME/.amore}"
+  mkdir -p "$amore_home"
+  cfg="$amore_home/config.toml"
+  if [ ! -f "$cfg" ]; then
+    printf '%s\n' '[cli]' 'update_check = false' >"$cfg"
+  elif grep -Eq '^[[:space:]]*update_check[[:space:]]*=' "$cfg"; then
+    # Force the install-time opt-out when the key is already present.
+    tmp_cfg="$(mktemp)"
+    sed -E 's/^[[:space:]]*update_check[[:space:]]*=.*/update_check = false/' "$cfg" >"$tmp_cfg"
+    mv "$tmp_cfg" "$cfg"
+  elif grep -Eq '^[[:space:]]*\[cli\][[:space:]]*$' "$cfg"; then
+    tmp_cfg="$(mktemp)"
+    awk '
+      BEGIN { done = 0 }
+      /^[[:space:]]*\[cli\][[:space:]]*$/ && !done {
+        print
+        print "update_check = false"
+        done = 1
+        next
+      }
+      { print }
+    ' "$cfg" >"$tmp_cfg"
+    mv "$tmp_cfg" "$cfg"
+  else
+    printf '\n%s\n%s\n' '[cli]' 'update_check = false' >>"$cfg"
+  fi
+  echo "Wrote update_check = false to $cfg (AMORE_INSTALL_NO_UPDATE_CHECK=1)"
+fi
 
 echo
 # Smoke-gate: the binary must run AND print a version. Exit code alone is not

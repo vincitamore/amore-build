@@ -24,6 +24,7 @@ pub mod managed_text;
 mod paths;
 pub mod shell;
 pub mod signed_policy;
+pub mod update_policy;
 mod validation;
 pub mod version_overrides;
 
@@ -71,6 +72,12 @@ pub use validation::{
     requirements_layers, validate_requirements,
 };
 pub use version_overrides::{VersionOverrideError, apply_version_overrides};
+pub use update_policy::{
+    DEFAULT_AUTO_UPDATE, DEFAULT_UPDATE_CHANNEL, DEFAULT_UPDATE_CHECK, ENV_DISABLE_UPDATES,
+    ENV_DISABLE_UPDATES_LEGACY, ENV_UPDATE_CHECK, UpdateCheckContext, effective_auto_update,
+    effective_update_channel, effective_update_check, update_check_env_override,
+    update_checks_permitted, updates_disabled_by_env, updates_permitted,
+};
 
 /// Parse an env var as a boolean. `None` if unset or unrecognized.
 ///

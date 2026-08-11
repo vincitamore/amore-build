@@ -8,6 +8,10 @@
 # Environment overrides:
 #   AMORE_VERSION      install a specific tag (e.g. v0.2.120) instead of latest
 #   AMORE_INSTALL_DIR  target directory (default: %USERPROFILE%\amore\bin)
+#   AMORE_INSTALL_NO_UPDATE_CHECK=1
+#                      write cli.update_check = false into the user config
+#                      before the binary runs (air-gapped / no startup check)
+#   AMORE_HOME         config home (default: %USERPROFILE%\.amore)
 
 $ErrorActionPreference = 'Stop'
 
@@ -53,6 +57,28 @@ try {
     foreach ($f in 'LICENSE', 'NOTICE') {
         $src = Join-Path $tmp "pkg\$f"
         if (Test-Path $src) { Copy-Item $src (Join-Path $installDir "$f.amore") }
+    }
+
+    # Install-time opt-out of startup update checks (before the binary is invoked).
+    if ($env:AMORE_INSTALL_NO_UPDATE_CHECK -eq '1') {
+        $amoreHome = if ($env:AMORE_HOME) { $env:AMORE_HOME } else { Join-Path $env:USERPROFILE '.amore' }
+        New-Item -ItemType Directory -Force -Path $amoreHome | Out-Null
+        $cfg = Join-Path $amoreHome 'config.toml'
+        if (-not (Test-Path $cfg)) {
+            Set-Content -LiteralPath $cfg -Value "[cli]`nupdate_check = false`n" -NoNewline
+        } else {
+            $raw = Get-Content -LiteralPath $cfg -Raw
+            if ($raw -match '(?m)^[ \t]*update_check[ \t]*=') {
+                $raw = [regex]::Replace($raw, '(?m)^[ \t]*update_check[ \t]*=.*$', 'update_check = false')
+            } elseif ($raw -match '(?m)^[ \t]*\[cli\][ \t]*$') {
+                $raw = [regex]::Replace($raw, '(?m)^([ \t]*\[cli\][ \t]*\r?\n)', "`$1update_check = false`n")
+            } else {
+                if (-not $raw.EndsWith("`n")) { $raw += "`n" }
+                $raw += "`n[cli]`nupdate_check = false`n"
+            }
+            Set-Content -LiteralPath $cfg -Value $raw -NoNewline
+        }
+        Write-Host "Wrote update_check = false to $cfg (AMORE_INSTALL_NO_UPDATE_CHECK=1)"
     }
 
     Write-Host ''

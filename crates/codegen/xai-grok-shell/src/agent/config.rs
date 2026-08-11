@@ -979,8 +979,21 @@ pub struct CompactionConfig {
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct CliConfig {
+    /// When true, pre-download updates without asking. Apply still requires
+    /// confirmation. Distinct from [`Self::update_check`].
     #[serde(skip_serializing_if = "Option::is_none")]
     pub auto_update: Option<bool>,
+    /// When true (compiled default), the interactive client may ask the
+    /// release origin whether a newer version exists. Env override:
+    /// `AMORE_UPDATE_CHECK`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub update_check: Option<bool>,
+    /// Release channel for version checks. Only `"stable"` is meaningful today.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub update_channel: Option<String>,
+    /// When set, checks report against this pin rather than latest.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub update_pin: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dismissed_version: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

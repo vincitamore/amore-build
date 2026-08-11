@@ -696,7 +696,7 @@ pub fn current_value_for(
         )),
         // CLI batch: snapshot mirrors; `None` → effective default `true`.
         "show_tips" => Some(SettingValue::Bool(pager.show_tips.unwrap_or(true))),
-        "auto_update" => Some(SettingValue::Bool(pager.auto_update.unwrap_or(true))),
+        "auto_update" => Some(SettingValue::Bool(pager.auto_update.unwrap_or(false))),
         // fork_secondary_model: baseline value folds to empty string. The
         // mirror persists the ModelId slug but the DynamicEnum canonicals
         // are catalog display names, so resolve via the snapshot; a stale
@@ -958,9 +958,9 @@ mod tests {
                 }
                 ("auto_update", SettingKind::Bool { default }) => {
                     assert!(
-                        *default,
-                        "auto_update registry default must be true \
-                         (matches auto_update.rs's `.unwrap_or(true)`)"
+                        !*default,
+                        "auto_update registry default must be false \
+                         (pre-download is opt-in; apply still confirms)"
                     );
                 }
                 // vim_mode: Option<bool>; None → false.

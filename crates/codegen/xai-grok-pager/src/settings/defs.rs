@@ -1354,7 +1354,7 @@ pub fn default_settings() -> Vec<SettingMeta> {
             keywords: &[
                 "auto", "update", "updates", "upgrade", "version", "install", "channel",
             ],
-            kind: SettingKind::Bool { default: true },
+            kind: SettingKind::Bool { default: false },
             restart_required: true,
             hidden_in_minimal: false,
         },

@@ -1,4 +1,5 @@
-//! Guided setup flow: model provider → Grok native rail → Iris (opt-out).
+//! Guided setup flow: model provider → Grok native rail → Iris (opt-out) →
+//! update-check notice.
 //!
 //! Interactive path is an auto-guided TUI screen (clear + numbered menus).
 //! Headless path prints the same steps without reading stdin.
@@ -74,7 +75,7 @@ impl FlowContext {
     }
 }
 
-/// Run the full three-step flow (interactive or headless).
+/// Run the full four-step flow (interactive or headless).
 pub fn run_flow(
     ctx: &FlowContext,
     input: &mut impl BufRead,
@@ -114,7 +115,7 @@ fn run_headless(ctx: &FlowContext, out: &mut impl Write, summary: &mut SetupSumm
     // and user already has no way to pick). Headless default: print steps only,
     // do not mutate config unless dry_run is false AND we still write nothing
     // automatically (operator: "prints headless steps").
-    writeln!(out, "Step 1/3 — model provider (headline)")?;
+    writeln!(out, "Step 1/4 — model provider (headline)")?;
     writeln!(
         out,
         "  Choose one and either re-run `amore setup` interactively, or paste into {}:",
@@ -149,7 +150,7 @@ fn run_headless(ctx: &FlowContext, out: &mut impl Write, summary: &mut SetupSumm
     summary.skipped_steps.push("model-provider (headless: printed only)");
 
     // Step 2 — Grok rail
-    writeln!(out, "Step 2/3 — Grok native rail (second)")?;
+    writeln!(out, "Step 2/4 — Grok native rail (second)")?;
     writeln!(
         out,
         "  One login covers the baked catalog + subagent freight (PKCE public client)."
@@ -164,7 +165,7 @@ fn run_headless(ctx: &FlowContext, out: &mut impl Write, summary: &mut SetupSumm
     summary.skipped_steps.push("grok-rail (headless: printed only)");
 
     // Step 3 — Iris
-    writeln!(out, "Step 3/3 — Iris companion (recommended, opt-out)")?;
+    writeln!(out, "Step 3/4 — Iris companion (recommended, opt-out)")?;
     let detected = detect_iris_on_path();
     let asset = iris_asset_shape();
     match &detected {
@@ -194,6 +195,11 @@ fn run_headless(ctx: &FlowContext, out: &mut impl Write, summary: &mut SetupSumm
         planted: false,
     });
     summary.skipped_steps.push("iris (headless: printed only)");
+
+    // Step 4 — update-check notice (disclosure only; default posture is on)
+    writeln!(out, "Step 4/4 — update check notice")?;
+    write_update_check_notice(out)?;
+    writeln!(out)?;
     summary.state_status = Some(WizardStatus::Skipped);
     Ok(())
 }
@@ -218,7 +224,7 @@ fn run_interactive(
     writeln!(out)?;
 
     // ── Step 1: model provider ──────────────────────────────────────────
-    step_header(out, 1, 3, "model provider (headline)")?;
+    step_header(out, 1, 4, "model provider (headline)")?;
     writeln!(
         out,
         "  [1] OpenRouter   (recommended)  deepseek/deepseek-v4-flash-0731"
@@ -277,7 +283,7 @@ fn run_interactive(
     writeln!(out)?;
 
     // ── Step 2: Grok rail ───────────────────────────────────────────────
-    step_header(out, 2, 3, "Grok native rail (second)")?;
+    step_header(out, 2, 4, "Grok native rail (second)")?;
     writeln!(
         out,
         "  One login covers the baked catalog + native subagent freight"
@@ -313,7 +319,7 @@ fn run_interactive(
     writeln!(out)?;
 
     // ── Step 3: Iris ─────────────────────────────────────────────────
-    step_header(out, 3, 3, "Iris companion (recommended, opt-out)")?;
+    step_header(out, 3, 4, "Iris companion (recommended, opt-out)")?;
     let detected = detect_iris_on_path();
     let asset = iris_asset_shape();
     match &detected {
@@ -366,9 +372,38 @@ fn run_interactive(
             planted: false,
         });
     }
+    writeln!(out)?;
+
+    // ── Step 4: update-check notice (disclosure; default posture ships on) ──
+    step_header(out, 4, 4, "update check notice")?;
+    write_update_check_notice(out)?;
+    writeln!(out)?;
+    write!(out, "  Press Enter to continue: ")?;
+    out.flush()?;
+    let _ = read_line(input)?;
 
     // Done if we did anything meaningful; still mark done so auto doesn't re-fire.
     summary.state_status = Some(WizardStatus::Done);
+    Ok(())
+}
+
+/// Shared disclosure text for the update-check notice step.
+///
+/// House register: full sentences, no em dashes, never first-person.
+fn write_update_check_notice(out: &mut impl Write) -> Result<()> {
+    writeln!(
+        out,
+        "  The client checks the release origin for new versions at interactive startup."
+    )?;
+    writeln!(
+        out,
+        "  Checks are on by default. Installing an update always asks first unless \
+         auto-update is enabled separately."
+    )?;
+    writeln!(out, "  To turn checks off, use any of:")?;
+    writeln!(out, "    env AMORE_UPDATE_CHECK=0")?;
+    writeln!(out, "    env AMORE_DISABLE_UPDATES=1")?;
+    writeln!(out, "    config.toml: cli.update_check = false")?;
     Ok(())
 }
 
@@ -551,8 +586,8 @@ mod tests {
             stdin_is_terminal: true,
             stdout_is_terminal: false,
         };
-        // 1 = openrouter, s = skip grok, s = skip iris
-        let mut input = Cursor::new("1\ns\ns\n");
+        // 1 = openrouter, s = skip grok, s = skip iris, Enter = notice confirm
+        let mut input = Cursor::new("1\ns\ns\n\n");
         let mut out = Vec::new();
         let summary = run_flow(&ctx, &mut input, &mut out).unwrap();
         assert_eq!(summary.model.as_ref().unwrap().id, "deepseek-openrouter");
@@ -561,6 +596,11 @@ mod tests {
         assert!(body.contains("system_prompt_label"));
         assert_eq!(summary.state_status, Some(WizardStatus::Done));
         assert!(WizardState::path_in(dir.path()).exists());
+        let text = String::from_utf8(out).unwrap();
+        assert!(
+            text.contains("AMORE_UPDATE_CHECK") && text.contains("cli.update_check"),
+            "notice step must name kill switches:\n{text}"
+        );
     }
 
     #[test]
@@ -582,6 +622,10 @@ mod tests {
         assert!(text.contains("OpenRouter"));
         assert!(text.contains("amore login"));
         assert!(text.contains("iris-"));
+        assert!(
+            text.contains("Step 4/4") && text.contains("AMORE_DISABLE_UPDATES"),
+            "headless must print update notice:\n{text}"
+        );
     }
 
     #[test]
