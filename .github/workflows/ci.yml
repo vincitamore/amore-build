@@ -236,3 +236,211 @@ jobs:
           --skip dispatcher::tests::
           --skip test_hook_blocking_allow
           --skip test_parameter_expansion_default_is_not_refused
+
+  # Live `amore update --check` against the real release origin on three
+  # platforms. Unit tests cannot see a present-but-unreachable dispatch or an
+  # origin assembled at runtime; this lane closes both by comparing the
+  # binary's latestVersion to `gh release view` and asserting the installer id.
+  # Dedicated job (not steps on `test`): the test matrix is linux+windows only,
+  # does not produce a standalone bin artifact, and is already disk-bound.
+  # Guarded to push-on-default-branch + workflow_dispatch so fork-PR token
+  # limits and shared-runner API budgets cannot flake a PR-only lane.
+  update-check-e2e:
+    name: ${{ matrix.os }} — update --check E2E
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' &&
+       github.ref == format('refs/heads/{0}', github.event.repository.default_branch))
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 150
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    env:
+      CARGO_TERM_COLOR: always
+      CARGO_INCREMENTAL: "0"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Install protoc
+        uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b # v3
+        with:
+          # Authenticated: the runner's shared IP exhausts the anonymous
+          # GitHub API pool (bit 2026-08-05, killed a tests job in 16s).
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Rust toolchain (rust-toolchain.toml)
+        uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master — installs with.toolchain (stable 1.92.0 here)
+        with:
+          toolchain: "1.92.0"
+
+      - name: Free runner disk (ubuntu)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /usr/local/.ghcup /opt/hostedtoolcache/CodeQL || true
+          df -h /
+
+      - name: Cargo cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          shared-key: ci-update-check-e2e
+
+      - name: Build amore debug binary (unix)
+        if: matrix.os != 'windows-latest'
+        run: cargo build -p xai-grok-pager-bin
+
+      # Same MSVC link flags as the release/build lanes: skip PDB emission and
+      # raise the default stack so the binary can boot on the runner.
+      - name: Build amore debug binary (windows)
+        if: matrix.os == 'windows-latest'
+        env:
+          RUSTFLAGS: "-Clink-arg=/DEBUG:NONE -Clink-arg=/STACK:8388608"
+        run: cargo build -p xai-grok-pager-bin
+
+      - name: Live update --check against real origin
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [ "${RUNNER_OS}" = "Windows" ]; then
+            BIN="target/debug/amore.exe"
+          else
+            BIN="target/debug/amore"
+          fi
+          if [ ! -f "$BIN" ]; then
+            echo "::error::missing binary at $BIN"
+            exit 1
+          fi
+
+          attempt=1
+          while true; do
+            set +e
+            "$BIN" update --check --json > out.json
+            code=$?
+            set -e
+            if [ "$code" -eq 0 ]; then
+              break
+            fi
+            if [ "$attempt" -ge 2 ]; then
+              echo "::error::update --check failed after one retry (exit ${code})"
+              cat out.json || true
+              exit "${code}"
+            fi
+            echo "update --check exit ${code}; retrying once after 5s"
+            attempt=$((attempt + 1))
+            sleep 5
+          done
+
+          gh release view --json tagName -q .tagName -R "${{ github.repository }}" > expected.txt
+          echo "expected tag: $(tr -d '\r\n' < expected.txt)"
+          echo "check json: $(tr -d '\r\n' < out.json | head -c 400)"
+
+          if command -v py >/dev/null 2>&1; then
+            PY=(py -3)
+          elif command -v python3 >/dev/null 2>&1; then
+            PY=(python3)
+          else
+            PY=(python)
+          fi
+          "${PY[@]}" - <<'PY'
+          import json
+          import sys
+
+          with open("out.json", encoding="utf-8") as f:
+              data = json.load(f)
+          with open("expected.txt", encoding="utf-8") as f:
+              expected = f.read().strip().lstrip("v")
+
+          if "updateCheck" not in data:
+              print("updateCheck missing from out.json", file=sys.stderr)
+              sys.exit(1)
+          if data.get("installer") != "amore-release":
+              print(
+                  f"installer={data.get('installer')!r}, want 'amore-release'",
+                  file=sys.stderr,
+              )
+              sys.exit(1)
+          latest = data.get("latestVersion")
+          if latest is None:
+              print("latestVersion missing or null", file=sys.stderr)
+              sys.exit(1)
+          got = str(latest).lstrip("v")
+          if got != expected:
+              print(
+                  f"latestVersion mismatch: got={got!r} expected={expected!r}",
+                  file=sys.stderr,
+              )
+              sys.exit(1)
+          print(
+              f"ok: latestVersion={got} updateCheck={data['updateCheck']!r} "
+              f"installer={data['installer']!r}"
+          )
+          PY
+
+      - name: Kill-switch AMORE_UPDATE_CHECK=0 is honored
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${RUNNER_OS}" = "Windows" ]; then
+            BIN="target/debug/amore.exe"
+          else
+            BIN="target/debug/amore"
+          fi
+
+          set +e
+          AMORE_UPDATE_CHECK=0 "$BIN" update --check --json > blocked.json 2>blocked.err
+          code=$?
+          set -e
+          if [ "$code" -ne 2 ]; then
+            echo "::error::expected exit 2 under AMORE_UPDATE_CHECK=0, got ${code}"
+            cat blocked.json blocked.err || true
+            exit 1
+          fi
+
+          if command -v py >/dev/null 2>&1; then
+            PY=(py -3)
+          elif command -v python3 >/dev/null 2>&1; then
+            PY=(python3)
+          else
+            PY=(python)
+          fi
+          "${PY[@]}" - <<'PY'
+          import json
+          import sys
+
+          with open("blocked.json", encoding="utf-8") as f:
+              raw = f.read().strip()
+          if not raw:
+              print("blocked.json empty", file=sys.stderr)
+              sys.exit(1)
+          data = json.loads(raw)
+          if data.get("updateCheck") is not False:
+              print(
+                  f"updateCheck={data.get('updateCheck')!r}, want false under kill-switch",
+                  file=sys.stderr,
+              )
+              sys.exit(1)
+          err = (data.get("error") or "").lower()
+          if "disabled" not in err and "blocked" not in err:
+              print(
+                  f"error field does not report blocked/disabled: {data.get('error')!r}",
+                  file=sys.stderr,
+              )
+              sys.exit(1)
+          if data.get("installer") != "amore-release":
+              print(
+                  f"installer={data.get('installer')!r}, want 'amore-release'",
+                  file=sys.stderr,
+              )
+              sys.exit(1)
+          print(
+              f"ok kill-switch: exit=2 updateCheck={data['updateCheck']!r} "
+              f"error={data.get('error')!r}"
+          )
+          PY
