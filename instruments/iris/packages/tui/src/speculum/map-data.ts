@@ -4,25 +4,30 @@
  * One-house geometry: the map is the spatial read of one operator's session
  * record over time — not a multi-project affinity graph. Placement is O(n) /
  * O(n log n) only (never force). Links are evidence-only: parentage +
- * event_links from the query-service; never invented affinity.
+ * event_links + session_links from the query-service; never invented affinity.
  */
 import type { SessionListRow, SessionMapLink } from './query-service';
 import { displayLabel, type GraphData, type GraphLink, type GraphNode, type WorldNode } from '../render/graph';
 import { clusterColor, type RGB } from '../render/color';
 import type { LegendEntry } from '../graph-view/blit';
 import { classifyCwd, type CwdOrigin } from './cwd-class';
+import type { Viewport } from '../render/viewport';
+import { worldToScreen } from '../render/viewport';
 
 /** Structure-invalidating map modes (reset viewport on change). */
 export type MapMode = 'density' | 'cluster';
 
 /** Edge-kind keys used by the map legend (evidence only). */
-export type MapEdgeKind = 'parentage' | 'event';
+export type MapEdgeKind = 'parentage' | 'event' | 'resumed_from' | 'shared_artifact';
 
 /** Origin class used as population filter + hue axis. */
 export type MapOrigin = CwdOrigin;
 
 /** Agent class used as population filter + glyph. */
 export type MapAgent = 'primary' | 'subagent';
+
+/** Exclusive lightness channel: volume-halo (default) or error-density overlay. */
+export type MapLightness = 'volume' | 'error';
 
 /** Closed origin order for hue index (not size-rank). */
 export const ORIGIN_ORDER: readonly MapOrigin[] = [
@@ -42,7 +47,20 @@ export const DEFAULT_ALLOWED_AGENTS: ReadonlySet<MapAgent> = new Set<MapAgent>([
 /** Legend vocabulary (depth-0 non-edge labels) — closed set. */
 export const LEGEND_ORIGIN_LABELS = new Set<string>(ORIGIN_ORDER);
 export const LEGEND_AGENT_LABELS = new Set<string>(AGENT_ORDER);
-export const LEGEND_EDGE_LABELS = new Set(['parentage', 'event links']);
+export const LEGEND_EDGE_LABELS = new Set([
+  'parentage',
+  'event links',
+  'resumed',
+  'shared artifact',
+]);
+
+/** Closed legend budget (4 edge kinds + ≤4 origins + 2 agents). */
+export const LEGEND_MAX_ROWS = 10;
+
+/** Zoom factor at which top-K node labels appear (besides focus labels). */
+export const ZOOM_TIER_MIN = 2;
+/** Cap on zoom-tier labels painted per frame. */
+export const ZOOM_TIER_MAX_LABELS = 12;
 
 export interface SessionWorldNode {
   id: string;
@@ -88,13 +106,31 @@ export const SESSION_MAP_LINKS: readonly GraphLink[] = Object.freeze([]);
 const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
 const ANCHOR_R = 100;
 const CLUSTER_SPACING = 5;
-const DENSITY_X_SPAN = 200;
+/** Horizontal world span of the timeline (density) mode — shared by axis ticks. */
+export const DENSITY_X_SPAN = 200;
 /** Vertical span of the volume band stack in density mode. */
 const DENSITY_Y_SPAN = 80;
 /** Number of volume quantile bands on Y (density). */
 const VOLUME_BANDS = 5;
 /** Glyph label budget (matches GraphView displayLabel default). */
 export const SESSION_GLYPH_LABEL_MAX = 18;
+/** Visible span below this uses week ticks; at/above uses month ticks. */
+export const AXIS_WEEK_THRESHOLD_MS = 60 * 86_400_000;
+const MS_DAY = 86_400_000;
+const MONTH_MMM = [
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
+] as const;
 
 /** Project path → stable short basename (kept for tooling; not a layout key). */
 export function projectBasename(projectPath: string): string {
@@ -362,10 +398,10 @@ export function buildSessionWorld(
 
 /**
  * Evidence edges to draw under the current policy:
- * - default (no selection, subagents hidden): none
- * - subagents visible, no selection: parentage with both ends visible
- * - selection active: raw parentage + event among the neighborhood
- * Never invents affinity; always a subset of `evidenceLinks`.
+ * - default (no selection): co-visible `resumed_from` + `shared_artifact`
+ * - subagents visible, no selection: those plus parentage
+ * - selection active: all co-visible evidence kinds among the neighborhood
+ * Event links stay selection-scoped. Never invents affinity.
  */
 export function selectDrawnLinks(
   world: SessionWorld,
@@ -389,19 +425,35 @@ export function selectDrawnLinks(
         nodeIds.has(l.target) &&
         l.source !== l.target,
     );
-  } else if (opts.subagentsVisible) {
-    candidates = evidenceLinks.filter(
-      (l) =>
-        l.kind === 'parentage' &&
-        nodeIds.has(l.source) &&
-        nodeIds.has(l.target) &&
-        l.source !== l.target,
-    );
   } else {
-    candidates = [];
+    candidates = evidenceLinks.filter((l) => {
+      if (!nodeIds.has(l.source) || !nodeIds.has(l.target) || l.source === l.target) return false;
+      if (l.kind === 'resumed_from' || l.kind === 'shared_artifact') return true;
+      if (l.kind === 'parentage' && opts.subagentsVisible) return true;
+      return false;
+    });
   }
 
   return filterEvidenceLinks(candidates, hidden);
+}
+
+/** Solid straight edge (everything except faint shared-artifact). */
+export function isSolidLinkKind(kind: SessionMapLink['kind']): boolean {
+  return kind !== 'shared_artifact';
+}
+
+/** Split drawn edges into solid (resumed/parentage/event) vs faint (shared_artifact). */
+export function partitionDrawnLinks(links: readonly SessionMapLink[]): {
+  solid: SessionMapLink[];
+  faint: SessionMapLink[];
+} {
+  const solid: SessionMapLink[] = [];
+  const faint: SessionMapLink[] = [];
+  for (const l of links) {
+    if (isSolidLinkKind(l.kind)) solid.push(l);
+    else faint.push(l);
+  }
+  return { solid, faint };
 }
 
 /**
@@ -481,8 +533,9 @@ export function filterEvidenceLinks(
 }
 
 /**
- * Build the map legend: edge kinds pinned first, then origin rows, then agent
- * rows. Counts come from the full loaded session list / full links() fetch.
+ * Build the map legend: edge kinds pinned first (parentage · event · resumed ·
+ * shared artifact), then origin rows, then agent rows. Closed vocabulary ≤ 10.
+ * Counts come from the full loaded session list / full sessionLinks fetch.
  * Never emits project-basename or session-folder labels.
  */
 export function buildMapLegendRows(
@@ -504,40 +557,40 @@ export function buildMapLegendRows(
     agentCounts[sessionAgent(s)] += 1;
   }
 
-  let parentageCount = 0;
-  let eventCount = 0;
+  const edgeCounts: Record<MapEdgeKind, number> = {
+    parentage: 0,
+    event: 0,
+    resumed_from: 0,
+    shared_artifact: 0,
+  };
   for (const l of evidenceLinks) {
-    if (l.kind === 'parentage') parentageCount += l.count;
-    else eventCount += l.count;
+    if (l.kind in edgeCounts) edgeCounts[l.kind as MapEdgeKind] += l.count;
   }
 
   const edgeColor: RGB = { r: 160, g: 168, b: 180 };
   const agentColor: RGB = { r: 140, g: 148, b: 160 };
   const rows: LegendEntry[] = [];
 
-  // Edge kinds pinned first (indices 0–1).
-  rows.push({
-    glyph: '─',
-    label: 'parentage',
-    color: edgeColor,
-    count: parentageCount,
-    hidden: hiddenEdgeKinds.has('parentage'),
-    depth: 0,
-    expandable: false,
-    expanded: false,
-    partial: false,
-  });
-  rows.push({
-    glyph: '═',
-    label: 'event links',
-    color: edgeColor,
-    count: eventCount,
-    hidden: hiddenEdgeKinds.has('event'),
-    depth: 0,
-    expandable: false,
-    expanded: false,
-    partial: false,
-  });
+  // Edge kinds pinned first (indices 0–3).
+  const edgeRows: { glyph: string; label: string; kind: MapEdgeKind }[] = [
+    { glyph: '─', label: 'parentage', kind: 'parentage' },
+    { glyph: '═', label: 'event links', kind: 'event' },
+    { glyph: '→', label: 'resumed', kind: 'resumed_from' },
+    { glyph: '┄', label: 'shared artifact', kind: 'shared_artifact' },
+  ];
+  for (const e of edgeRows) {
+    rows.push({
+      glyph: e.glyph,
+      label: e.label,
+      color: edgeColor,
+      count: edgeCounts[e.kind],
+      hidden: hiddenEdgeKinds.has(e.kind),
+      depth: 0,
+      expandable: false,
+      expanded: false,
+      partial: false,
+    });
+  }
 
   // Origins in fixed order; unknown only when count > 0.
   for (let i = 0; i < ORIGIN_ORDER.length; i++) {
@@ -572,7 +625,7 @@ export function buildMapLegendRows(
     });
   }
 
-  return rows;
+  return rows.slice(0, LEGEND_MAX_ROWS);
 }
 
 /**
@@ -599,6 +652,8 @@ export type LegendToggle =
 export function legendToggleTarget(label: string): LegendToggle | null {
   if (label === 'parentage') return { kind: 'edge', key: 'parentage' };
   if (label === 'event links') return { kind: 'edge', key: 'event' };
+  if (label === 'resumed') return { kind: 'edge', key: 'resumed_from' };
+  if (label === 'shared artifact') return { kind: 'edge', key: 'shared_artifact' };
   if ((LEGEND_ORIGIN_LABELS as Set<string>).has(label)) {
     return { kind: 'origin', key: label as MapOrigin };
   }
@@ -633,6 +688,23 @@ export function modeStatusLabel(mode: MapMode): string {
   return mode === 'density' ? 'timeline' : 'structure';
 }
 
+/** Active lightness-channel name for the control line. */
+export function lightnessStatusLabel(mode: MapLightness): string {
+  return mode === 'error' ? 'error-density' : 'volume-halo';
+}
+
+/** Unified links vocabulary for status + load flash: `links {drawn}/{loaded}`. */
+export function formatLinksStatus(drawn: number, loaded: number): string {
+  return `links ${drawn}/${loaded}`;
+}
+
+/** Canvas body rows for graph glyphs — timeline reserves the bottom row as axis strip. */
+export function mapCanvasBodyRows(canvasRows: number, mode: MapMode): number {
+  const n = Math.max(1, canvasRows);
+  if (mode === 'density' && n > 1) return n - 1;
+  return n;
+}
+
 /**
  * Nearest session glyph to a cell within subpixel d² ≤ 36 (GraphView contract).
  * cell center = cellX*2+1, cellY*4+2.
@@ -660,6 +732,331 @@ export function hitTestSession(
 /** True when a graph has zero links (no evidence edges projected). */
 export function hasNoForceEdges(graph: GraphData): boolean {
   return !graph.links || graph.links.length === 0;
+}
+
+// ── Time axis (timeline mode) ────────────────────────────────────────────────
+
+export type AxisGranularity = 'month' | 'week';
+
+export interface AxisTick {
+  /** World X matching buildTimelineWorld's time mapping. */
+  worldX: number;
+  /** Boundary instant (ms). */
+  t: number;
+  label: string;
+  kind: AxisGranularity;
+}
+
+export interface AxisTickCell {
+  cellX: number;
+  label: string;
+  kind: AxisGranularity;
+}
+
+/** Min/max startedAt of a population, in ms. Empty → zeros. */
+export function populationTimeRange(
+  nodes: readonly { startedAt: string }[],
+): { minT: number; maxT: number; spanMs: number } {
+  if (nodes.length === 0) return { minT: 0, maxT: 0, spanMs: 0 };
+  let minT = Infinity;
+  let maxT = -Infinity;
+  for (const n of nodes) {
+    const t = parseTs(n.startedAt);
+    if (t < minT) minT = t;
+    if (t > maxT) maxT = t;
+  }
+  if (!Number.isFinite(minT) || !Number.isFinite(maxT)) return { minT: 0, maxT: 0, spanMs: 0 };
+  return { minT, maxT, spanMs: Math.max(0, maxT - minT) };
+}
+
+/** World X for a timestamp under the timeline mapping (no jitter). */
+export function timeToWorldX(t: number, minT: number, maxT: number): number {
+  const spanT = Math.max(1, maxT - minT);
+  const u = (t - minT) / spanT;
+  return (u - 0.5) * DENSITY_X_SPAN;
+}
+
+function pad2(n: number): string {
+  return n < 10 ? `0${n}` : String(n);
+}
+
+function utcMonthStart(t: number): number {
+  const d = new Date(t);
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1);
+}
+
+function nextUtcMonth(t: number): number {
+  const d = new Date(t);
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1);
+}
+
+/** Monday 00:00 UTC of the week containing t. */
+function utcWeekStart(t: number): number {
+  const d = new Date(t);
+  const day = d.getUTCDay(); // 0=Sun
+  const sinceMon = (day + 6) % 7;
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - sinceMon);
+}
+
+function nextUtcWeek(t: number): number {
+  return utcWeekStart(t) + 7 * MS_DAY;
+}
+
+function monthLabel(t: number): string {
+  return MONTH_MMM[new Date(t).getUTCMonth()] ?? '???';
+}
+
+function weekLabel(t: number): string {
+  const d = new Date(t);
+  return `${pad2(d.getUTCMonth() + 1)}-${pad2(d.getUTCDate())}`;
+}
+
+/**
+ * Axis ticks for the visible population's time range.
+ * Week boundaries when span < 60 days; month boundaries otherwise.
+ */
+export function deriveAxisTicks(minT: number, maxT: number): AxisTick[] {
+  if (!Number.isFinite(minT) || !Number.isFinite(maxT) || maxT < minT) return [];
+  const spanMs = Math.max(0, maxT - minT);
+  // Single-instant population: one label at center.
+  if (spanMs === 0) {
+    const kind: AxisGranularity = 'month';
+    return [{ worldX: 0, t: minT, label: monthLabel(minT), kind }];
+  }
+  const kind: AxisGranularity = spanMs < AXIS_WEEK_THRESHOLD_MS ? 'week' : 'month';
+  const ticks: AxisTick[] = [];
+  if (kind === 'month') {
+    let cur = utcMonthStart(minT);
+    // Include the month that contains minT even if the boundary is before minT.
+    if (cur < minT - MS_DAY) cur = nextUtcMonth(cur);
+    // Walk from the month start at/before minT through maxT.
+    cur = utcMonthStart(minT);
+    const end = maxT + MS_DAY; // allow last boundary near max
+    let guard = 0;
+    while (cur <= end && guard++ < 240) {
+      if (cur >= minT - MS_DAY && cur <= maxT + MS_DAY) {
+        ticks.push({
+          worldX: timeToWorldX(cur, minT, maxT),
+          t: cur,
+          label: monthLabel(cur),
+          kind,
+        });
+      }
+      cur = nextUtcMonth(cur);
+    }
+  } else {
+    let cur = utcWeekStart(minT);
+    const end = maxT + MS_DAY;
+    let guard = 0;
+    while (cur <= end && guard++ < 520) {
+      if (cur >= minT - MS_DAY && cur <= maxT + MS_DAY) {
+        ticks.push({
+          worldX: timeToWorldX(cur, minT, maxT),
+          t: cur,
+          label: weekLabel(cur),
+          kind,
+        });
+      }
+      cur = nextUtcWeek(cur);
+    }
+  }
+  // Deduplicate by label+worldX (single-month span may only yield one).
+  if (ticks.length === 0) {
+    ticks.push({
+      worldX: 0,
+      t: minT,
+      label: kind === 'month' ? monthLabel(minT) : weekLabel(minT),
+      kind,
+    });
+  }
+  return ticks;
+}
+
+/**
+ * Project world-space axis ticks through the current viewport into cell columns
+ * on the graph body. Off-screen ticks are dropped; pan/zoom recomputes labels.
+ */
+export function projectAxisTicks(
+  ticks: readonly AxisTick[],
+  vp: Viewport,
+  cols: number,
+  bodyRows: number,
+): AxisTickCell[] {
+  if (cols <= 0 || bodyRows <= 0 || ticks.length === 0) return [];
+  const width = cols * 2;
+  const height = bodyRows * 4;
+  const out: AxisTickCell[] = [];
+  const seen = new Set<number>();
+  for (const tick of ticks) {
+    const s = worldToScreen({ x: tick.worldX, y: 0 }, vp, width, height);
+    const cellX = Math.floor(s.x / 2);
+    if (cellX < 0 || cellX >= cols) continue;
+    if (seen.has(cellX)) continue;
+    seen.add(cellX);
+    out.push({ cellX, label: tick.label, kind: tick.kind });
+  }
+  return out;
+}
+
+/**
+ * Full axis layout for timeline mode: derive ticks from population times, project
+ * through the viewport. Empty when there are no nodes.
+ */
+export function layoutAxisStrip(
+  nodes: readonly { startedAt: string }[],
+  vp: Viewport,
+  cols: number,
+  bodyRows: number,
+): { ticks: AxisTickCell[]; granularity: AxisGranularity | null; range: { minT: number; maxT: number; spanMs: number } } {
+  const range = populationTimeRange(nodes);
+  if (nodes.length === 0 || range.spanMs < 0) {
+    return { ticks: [], granularity: null, range };
+  }
+  const derived = deriveAxisTicks(range.minT, range.maxT);
+  const granularity = derived[0]?.kind ?? null;
+  return {
+    ticks: projectAxisTicks(derived, vp, cols, bodyRows),
+    granularity,
+    range,
+  };
+}
+
+// ── Hover / selection readout ────────────────────────────────────────────────
+
+/** Glanceable age from an ISO timestamp (`Xm ago` / `Xh ago` / `Xd ago`). */
+export function formatSessionAge(iso: string | null | undefined, now = Date.now()): string {
+  if (iso == null || iso === '') return '?';
+  const ts = Date.parse(iso);
+  if (!Number.isFinite(ts)) return '?';
+  const ms = Math.max(0, now - ts);
+  const minutes = Math.floor(ms / 60_000);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
+
+/**
+ * Hover info line when no node is selected:
+ * `◌ {title} · t:{n} · {age}`
+ */
+export function formatHoverReadout(
+  node: {
+    id: string;
+    label: string;
+    turnCount: number;
+    endedAt?: string;
+    startedAt?: string;
+  },
+  now = Date.now(),
+): string {
+  const title = displayLabel(node.label || node.id);
+  const age = formatSessionAge(node.endedAt || node.startedAt || '', now);
+  return `◌ ${title} · t:${node.turnCount} · ${age}`;
+}
+
+/**
+ * Selection info fragment (appended after the status prefix):
+ * `◉ {title} · turns {n} · {origin}`
+ */
+export function formatSelectionReadout(node: {
+  label: string;
+  turnCount: number;
+  origin: string;
+}): string {
+  return `◉ ${displayLabel(node.label)} · turns ${node.turnCount} · ${node.origin}`;
+}
+
+// ── Zoom-tier labels ─────────────────────────────────────────────────────────
+
+export interface ZoomLabelCandidate {
+  id: string;
+  turnCount: number;
+  /** Session title or glyph label (displayLabel applied here). */
+  label: string;
+  /** Glyph cell coordinates. */
+  cx: number;
+  cy: number;
+}
+
+export interface ZoomLabelPlacement {
+  id: string;
+  text: string;
+  /** First character cell (to the right of the glyph). */
+  cx: number;
+  cy: number;
+}
+
+/**
+ * Top-K visible nodes by turn count at zoom ≥ ZOOM_TIER_MIN. Skips any label
+ * whose cells collide with occupied cells or a previously placed label.
+ */
+export function selectZoomTierLabels(
+  candidates: readonly ZoomLabelCandidate[],
+  opts: {
+    cols: number;
+    rows: number;
+    maxLabels?: number;
+    occupied?: ReadonlySet<number>;
+  },
+): ZoomLabelPlacement[] {
+  const cols = opts.cols;
+  const rows = opts.rows;
+  const max = opts.maxLabels ?? ZOOM_TIER_MAX_LABELS;
+  if (cols <= 0 || rows <= 0 || max <= 0) return [];
+
+  const occupied = new Set<number>(opts.occupied ?? []);
+  const ranked = [...candidates]
+    .filter((c) => c.cx >= 0 && c.cy >= 0 && c.cx < cols && c.cy < rows)
+    .sort((a, b) => {
+      const dt = b.turnCount - a.turnCount;
+      return dt !== 0 ? dt : a.id.localeCompare(b.id);
+    });
+
+  const out: ZoomLabelPlacement[] = [];
+  for (const c of ranked) {
+    if (out.length >= max) break;
+    const text = displayLabel(c.label);
+    if (!text) continue;
+    // Leading space matches renderView focus labels (` ${label}`).
+    const chars = ` ${text}`;
+    const cells: number[] = [];
+    let collides = false;
+    for (let i = 0; i < chars.length; i++) {
+      const lx = c.cx + 1 + i;
+      if (lx < 0 || lx >= cols) {
+        collides = true;
+        break;
+      }
+      const idx = c.cy * cols + lx;
+      if (occupied.has(idx)) {
+        collides = true;
+        break;
+      }
+      cells.push(idx);
+    }
+    if (collides || cells.length === 0) continue;
+    for (const idx of cells) occupied.add(idx);
+    // Reserve the glyph cell too so a later label cannot overwrite it.
+    occupied.add(c.cy * cols + c.cx);
+    out.push({ id: c.id, text, cx: c.cx + 1, cy: c.cy });
+  }
+  return out;
+}
+
+// ── Error-density → attention tier ───────────────────────────────────────────
+
+export type ErrorDensityTier = 0 | 1 | 2 | 3;
+
+/**
+ * Map session_annotations.error_density (tool_errors / max(1, turns), ≥0)
+ * onto attention tiers 0–3 for attentionShade. Zero/absent → dormant.
+ */
+export function errorDensityTier(density: number): ErrorDensityTier {
+  if (!Number.isFinite(density) || density <= 0) return 0;
+  if (density < 0.05) return 1;
+  if (density < 0.15) return 2;
+  return 3;
 }
 
 /**

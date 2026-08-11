@@ -2,9 +2,10 @@
  * Sessions Map stage — Panel-framed timeline / structure scatter of the session RECORD.
  *
  * Composition: pure one-house world builders + Graph `renderView` (glyphs, origin hue)
- * with evidence links only (parentage + event_links). Viewport chrome matches GraphView
- * (pan/zoom/fit/hit-test). Legend is fixed React rows (not a canvas blit) so it paints
- * reliably when nested under SessionsMember and appears in char-frame harnesses.
+ * with evidence links only (parentage + event_links + session_links). Viewport chrome
+ * matches GraphView (pan/zoom/fit/hit-test). Legend is fixed React rows (not a canvas
+ * blit) so it paints reliably when nested under SessionsMember and appears in
+ * char-frame harnesses. Timeline mode reserves the canvas bottom row as a time axis.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useKeyboard } from '@opentui/react';
@@ -20,8 +21,8 @@ import {
   seedStageBox,
 } from './sessions-layout';
 import {
-  displayLabel,
   renderView,
+  type Cell,
   type FocusState,
   type GraphData,
   type WorldNode,
@@ -31,16 +32,20 @@ import {
   fitViewport,
   panViewport,
   screenToWorld,
+  worldToScreen,
   zoomViewport,
   zoomViewportAt,
   type Viewport,
   type WorldPoint,
 } from '../render/viewport';
+import { BrailleCanvas } from '../render/braille';
+import { attentionShade, clusterColor, EDGE_FAINT, type RGB } from '../render/color';
 import { blitGrid, GRAPH_BG, type DrawBuffer, type LegendEntry } from '../graph-view/blit';
 import {
   openQueryService,
   resolveIndexPath,
   type QueryService,
+  type SessionAnnotation,
   type SessionListRow,
   type SessionMapLink,
 } from './query-service';
@@ -49,16 +54,28 @@ import {
   buildSessionWorld,
   DEFAULT_ALLOWED_AGENTS,
   DEFAULT_ALLOWED_ORIGINS,
+  errorDensityTier,
   filtersShortLabel,
+  formatHoverReadout,
+  formatLinksStatus,
   formatMapLegendLine,
+  formatSelectionReadout,
   hitTestSession,
+  layoutAxisStrip,
+  LEGEND_MAX_ROWS,
   legendToggleTarget,
+  lightnessStatusLabel,
+  mapCanvasBodyRows,
   modeStatusLabel,
   neighborhoodIds,
+  partitionDrawnLinks,
   selectDrawnLinks,
+  selectZoomTierLabels,
   sessionWorldToGraph,
+  ZOOM_TIER_MIN,
   type MapAgent,
   type MapEdgeKind,
+  type MapLightness,
   type MapMode,
   type MapOrigin,
   type SessionWorld,
@@ -67,11 +84,11 @@ import {
 const STATUS_BG = RGBA.fromInts(30, 34, 42);
 const STATUS_FG = RGBA.fromInts(205, 211, 220);
 const STATUS_DIM = RGBA.fromInts(120, 128, 140);
+/** Axis strip chrome (month/week ticks) — palette-adjacent slate. */
+const AXIS_CHROME: RGB = { r: 120, g: 128, b: 140 };
 /** Full-set fetch ceiling — well above any realistic corpus; never a soft product cap. */
 const SESSION_LIST_FETCH = 1_000_000;
 const INSTALL_RECIPE = 'amore init --with-speculum';
-/** Legend block max rows (closed vocabulary ≤ 8). */
-const LEGEND_MAX_ROWS = 8;
 
 interface MouseLike {
   x: number;
@@ -101,7 +118,10 @@ type SoftState =
       sessions: SessionListRow[];
       /** Total sessions in the index (honest coverage denominator). */
       total: number;
+      /** Evidence edges from sessionLinks (parentage + event + resumed/shared). */
       links: SessionMapLink[];
+      /** session_annotations by id (empty on v5 / missing table). */
+      annotations: Record<string, SessionAnnotation>;
     };
 
 function padRow(text: string, width: number): string {
@@ -232,8 +252,7 @@ function softCopy(state: SoftState): { title: string; lines: string[] } {
 /**
  * Interactive session map. Opens the readonly query-service, places sessions with
  * one-house world builders, draws via Graph `renderView` with evidence links.
- */
-/**
+ *
  * Local map chrome against residual host:
  * panel title/border ~3 + 2 status lines + legend rows (≤ LEGEND_MAX_ROWS).
  * Legend is React chrome (not canvas blit), so it is budgeted here.
@@ -290,6 +309,8 @@ export function MapStage({
     () => new Set(DEFAULT_ALLOWED_AGENTS),
   );
   const [hiddenEdgeKinds, setHiddenEdgeKinds] = useState<Set<MapEdgeKind>>(() => new Set());
+  /** Exclusive lightness channel: volume-halo (default) ↔ error-density (`e`). */
+  const [lightness, setLightness] = useState<MapLightness>('volume');
   const qsRef = useRef<QueryService | null>(null);
   const aliveRef = useRef(true);
   const onFlashRef = useRef(onFlash);
@@ -354,7 +375,10 @@ export function MapStage({
       onFlashRef.current?.('map: empty index');
       return;
     }
-    const links = qs.links(sessions.map((s) => s.id));
+    const ids = sessions.map((s) => s.id);
+    // sessionLinks soft-degrades to links() when session_links is absent (v5).
+    const links = qs.sessionLinks(ids);
+    const annotations = qs.annotations(ids);
     if (aliveRef.current) {
       setSoft({
         kind: 'ready',
@@ -362,11 +386,12 @@ export function MapStage({
         sessions,
         total: Math.max(total, sessions.length),
         links,
+        annotations,
       });
       setSelected(null);
       setViewport(null);
       onFlashRef.current?.(
-        `map: showing ${sessions.length} of ${Math.max(total, sessions.length)} · ${links.length} raw links`,
+        `map: showing ${sessions.length} of ${Math.max(total, sessions.length)} · ${formatLinksStatus(0, links.length)}`,
       );
     }
   }, []);
@@ -379,7 +404,9 @@ export function MapStage({
 
   const sessions = soft.kind === 'ready' ? soft.sessions : null;
   const evidenceLinks = soft.kind === 'ready' ? soft.links : [];
+  const annotationMap = soft.kind === 'ready' ? soft.annotations : {};
   const totalSessions = soft.kind === 'ready' ? soft.total : 0;
+  const loadedLinkCount = evidenceLinks.length;
 
   const populationFilters = useMemo(
     () => ({ origins: allowedOrigins, agents: allowedAgents }),
@@ -402,6 +429,11 @@ export function MapStage({
     });
   }, [sessionWorld, evidenceLinks, selected, subagentsVisible, hiddenEdgeKinds]);
 
+  const { solid: solidLinks, faint: faintLinks } = useMemo(
+    () => partitionDrawnLinks(drawnLinks),
+    [drawnLinks],
+  );
+
   const { graph, worldNodes } = useMemo(() => {
     if (!sessionWorld) {
       return {
@@ -409,8 +441,9 @@ export function MapStage({
         worldNodes: [] as WorldNode[],
       };
     }
-    return sessionWorldToGraph(sessionWorld, drawnLinks);
-  }, [sessionWorld, drawnLinks]);
+    // Solid kinds through renderView; faint shared_artifact overlaid after.
+    return sessionWorldToGraph(sessionWorld, solidLinks);
+  }, [sessionWorld, solidLinks]);
 
   const legend = useMemo(() => {
     if (!sessions) return [];
@@ -454,13 +487,18 @@ export function MapStage({
     }
   }, [selected, sessionWorld]);
 
+  // Timeline reserves the bottom canvas row as the axis strip.
+  const bodyRows = mapCanvasBodyRows(rows, mode);
+  const bodyHeight = bodyRows * 4;
+  const hasAxis = mode === 'density' && rows > 1;
+
   const vp = useMemo(
-    () => viewport ?? fitViewport(worldNodes, width, height),
-    [viewport, worldNodes, width, height],
+    () => viewport ?? fitViewport(worldNodes, width, bodyHeight),
+    [viewport, worldNodes, width, bodyHeight],
   );
   const fitScale = useMemo(
-    () => fitViewport(worldNodes, width, height).scale,
-    [worldNodes, width, height],
+    () => fitViewport(worldNodes, width, bodyHeight).scale,
+    [worldNodes, width, bodyHeight],
   );
   const zoomFactor = fitScale > 0 ? vp.scale / fitScale : 1;
 
@@ -473,37 +511,184 @@ export function MapStage({
   );
 
   // Focus for dimming: selection (or hover without neighborhood) via existing FocusState.
+  // Hover alone does NOT enter focus (keeps zoom-tier labels + avoids mystery selection ring);
+  // selection still labels the neighborhood.
   const focus = useMemo<FocusState | undefined>(() => {
     if (selected) {
       return { selected, neighbors };
     }
-    if (hovered) {
-      return { selected: hovered, neighbors: new Set() };
-    }
     return undefined;
-  }, [selected, hovered, neighbors]);
+  }, [selected, neighbors]);
 
-  const { grid, nodes: screenNodes } = useMemo(
-    () =>
-      renderView(
-        graph,
-        worldNodes,
+  const { grid, nodes: screenNodes } = useMemo(() => {
+    const result = renderView(
+      graph,
+      worldNodes,
+      vp,
+      {
+        cols,
+        rows: bodyRows,
+        mode: 'cluster',
+        attention: true,
+        // Volume-halo uses hub size from volume-mapped linkCount; exclusive with error overlay.
+        emphasizeHubs: lightness === 'volume',
+      },
+      focus,
+    );
+
+    // Faint shared_artifact edges under glyphs (EDGE_FAINT).
+    if (faintLinks.length > 0 && sessionWorld) {
+      const byId = new Map(worldNodes.map((n) => [n.id, n]));
+      const canvas = new BrailleCanvas(width, bodyHeight);
+      for (const l of faintLinks) {
+        const a = byId.get(l.source);
+        const b = byId.get(l.target);
+        if (!a || !b) continue;
+        const sa = worldToScreen(a, vp, width, bodyHeight);
+        const sb = worldToScreen(b, vp, width, bodyHeight);
+        canvas.line(sa.x, sa.y, sb.x, sb.y);
+      }
+      for (let cy = 0; cy < bodyRows; cy++) {
+        for (let cx = 0; cx < cols; cx++) {
+          const mask = canvas.cellAt(cx, cy);
+          if (mask === 0) continue;
+          const idx = cy * cols + cx;
+          const existing = result.grid.cells[idx];
+          // Only paint into empty cells or overwrite other dim edge braille.
+          if (
+            !existing ||
+            (existing.char >= '⠀' && existing.char <= '⣿' && existing.fg.r <= EDGE_FAINT.r + 40)
+          ) {
+            result.grid.cells[idx] = {
+              char: String.fromCodePoint(0x2800 + mask),
+              fg: EDGE_FAINT,
+            };
+          }
+        }
+      }
+    }
+
+    // Error-density lightness: re-shade glyph cells via attention machinery.
+    if (lightness === 'error' && sessionWorld) {
+      const nodeById = new Map(sessionWorld.nodes.map((n) => [n.id, n]));
+      for (const sn of result.nodes) {
+        const cx = Math.floor(sn.x / 2);
+        const cy = Math.floor(sn.y / 4);
+        if (cx < 0 || cy < 0 || cx >= cols || cy >= bodyRows) continue;
+        const idx = cy * cols + cx;
+        const cell = result.grid.cells[idx];
+        if (!cell) continue;
+        // Leave the selection ring alone.
+        if (selected && sn.id === selected) continue;
+        const wn = nodeById.get(sn.id);
+        if (!wn) continue;
+        const density = annotationMap[sn.id]?.errorDensity ?? 0;
+        const tier = errorDensityTier(density);
+        const hue = clusterColor(wn.cluster);
+        const shaded = attentionShade(hue, tier);
+        result.grid.cells[idx] = { ...cell, fg: shaded };
+      }
+    }
+
+    // Zoom-tier labels (top-K by turns) when sufficiently zoomed and no selection focus labels.
+    if (zoomFactor >= ZOOM_TIER_MIN && sessionWorld && !selected) {
+      const nodeById = new Map(sessionWorld.nodes.map((n) => [n.id, n]));
+      const occupied = new Set<number>();
+      for (let i = 0; i < result.grid.cells.length; i++) {
+        const c = result.grid.cells[i];
+        if (c && c.char && c.char !== ' ') occupied.add(i);
+      }
+      const candidates = result.nodes.map((sn) => {
+        const wn = nodeById.get(sn.id);
+        return {
+          id: sn.id,
+          turnCount: wn?.turnCount ?? 0,
+          label: wn?.label ?? sn.id,
+          cx: Math.floor(sn.x / 2),
+          cy: Math.floor(sn.y / 4),
+        };
+      });
+      const placements = selectZoomTierLabels(candidates, {
+        cols,
+        rows: bodyRows,
+        occupied,
+      });
+      for (const p of placements) {
+        const text = ` ${p.text}`;
+        const baseIdx = p.cy * cols + (p.cx - 1); // glyph cell
+        const glyphCell = result.grid.cells[baseIdx];
+        const fg = glyphCell?.fg ?? AXIS_CHROME;
+        for (let i = 0; i < text.length; i++) {
+          const lx = p.cx + i;
+          if (lx < 0 || lx >= cols) break;
+          const idx = p.cy * cols + lx;
+          result.grid.cells[idx] = { char: text[i]!, fg };
+        }
+      }
+    }
+
+    // Expand grid to full canvas rows so the axis strip is addressable.
+    if (hasAxis && bodyRows < rows) {
+      const full: (Cell | null)[] = new Array(cols * rows).fill(null);
+      for (let cy = 0; cy < bodyRows; cy++) {
+        for (let cx = 0; cx < cols; cx++) {
+          full[cy * cols + cx] = result.grid.cells[cy * cols + cx] ?? null;
+        }
+      }
+      const axis = layoutAxisStrip(
+        sessionWorld?.nodes ?? [],
         vp,
-        {
-          cols,
-          rows,
-          mode: 'cluster',
-          attention: true,
-        },
-        focus,
-      ),
-    [graph, worldNodes, vp, cols, rows, focus],
-  );
+        cols,
+        bodyRows,
+      );
+      const axisY = rows - 1;
+      // Light baseline (only interior cells) so panel side borders stay untouched.
+      for (let cx = 1; cx < cols - 1; cx++) {
+        full[axisY * cols + cx] = { char: '─', fg: AXIS_CHROME };
+      }
+      for (const tick of axis.ticks) {
+        if (tick.cellX < 0 || tick.cellX >= cols) continue;
+        // Tick mark
+        full[axisY * cols + tick.cellX] = { char: '│', fg: AXIS_CHROME };
+        // Label to the right of the tick when space allows
+        const label = tick.label;
+        for (let i = 0; i < label.length; i++) {
+          const lx = tick.cellX + 1 + i;
+          if (lx <= 0 || lx >= cols - 1) break;
+          // Stop if we would overwrite the next tick column
+          const nextTick = axis.ticks.find((t) => t.cellX > tick.cellX);
+          if (nextTick && lx >= nextTick.cellX) break;
+          full[axisY * cols + lx] = { char: label[i]!, fg: AXIS_CHROME };
+        }
+      }
+      result.grid.rows = rows;
+      result.grid.cells = full;
+    }
+
+    return result;
+  }, [
+    graph,
+    worldNodes,
+    vp,
+    cols,
+    bodyRows,
+    rows,
+    focus,
+    lightness,
+    faintLinks,
+    sessionWorld,
+    annotationMap,
+    selected,
+    zoomFactor,
+    hasAxis,
+    width,
+    bodyHeight,
+  ]);
 
   const gridRef = useRef(grid);
   gridRef.current = grid;
 
-  // Canvas blit is glyphs only — legend is React fixed rows below (paints nested + char-frame).
+  // Canvas blit is glyphs + axis strip — legend is React fixed rows below.
   const draw = useCallback(
     (buffer: DrawBuffer) => {
       blitGrid(buffer, gridRef.current, 0, 0, cols, rows);
@@ -512,8 +697,12 @@ export function MapStage({
   );
 
   const hitTest = useCallback(
-    (cellX: number, cellY: number): string | null => hitTestSession(screenNodes, cellX, cellY),
-    [screenNodes],
+    (cellX: number, cellY: number): string | null => {
+      // Axis strip is not a hit target.
+      if (hasAxis && cellY >= bodyRows) return null;
+      return hitTestSession(screenNodes, cellX, cellY);
+    },
+    [screenNodes, hasAxis, bodyRows],
   );
 
   const toggleLegendKey = useCallback((label: string) => {
@@ -592,6 +781,11 @@ export function MapStage({
       setMode((m) => (m === 'cluster' ? 'density' : 'cluster'));
       return;
     }
+    if (n === 'e') {
+      // Exclusive lightness channel: volume-halo ↔ error-density.
+      setLightness((m) => (m === 'volume' ? 'error' : 'volume'));
+      return;
+    }
     if (n === 'left') setViewport(panViewport(vp, -3, 0));
     else if (n === 'right') setViewport(panViewport(vp, 3, 0));
     else if (n === 'up') setViewport(panViewport(vp, 0, -2));
@@ -609,14 +803,14 @@ export function MapStage({
   const onMouseDown = useCallback(
     (e: MouseLike) => {
       dragRef.current = {
-        anchorWorld: screenToWorld(sub(e), vp, width, height),
+        anchorWorld: screenToWorld(sub(e), vp, width, bodyHeight),
         scale: vp.scale,
         startX: e.x,
         startY: e.y,
         moved: false,
       };
     },
-    [vp, width, height, sub],
+    [vp, width, bodyHeight, sub],
   );
 
   const onMouseDrag = useCallback(
@@ -625,9 +819,9 @@ export function MapStage({
       if (!d) return;
       if (e.x !== d.startX || e.y !== d.startY) d.moved = true;
       const s = sub(e);
-      setViewport(anchorViewport(d.anchorWorld, d.scale, s.x, s.y, width, height));
+      setViewport(anchorViewport(d.anchorWorld, d.scale, s.x, s.y, width, bodyHeight));
     },
-    [width, height, sub],
+    [width, bodyHeight, sub],
   );
 
   const onMouseUp = useCallback(
@@ -661,17 +855,21 @@ export function MapStage({
       if (!dir && e.button === 5) dir = 'down';
       if (!dir) return;
       const s = sub(e);
-      setViewport(zoomViewportAt(vp, dir === 'up' ? 1.2 : 1 / 1.2, s.x, s.y, width, height));
+      setViewport(zoomViewportAt(vp, dir === 'up' ? 1.2 : 1 / 1.2, s.x, s.y, width, bodyHeight));
     },
-    [vp, width, height, sub],
+    [vp, width, bodyHeight, sub],
   );
 
   const rowW = Math.max(16, stageBox.width - 2);
   const selNode = selected ? sessionWorld?.nodes.find((n) => n.id === selected) : undefined;
+  const hoverNode =
+    !selected && hovered ? sessionWorld?.nodes.find((n) => n.id === hovered) : undefined;
   const showing = sessionWorld?.nodes.length ?? 0;
-  const linkCount = drawnLinks.length;
+  const drawnLinkCount = drawnLinks.length;
   const modeLabel = modeStatusLabel(mode);
   const filterLabel = filtersShortLabel(allowedOrigins, allowedAgents);
+  const linksStatus = formatLinksStatus(drawnLinkCount, loadedLinkCount);
+  const lightnessLabel = lightnessStatusLabel(lightness);
 
   const headerRight =
     soft.kind === 'ready'
@@ -682,15 +880,17 @@ export function MapStage({
 
   const infoLine =
     soft.kind === 'ready'
-      ? ` showing ${showing} of ${totalSessions} · ${linkCount} links · ${modeLabel} · ${filterLabel} · ${zoomFactor.toFixed(1)}× zoom` +
+      ? ` showing ${showing} of ${totalSessions} · ${linksStatus} · ${modeLabel} · ${filterLabel} · ${zoomFactor.toFixed(1)}× zoom` +
         (selNode
-          ? `   ◉ ${displayLabel(selNode.label)} · turns ${selNode.turnCount} · ${selNode.origin}`
-          : '')
+          ? `   ${formatSelectionReadout(selNode)}`
+          : hoverNode
+            ? `   ${formatHoverReadout(hoverNode)}`
+            : '')
       : ` ${softCopy(soft).title}`;
 
   const controlLine =
     soft.kind === 'ready'
-      ? ' drag pan · scroll zoom · click select · legend filter · click·click / ⏎ open · [d] timeline/structure · [f]it [c]enter [r]eload'
+      ? ` drag pan · scroll zoom · click select · legend filter · click·click / ⏎ open · [d] timeline/structure · [e] ${lightnessLabel} · [f]it [c]enter [r]eload`
       : ' r retry';
 
   const softBody =

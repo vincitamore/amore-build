@@ -1,5 +1,5 @@
-// Char-frame smoke for MapStage: multi-origin + parentage fixtures → one-house
-// default (operator primaries), closed legend vocabulary, structure parentage.
+// Char-frame smoke for MapStage: multi-origin + parentage + session_links +
+// annotations fixtures → one-house default, closed legend, timeline axis strip.
 // Run: bun run src/speculum/map-smoke.tsx
 // Optional: SMOKE_W=140 SMOKE_H=48 bun run src/speculum/map-smoke.tsx
 import { readFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
@@ -16,9 +16,14 @@ import {
   buildSessionWorld,
   DEFAULT_ALLOWED_AGENTS,
   DEFAULT_ALLOWED_ORIGINS,
+  deriveAxisTicks,
   filterSessionsByPopulation,
+  formatLinksStatus,
   formatMapLegendLine,
   hitTestSession,
+  layoutAxisStrip,
+  LEGEND_MAX_ROWS,
+  mapCanvasBodyRows,
   selectDrawnLinks,
   sessionLabel,
   sessionWorldToGraph,
@@ -95,6 +100,28 @@ CREATE TABLE event_links (
   heuristic        INTEGER NOT NULL DEFAULT 0,
   UNIQUE(source_event_id, target_event_id, kind)
 );
+CREATE TABLE session_links (
+  id               INTEGER PRIMARY KEY AUTOINCREMENT,
+  source_session   TEXT NOT NULL,
+  target_session   TEXT NOT NULL,
+  kind             TEXT NOT NULL,
+  method           TEXT NOT NULL DEFAULT 'smoke',
+  confidence       REAL NOT NULL DEFAULT 1.0,
+  heuristic        INTEGER NOT NULL DEFAULT 0,
+  evidence         TEXT NOT NULL DEFAULT '',
+  UNIQUE(source_session, target_session, kind)
+);
+CREATE TABLE session_annotations (
+  session_id     TEXT PRIMARY KEY,
+  phase_class    TEXT NOT NULL DEFAULT '',
+  error_density  REAL NOT NULL DEFAULT 0,
+  probe_hits     TEXT NOT NULL DEFAULT '{}',
+  input_tokens   INTEGER NOT NULL DEFAULT 0,
+  output_tokens  INTEGER NOT NULL DEFAULT 0,
+  total_tokens   INTEGER NOT NULL DEFAULT 0,
+  duration_sec   REAL NOT NULL DEFAULT 0,
+  method         TEXT NOT NULL DEFAULT 'smoke'
+);
 CREATE VIRTUAL TABLE events_fts USING fts5(
   text,
   tool_name,
@@ -123,7 +150,7 @@ function seedMapIndex(path: string): SessionListRow[] {
   const rows: SessionListRow[] = [];
   try {
     db.exec(SYNTHETIC_DDL);
-    db.run('PRAGMA user_version = 5');
+    db.run('PRAGMA user_version = 6');
 
     const specs: SeedSpec[] = [
       {
@@ -268,6 +295,26 @@ function seedMapIndex(path: string): SessionListRow[] {
        VALUES (?, ?, 'GENERATED', 'smoke')`,
       [e2, e3],
     );
+    // session_links among operator primaries (default population draws these).
+    db.run(
+      `INSERT INTO session_links (source_session, target_session, kind, method, evidence)
+       VALUES ('map-sess-000', 'map-sess-002', 'resumed_from', 'smoke', 'resume chain')`,
+    );
+    db.run(
+      `INSERT INTO session_links (source_session, target_session, kind, method, evidence)
+       VALUES ('map-sess-002', 'map-sess-007', 'shared_artifact', 'smoke', 'shared file')`,
+    );
+    // annotations for error-density overlay.
+    for (const s of specs) {
+      const density = s.id === 'map-sess-007' ? 0.25 : s.id === 'map-sess-002' ? 0.08 : 0;
+      db.run(
+        `INSERT INTO session_annotations (
+           session_id, phase_class, error_density, probe_hits,
+           input_tokens, output_tokens, total_tokens, duration_sec, method
+         ) VALUES (?, 'steady', ?, '{}', 100, 50, 150, 60, 'smoke')`,
+        [s.id, density],
+      );
+    }
     db.run(
       `INSERT INTO ingest_state (
          file_path, size_bytes, mtime, byte_offset, last_ingested, forgotten
@@ -334,7 +381,8 @@ const log = (msg: string, ok: boolean) => {
 // ── 1. Pure path: default population, legend, structure parentage ────────────
 const qs = openQueryService(dbPath);
 const listed = qs.sessionList(1_000_000);
-const evidence: SessionMapLink[] = qs.links(listed.map((s) => s.id));
+const evidence: SessionMapLink[] = qs.sessionLinks(listed.map((s) => s.id));
+const annotations = qs.annotations(listed.map((s) => s.id));
 qs.close();
 
 const defaultFilters = {
@@ -353,8 +401,22 @@ log(
   world.nodes.length < listed.length,
 );
 
-const { graph, worldNodes } = sessionWorldToGraph(world, []);
-log(`default canvas draws zero edges (links=${graph.links.length})`, graph.links.length === 0);
+// Default population draws resumed/shared (not parentage/event).
+const defaultDrawn = selectDrawnLinks(world, evidence, { subagentsVisible: false });
+log(
+  `default draws resumed/shared only (drawn=${defaultDrawn.length})`,
+  defaultDrawn.length >= 1 &&
+    defaultDrawn.every((l) => l.kind === 'resumed_from' || l.kind === 'shared_artifact'),
+);
+const { graph, worldNodes } = sessionWorldToGraph(world, defaultDrawn);
+log(
+  `default canvas projects solid resumed edges (links=${graph.links.length})`,
+  graph.links.length >= 1,
+);
+log(
+  `annotations loaded for error-density (${Object.keys(annotations).length})`,
+  Object.keys(annotations).length > 0,
+);
 
 const legend = buildMapLegendRows(
   listed,
@@ -364,12 +426,17 @@ const legend = buildMapLegendRows(
   new Set(),
 );
 log(
-  `legend pins parentage + event links first`,
-  legend[0]?.label === 'parentage' && legend[1]?.label === 'event links',
+  `legend pins parentage + event + resumed + shared first`,
+  legend[0]?.label === 'parentage' &&
+    legend[1]?.label === 'event links' &&
+    legend[2]?.label === 'resumed' &&
+    legend[3]?.label === 'shared artifact',
 );
 log(
-  `legend contains parentage + operator`,
-  legend.some((r) => r.label === 'parentage') && legend.some((r) => r.label === 'operator'),
+  `legend contains parentage + operator + resumed`,
+  legend.some((r) => r.label === 'parentage') &&
+    legend.some((r) => r.label === 'operator') &&
+    legend.some((r) => r.label === 'resumed'),
 );
 log(
   `legend has no A-sen- / session-folder labels`,
@@ -381,7 +448,28 @@ log(
       r.label !== 'A-sen-01-r1-Fz7FoM',
   ),
 );
-log(`legend cardinality ≤ 8 (${legend.length})`, legend.length <= 8);
+log(`legend cardinality ≤ ${LEGEND_MAX_ROWS} (${legend.length})`, legend.length <= LEGEND_MAX_ROWS);
+log(
+  `resumed/shared legend counts > 0`,
+  (legend.find((r) => r.label === 'resumed')?.count ?? 0) > 0 &&
+    (legend.find((r) => r.label === 'shared artifact')?.count ?? 0) > 0,
+);
+
+// Timeline axis from population range (fixtures span ~20d → week ticks).
+const axisBody = mapCanvasBodyRows(24, 'density');
+const axisVp = fitViewport(worldNodes, 200, axisBody * 4);
+const axis = layoutAxisStrip(world.nodes, axisVp, 100, axisBody);
+const expectWeek = axis.range.spanMs < 60 * 86_400_000;
+log(
+  `timeline axis ticks present (n=${axis.ticks.length} gran=${axis.granularity})`,
+  axis.ticks.length > 0 &&
+    axis.granularity === (expectWeek ? 'week' : 'month'),
+);
+const pureTicks = deriveAxisTicks(axis.range.minT, axis.range.maxT);
+log(
+  `deriveAxisTicks granularity matches span (week=${expectWeek})`,
+  pureTicks.length > 0 && pureTicks.every((t) => t.kind === (expectWeek ? 'week' : 'month')),
+);
 
 // Structure mode with subagents → parentage edge.
 const structureWorld = buildSessionWorld(listed, 'cluster', {
@@ -518,7 +606,7 @@ console.log('--- END FRAME ---');
 
 const hasTitle = /\bMap\b/.test(frame);
 const hasShowing = /showing\s+\d+\s+of\s+\d+/i.test(frame);
-const hasLinks = /\d+\s+links/.test(frame);
+const hasLinksStatus = /links\s+\d+\/\d+/.test(frame);
 const hasGlyph = /[⬢●◆◉•◇]/.test(frame) || /[⠀-⣿]/.test(frame);
 const hasMode = /timeline|structure|density|cluster/.test(frame);
 // Legend is React fixed rows — assert full line text (not blit geometry on the border).
@@ -526,28 +614,45 @@ const legendLines = legend.map(formatMapLegendLine);
 const hasLegendParentageLine = /[─\-]\s*parentage\s*\(\d+\)/i.test(frame) || frame.includes('parentage');
 const hasLegendOperatorLine = /[●○]\s*operator\s*\(\d+\)/i.test(frame) || /operator\s*\(\d+\)/.test(frame);
 const hasLegendEventLine = /event links\s*\(\d+\)/i.test(frame);
+const hasLegendResumedLine = /resumed\s*\(\d+\)/i.test(frame);
+const hasLegendSharedLine = /shared artifact\s*\(\d+\)/i.test(frame);
 const hasLegendPrimaryLine = /primary\s*\(\d+\)/i.test(frame);
 const hasASen = /A-sen-/i.test(frame);
 const hasTitleInInfo = /Alpha Primary|dream-digest|Primary Session|Deep Forge/i.test(frame);
 const hasOpPrim = /op·prim|op\+/.test(frame);
+const hasLightnessCtrl = /volume-halo|error-density/.test(frame);
+// Axis strip: month labels from May span (May 1–20) — actually fixtures span May 1–20
+// which is < 60d → week labels MM-DD, OR broader if fit shows them. Also accept │ ticks.
+const hasAxisChrome =
+  /\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\b/.test(frame) ||
+  /\d{2}-\d{2}/.test(frame) ||
+  /│/.test(frame);
 // React legend must not paint onto the panel top border (old blit defect signature).
 const topBorderHasLegend = /^┌.*parentage/m.test(frame) || /^┌.*event links/m.test(frame);
 log(`frame title Map:${hasTitle}`, hasTitle);
 log(`frame showing N of M:${hasShowing}`, hasShowing);
-log(`frame links count:${hasLinks}`, hasLinks);
+log(`frame links drawn/loaded status:${hasLinksStatus}`, hasLinksStatus);
 log(`frame glyphs/density present:${hasGlyph}`, hasGlyph);
 log(`frame mode label (timeline/structure):${hasMode}`, hasMode);
 log(`frame React legend parentage line:${hasLegendParentageLine}`, hasLegendParentageLine);
 log(`frame React legend operator line:${hasLegendOperatorLine}`, hasLegendOperatorLine);
 log(`frame React legend event links line:${hasLegendEventLine}`, hasLegendEventLine);
+log(`frame React legend resumed line:${hasLegendResumedLine}`, hasLegendResumedLine);
+log(`frame React legend shared artifact line:${hasLegendSharedLine}`, hasLegendSharedLine);
 log(`frame React legend primary line:${hasLegendPrimaryLine}`, hasLegendPrimaryLine);
 log(`frame has no A-sen- labels:${!hasASen}`, !hasASen);
 log(`frame title in info line:${hasTitleInInfo}`, hasTitleInInfo || /◉/.test(frame));
 log(`frame filter short (op·prim):${hasOpPrim}`, hasOpPrim);
+log(`frame lightness control (${hasLightnessCtrl}):${hasLightnessCtrl}`, hasLightnessCtrl);
+log(`frame axis strip chrome:${hasAxisChrome}`, hasAxisChrome);
 log(`legend not on panel top border:${!topBorderHasLegend}`, !topBorderHasLegend);
 log(
   `formatMapLegendLine matches pure legend rows (${legendLines[0]})`,
   legendLines[0]?.includes('parentage') === true,
+);
+log(
+  `formatLinksStatus sample ${formatLinksStatus(defaultDrawn.length, evidence.length)}`,
+  formatLinksStatus(defaultDrawn.length, evidence.length).startsWith('links '),
 );
 
 // Enter → openSession with the pre-selected id.

@@ -2,39 +2,57 @@ import { describe, expect, test } from 'bun:test';
 import type { SessionListRow, SessionMapLink } from './query-service';
 import {
   AGENT_ORDER,
+  AXIS_WEEK_THRESHOLD_MS,
   buildMapLegendRows,
   buildSessionWorld,
   buildStructureWorld,
   buildTimelineWorld,
   DEFAULT_ALLOWED_AGENTS,
   DEFAULT_ALLOWED_ORIGINS,
+  deriveAxisTicks,
+  errorDensityTier,
   filterEvidenceLinks,
   filterSessionsByPopulation,
   filtersShortLabel,
+  formatHoverReadout,
+  formatLinksStatus,
   formatMapLegendLine,
+  formatSelectionReadout,
+  formatSessionAge,
   gridAnchors,
   hasNoForceEdges,
   hitTestSession,
+  layoutAxisStrip,
   LEGEND_AGENT_LABELS,
   LEGEND_EDGE_LABELS,
+  LEGEND_MAX_ROWS,
   LEGEND_ORIGIN_LABELS,
   legendToggleTarget,
+  lightnessStatusLabel,
+  mapCanvasBodyRows,
   modeStatusLabel,
   neighborhoodIds,
   ORIGIN_ORDER,
+  partitionDrawnLinks,
+  projectAxisTicks,
   projectBasename,
   selectDrawnLinks,
+  selectZoomTierLabels,
   sessionAgent,
   sessionLabel,
   sessionOrigin,
   sessionWorldToGraph,
   SESSION_MAP_LINKS,
   stableUnit,
+  timeToWorldX,
   volumeLinkCount,
+  ZOOM_TIER_MAX_LABELS,
+  type MapEdgeKind,
   type MapMode,
   type MapOrigin,
   type PopulationFilters,
 } from './map-data';
+import { fitViewport } from '../render/viewport';
 
 function row(partial: Partial<SessionListRow> & { id: string }): SessionListRow {
   return {
@@ -356,11 +374,12 @@ describe('sessionWorldToGraph / evidence / edge honesty (§7.7–§7.9)', () => 
     expect(graph.nodes.find((n) => n.id === 's')!.type).toBe('other');
   });
 
-  test('selectDrawnLinks: default zero edges; parentage when subagents on', () => {
+  test('selectDrawnLinks: default draws resumed/shared only; parentage when subagents on', () => {
     const w = buildSessionWorld(
       [
         row({ id: 'parent', projectPath: OP }),
         row({ id: 'child', projectPath: OP, agent: 'subagent', parentSession: 'parent' }),
+        row({ id: 'peer', projectPath: OP }),
       ],
       'cluster',
       { origins: DEFAULT_ALLOWED_ORIGINS, agents: new Set(['primary', 'subagent']) },
@@ -368,11 +387,16 @@ describe('sessionWorldToGraph / evidence / edge honesty (§7.7–§7.9)', () => 
     const evidence: SessionMapLink[] = [
       { source: 'child', target: 'parent', kind: 'parentage', count: 1 },
       { source: 'parent', target: 'child', kind: 'event', count: 2 },
+      { source: 'parent', target: 'peer', kind: 'resumed_from', count: 1 },
+      { source: 'peer', target: 'parent', kind: 'shared_artifact', count: 1 },
     ];
-    expect(selectDrawnLinks(w, evidence, { subagentsVisible: false })).toHaveLength(0);
+    const def = selectDrawnLinks(w, evidence, { subagentsVisible: false });
+    expect(def.map((l) => l.kind).sort()).toEqual(['resumed_from', 'shared_artifact']);
+    expect(def.every((l) => l.kind !== 'parentage' && l.kind !== 'event')).toBe(true);
     const withSub = selectDrawnLinks(w, evidence, { subagentsVisible: true });
-    expect(withSub).toHaveLength(1);
-    expect(withSub[0]!.kind).toBe('parentage');
+    expect(withSub.some((l) => l.kind === 'parentage')).toBe(true);
+    expect(withSub.some((l) => l.kind === 'resumed_from')).toBe(true);
+    expect(withSub.some((l) => l.kind === 'event')).toBe(false);
   });
 
   test('selectDrawnLinks: focus neighborhood includes both edge kinds', () => {
@@ -456,16 +480,20 @@ describe('sessionWorldToGraph / evidence / edge honesty (§7.7–§7.9)', () => 
 });
 
 describe('legend (§7.1–§7.3)', () => {
-  test('edge kinds pinned at 0 and 1', () => {
+  test('edge kinds pinned first (parentage · event · resumed · shared artifact)', () => {
     const rows = buildMapLegendRows(mixed, [], DEFAULT_ALLOWED_ORIGINS, DEFAULT_ALLOWED_AGENTS, new Set());
     expect(rows[0]!.label).toBe('parentage');
     expect(rows[1]!.label).toBe('event links');
+    expect(rows[2]!.label).toBe('resumed');
+    expect(rows[3]!.label).toBe('shared artifact');
   });
 
   test('legend vocabulary closed — no session-folder / A-sen- labels', () => {
     const evidence: SessionMapLink[] = [
       { source: 'op-s1', target: 'op-p1', kind: 'parentage', count: 1 },
       { source: 'op-p1', target: 'op-p2', kind: 'event', count: 2 },
+      { source: 'op-p1', target: 'op-p2', kind: 'resumed_from', count: 1 },
+      { source: 'op-p2', target: 'op-p1', kind: 'shared_artifact', count: 1 },
     ];
     const rows = buildMapLegendRows(
       mixed,
@@ -485,24 +513,41 @@ describe('legend (§7.1–§7.3)', () => {
     }
     expect(rows.some((r) => r.label === 'operator')).toBe(true);
     expect(rows.some((r) => r.label === 'parentage')).toBe(true);
+    expect(rows.some((r) => r.label === 'resumed')).toBe(true);
+    expect(rows.some((r) => r.label === 'shared artifact')).toBe(true);
     // Never project basenames.
     expect(rows.some((r) => r.label === 'amore')).toBe(false);
     expect(rows.some((r) => r.label === 'A-sen-01-r1-Fz7FoM')).toBe(false);
   });
 
-  test('legend cardinality ≤ 8', () => {
+  test('legend cardinality ≤ 10', () => {
     const rows = buildMapLegendRows(mixed, [], DEFAULT_ALLOWED_ORIGINS, DEFAULT_ALLOWED_AGENTS, new Set());
-    expect(rows.length).toBeLessThanOrEqual(8);
+    expect(rows.length).toBeLessThanOrEqual(LEGEND_MAX_ROWS);
+    expect(LEGEND_MAX_ROWS).toBe(10);
   });
 
   test('corpus edge totals on legend from full links fetch', () => {
     const evidence: SessionMapLink[] = [
       { source: 'a', target: 'b', kind: 'parentage', count: 4 },
       { source: 'c', target: 'd', kind: 'event', count: 7 },
+      { source: 'a', target: 'c', kind: 'resumed_from', count: 2 },
+      { source: 'b', target: 'd', kind: 'shared_artifact', count: 3 },
     ];
     const rows = buildMapLegendRows(mixed, evidence, DEFAULT_ALLOWED_ORIGINS, DEFAULT_ALLOWED_AGENTS, new Set());
     expect(rows.find((r) => r.label === 'parentage')!.count).toBe(4);
     expect(rows.find((r) => r.label === 'event links')!.count).toBe(7);
+    expect(rows.find((r) => r.label === 'resumed')!.count).toBe(2);
+    expect(rows.find((r) => r.label === 'shared artifact')!.count).toBe(3);
+  });
+
+  test('v5 absence: resumed/shared legend rows show 0', () => {
+    const evidence: SessionMapLink[] = [
+      { source: 'a', target: 'b', kind: 'parentage', count: 1 },
+      { source: 'a', target: 'b', kind: 'event', count: 1 },
+    ];
+    const rows = buildMapLegendRows(mixed, evidence, DEFAULT_ALLOWED_ORIGINS, DEFAULT_ALLOWED_AGENTS, new Set());
+    expect(rows.find((r) => r.label === 'resumed')!.count).toBe(0);
+    expect(rows.find((r) => r.label === 'shared artifact')!.count).toBe(0);
   });
 
   test('origin/agent default hidden flags match default population', () => {
@@ -523,6 +568,11 @@ describe('legend (§7.1–§7.3)', () => {
   test('legendToggleTarget distinguishes edge / origin / agent', () => {
     expect(legendToggleTarget('parentage')).toEqual({ kind: 'edge', key: 'parentage' });
     expect(legendToggleTarget('event links')).toEqual({ kind: 'edge', key: 'event' });
+    expect(legendToggleTarget('resumed')).toEqual({ kind: 'edge', key: 'resumed_from' });
+    expect(legendToggleTarget('shared artifact')).toEqual({
+      kind: 'edge',
+      key: 'shared_artifact',
+    });
     expect(legendToggleTarget('operator')).toEqual({ kind: 'origin', key: 'operator' });
     expect(legendToggleTarget('experiment')).toEqual({ kind: 'origin', key: 'experiment' });
     expect(legendToggleTarget('primary')).toEqual({ kind: 'agent', key: 'primary' });
@@ -531,14 +581,51 @@ describe('legend (§7.1–§7.3)', () => {
     expect(legendToggleTarget('A-sen-01')).toBe(null);
   });
 
-  test('filterEvidenceLinks hides by kind', () => {
+  test('filterEvidenceLinks hides by kind (incl. resumed/shared)', () => {
     const links: SessionMapLink[] = [
       { source: 'a', target: 'b', kind: 'parentage', count: 1 },
       { source: 'a', target: 'c', kind: 'event', count: 2 },
+      { source: 'a', target: 'd', kind: 'resumed_from', count: 1 },
+      { source: 'a', target: 'e', kind: 'shared_artifact', count: 1 },
     ];
     expect(filterEvidenceLinks(links, new Set(['parentage']))).toEqual([
       { source: 'a', target: 'c', kind: 'event', count: 2 },
+      { source: 'a', target: 'd', kind: 'resumed_from', count: 1 },
+      { source: 'a', target: 'e', kind: 'shared_artifact', count: 1 },
     ]);
+    const hidden = new Set<MapEdgeKind>(['resumed_from', 'shared_artifact']);
+    expect(filterEvidenceLinks(links, hidden).map((l) => l.kind).sort()).toEqual([
+      'event',
+      'parentage',
+    ]);
+  });
+
+  test('legend toggle filters resumed/shared independently', () => {
+    const edges = new Set<MapEdgeKind>();
+    const toggle = (label: string) => {
+      const t = legendToggleTarget(label);
+      if (!t || t.kind !== 'edge') return;
+      if (edges.has(t.key)) edges.delete(t.key);
+      else edges.add(t.key);
+    };
+    toggle('resumed');
+    expect(edges.has('resumed_from')).toBe(true);
+    toggle('shared artifact');
+    expect(edges.has('shared_artifact')).toBe(true);
+    const evidence: SessionMapLink[] = [
+      { source: 'op-p1', target: 'op-p2', kind: 'resumed_from', count: 1 },
+      { source: 'op-p2', target: 'op-p1', kind: 'shared_artifact', count: 1 },
+    ];
+    const w = buildSessionWorld(mixed, 'density', defaultFilters);
+    expect(selectDrawnLinks(w, evidence, { subagentsVisible: false, hiddenEdgeKinds: edges })).toHaveLength(
+      0,
+    );
+    toggle('resumed'); // unhide resumed → only shared stays hidden
+    expect(
+      selectDrawnLinks(w, evidence, { subagentsVisible: false, hiddenEdgeKinds: edges }).map(
+        (l) => l.kind,
+      ),
+    ).toEqual(['resumed_from']);
   });
 
   test('origin swatches use fixed ORIGIN_ORDER clusterColor indices', () => {
@@ -615,12 +702,189 @@ describe('status helpers (§7.10 showing N of M)', () => {
     expect(modeStatusLabel('cluster')).toBe('structure');
   });
 
+  test('formatLinksStatus unifies drawn/loaded vocabulary', () => {
+    expect(formatLinksStatus(0, 12)).toBe('links 0/12');
+    expect(formatLinksStatus(3, 3)).toBe('links 3/3');
+  });
+
+  test('lightnessStatusLabel names the active channel', () => {
+    expect(lightnessStatusLabel('volume')).toBe('volume-halo');
+    expect(lightnessStatusLabel('error')).toBe('error-density');
+  });
+
   test('filtered N < total M on mixed fixtures when experiment hidden', () => {
     const N = filterSessionsByPopulation(mixed, defaultFilters).length;
     const M = mixed.length;
     expect(N).toBe(2);
     expect(M).toBe(5);
     expect(N).toBeLessThan(M);
+  });
+});
+
+describe('time axis (timeline mode)', () => {
+  test('month ticks when span ≥ 60 days', () => {
+    const minT = Date.parse('2026-01-15T00:00:00.000Z');
+    const maxT = Date.parse('2026-06-15T00:00:00.000Z');
+    expect(maxT - minT).toBeGreaterThanOrEqual(AXIS_WEEK_THRESHOLD_MS);
+    const ticks = deriveAxisTicks(minT, maxT);
+    expect(ticks.length).toBeGreaterThan(0);
+    expect(ticks.every((t) => t.kind === 'month')).toBe(true);
+    expect(ticks.some((t) => t.label === 'Jan' || t.label === 'Feb' || t.label === 'Mar')).toBe(
+      true,
+    );
+    // World X is finite and ordered.
+    for (let i = 1; i < ticks.length; i++) {
+      expect(ticks[i]!.worldX).toBeGreaterThanOrEqual(ticks[i - 1]!.worldX);
+    }
+  });
+
+  test('week ticks when span < 60 days', () => {
+    const minT = Date.parse('2026-05-01T00:00:00.000Z');
+    const maxT = Date.parse('2026-05-20T00:00:00.000Z');
+    expect(maxT - minT).toBeLessThan(AXIS_WEEK_THRESHOLD_MS);
+    const ticks = deriveAxisTicks(minT, maxT);
+    expect(ticks.length).toBeGreaterThan(0);
+    expect(ticks.every((t) => t.kind === 'week')).toBe(true);
+    expect(ticks[0]!.label).toMatch(/^\d{2}-\d{2}$/);
+  });
+
+  test('timeToWorldX matches timeline endpoints', () => {
+    const minT = Date.parse('2026-01-01T00:00:00.000Z');
+    const maxT = Date.parse('2026-12-01T00:00:00.000Z');
+    expect(timeToWorldX(minT, minT, maxT)).toBeCloseTo(-100, 5);
+    expect(timeToWorldX(maxT, minT, maxT)).toBeCloseTo(100, 5);
+    expect(timeToWorldX((minT + maxT) / 2, minT, maxT)).toBeCloseTo(0, 5);
+  });
+
+  test('projectAxisTicks drops off-screen ticks after pan (viewport recompute)', () => {
+    const minT = Date.parse('2026-01-01T00:00:00.000Z');
+    const maxT = Date.parse('2026-12-01T00:00:00.000Z');
+    const derived = deriveAxisTicks(minT, maxT);
+    const cols = 40;
+    const bodyRows = 10;
+    const width = cols * 2;
+    const height = bodyRows * 4;
+    // Fit around the full timeline span.
+    const nodes = [
+      { x: -100, y: 0 },
+      { x: 100, y: 0 },
+    ];
+    const fit = fitViewport(nodes, width, height);
+    const atFit = projectAxisTicks(derived, fit, cols, bodyRows);
+    expect(atFit.length).toBeGreaterThan(0);
+    // Pan far right → left-side ticks leave the screen.
+    const panned = { ...fit, cx: fit.cx + 200 };
+    const afterPan = projectAxisTicks(derived, panned, cols, bodyRows);
+    // Not every tick that was visible need vanish, but the set must recompute.
+    expect(afterPan.map((t) => t.cellX).join(',')).not.toBe(atFit.map((t) => t.cellX).join(','));
+  });
+
+  test('layoutAxisStrip wires population → ticks → cells', () => {
+    const nodes = [
+      { startedAt: '2026-01-01T00:00:00.000Z', x: -100, y: 0 },
+      { startedAt: '2026-06-01T00:00:00.000Z', x: 0, y: 0 },
+      { startedAt: '2026-12-01T00:00:00.000Z', x: 100, y: 0 },
+    ];
+    const vp = fitViewport(nodes, 80, 40);
+    const layout = layoutAxisStrip(nodes, vp, 40, 10);
+    expect(layout.granularity).toBe('month');
+    expect(layout.ticks.length).toBeGreaterThan(0);
+    expect(layout.ticks.every((t) => t.cellX >= 0 && t.cellX < 40)).toBe(true);
+  });
+
+  test('mapCanvasBodyRows reserves one row for the axis in timeline mode', () => {
+    expect(mapCanvasBodyRows(12, 'density')).toBe(11);
+    expect(mapCanvasBodyRows(12, 'cluster')).toBe(12);
+    expect(mapCanvasBodyRows(1, 'density')).toBe(1);
+  });
+});
+
+describe('hover / selection readout', () => {
+  test('formatHoverReadout composition', () => {
+    const now = Date.parse('2026-06-02T12:00:00.000Z');
+    const line = formatHoverReadout(
+      {
+        id: 'abc',
+        label: 'Operator Deep Forge',
+        turnCount: 12,
+        endedAt: '2026-06-02T10:00:00.000Z',
+      },
+      now,
+    );
+    expect(line).toBe('◌ Operator Deep Forg · t:12 · 2h ago');
+  });
+
+  test('formatSelectionReadout keeps full facts shape', () => {
+    expect(
+      formatSelectionReadout({
+        label: 'Operator Deep Forge',
+        turnCount: 12,
+        origin: 'operator',
+      }),
+    ).toBe('◉ Operator Deep Forg · turns 12 · operator');
+  });
+
+  test('formatSessionAge buckets', () => {
+    const now = Date.parse('2026-06-02T12:00:00.000Z');
+    expect(formatSessionAge('2026-06-02T11:30:00.000Z', now)).toBe('30m ago');
+    expect(formatSessionAge('2026-06-02T09:00:00.000Z', now)).toBe('3h ago');
+    expect(formatSessionAge('2026-05-30T12:00:00.000Z', now)).toBe('3d ago');
+    expect(formatSessionAge('', now)).toBe('?');
+  });
+});
+
+describe('zoom-tier labels', () => {
+  test('selects top-K by turn count and skips collisions', () => {
+    const candidates = [
+      { id: 'a', turnCount: 50, label: 'Alpha Primary Session', cx: 5, cy: 2 },
+      { id: 'b', turnCount: 40, label: 'Beta Review Pass', cx: 6, cy: 2 }, // collides with a's label
+      { id: 'c', turnCount: 30, label: 'Gamma Notes', cx: 30, cy: 2 },
+      { id: 'd', turnCount: 10, label: 'Delta', cx: 5, cy: 5 },
+    ];
+    // Occupy nothing initially.
+    const placed = selectZoomTierLabels(candidates, { cols: 50, rows: 10, maxLabels: 12 });
+    expect(placed[0]!.id).toBe('a'); // highest turns
+    // b shares the row and sits inside a's label run → skipped
+    expect(placed.some((p) => p.id === 'b')).toBe(false);
+    expect(placed.some((p) => p.id === 'c')).toBe(true);
+    expect(placed.length).toBeLessThanOrEqual(ZOOM_TIER_MAX_LABELS);
+  });
+
+  test('respects maxLabels cap', () => {
+    const candidates = Array.from({ length: 20 }, (_, i) => ({
+      id: `n${i}`,
+      turnCount: 100 - i,
+      label: `Session ${i}`,
+      cx: (i * 5) % 80,
+      cy: Math.floor(i / 16),
+    }));
+    const placed = selectZoomTierLabels(candidates, { cols: 100, rows: 20, maxLabels: 5 });
+    expect(placed.length).toBeLessThanOrEqual(5);
+  });
+});
+
+describe('error-density tier mapping', () => {
+  test('maps density onto attention tiers 0–3', () => {
+    expect(errorDensityTier(0)).toBe(0);
+    expect(errorDensityTier(-1)).toBe(0);
+    expect(errorDensityTier(0.02)).toBe(1);
+    expect(errorDensityTier(0.1)).toBe(2);
+    expect(errorDensityTier(0.2)).toBe(3);
+    expect(errorDensityTier(1)).toBe(3);
+  });
+});
+
+describe('link partition solid/faint', () => {
+  test('shared_artifact is faint; resumed/parentage/event solid', () => {
+    const links: SessionMapLink[] = [
+      { source: 'a', target: 'b', kind: 'resumed_from', count: 1 },
+      { source: 'a', target: 'c', kind: 'shared_artifact', count: 1 },
+      { source: 'a', target: 'd', kind: 'parentage', count: 1 },
+      { source: 'a', target: 'e', kind: 'event', count: 1 },
+    ];
+    const { solid, faint } = partitionDrawnLinks(links);
+    expect(solid.map((l) => l.kind).sort()).toEqual(['event', 'parentage', 'resumed_from']);
+    expect(faint.map((l) => l.kind)).toEqual(['shared_artifact']);
   });
 });
 
