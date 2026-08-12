@@ -226,12 +226,13 @@ describe("runDreamCycle enablement", () => {
   test("IO error keeps previous enablement flags", () => {
     const next = flagsFromEnablementRead(
       {
-        enablement: { dreamsEnabled: false, autoCommitLive: false },
+        enablement: { dreamsEnabled: false, autoCommitEnabled: false, autoCommitLive: false },
         error: "enablement read failed: EACCES: permission denied",
       },
-      { dreamsEnabled: true, autoCommitLive: true },
+      { dreamsEnabled: true, autoCommitEnabled: true, autoCommitLive: true },
     );
     expect(next.dreamsEnabled).toBe(true);
+    expect(next.autoCommitEnabled).toBe(true);
     expect(next.autoCommitLive).toBe(true);
     expect(next.ioError).toMatch(/EACCES/);
   });
@@ -239,12 +240,13 @@ describe("runDreamCycle enablement", () => {
   test("malformed enablement is both-false unless env/argv keep a knob on", () => {
     const next = flagsFromEnablementRead(
       {
-        enablement: { dreamsEnabled: false, autoCommitLive: false },
+        enablement: { dreamsEnabled: false, autoCommitEnabled: true, autoCommitLive: false },
         error: "malformed enablement JSON: Unexpected token",
       },
-      { dreamsEnabled: true, autoCommitLive: true },
+      { dreamsEnabled: true, autoCommitEnabled: true, autoCommitLive: true },
     );
     expect(next.dreamsEnabled).toBe(false);
+    expect(next.autoCommitEnabled).toBe(true);
     expect(next.autoCommitLive).toBe(false);
     expect(next.ioError).toBeUndefined();
   });

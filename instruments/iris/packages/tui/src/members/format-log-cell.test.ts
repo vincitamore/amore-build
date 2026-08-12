@@ -27,6 +27,9 @@ import {
   parseLucernaBudgets,
   pulsePanelInnerWidth,
   tokenOverPercent,
+  autoCommitMode,
+  nextAutoCommitMode,
+  enablementPatchForMode,
 } from './lucerna-display';
 
 const ELLIPSIS = '\u2026';
@@ -566,5 +569,31 @@ describe('chores overlay copy', () => {
     );
     const items = choreOverlayItems(roster);
     expect(items.some((i) => i.kind === 'unknown' && i.key === 'deploy-drift')).toBe(true);
+  });
+});
+
+describe('auto-commit mode', () => {
+  test('absent enabled key is dry-run; explicit false is off', () => {
+    expect(autoCommitMode({ autoCommitLive: false })).toBe('dry-run');
+    expect(autoCommitMode({ autoCommitEnabled: true, autoCommitLive: false })).toBe('dry-run');
+    expect(autoCommitMode({ autoCommitEnabled: true, autoCommitLive: true })).toBe('live');
+    expect(autoCommitMode({ autoCommitEnabled: false, autoCommitLive: true })).toBe('off');
+  });
+
+  test('a cycles dry-run → off → live → dry-run', () => {
+    expect(nextAutoCommitMode('dry-run')).toBe('off');
+    expect(nextAutoCommitMode('off')).toBe('live');
+    expect(nextAutoCommitMode('live')).toBe('dry-run');
+  });
+
+  test('patch for off clears live', () => {
+    expect(enablementPatchForMode('off')).toEqual({
+      autoCommitEnabled: false,
+      autoCommitLive: false,
+    });
+    expect(enablementPatchForMode('live')).toEqual({
+      autoCommitEnabled: true,
+      autoCommitLive: true,
+    });
   });
 });

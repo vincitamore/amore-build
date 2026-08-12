@@ -56,6 +56,7 @@ File: `<house>/.amore/lucerna/enable.json`
 ```json
 {
   "dreamsEnabled": false,
+  "autoCommitEnabled": true,
   "autoCommitLive": false
 }
 ```
@@ -63,25 +64,30 @@ File: `<house>/.amore/lucerna/enable.json`
 | Field | Default | Meaning |
 |-------|---------|---------|
 | `dreamsEnabled` | `false` | Autonomous dream scheduling |
-| `autoCommitLive` | `false` | Live auto-commit; dry-run (git word: draft only, no commit) when false |
+| `autoCommitEnabled` | `true` when the key is absent | Whether auto-commit may draft at all. `false` is spend-off: no model call, no tokens. |
+| `autoCommitLive` | `false` | Live auto-commit; dry-run (git word: draft only, no commit) when false. Ignored when disabled. |
 
-**Absent file: both false.** Malformed JSON: both false (with a log line).
-CLI flags (`--dreams-enabled`, `--auto-commit-live`) and env vars
-(`LUCERNA_DREAMS_ENABLED=1`, `LUCERNA_AUTO_COMMIT_LIVE=1`) OR with the file
-for one-shot override. Safe defaults never flip themselves on. A file edit
-does not revoke an env/argv enablement.
+**Absent file:** dreams off, auto-commit dry-run (the v1.0.1 default).
+Malformed JSON: same defaults (with a log line). An existing file that
+omits `autoCommitEnabled` keeps drafting. CLI flags
+(`--dreams-enabled`, `--auto-commit-live`, `--no-auto-commit`) and env
+vars (`LUCERNA_DREAMS_ENABLED=1`, `LUCERNA_AUTO_COMMIT_LIVE=1`,
+`LUCERNA_AUTO_COMMIT=0`) OR with the file for one-shot override.
+`--no-auto-commit` / `LUCERNA_AUTO_COMMIT=0` win over a file that is on.
+A file edit does not revoke an env/argv enablement.
 
 If the charter file is absent and a legacy
 `<house>/instruments/lucerna/lucerna.enable.json` exists, that file is
 still *read*. It is never written.
 
-**Dreams-off is not spend-off.** Auto-commit drafting still runs on its own
-schedule (default 30 minutes) against your configured model and key, from
-its own token allowance, whether or not dreams are enabled. Dry-run means
-"do not commit," not "do not call a model." Turn drafting off with
-`LUCERNA_AUTO_COMMIT=0` or `--no-auto-commit`. Live mode remains draft-only
-until a hardened live path ships; treat live as "not a silent git commit"
-regardless of the flag name.
+**Dreams-off is not spend-off.** Auto-commit drafting runs on its own
+schedule (default 30 minutes) against your configured model and key
+unless `autoCommitEnabled` is false (tab `a` to off, or
+`iris lucerna enable auto-commit off`). Dry-run means "do not commit,"
+not "do not call a model." `LUCERNA_AUTO_COMMIT=0` and `--no-auto-commit`
+remain start-time kills. Live mode remains draft-only until a hardened
+live path ships; treat live as "not a silent git commit" regardless of
+the flag name.
 
 ---
 
@@ -293,7 +299,7 @@ is already in flight.
 | `echo > <house>/instruments/lucerna/halt` or `iris lucerna halt` | request graceful stop | current unit finishes; next unit does not start |
 | `iris lucerna stop` / tab `k` | halt, then pid-verified kill if still alive | **immediate** after halt timeout |
 | Set `dreamsEnabled` to `false` | autonomous dreams will not start | **next cycle** (file edit does not revoke env/argv) |
-| Delete or break `enable.json` | both knobs false | **next cycle** |
+| Delete or break `enable.json` | dreams off, auto-commit dry-run | **next cycle** |
 | Edit or delete `budgets.json` / `chores.json` | new caps / roster take effect | **next cycle** (or next auto-commit draft attempt) |
 | `LUCERNA_AUTO_COMMIT=0` | auto-commit drafting off | **next draft attempt** |
 | Remove binary / uninstall companion | nothing left to schedule | **immediate** (no process) |

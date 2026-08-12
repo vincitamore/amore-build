@@ -421,6 +421,41 @@ export function formatPulseRefusingSubLine(
   return formatLucernaDisplayLine(body, innerWidth, home);
 }
 
+// ── Auto-commit enablement (off / dry-run / live) ────────────────────────────
+
+export type AutoCommitMode = 'off' | 'dry-run' | 'live';
+
+export function autoCommitMode(e: {
+  autoCommitEnabled?: boolean;
+  autoCommitLive?: boolean;
+}): AutoCommitMode {
+  if (e.autoCommitEnabled === false) return 'off';
+  return e.autoCommitLive ? 'live' : 'dry-run';
+}
+
+export function nextAutoCommitMode(mode: AutoCommitMode): AutoCommitMode {
+  // From the shipped default (dry-run), the next press is off — not live.
+  if (mode === 'dry-run') return 'off';
+  if (mode === 'off') return 'live';
+  return 'dry-run';
+}
+
+export function enablementPatchForMode(mode: AutoCommitMode): {
+  autoCommitEnabled: boolean;
+  autoCommitLive: boolean;
+} {
+  return {
+    autoCommitEnabled: mode !== 'off',
+    autoCommitLive: mode === 'live',
+  };
+}
+
+export function autoCommitModeLabel(mode: AutoCommitMode): string {
+  if (mode === 'off') return 'off';
+  if (mode === 'live') return 'live';
+  return 'dry-run';
+}
+
 // ── Budgets panel + chores overlay (reads of the persisted snapshot) ──────────
 
 export const BUDGETS_EMPTY_NEVER_RAN =

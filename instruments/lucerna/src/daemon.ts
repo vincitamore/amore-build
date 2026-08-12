@@ -152,6 +152,7 @@ export class DaemonLoop {
   private sentinelPollMs = 3000;
   /** Env/argv as of process start — a file edit must not revoke these. */
   private readonly startEnvDreams = process.env.LUCERNA_DREAMS_ENABLED;
+  private readonly startEnvAutoCommit = process.env.LUCERNA_AUTO_COMMIT;
   private readonly startEnvAutoCommitLive = process.env.LUCERNA_AUTO_COMMIT_LIVE;
   private readonly startArgs = process.argv.slice(2);
   private lastCharter: ResolvedCharter | undefined;
@@ -510,10 +511,12 @@ export class DaemonLoop {
   private refreshEnablement(): void {
     const previous = {
       dreamsEnabled: this.config.dreamsEnabled,
+      autoCommitEnabled: this.config.autoCommitEnabled,
       autoCommitLive: !this.config.autoCommitDryRun,
     };
     const next = resolveCycleEnablement(this.config.houseRoot, previous, {
       envDreams: this.startEnvDreams,
+      envAutoCommit: this.startEnvAutoCommit,
       envAutoCommitLive: this.startEnvAutoCommitLive,
       args: this.startArgs,
     });
@@ -525,7 +528,8 @@ export class DaemonLoop {
       return;
     }
     this.config.dreamsEnabled = next.dreamsEnabled;
-    this.config.autoCommitDryRun = !next.autoCommitLive;
+    this.config.autoCommitEnabled = next.autoCommitEnabled;
+    this.config.autoCommitDryRun = !next.autoCommitLive || !next.autoCommitEnabled;
   }
 
   /**

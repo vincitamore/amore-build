@@ -63,19 +63,25 @@ import { logPath } from "./paths.ts";
 
 export interface CycleEnablementFlags {
   dreamsEnabled: boolean;
+  autoCommitEnabled: boolean;
   autoCommitLive: boolean;
   ioError?: string;
 }
 
 /**
  * Apply one enablement read. IO error keeps previous flags; absent or
- * malformed file yields both-false (env/argv may still turn a knob on).
+ * malformed file yields defaults (env/argv may still turn a knob on).
  */
 export function flagsFromEnablementRead(
   read: EnablementRead,
-  previous: { dreamsEnabled: boolean; autoCommitLive: boolean },
+  previous: {
+    dreamsEnabled: boolean;
+    autoCommitEnabled: boolean;
+    autoCommitLive: boolean;
+  },
   sources: {
     envDreams?: string;
+    envAutoCommit?: string;
     envAutoCommitLive?: string;
     args?: string[];
   } = {},
@@ -86,11 +92,13 @@ export function flagsFromEnablementRead(
   const flags = resolveStartFlags({
     enablement: read.enablement,
     envDreams: sources.envDreams,
+    envAutoCommit: sources.envAutoCommit,
     envAutoCommitLive: sources.envAutoCommitLive,
     args: sources.args,
   });
   return {
     dreamsEnabled: flags.dreamsEnabled,
+    autoCommitEnabled: flags.autoCommitEnabled,
     autoCommitLive: flags.autoCommitLive,
   };
 }
@@ -101,9 +109,14 @@ export function flagsFromEnablementRead(
  */
 export function resolveCycleEnablement(
   houseRoot: string,
-  previous: { dreamsEnabled: boolean; autoCommitLive: boolean },
+  previous: {
+    dreamsEnabled: boolean;
+    autoCommitEnabled: boolean;
+    autoCommitLive: boolean;
+  },
   sources?: {
     envDreams?: string;
+    envAutoCommit?: string;
     envAutoCommitLive?: string;
     args?: string[];
   },
@@ -111,6 +124,7 @@ export function resolveCycleEnablement(
   const read = readEnablementForHouse(houseRoot);
   return flagsFromEnablementRead(read, previous, {
     envDreams: sources?.envDreams ?? process.env.LUCERNA_DREAMS_ENABLED,
+    envAutoCommit: sources?.envAutoCommit ?? process.env.LUCERNA_AUTO_COMMIT,
     envAutoCommitLive:
       sources?.envAutoCommitLive ?? process.env.LUCERNA_AUTO_COMMIT_LIVE,
     args: sources?.args ?? process.argv.slice(2),
@@ -121,12 +135,14 @@ function applyCycleEnablement(
   config: LucernaConfig,
   sources?: {
     envDreams?: string;
+    envAutoCommit?: string;
     envAutoCommitLive?: string;
     args?: string[];
   },
 ): CycleEnablementFlags {
   const previous = {
     dreamsEnabled: config.dreamsEnabled,
+    autoCommitEnabled: config.autoCommitEnabled,
     autoCommitLive: !config.autoCommitDryRun,
   };
   const next = resolveCycleEnablement(config.houseRoot, previous, sources);
@@ -138,7 +154,8 @@ function applyCycleEnablement(
     return next;
   }
   config.dreamsEnabled = next.dreamsEnabled;
-  config.autoCommitDryRun = !next.autoCommitLive;
+  config.autoCommitEnabled = next.autoCommitEnabled;
+  config.autoCommitDryRun = !next.autoCommitLive || !next.autoCommitEnabled;
   return next;
 }
 

@@ -42,7 +42,7 @@ Precedence for every spend knob: **`argv > env > file > shipped`**. A house-loca
 |------|--------|-----------|
 | `budgets.json` | shipped defaults, no warning | shipped defaults + warning + notice |
 | `chores.json` | all shipped chores admitted | refuse the cycle (do not fall back) |
-| `enable.json` | both knobs false | both knobs false |
+| `enable.json` | dreams off, auto-commit dry-run | same defaults + warning |
 
 Environment overrides (all optional):
 
@@ -63,6 +63,7 @@ File: `<house>/.amore/lucerna/enable.json`
 ```json
 {
   "dreamsEnabled": false,
+  "autoCommitEnabled": true,
   "autoCommitLive": false
 }
 ```
@@ -70,11 +71,12 @@ File: `<house>/.amore/lucerna/enable.json`
 | Field | Default | Meaning |
 |-------|---------|---------|
 | `dreamsEnabled` | `false` | Autonomous dream scheduling |
-| `autoCommitLive` | `false` | Live git commit (dry-run — a git word — when false) |
+| `autoCommitEnabled` | `true` when the key is absent | Drafting on or off. `false` is spend-off. |
+| `autoCommitLive` | `false` | Live git commit (dry-run — a git word — when false). Ignored when disabled. |
 
-Absent file: both false. Malformed JSON: both false, with a log line. CLI flags and env vars OR with the file for one-shot override. Safe defaults never flip themselves on. A legacy `instruments/lucerna/lucerna.enable.json` is still *read* when the charter file is absent; it is never written.
+Absent file: dreams off, auto-commit dry-run. Malformed JSON: same defaults, with a log line. An existing file that omits `autoCommitEnabled` keeps drafting. CLI flags and env vars OR with the file for one-shot override. `--no-auto-commit` / `LUCERNA_AUTO_COMMIT=0` win over a file that is on. A legacy `instruments/lucerna/lucerna.enable.json` is still *read* when the charter file is absent; it is never written.
 
-Dreams-off is not spend-off. Drafting still spends on your key on its own 30-minute schedule unless `LUCERNA_AUTO_COMMIT=0`.
+Dreams-off is not spend-off. Turn drafting off with `autoCommitEnabled: false` (`iris lucerna enable auto-commit off`).
 
 ## Light dreams
 

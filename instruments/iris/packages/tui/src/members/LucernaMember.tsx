@@ -10,10 +10,13 @@ import { tickRender } from '../debug';
 import {
   BUDGETS_EMPTY_NEVER_RAN,
   BUDGETS_EMPTY_UNAVAILABLE,
+  autoCommitMode,
+  autoCommitModeLabel,
   budgetsPanelKind,
   choreOverlayItems,
   deriveLucernaUiState,
   emptyDisplayRow,
+  enablementPatchForMode,
   formatBudgetPanelLines,
   formatChoreOverlayRow,
   formatChoresOverlayHeader,
@@ -23,6 +26,7 @@ import {
   lucernaActivitySub,
   lucernaActivityValue,
   lucernaBeatAgeSub,
+  nextAutoCommitMode,
   parseLucernaBudgets,
   type LucernaCapabilityView,
   type LucernaRosterView,
@@ -65,6 +69,7 @@ interface Health {
 
 interface Enablement {
   dreamsEnabled: boolean;
+  autoCommitEnabled?: boolean;
   autoCommitLive: boolean;
 }
 
@@ -632,8 +637,10 @@ export function LucernaMember({
   const uiState = deriveLucernaUiState(daemonUrl, health, status);
   const enablement: Enablement = status?.enablement ?? {
     dreamsEnabled: dreamsEnabledFlag,
+    autoCommitEnabled: true,
     autoCommitLive: false,
   };
+  const commitMode = autoCommitMode(enablement);
 
   const reviewRows = useMemo(
     () => toReviewRows(dreamItems, proposalItems),
@@ -699,7 +706,7 @@ export function LucernaMember({
           const e = j.enablement;
           setFlash(
             e
-              ? `enablement: dreams ${e.dreamsEnabled ? 'on' : 'off'} · auto-commit ${e.autoCommitLive ? 'live' : 'dry-run'}`
+              ? `enablement: dreams ${e.dreamsEnabled ? 'on' : 'off'} · auto-commit ${autoCommitModeLabel(autoCommitMode(e))}`
               : label,
           );
           // Force status re-read so TUI always shows file truth after write
@@ -883,10 +890,20 @@ export function LucernaMember({
       });
     }
     if (n === 'a') {
-      const next = !enablement.autoCommitLive;
+      const next = nextAutoCommitMode(commitMode);
+      const label = autoCommitModeLabel(next);
       return setConfirm({
-        msg: `Set auto-commit ${next ? 'LIVE' : 'dry-run'} in lucerna.enable.json?`,
-        run: () => void post('enable', 'auto-commit', { autoCommitLive: next }),
+        msg: `Set auto-commit ${label} in lucerna.enable.json?`,
+        detail:
+          next === 'off'
+            ? ['No drafts. No model calls. Token budget is untouched.']
+            : next === 'dry-run'
+              ? ['Drafts a commit message via your configured model.', 'Does not commit. Still spends tokens.']
+              : [
+                  'Live remains draft-only until a hardened path ships.',
+                  'This still spends tokens on the draft call.',
+                ],
+        run: () => void post('enable', 'auto-commit', enablementPatchForMode(next)),
       });
     }
   });
@@ -933,7 +950,7 @@ export function LucernaMember({
             : t.success;
     const beat = formatBeatAge(health?.beatAgeSec);
     const dreamsBadge = enablement.dreamsEnabled ? 'dreams on' : 'dreams off';
-    const commitBadge = enablement.autoCommitLive ? 'auto-commit live' : 'auto-commit dry-run';
+    const commitBadge = `auto-commit ${autoCommitModeLabel(autoCommitMode(enablement))}`;
     const hasOtherState = status?.activity != null || status?.lastActions != null;
     const panelKind = budgetsPanelKind(status?.budgets, hasOtherState);
     const budgetInnerW = Math.max(20, Math.floor(dims.width / 2) - 8);
@@ -1012,7 +1029,7 @@ export function LucernaMember({
           </Panel>
           <Panel title="Enablement" flexGrow={1}>
             <text fg={t.foreground}>{`${dreamsBadge} · ${commitBadge}`}</text>
-            <text fg={t.muted}>d toggle dreams · a toggle auto-commit (confirm)</text>
+            <text fg={t.muted}>d toggle dreams · a cycle auto-commit off/dry-run/live (confirm)</text>
           </Panel>
         </box>
         <box flexShrink={0} marginTop={1}>

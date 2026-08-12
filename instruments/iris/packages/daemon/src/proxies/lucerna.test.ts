@@ -172,19 +172,31 @@ describe('readHealth', () => {
 });
 
 describe('readEnablement / readStatus', () => {
-  test('absent enablement → both false', () => {
+  test('absent enablement → dreams off, auto-commit dry-run', () => {
     ensureDir();
-    expect(readEnablement(org)).toEqual({ dreamsEnabled: false, autoCommitLive: false });
+    expect(readEnablement(org)).toEqual({
+      dreamsEnabled: false,
+      autoCommitEnabled: true,
+      autoCommitLive: false,
+    });
   });
 
   test('enablement file honored', () => {
     wf('lucerna.enable.json', JSON.stringify({ dreamsEnabled: true, autoCommitLive: true }));
-    expect(readEnablement(org)).toEqual({ dreamsEnabled: true, autoCommitLive: true });
+    expect(readEnablement(org)).toEqual({
+      dreamsEnabled: true,
+      autoCommitEnabled: true,
+      autoCommitLive: true,
+    });
   });
 
   test('legacy-only enablement still returns flags', () => {
     wf('lucerna.enable.json', JSON.stringify({ dreamsEnabled: true, autoCommitLive: false }));
-    expect(readEnablement(org)).toEqual({ dreamsEnabled: true, autoCommitLive: false });
+    expect(readEnablement(org)).toEqual({
+      dreamsEnabled: true,
+      autoCommitEnabled: true,
+      autoCommitLive: false,
+    });
   });
 
   test('charter enable.json honored over legacy', () => {
@@ -195,14 +207,22 @@ describe('readEnablement / readStatus', () => {
       join(cdir, 'enable.json'),
       JSON.stringify({ dreamsEnabled: true, autoCommitLive: false }),
     );
-    expect(readEnablement(org)).toEqual({ dreamsEnabled: true, autoCommitLive: false });
+    expect(readEnablement(org)).toEqual({
+      dreamsEnabled: true,
+      autoCommitEnabled: true,
+      autoCommitLive: false,
+    });
   });
 
   test('status not-installed', () => {
     const s = readStatus(org);
     expect(s.available).toBe(false);
     expect(s.reason).toBe('not-installed');
-    expect(s.enablement).toEqual({ dreamsEnabled: false, autoCommitLive: false });
+    expect(s.enablement).toEqual({
+      dreamsEnabled: false,
+      autoCommitEnabled: false,
+      autoCommitLive: false,
+    });
   });
 
   test('status happy path with state + enablement', () => {
@@ -230,7 +250,11 @@ describe('readEnablement / readStatus', () => {
     expect(s.version).toBe('0.2.0');
     expect(s.activity).toBe('idle');
     expect(s.budgets).toEqual({ tokens: 100 });
-    expect(s.enablement).toEqual({ dreamsEnabled: true, autoCommitLive: false });
+    expect(s.enablement).toEqual({
+      dreamsEnabled: true,
+      autoCommitEnabled: true,
+      autoCommitLive: false,
+    });
   });
 
   test('status maps lastActivity / lastActionResults and phase', () => {
@@ -315,22 +339,46 @@ describe('writeEnablement', () => {
 
   test('atomic set + re-read accuracy', () => {
     ensureDir();
+    const dry = {
+      dreamsEnabled: true,
+      autoCommitEnabled: true,
+      autoCommitLive: false,
+    };
+    const live = {
+      dreamsEnabled: true,
+      autoCommitEnabled: true,
+      autoCommitLive: true,
+    };
     const w = writeEnablement(org, { dreamsEnabled: true });
     expect(w.ok).toBe(true);
-    expect(w.enablement).toEqual({ dreamsEnabled: true, autoCommitLive: false });
-    expect(readEnablement(org)).toEqual({ dreamsEnabled: true, autoCommitLive: false });
+    expect(w.enablement).toEqual(dry);
+    expect(readEnablement(org)).toEqual(dry);
 
     const w2 = writeEnablement(org, { autoCommitLive: true });
-    expect(w2.enablement).toEqual({ dreamsEnabled: true, autoCommitLive: true });
-    expect(readEnablement(org)).toEqual({ dreamsEnabled: true, autoCommitLive: true });
+    expect(w2.enablement).toEqual(live);
+    expect(readEnablement(org)).toEqual(live);
 
     expect(writeEnablement(org, { dreamsEnabled: false, autoCommitLive: false }).ok).toBe(true);
-    expect(readEnablement(org)).toEqual({ dreamsEnabled: false, autoCommitLive: false });
-    // File content is valid JSON (write-temp-rename) at the charter path
+    expect(readEnablement(org)).toEqual({
+      dreamsEnabled: false,
+      autoCommitEnabled: true,
+      autoCommitLive: false,
+    });
     const charterFile = join(lucernaCharterDir(org), 'enable.json');
     const raw = JSON.parse(readFileSync(charterFile, 'utf8'));
-    expect(raw).toEqual({ dreamsEnabled: false, autoCommitLive: false });
+    expect(raw).toEqual({
+      dreamsEnabled: false,
+      autoCommitEnabled: true,
+      autoCommitLive: false,
+    });
     expect(existsSync(join(ldir, 'lucerna.enable.json'))).toBe(false);
+
+    const w3 = writeEnablement(org, { autoCommitEnabled: false });
+    expect(w3.enablement).toEqual({
+      dreamsEnabled: false,
+      autoCommitEnabled: false,
+      autoCommitLive: false,
+    });
   });
 
   test('writeEnablement creates charter file only', () => {

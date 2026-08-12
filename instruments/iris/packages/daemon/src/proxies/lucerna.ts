@@ -6,7 +6,7 @@
 // File map:
 //   health.json                    → readHealth (pid, startedAt, lastBeat, version)
 //   state.json                     → readStatus (activity, lastActions, budgets)
-//   .amore/lucerna/enable.json     → enablement (dreamsEnabled, autoCommitLive; absent = both false)
+//   .amore/lucerna/enable.json     → enablement (dreams, autoCommitEnabled, autoCommitLive)
 //   .amore/lucerna/budgets.json    ← writeBudgets (merge-patch, tmp+rename)
 //   .amore/lucerna/chores.json     ← writeChores (per-entry assignment, tmp+rename)
 //   instruments/lucerna/lucerna.enable.json → legacy enablement read (never written)
@@ -310,29 +310,49 @@ export function readHealth(
 
 export interface LucernaEnablement {
   dreamsEnabled: boolean;
+  autoCommitEnabled: boolean;
   autoCommitLive: boolean;
 }
 
+/** Installed house, no file: dreams off, auto-commit dry-run (legacy default). */
+export const DEFAULT_ENABLEMENT: LucernaEnablement = {
+  dreamsEnabled: false,
+  autoCommitEnabled: true,
+  autoCommitLive: false,
+};
+
+function normalizeEnablement(en: LucernaEnablement): LucernaEnablement {
+  if (!en.autoCommitEnabled) {
+    return { ...en, autoCommitEnabled: false, autoCommitLive: false };
+  }
+  if (en.autoCommitLive) {
+    return { ...en, autoCommitEnabled: true, autoCommitLive: true };
+  }
+  return { ...en, autoCommitEnabled: true, autoCommitLive: false };
+}
+
 function parseEnablementRaw(raw: unknown): LucernaEnablement {
-  if (!isObj(raw)) return { dreamsEnabled: false, autoCommitLive: false };
-  return {
+  if (!isObj(raw)) return { ...DEFAULT_ENABLEMENT };
+  return normalizeEnablement({
     dreamsEnabled: boolOr(raw.dreamsEnabled, false),
+    // Absent key stays on so existing enable.json files keep drafting.
+    autoCommitEnabled: raw.autoCommitEnabled === false ? false : true,
     autoCommitLive: boolOr(raw.autoCommitLive, false),
-  };
+  });
 }
 
 function readEnablementAt(path: string): LucernaEnablement {
   try {
     return parseEnablementRaw(JSON.parse(readFileSync(path, 'utf8')));
   } catch {
-    return { dreamsEnabled: false, autoCommitLive: false };
+    return { ...DEFAULT_ENABLEMENT };
   }
 }
 
-/** Absent enablement file → both false (honest defaults). New path first, then legacy. */
+/** Absent enablement file → dreams off, auto-commit dry-run. New path first, then legacy. */
 export function readEnablement(orgRoot: string): LucernaEnablement {
   if (!isInstalled(orgRoot)) {
-    return { dreamsEnabled: false, autoCommitLive: false };
+    return { ...DEFAULT_ENABLEMENT, autoCommitEnabled: false };
   }
   const primary = join(lucernaCharterDir(orgRoot), 'enable.json');
   if (existsSync(primary)) {
@@ -399,7 +419,7 @@ export function readStatus(
   deps: LucernaHealthDeps = {},
 ): LucernaStatusWire {
   if (!isInstalled(orgRoot)) {
-    return { ...NOT_INSTALLED, enablement: { dreamsEnabled: false, autoCommitLive: false } };
+    return { ...NOT_INSTALLED, enablement: { ...DEFAULT_ENABLEMENT, autoCommitEnabled: false } };
   }
 
   const health = readHealth(orgRoot, nowMs, deps);
@@ -512,12 +532,16 @@ export function writeEnablement(
     return { ...NOT_INSTALLED, ok: false };
   }
   const current = readEnablement(orgRoot);
-  const next: LucernaEnablement = {
+  const next = normalizeEnablement({
     dreamsEnabled:
       typeof patch.dreamsEnabled === 'boolean' ? patch.dreamsEnabled : current.dreamsEnabled,
+    autoCommitEnabled:
+      typeof patch.autoCommitEnabled === 'boolean'
+        ? patch.autoCommitEnabled
+        : current.autoCommitEnabled,
     autoCommitLive:
       typeof patch.autoCommitLive === 'boolean' ? patch.autoCommitLive : current.autoCommitLive,
-  };
+  });
   const dir = lucernaCharterDir(orgRoot);
   const target = join(dir, 'enable.json');
   const tmp = `${target}.tmp`;

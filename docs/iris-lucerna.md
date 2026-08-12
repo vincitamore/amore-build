@@ -56,7 +56,7 @@ Hint line: `b edit caps · c chores`.
 | `w` | Wake sentinel |
 | `s` | Sleep sentinel |
 | `d` | Toggle dreams enablement (confirm — UX, not auth) |
-| `a` | Toggle auto-commit live vs dry-run (confirm) |
+| `a` | Cycle auto-commit dry-run → off → live (confirm) |
 | `b` | Edit a spend cap (actions / expensive / tokens); confirm, then applies at the next cycle |
 | `c` | Open the chores overlay (roster) |
 | `t` | (chores overlay) toggle the selected chore (confirm) |
@@ -106,6 +106,7 @@ iris lucerna halt
 iris lucerna wake
 iris lucerna sleep
 iris lucerna enable dreams on|off
+iris lucerna enable auto-commit off|dry-run|live
 iris lucerna enable auto-commit-live on|off
 iris lucerna budgets [show]
 iris lucerna budgets set <cap> <value>
@@ -206,6 +207,7 @@ File: `<house>/.amore/lucerna/enable.json`
 ```json
 {
   "dreamsEnabled": false,
+  "autoCommitEnabled": true,
   "autoCommitLive": false
 }
 ```
@@ -213,16 +215,18 @@ File: `<house>/.amore/lucerna/enable.json`
 | Field | Default | Meaning |
 |-------|---------|---------|
 | `dreamsEnabled` | `false` | Autonomous dream scheduling |
-| `autoCommitLive` | `false` | Live auto-commit (dry-run — a git word — when false) |
+| `autoCommitEnabled` | `true` when absent | Drafting on or off. `false` stops model calls. |
+| `autoCommitLive` | `false` | Live auto-commit (dry-run — a git word — when false). Ignored when disabled. |
 
-Absent or malformed file: both false. Iris writes the charter path
-(write-temp-rename). A legacy
+Absent or malformed file: dreams off, auto-commit dry-run. An existing
+file that omits `autoCommitEnabled` keeps drafting. Iris writes the
+charter path (write-temp-rename). A legacy
 `<house>/instruments/lucerna/lucerna.enable.json` is still *read* when the
 charter file is absent; it is never written. CLI and TUI always display the
 file values after each change.
 
-Dreams-off is not spend-off: drafting still spends on your key unless
-`LUCERNA_AUTO_COMMIT=0`.
+`iris lucerna enable auto-commit off|dry-run|live` is the three-way write.
+`auto-commit-live on|off` still means live vs dry-run and keeps drafting on.
 
 ---
 

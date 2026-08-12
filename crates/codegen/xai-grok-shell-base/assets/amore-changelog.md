@@ -15,6 +15,11 @@ work it describes.
 
 ## v1.0.2
 
+- **Auto-commit can be turned off** — `a` on the Lucerna tab cycles
+  off / dry-run / live. Dry-run still drafts (and spends tokens); off
+  does not. `iris lucerna enable auto-commit off|dry-run|live` writes
+  `autoCommitEnabled` on `enable.json`. `auto-commit-live on|off` still
+  means live vs dry-run and keeps drafting on.
 - **Lucerna's Budgets panel tells the truth it already promised** — the
   Running tab now shows live caps, capability (`ready` / `cooling` /
   `refusing`), and provenance (`source`, `aboveShipped`). This honours a
@@ -36,7 +41,7 @@ work it describes.
   not authentication; iris stays loopback-unauthenticated. A planner
   reservation refuses *starting* a call when remaining room is too small —
   it does not make overspend impossible. Dreams-off is not spend-off:
-  drafting still spends unless `LUCERNA_AUTO_COMMIT=0`.
+  drafting still spends until auto-commit itself is off.
 - **Lucerna status tells the truth** — the iris dashboard no longer reports a
   healthy daemon as Hung between adaptive heartbeats. Iris now honors the
   daemon's own `intervalMs` for staleness (bound `max(120s, 2.5×interval)`,

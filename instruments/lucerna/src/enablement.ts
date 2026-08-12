@@ -1,10 +1,16 @@
 /**
- * Durable standing enablement for lucerna dreams and live auto-commit.
+ * Durable standing enablement for lucerna dreams and auto-commit.
  *
  * File: <house>/.amore/lucerna/enable.json
  * Legacy (read-only): <house>/instruments/lucerna/lucerna.enable.json
- * Schema: { "dreamsEnabled": boolean, "autoCommitLive": boolean }
- * Absent or malformed file → both false (safe defaults).
+ * Schema: {
+ *   "dreamsEnabled": boolean,
+ *   "autoCommitEnabled": boolean,
+ *   "autoCommitLive": boolean
+ * }
+ * Absent or malformed file → dreams off, auto-commit dry-run
+ * (autoCommitEnabled defaults true when the key is absent, so existing
+ * files keep drafting; set false to stop model calls).
  */
 
 import { existsSync, readFileSync } from "node:fs";
@@ -20,14 +26,49 @@ export const ENABLE_FILE_NAME = RUNTIME_FILES.enable;
 export interface LucernaEnablement {
   /** Autonomous dream schedule (default OFF). */
   dreamsEnabled: boolean;
-  /** Live git commit for auto-commit (default OFF → dry-run). */
+  /**
+   * Whether auto-commit may draft at all (default ON when the key is
+   * absent — existing files keep dry-run drafting). False is spend-off.
+   */
+  autoCommitEnabled: boolean;
+  /** Live git commit (default OFF → dry-run). Ignored when disabled. */
   autoCommitLive: boolean;
 }
 
+export type AutoCommitMode = "off" | "dry-run" | "live";
+
 export const DEFAULT_ENABLEMENT: LucernaEnablement = {
   dreamsEnabled: false,
+  autoCommitEnabled: true,
   autoCommitLive: false,
 };
+
+export function autoCommitMode(en: LucernaEnablement): AutoCommitMode {
+  if (!en.autoCommitEnabled) return "off";
+  return en.autoCommitLive ? "live" : "dry-run";
+}
+
+export function enablementFromAutoCommitMode(
+  mode: AutoCommitMode,
+  dreamsEnabled: boolean,
+): LucernaEnablement {
+  return {
+    dreamsEnabled,
+    autoCommitEnabled: mode !== "off",
+    autoCommitLive: mode === "live",
+  };
+}
+
+/** Off wins over live; live implies enabled. */
+export function normalizeEnablement(en: LucernaEnablement): LucernaEnablement {
+  if (!en.autoCommitEnabled) {
+    return { ...en, autoCommitEnabled: false, autoCommitLive: false };
+  }
+  if (en.autoCommitLive) {
+    return { ...en, autoCommitEnabled: true, autoCommitLive: true };
+  }
+  return { ...en, autoCommitEnabled: true, autoCommitLive: false };
+}
 
 export interface EnablementRead {
   enablement: LucernaEnablement;
@@ -36,19 +77,20 @@ export interface EnablementRead {
   legacyLocation?: boolean;
 }
 
-/** Parse enablement JSON text. Invalid or empty → safe defaults (both false). */
+/** Parse enablement JSON text. Invalid or empty → safe defaults. */
 export function parseEnablementJson(raw: string): LucernaEnablement {
   const out: LucernaEnablement = { ...DEFAULT_ENABLEMENT };
   try {
     const j = JSON.parse(raw) as Record<string, unknown>;
     if (j && typeof j === "object") {
       if (j.dreamsEnabled === true) out.dreamsEnabled = true;
+      if (j.autoCommitEnabled === false) out.autoCommitEnabled = false;
       if (j.autoCommitLive === true) out.autoCommitLive = true;
     }
   } catch {
     // malformed → safe defaults
   }
-  return out;
+  return normalizeEnablement(out);
 }
 
 function readEnablementAtPath(path: string): EnablementRead {
@@ -104,19 +146,23 @@ export function readEnablementFile(runtimeDir: string): EnablementRead {
 export interface StartFlagSources {
   enablement?: LucernaEnablement;
   envDreams?: string | undefined;
+  envAutoCommit?: string | undefined;
   envAutoCommitLive?: string | undefined;
   args?: string[];
 }
 
 export interface ResolvedStartFlags {
   dreamsEnabled: boolean;
+  autoCommitEnabled: boolean;
   autoCommitLive: boolean;
   argvFlags: string[];
 }
 
 /**
- * Resolve dreams/LIVE enablement from durable file + env + argv.
- * Any truthy source turns the knob ON (OR). Defaults OFF when all absent.
+ * Resolve dreams / auto-commit from durable file + env + argv.
+ * Dreams and live: any truthy source turns the knob ON (OR).
+ * Auto-commit enabled: `--no-auto-commit` / LUCERNA_AUTO_COMMIT=0 win;
+ * otherwise file (absent key = on) OR env=1 OR live-on OR `--auto-commit`.
  */
 export function resolveStartFlags(sources: StartFlagSources = {}): ResolvedStartFlags {
   const en = sources.enablement ?? DEFAULT_ENABLEMENT;
@@ -125,16 +171,26 @@ export function resolveStartFlags(sources: StartFlagSources = {}): ResolvedStart
     en.dreamsEnabled ||
     sources.envDreams === "1" ||
     args.includes("--dreams-enabled");
-  const autoCommitLive =
+  const liveRequested =
     en.autoCommitLive ||
     sources.envAutoCommitLive === "1" ||
     args.includes("--auto-commit-live");
+  const killed =
+    args.includes("--no-auto-commit") || sources.envAutoCommit === "0";
+  const autoCommitEnabled =
+    !killed &&
+    (en.autoCommitEnabled !== false ||
+      sources.envAutoCommit === "1" ||
+      args.includes("--auto-commit") ||
+      liveRequested);
+  const autoCommitLive = autoCommitEnabled && liveRequested;
 
   const argvFlags: string[] = [];
   if (dreamsEnabled) argvFlags.push("--dreams-enabled");
   if (autoCommitLive) argvFlags.push("--auto-commit-live");
+  if (!autoCommitEnabled) argvFlags.push("--no-auto-commit");
 
-  return { dreamsEnabled, autoCommitLive, argvFlags };
+  return { dreamsEnabled, autoCommitEnabled, autoCommitLive, argvFlags };
 }
 
 /** Charter enablement path (new location). */

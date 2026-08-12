@@ -49,6 +49,7 @@ function parseEnableBody(body: unknown): Partial<LucernaEnablement> | null {
   const o = body as Record<string, unknown>;
   const patch: Partial<LucernaEnablement> = {};
   if (typeof o.dreamsEnabled === 'boolean') patch.dreamsEnabled = o.dreamsEnabled;
+  if (typeof o.autoCommitEnabled === 'boolean') patch.autoCommitEnabled = o.autoCommitEnabled;
   if (typeof o.autoCommitLive === 'boolean') patch.autoCommitLive = o.autoCommitLive;
   if (Object.keys(patch).length === 0) return null;
   return patch;
@@ -205,7 +206,8 @@ export async function lucernaRoute(config: DaemonConfig, req: Request): Promise<
               available: true,
               ok: false,
               reason: 'usage',
-              message: 'body requires dreamsEnabled and/or autoCommitLive boolean',
+              message:
+                'body requires dreamsEnabled, autoCommitEnabled, and/or autoCommitLive boolean',
             },
             400,
           );

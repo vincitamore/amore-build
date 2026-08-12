@@ -163,14 +163,37 @@ export function lucernaStop(): Promise<Record<string, unknown>> {
 
 /**
  * Set durable enablement flags via the daemon proxy.
- * flag: "dreams" | "auto-commit-live"; value: "on" | "off".
+ * flag: "dreams" (on|off) | "auto-commit" (off|dry-run|live) |
+ *       "auto-commit-live" (on|off — live vs dry-run, keeps drafting on).
  */
 export function lucernaEnable(
   flag: string,
   value: string,
 ): Promise<Record<string, unknown>> {
-  const on = value === 'on' || value === 'true' || value === '1';
-  const off = value === 'off' || value === 'false' || value === '0';
+  const raw = value.toLowerCase();
+  if (flag === 'auto-commit' || flag === 'autoCommit') {
+    if (raw === 'off' || raw === 'false' || raw === '0') {
+      return daemonPost('/api/lucerna/enable', {
+        autoCommitEnabled: false,
+        autoCommitLive: false,
+      }) as Promise<Record<string, unknown>>;
+    }
+    if (raw === 'dry-run' || raw === 'dryrun') {
+      return daemonPost('/api/lucerna/enable', {
+        autoCommitEnabled: true,
+        autoCommitLive: false,
+      }) as Promise<Record<string, unknown>>;
+    }
+    if (raw === 'live') {
+      return daemonPost('/api/lucerna/enable', {
+        autoCommitEnabled: true,
+        autoCommitLive: true,
+      }) as Promise<Record<string, unknown>>;
+    }
+    throw new Error(`auto-commit value must be off|dry-run|live (got '${value}')`);
+  }
+  const on = raw === 'on' || raw === 'true' || raw === '1';
+  const off = raw === 'off' || raw === 'false' || raw === '0';
   if (!on && !off) {
     throw new Error(`enable value must be on|off (got '${value}')`);
   }
@@ -181,11 +204,12 @@ export function lucernaEnable(
     >;
   }
   if (flag === 'auto-commit-live' || flag === 'autoCommitLive') {
-    return daemonPost('/api/lucerna/enable', { autoCommitLive: bool }) as Promise<
-      Record<string, unknown>
-    >;
+    return daemonPost('/api/lucerna/enable', {
+      autoCommitEnabled: true,
+      autoCommitLive: bool,
+    }) as Promise<Record<string, unknown>>;
   }
-  throw new Error(`enable flag must be dreams|auto-commit-live (got '${flag}')`);
+  throw new Error(`enable flag must be dreams|auto-commit|auto-commit-live (got '${flag}')`);
 }
 
 const BUDGET_CAP_ALIASES: Record<string, { knob: string; hours?: boolean }> = {

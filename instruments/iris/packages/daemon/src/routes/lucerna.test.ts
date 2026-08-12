@@ -121,13 +121,22 @@ describe('POST governance', () => {
     expect(r.status).toBe(200);
     const b = (await r.json()) as {
       ok: boolean;
-      enablement: { dreamsEnabled: boolean; autoCommitLive: boolean };
+      enablement: {
+        dreamsEnabled: boolean;
+        autoCommitEnabled: boolean;
+        autoCommitLive: boolean;
+      };
     };
     expect(b.ok).toBe(true);
-    expect(b.enablement).toEqual({ dreamsEnabled: true, autoCommitLive: false });
+    expect(b.enablement).toEqual({
+      dreamsEnabled: true,
+      autoCommitEnabled: true,
+      autoCommitLive: false,
+    });
     const charterEnable = join(org, '.amore', 'lucerna', 'enable.json');
     expect(JSON.parse(readFileSync(charterEnable, 'utf8'))).toEqual({
       dreamsEnabled: true,
+      autoCommitEnabled: true,
       autoCommitLive: false,
     });
     expect(existsSync(join(ldir, 'lucerna.enable.json'))).toBe(false);
@@ -192,6 +201,7 @@ describe('POST governance', () => {
     const charterEnable = join(org, '.amore', 'lucerna', 'enable.json');
     expect(JSON.parse(readFileSync(charterEnable, 'utf8'))).toEqual({
       dreamsEnabled: true,
+      autoCommitEnabled: true,
       autoCommitLive: false,
     });
     expect(existsSync(join(ldir, 'lucerna.enable.json'))).toBe(false);

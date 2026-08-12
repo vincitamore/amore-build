@@ -90,15 +90,18 @@ steward process is present.
 
 | Control | Default | Meaning |
 |---------|---------|---------|
-| `<house>/.amore/lucerna/enable.json` | absent | both knobs false |
+| `<house>/.amore/lucerna/enable.json` | absent | dreams off, auto-commit dry-run |
 | `dreamsEnabled` | `false` | no autonomous dream schedule |
-| `autoCommitLive` | `false` | auto-commit drafts only (dry-run is a git word: no live commit) |
+| `autoCommitEnabled` | `true` when the key is absent | drafting on or off; `false` is spend-off |
+| `autoCommitLive` | `false` | live vs dry-run (a git word: no live commit). Ignored when disabled. |
 
-Absent or malformed enablement JSON keeps both false. Environment variables
-and CLI flags may OR a knob on for one start; safe defaults never flip
-themselves on. Dreams-off is not spend-off: auto-commit drafting still
-runs on its own schedule unless `LUCERNA_AUTO_COMMIT=0` or
-`--no-auto-commit` is set.
+Absent or malformed enablement JSON keeps dreams off and auto-commit
+dry-run. An existing file that omits `autoCommitEnabled` keeps drafting.
+Environment variables and CLI flags may OR a knob on for one start;
+`--no-auto-commit` / `LUCERNA_AUTO_COMMIT=0` win over a file that is on.
+Dreams-off is not spend-off: turn drafting off with
+`autoCommitEnabled: false` (tab `a`, or
+`iris lucerna enable auto-commit off`).
 
 A legacy `<house>/instruments/lucerna/lucerna.enable.json` is still *read*
 when the charter path is absent; it is never written.
@@ -205,7 +208,7 @@ already running.
 | Write sentinel `halt` (or `iris lucerna halt`) | graceful stop request | current unit finishes; next unit does not start |
 | `iris lucerna stop` / tab `k` | halt, then pid-verified kill if still alive | **immediate** after halt timeout |
 | Set `dreamsEnabled` false (file, CLI, or env unset) | autonomous dreams will not start; daemon may keep heartbeating | **next cycle** (file edit does not revoke an env/argv enablement) |
-| Delete or correct `enable.json` | absent or malformed → both knobs false | **next cycle** |
+| Delete or correct `enable.json` | absent or malformed → dreams off, auto-commit dry-run | **next cycle** |
 | Edit or delete `budgets.json` / `chores.json` | new caps / roster take effect | **next cycle** (or next auto-commit draft attempt) |
 | Uninstall / remove the Lucerna binary and house runtime dir | no process remains to schedule work | **immediate** (no process) |
 | `LUCERNA_AUTO_COMMIT=0` or `--no-auto-commit` | auto-commit drafting disabled entirely | **next draft attempt** |

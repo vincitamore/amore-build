@@ -926,7 +926,7 @@ export const COMMANDS: CommandSpec[] = [
   {
     name: 'lucerna enable',
     summary:
-      'Set durable enablement: iris lucerna enable dreams on|off | auto-commit-live on|off (defaults both off)',
+      'Set durable enablement: iris lucerna enable dreams on|off | auto-commit off|dry-run|live | auto-commit-live on|off',
     isWrite: true,
     booleanFlags: [],
     flags: {},
@@ -936,7 +936,7 @@ export const COMMANDS: CommandSpec[] = [
       if (!flag || !value) {
         throw new regula.RegulaError(
           'USAGE',
-          'lucerna enable requires <dreams|auto-commit-live> <on|off>',
+          'lucerna enable requires <dreams|auto-commit|auto-commit-live> <value>',
         );
       }
       try {

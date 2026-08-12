@@ -143,14 +143,14 @@ export function loadConfig(args: string[] = process.argv.slice(2)): LucernaConfi
   const flags = resolveStartFlags({
     enablement,
     envDreams: process.env.LUCERNA_DREAMS_ENABLED,
+    envAutoCommit: process.env.LUCERNA_AUTO_COMMIT,
     envAutoCommitLive: process.env.LUCERNA_AUTO_COMMIT_LIVE,
     args,
   });
 
   const intervalSec = parseInt(getArg(args, "--interval") ?? "8", 10);
   const dryRun = args.includes("--dry-run");
-  const autoCommitEnabled =
-    !args.includes("--no-auto-commit") && process.env.LUCERNA_AUTO_COMMIT !== "0";
+  const autoCommitEnabled = flags.autoCommitEnabled;
 
   const modelFlag = getArg(args, "--model");
   const autoCommitModel =
@@ -213,7 +213,7 @@ export function loadConfig(args: string[] = process.argv.slice(2)): LucernaConfi
     dryRun,
     dreamsEnabled: flags.dreamsEnabled,
     autoCommitEnabled,
-    autoCommitDryRun: !flags.autoCommitLive,
+    autoCommitDryRun: !flags.autoCommitLive || !flags.autoCommitEnabled,
     // Full chain: LUCERNA_AMORE_BIN → AMORE_BIN → amore on PATH
     amoreBin: resolveAmoreBin(),
     processName: PROCESS_NAME,
