@@ -946,6 +946,21 @@ where
             }
         }
     }
+    // Config snapshot at FINALIZE (ACTIVATE complete): copy live user
+    // config.toml beside install state so --rollback can restore it with
+    // binaries. Best-effort; missing config is not an error. Prefer recording
+    // on new_state so one store_atomic keeps files{} + config_snapshot atomic.
+    // (cmd.rs also calls snapshot_user_config post-transaction as a belt-and-
+    // braces path until this patch is applied; both are idempotent.)
+    match state::write_user_config_snapshot(install_dir) {
+        Ok(state::SnapshotOutcome::Written { record, .. }) => {
+            new_state.config_snapshot = Some(record);
+        }
+        Ok(state::SnapshotOutcome::SourceAbsent) => {}
+        Err(_) => {
+            // Install already succeeded; snapshot is best-effort.
+        }
+    }
     state::store_atomic(install_dir, &new_state)?;
     Marker::delete(install_dir)?;
     let _ = fs::remove_dir_all(&staging_root);

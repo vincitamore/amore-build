@@ -774,6 +774,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(amore_update_env)]
     fn status_json_contract_fields() {
         with_clear_update_env(|| {
             let cfg = base_cfg("1.0.0");
@@ -817,6 +818,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(amore_update_env)]
     fn dismissed_version_suppresses_available() {
         with_clear_update_env(|| {
             let mut cfg = base_cfg("1.0.0");
@@ -839,6 +841,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(amore_update_env)]
     fn update_pin_compared_instead_of_latest() {
         with_clear_update_env(|| {
             let mut cfg = base_cfg("1.0.0");
@@ -867,6 +870,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(amore_update_env)]
     fn cadence_window_respected_no_second_probe() {
         with_clear_update_env(|| {
             // Isolate install dir via a temp cwd is hard (install_dir uses current_exe).
@@ -908,6 +912,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(amore_update_env)]
     fn offline_background_is_silence() {
         with_clear_update_env(|| {
             // Clear any leftover state from the cadence test so we exercise the
@@ -922,6 +927,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(amore_update_env)]
     fn alpha_channel_blocked_loudly() {
         with_clear_update_env(|| {
             let mut cfg = base_cfg("1.0.0");

@@ -223,6 +223,10 @@ fn run_apply_inner(cmd: &UpdateCommand, print: bool) -> Result<Option<String>, A
                 }
                 Ok(None)
             } else {
+                // ACTIVATE-time hook (post-transaction): fleet FINALIZE is
+                // foreign; snapshot here so rollback can restore config with
+                // the binaries. Best-effort — install already succeeded.
+                snapshot_config_after_activate(&out.install_dir, print);
                 if print {
                     println!("{}", installed_line(&ver));
                 }
@@ -768,8 +772,9 @@ fn run_rollback(cmd: &UpdateCommand) -> i32 {
         }
     }
 
-    // Config-snapshot restore arrives with a later unit; seam only.
-    restore_config_snapshot_if_present(&install_dir);
+    // Config snapshot taken at ACTIVATE; restore alongside binaries when present.
+    // Absent snapshot never fails the rollback (notice only).
+    let config_notice = restore_config_snapshot_if_present(&install_dir);
 
     if !restored.is_empty() {
         if let Err(e) = rewrite_state_after_rollback(
@@ -789,6 +794,11 @@ fn run_rollback(cmd: &UpdateCommand) -> i32 {
             "restored": restored,
             "missingPrev": missing,
             "failed": failed.iter().map(|(n, d)| serde_json::json!({"component": n, "detail": d})).collect::<Vec<_>>(),
+            "configSnapshot": match &config_notice {
+                ConfigRestoreNotice::Restored => "restored",
+                ConfigRestoreNotice::Absent => "absent",
+                ConfigRestoreNotice::Failed(_) => "failed",
+            },
         });
         println!("{payload}");
     } else {
@@ -805,6 +815,21 @@ fn run_rollback(cmd: &UpdateCommand) -> i32 {
                 eprintln!("Failed to restore {name}: {detail}");
             }
         }
+        match &config_notice {
+            ConfigRestoreNotice::Restored => {
+                println!("Restored config.toml from snapshot");
+            }
+            ConfigRestoreNotice::Absent => {
+                println!(
+                    "No config.toml snapshot found; binary rollback proceeded without restoring config"
+                );
+            }
+            ConfigRestoreNotice::Failed(detail) => {
+                eprintln!(
+                    "Could not restore config.toml snapshot ({detail}); binary rollback proceeded"
+                );
+            }
+        }
         if !restored.is_empty() {
             if let Some(ref v) = smoke_version {
                 let bin = crate::app::cli::resolved_bin_name();
@@ -818,10 +843,37 @@ fn run_rollback(cmd: &UpdateCommand) -> i32 {
     if failed.is_empty() { 0 } else { 1 }
 }
 
-/// Seam for a later unit: restore a config snapshot taken before apply.
-/// Binary-only rollback is complete without it.
-fn restore_config_snapshot_if_present(_install_dir: &Path) {
-    // Intentionally empty: config-snapshot restore is not part of this unit.
+/// Result of optional config-snapshot restore during rollback.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ConfigRestoreNotice {
+    Restored,
+    Absent,
+    Failed(String),
+}
+
+/// Snapshot the live user config after a successful fleet activation.
+///
+/// Lives in cmd (not fleet) because fleet.rs is foreign to this unit; a
+/// foreign-file patch places the same call at FINALIZE for other callers.
+fn snapshot_config_after_activate(install_dir: &Path, print: bool) {
+    match state::snapshot_user_config(install_dir) {
+        Ok(state::SnapshotOutcome::Written { .. }) => {}
+        Ok(state::SnapshotOutcome::SourceAbsent) => {}
+        Err(e) => {
+            if print {
+                eprintln!("note: could not snapshot config.toml for rollback: {e}");
+            }
+        }
+    }
+}
+
+/// Restore a config snapshot taken at ACTIVATE. Absent snapshot → notice only.
+fn restore_config_snapshot_if_present(install_dir: &Path) -> ConfigRestoreNotice {
+    match state::restore_config_snapshot(install_dir) {
+        Ok(state::RestoreOutcome::Restored { .. }) => ConfigRestoreNotice::Restored,
+        Ok(state::RestoreOutcome::SnapshotAbsent) => ConfigRestoreNotice::Absent,
+        Err(e) => ConfigRestoreNotice::Failed(e.to_string()),
+    }
 }
 
 fn rewrite_state_after_rollback(
@@ -992,6 +1044,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(amore_update_env)]
     fn disable_updates_blocks_apply_with_exit_2() {
         with_env(
             &[(xai_grok_config::ENV_DISABLE_UPDATES, Some("1"))],
@@ -1014,6 +1067,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(amore_update_env)]
     fn run_apply_result_policy_block_is_err() {
         with_env(
             &[(xai_grok_config::ENV_DISABLE_UPDATES, Some("1"))],
@@ -1028,6 +1082,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(amore_update_env)]
     fn disable_updates_blocks_rollback_with_exit_2() {
         with_env(
             &[(xai_grok_config::ENV_DISABLE_UPDATES, Some("1"))],
@@ -1050,6 +1105,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(amore_update_env)]
     fn disable_updates_blocks_dry_run_apply_with_exit_2() {
         with_env(
             &[(xai_grok_config::ENV_DISABLE_UPDATES, Some("1"))],
@@ -1072,6 +1128,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial(amore_update_env)]
     fn alpha_channel_on_apply_exits_2_without_network() {
         with_env(&[(xai_grok_config::ENV_DISABLE_UPDATES, None)], || {
             let code = run_update(&UpdateCommand {
@@ -1198,5 +1255,123 @@ mod tests {
         // our scan path treats missing as report-only.
         let missing = !path_exists(&prev_sibling(&dest));
         assert!(missing);
+    }
+
+    /// ACTIVATE-time hook: snapshot lands beside install state when a source
+    /// config exists (mirrors `snapshot_config_after_activate`).
+    #[test]
+    fn snapshot_written_at_activate_hook() {
+        let dir = tempfile::tempdir().unwrap();
+        let install = dir.path().join("install");
+        std::fs::create_dir_all(&install).unwrap();
+        let mut st = InstallState::new("v1.0.0", "stable", "t0");
+        st.files.insert(
+            "amore.exe".into(),
+            FileRecord {
+                sha256: "a".into(),
+                size: 1,
+            },
+        );
+        state::store_atomic(&install, &st).unwrap();
+
+        let source = dir.path().join("config.toml");
+        std::fs::write(
+            &source,
+            b"[cli]\nauto_update = true\nsnapshot_marker = \"pre\"\n",
+        )
+        .unwrap();
+
+        // Same work the post-transaction hook performs (explicit source for
+        // hermetic tests; production uses live user config).
+        let outcome = state::snapshot_config_file(&install, &source).unwrap();
+        assert!(
+            matches!(outcome, state::SnapshotOutcome::Written { .. }),
+            "{outcome:?}"
+        );
+        assert!(state::config_snapshot_path(&install).is_file());
+        let loaded = state::load(&install).unwrap().expect("state");
+        assert!(loaded.config_snapshot.is_some());
+    }
+
+    /// Rollback restores binary `.prev` AND config snapshot when both present.
+    #[test]
+    fn rollback_restores_binary_and_config_snapshot() {
+        let dir = tempfile::tempdir().unwrap();
+        let install = dir.path().join("install");
+        std::fs::create_dir_all(&install).unwrap();
+
+        let dest = install.join("amore.exe");
+        let prev = prev_sibling(&dest);
+        std::fs::write(&dest, b"new-binary").unwrap();
+        std::fs::write(&prev, b"old-binary").unwrap();
+
+        std::fs::write(
+            state::config_snapshot_path(&install),
+            b"[cli]\nmarker = \"old-config\"\n",
+        )
+        .unwrap();
+        let live = dir.path().join("home").join("config.toml");
+        std::fs::create_dir_all(live.parent().unwrap()).unwrap();
+        std::fs::write(&live, b"[cli]\nmarker = \"new-config\"\n").unwrap();
+
+        let rb = Rollback {
+            prev_path: prev,
+            dest: dest.clone(),
+        };
+        rb.restore().unwrap();
+        assert_eq!(std::fs::read(&dest).unwrap(), b"old-binary");
+
+        let notice = match state::restore_config_snapshot_to(&install, &live).unwrap() {
+            state::RestoreOutcome::Restored { .. } => ConfigRestoreNotice::Restored,
+            state::RestoreOutcome::SnapshotAbsent => ConfigRestoreNotice::Absent,
+        };
+        assert_eq!(notice, ConfigRestoreNotice::Restored);
+        assert_eq!(
+            std::fs::read_to_string(&live).unwrap(),
+            "[cli]\nmarker = \"old-config\"\n"
+        );
+    }
+
+    /// Absent config snapshot: binary path proceeds; notice is Absent (never fail).
+    #[test]
+    fn absent_snapshot_rollback_notices_and_proceeds() {
+        let dir = tempfile::tempdir().unwrap();
+        let install = dir.path().join("install");
+        std::fs::create_dir_all(&install).unwrap();
+
+        let dest = install.join("amore.exe");
+        let prev = prev_sibling(&dest);
+        std::fs::write(&dest, b"new").unwrap();
+        std::fs::write(&prev, b"old").unwrap();
+
+        let rb = Rollback {
+            prev_path: prev,
+            dest: dest.clone(),
+        };
+        rb.restore().unwrap();
+        assert_eq!(std::fs::read(&dest).unwrap(), b"old");
+
+        // No config.toml.prev under install → Absent, not an error.
+        let notice = restore_config_snapshot_if_present(&install);
+        assert_eq!(notice, ConfigRestoreNotice::Absent);
+    }
+
+    /// Unknown keys written by a newer binary must not brick an older loader.
+    #[test]
+    fn unknown_key_config_loads_clean_through_real_loader() {
+        let raw = "\
+[cli]
+auto_update = true
+future_key_from_newer_binary = \"must-not-brick\"
+
+[future_section_from_n_plus_1]
+brand_new = true
+";
+        let root: toml::Value =
+            toml::from_str(raw).expect("valid toml with future keys");
+        // Real shell loader path (same as apply/check config reads).
+        let cfg = xai_grok_shell::util::config::load_config_from_toml(&root);
+        assert_eq!(cfg.cli.auto_update, Some(true));
+        // No error / panic: unknown keys are warnings, not load failures.
     }
 }

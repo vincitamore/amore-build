@@ -35,8 +35,19 @@ use tracing::debug;
 /// Filename of the install state document, always under the install directory.
 pub const STATE_FILE_NAME: &str = ".amore-install.json";
 
+/// Config snapshot filename under the install directory (beside binary `.prev`
+/// siblings and [STATE_FILE_NAME]).
+///
+/// Chosen over a slot under `$AMORE_HOME`: install identity is Model B (parent
+/// of the running binary), side-by-side installs keep independent rollback
+/// artifacts, and the snapshot travels with the binaries it pairs with.
+pub const CONFIG_SNAPSHOT_FILE_NAME: &str = "config.toml.prev";
+
 /// Spec version written by this crate. A mismatched `spec` on disk is treated
 /// as absent state (forward-incompatible), never a crash.
+///
+/// Stays at 1 while new fields remain optional with serde defaults (same rule
+/// as `targets` and `config_snapshot`).
 pub const SPEC_VERSION: u32 = 1;
 
 /// Per-file record of an activated install member.
@@ -60,15 +71,29 @@ pub struct TargetRecord {
     pub archive_sha256: String,
 }
 
+/// Record that a user `config.toml` was snapshotted for rollback.
+///
+/// The bytes live at [`CONFIG_SNAPSHOT_FILE_NAME`] under the install directory;
+/// this field only records that the snapshot was taken (and when).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConfigSnapshotRecord {
+    /// Basename under the install directory (today always
+    /// [`CONFIG_SNAPSHOT_FILE_NAME`]).
+    pub path: String,
+    /// When the snapshot was written (same clock style as `installed_at`).
+    pub taken_at: String,
+}
+
 /// Contents of `.amore-install.json`.
 ///
 /// Unknown fields are tolerated on read (serde default) so a newer writer can
 /// extend the document without breaking older readers. A `spec` other than
 /// [`SPEC_VERSION`] is treated as absent state by [`load`].
 ///
-/// `files` holds content hashes; `targets` holds archive digests. Adding
-/// `targets` is forward-compatible (default empty on old documents), so
-/// [`SPEC_VERSION`] stays at 1.
+/// `files` holds content hashes; `targets` holds archive digests;
+/// `config_snapshot` records a pre-activate copy of the user config. Adding
+/// optional maps/fields is forward-compatible (default empty / none on old
+/// documents), so [`SPEC_VERSION`] stays at 1.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InstallState {
     pub spec: u32,
@@ -85,6 +110,9 @@ pub struct InstallState {
     /// Archive/sidecar digests keyed by the same basenames as [`Self::files`].
     #[serde(default)]
     pub targets: BTreeMap<String, TargetRecord>,
+    /// Present when a config.toml snapshot was written for this install.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub config_snapshot: Option<ConfigSnapshotRecord>,
 }
 
 impl InstallState {
@@ -102,6 +130,7 @@ impl InstallState {
             last_seen_tag: None,
             files: BTreeMap::new(),
             targets: BTreeMap::new(),
+            config_snapshot: None,
         }
     }
 }
@@ -264,9 +293,177 @@ pub fn store_atomic(dir: &Path, state: &InstallState) -> Result<(), StateError> 
     Ok(())
 }
 
+// ---------------------------------------------------------------------------
+// Config snapshot (rollback completeness)
+// ---------------------------------------------------------------------------
+
+/// Outcome of taking a config snapshot under the install directory.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SnapshotOutcome {
+    /// Bytes copied to `path` (install-dir [`CONFIG_SNAPSHOT_FILE_NAME`]).
+    Written {
+        path: PathBuf,
+        record: ConfigSnapshotRecord,
+    },
+    /// Live user config was missing or unresolvable; nothing written.
+    SourceAbsent,
+}
+
+/// Outcome of restoring a config snapshot over the live user config.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RestoreOutcome {
+    /// Snapshot bytes written to `dest`.
+    Restored { dest: PathBuf },
+    /// No snapshot file under the install directory.
+    SnapshotAbsent,
+}
+
+/// Absolute path of the live user `config.toml` (`$AMORE_HOME` / `$GROK_HOME`).
+pub fn live_user_config_path() -> Option<PathBuf> {
+    xai_grok_config::user_grok_home().map(|h| h.join(xai_grok_config::USER_CONFIG_FILENAME))
+}
+
+/// Path of the config snapshot under `install_dir`.
+pub fn config_snapshot_path(install_dir: &Path) -> PathBuf {
+    install_dir.join(CONFIG_SNAPSHOT_FILE_NAME)
+}
+
+/// Copy `source_config` to `install_dir/config.toml.prev` without mutating
+/// install state. Use this from FINALIZE when the caller will set
+/// [`InstallState::config_snapshot`] and `store_atomic` in one write.
+///
+/// Missing source is not an error ([`SnapshotOutcome::SourceAbsent`]).
+pub fn write_config_snapshot_bytes(
+    install_dir: &Path,
+    source_config: &Path,
+) -> Result<SnapshotOutcome, StateError> {
+    if !source_config.is_file() {
+        return Ok(SnapshotOutcome::SourceAbsent);
+    }
+    write_probe(install_dir)?;
+    let dest = config_snapshot_path(install_dir);
+    let tmp = install_dir.join(format!("{CONFIG_SNAPSHOT_FILE_NAME}.tmp"));
+    fs::copy(source_config, &tmp).map_err(|source| StateError::Io {
+        path: tmp.clone(),
+        source,
+    })?;
+    if dest.exists() {
+        fs::remove_file(&dest).map_err(|source| StateError::Io {
+            path: dest.clone(),
+            source,
+        })?;
+    }
+    fs::rename(&tmp, &dest).map_err(|source| StateError::Io {
+        path: dest.clone(),
+        source,
+    })?;
+
+    let record = ConfigSnapshotRecord {
+        path: CONFIG_SNAPSHOT_FILE_NAME.to_string(),
+        taken_at: unix_now_string(),
+    };
+    Ok(SnapshotOutcome::Written {
+        path: dest,
+        record,
+    })
+}
+
+/// Copy live user `config.toml` into the install dir (bytes only).
+pub fn write_user_config_snapshot(install_dir: &Path) -> Result<SnapshotOutcome, StateError> {
+    let Some(src) = live_user_config_path() else {
+        return Ok(SnapshotOutcome::SourceAbsent);
+    };
+    write_config_snapshot_bytes(install_dir, &src)
+}
+
+/// Copy `source_config` to `install_dir/config.toml.prev` and record the
+/// snapshot on install state when a state document is present.
+///
+/// Missing source is not an error ([`SnapshotOutcome::SourceAbsent`]). Callers
+/// at ACTIVATE / post-transaction use this so a later rollback can restore
+/// both binaries and config.
+pub fn snapshot_config_file(
+    install_dir: &Path,
+    source_config: &Path,
+) -> Result<SnapshotOutcome, StateError> {
+    let outcome = write_config_snapshot_bytes(install_dir, source_config)?;
+    // Best-effort state annotation: a missing state file still leaves the
+    // snapshot bytes for restore (restore keys off the file, not the field).
+    if let SnapshotOutcome::Written { record, .. } = &outcome {
+        if let Some(mut state) = load(install_dir)? {
+            state.config_snapshot = Some(record.clone());
+            store_atomic(install_dir, &state)?;
+        }
+    }
+    Ok(outcome)
+}
+
+/// Snapshot the live user `config.toml` when it exists (bytes + state field).
+pub fn snapshot_user_config(install_dir: &Path) -> Result<SnapshotOutcome, StateError> {
+    let Some(src) = live_user_config_path() else {
+        return Ok(SnapshotOutcome::SourceAbsent);
+    };
+    snapshot_config_file(install_dir, &src)
+}
+
+/// Restore `install_dir/config.toml.prev` over `dest` when the snapshot exists.
+///
+/// Absent snapshot → [`RestoreOutcome::SnapshotAbsent`] (never an error). Used
+/// by `amore update --rollback` so binary restore still succeeds without one.
+pub fn restore_config_snapshot_to(
+    install_dir: &Path,
+    dest: &Path,
+) -> Result<RestoreOutcome, StateError> {
+    let src = config_snapshot_path(install_dir);
+    if !src.is_file() {
+        return Ok(RestoreOutcome::SnapshotAbsent);
+    }
+    if let Some(parent) = dest.parent() {
+        fs::create_dir_all(parent).map_err(|source| StateError::Io {
+            path: parent.to_path_buf(),
+            source,
+        })?;
+    }
+    let tmp = dest.with_extension("toml.restore-tmp");
+    fs::copy(&src, &tmp).map_err(|source| StateError::Io {
+        path: tmp.clone(),
+        source,
+    })?;
+    if dest.exists() {
+        fs::remove_file(dest).map_err(|source| StateError::Io {
+            path: dest.to_path_buf(),
+            source,
+        })?;
+    }
+    fs::rename(&tmp, dest).map_err(|source| StateError::Io {
+        path: dest.to_path_buf(),
+        source,
+    })?;
+    Ok(RestoreOutcome::Restored {
+        dest: dest.to_path_buf(),
+    })
+}
+
+/// Restore the config snapshot over the live user `config.toml` when present.
+pub fn restore_config_snapshot(install_dir: &Path) -> Result<RestoreOutcome, StateError> {
+    let Some(dest) = live_user_config_path() else {
+        return Ok(RestoreOutcome::SnapshotAbsent);
+    };
+    restore_config_snapshot_to(install_dir, &dest)
+}
+
 /// Strip a leading `v` from a tag for the version-floor field.
 fn tag_to_version_floor(tag: &str) -> String {
     tag.strip_prefix('v').unwrap_or(tag).to_string()
+}
+
+fn unix_now_string() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+        .to_string()
 }
 
 #[cfg(test)]
@@ -420,5 +617,99 @@ mod tests {
         assert_eq!(s.version_floor, "2.1.0");
         let s = InstallState::new("3.0.0", "stable", "t");
         assert_eq!(s.version_floor, "3.0.0");
+    }
+
+    #[test]
+    fn config_snapshot_field_defaults_none_on_legacy_state() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = state_path(dir.path());
+        let json = r#"{
+            "spec": 1,
+            "tag": "v1.0.0",
+            "channel": "stable",
+            "installed_at": "2026-08-11T00:00:00Z",
+            "version_floor": "1.0.0",
+            "files": {}
+        }"#;
+        fs::write(&path, json).unwrap();
+        let loaded = load(dir.path()).unwrap().expect("legacy shape");
+        assert!(loaded.config_snapshot.is_none());
+    }
+
+    #[test]
+    fn snapshot_config_file_writes_prev_and_records_state() {
+        let dir = tempfile::tempdir().unwrap();
+        let install = dir.path().join("install");
+        fs::create_dir_all(&install).unwrap();
+        store_atomic(&install, &sample_state()).unwrap();
+
+        let home = dir.path().join("home");
+        fs::create_dir_all(&home).unwrap();
+        let source = home.join("config.toml");
+        fs::write(&source, b"[cli]\nauto_update = true\nmarker = \"pre-activate\"\n").unwrap();
+
+        let outcome = snapshot_config_file(&install, &source).unwrap();
+        match outcome {
+            SnapshotOutcome::Written { path, record } => {
+                assert_eq!(path, config_snapshot_path(&install));
+                assert_eq!(record.path, CONFIG_SNAPSHOT_FILE_NAME);
+                assert!(!record.taken_at.is_empty());
+            }
+            other => panic!("expected Written, got {other:?}"),
+        }
+        assert_eq!(
+            fs::read_to_string(config_snapshot_path(&install)).unwrap(),
+            "[cli]\nauto_update = true\nmarker = \"pre-activate\"\n"
+        );
+        let loaded = load(&install).unwrap().expect("state");
+        assert_eq!(
+            loaded
+                .config_snapshot
+                .as_ref()
+                .map(|c| c.path.as_str()),
+            Some(CONFIG_SNAPSHOT_FILE_NAME)
+        );
+    }
+
+    #[test]
+    fn snapshot_source_absent_is_not_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("no-such-config.toml");
+        let outcome = snapshot_config_file(dir.path(), &missing).unwrap();
+        assert_eq!(outcome, SnapshotOutcome::SourceAbsent);
+        assert!(!config_snapshot_path(dir.path()).exists());
+    }
+
+    #[test]
+    fn restore_config_snapshot_to_overwrites_dest() {
+        let dir = tempfile::tempdir().unwrap();
+        let install = dir.path().join("install");
+        fs::create_dir_all(&install).unwrap();
+        fs::write(
+            config_snapshot_path(&install),
+            b"[cli]\nauto_update = false\nmarker = \"snap\"\n",
+        )
+        .unwrap();
+
+        let dest = dir.path().join("home").join("config.toml");
+        fs::create_dir_all(dest.parent().unwrap()).unwrap();
+        fs::write(&dest, b"[cli]\nmarker = \"live-new\"\n").unwrap();
+
+        let outcome = restore_config_snapshot_to(&install, &dest).unwrap();
+        assert!(matches!(outcome, RestoreOutcome::Restored { .. }));
+        assert_eq!(
+            fs::read_to_string(&dest).unwrap(),
+            "[cli]\nauto_update = false\nmarker = \"snap\"\n"
+        );
+    }
+
+    #[test]
+    fn restore_absent_snapshot_notices_not_fails() {
+        let dir = tempfile::tempdir().unwrap();
+        let dest = dir.path().join("config.toml");
+        fs::write(&dest, b"keep-me\n").unwrap();
+        let outcome = restore_config_snapshot_to(dir.path(), &dest).unwrap();
+        assert_eq!(outcome, RestoreOutcome::SnapshotAbsent);
+        assert_eq!(fs::read_to_string(&dest).unwrap(), "keep-me\n");
     }
 }
