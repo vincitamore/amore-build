@@ -6,7 +6,7 @@ monorepo sync commits; everything below is the fork's own delta, newest first.
 This document is compiled into the binary — update it in the same change as the
 work it describes.
 
-## Unreleased
+## v1.0.2
 
 - **Lucerna status tells the truth** — the iris dashboard no longer reports a
   healthy daemon as Hung between adaptive heartbeats. Iris now honors the
