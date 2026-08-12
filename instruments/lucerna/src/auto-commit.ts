@@ -24,6 +24,9 @@ import type { StateManager } from "./state.ts";
 const MAX_DIFFSTAT_CHARS = 12_000;
 const MAX_STATUS_LINES = 200;
 
+/** Wall bound for the draft compose driver call. */
+export const AUTO_COMMIT_WALL_MS = 120_000;
+
 /** Re-export default cooldown for callers that import from this module. */
 export { DEFAULT_AUTO_COMMIT_COOLDOWN_MS };
 
@@ -461,7 +464,7 @@ export class AutoCommitter {
         jsonSchema: COMMIT_MSG_SCHEMA,
         maxTurns: 1,
         noSubagents: true,
-        wallMs: 120_000,
+        wallMs: AUTO_COMMIT_WALL_MS,
         model: this.config.autoCommitModel || undefined,
       });
       // Meter tokens like planner calls (planning included in daily ceiling).

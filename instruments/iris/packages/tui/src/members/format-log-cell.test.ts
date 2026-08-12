@@ -1,10 +1,17 @@
 import { describe, expect, test } from 'bun:test';
 import {
   collapseHomeInText,
+  deriveLucernaUiState,
   emptyDisplayRow,
   formatLogCell,
   formatLucernaDisplayLine,
+  formatLucernaLastActionsLine,
+  formatLucernaPulseStatus,
   formatPulseSubLine,
+  lastActionsSummary,
+  lucernaActivitySub,
+  lucernaActivityValue,
+  lucernaBeatAgeSub,
   pulsePanelInnerWidth,
 } from './lucerna-display';
 
@@ -153,5 +160,216 @@ describe('pulse sub-line width (real panel inner, not dims/3)', () => {
     expect(out.length).toBe(20);
     expect(out.startsWith('   no notifications')).toBe(true);
     expect(out.endsWith(ELLIPSIS)).toBe(false);
+  });
+});
+
+describe('deriveLucernaUiState', () => {
+  const url = 'http://127.0.0.1:3853';
+
+  test('no daemon url → daemon-down', () => {
+    expect(deriveLucernaUiState(null, { available: true, lastBeat: 't' }, null)).toBe('daemon-down');
+    expect(deriveLucernaUiState(undefined, null, null)).toBe('daemon-down');
+  });
+
+  test('no health and no status → stopped (loading/empty)', () => {
+    expect(deriveLucernaUiState(url, null, null)).toBe('stopped');
+  });
+
+  test('available false → not-installed', () => {
+    expect(deriveLucernaUiState(url, { available: false, reason: 'not-installed' }, null)).toBe(
+      'not-installed',
+    );
+    expect(deriveLucernaUiState(url, { available: false }, null)).toBe('not-installed');
+  });
+
+  test('stale without stopped/pidAlive → stale (prior mapping)', () => {
+    expect(
+      deriveLucernaUiState(url, { available: true, stale: true, lastBeat: 't' }, null),
+    ).toBe('stale');
+  });
+
+  test('stopped tombstone beats stale', () => {
+    expect(
+      deriveLucernaUiState(
+        url,
+        { available: true, stale: true, stopped: true, lastBeat: 't' },
+        null,
+      ),
+    ).toBe('stopped');
+  });
+
+  test('pidAlive false beats stale', () => {
+    expect(
+      deriveLucernaUiState(
+        url,
+        { available: true, stale: true, pidAlive: false, lastBeat: 't' },
+        null,
+      ),
+    ).toBe('stopped');
+  });
+
+  test('absent pidAlive/stopped leave stale mapping unchanged', () => {
+    expect(
+      deriveLucernaUiState(url, { available: true, stale: true, lastBeat: 't' }, null),
+    ).toBe('stale');
+  });
+
+  test('available + lastBeat + not stale → running', () => {
+    expect(
+      deriveLucernaUiState(url, { available: true, lastBeat: 't', stale: false }, null),
+    ).toBe('running');
+  });
+
+  test('available, no lastBeat, stale false → stopped', () => {
+    expect(deriveLucernaUiState(url, { available: true, stale: false }, null)).toBe('stopped');
+  });
+
+  test('status available and not stale → running', () => {
+    expect(deriveLucernaUiState(url, null, { available: true, stale: false })).toBe('running');
+  });
+
+  test('pidAlive true does not override running', () => {
+    expect(
+      deriveLucernaUiState(
+        url,
+        { available: true, lastBeat: 't', stale: false, pidAlive: true },
+        null,
+      ),
+    ).toBe('running');
+  });
+});
+
+describe('Activity Stat copy', () => {
+  test('running value is Running; Hung/Stopped reserved', () => {
+    expect(lucernaActivityValue('running')).toBe('Running');
+    expect(lucernaActivityValue('stale')).toBe('Hung');
+    expect(lucernaActivityValue('stopped')).toBe('Stopped');
+  });
+
+  test('running sub prefers status.phase then health.phase then live', () => {
+    expect(lucernaActivitySub('running', { phase: 'dreaming' }, { phase: 'idle' })).toBe('dreaming');
+    expect(lucernaActivitySub('running', {}, { phase: 'dreaming' })).toBe('dreaming');
+    expect(lucernaActivitySub('running', {}, {})).toBe('live');
+    expect(lucernaActivitySub('running', { phase: '  ' }, { phase: '' })).toBe('live');
+    expect(lucernaActivitySub('stale')).toBe('stale');
+    expect(lucernaActivitySub('stopped')).toBe('stopped');
+  });
+
+  test('beat-age sub shows bound when present', () => {
+    expect(lucernaBeatAgeSub({ lastBeat: 't', staleBoundSec: 750 })).toBe('bound 750s');
+    expect(lucernaBeatAgeSub({ lastBeat: 't' })).toBe('since lastBeat');
+    expect(lucernaBeatAgeSub({})).toBe('no beat');
+  });
+});
+
+describe('lastActionsSummary', () => {
+  test('string array keeps first entry', () => {
+    expect(lastActionsSummary(['did thing'])).toBe('did thing');
+  });
+
+  test('legacy object uses action/type/name', () => {
+    expect(lastActionsSummary([{ action: 'wake' }])).toBe('wake');
+    expect(lastActionsSummary([{ type: 'halt' }])).toBe('halt');
+  });
+
+  test('writer shape {key, ok} renders key plus marker', () => {
+    expect(lastActionsSummary([{ key: 'dream', ok: true }])).toBe('dream:ok');
+    expect(lastActionsSummary([{ key: 'commit', ok: false, detail: 'x' }])).toBe('commit:fail');
+    expect(lastActionsSummary([{ key: 'idle' }])).toBe('idle');
+  });
+
+  test('writer-shaped array joins up to three', () => {
+    expect(
+      lastActionsSummary([
+        { key: 'dream', ok: true },
+        { key: 'commit', ok: false },
+      ]),
+    ).toBe('dream:ok · commit:fail');
+  });
+
+  test('bare writer object (not array) still renders', () => {
+    expect(lastActionsSummary({ key: 'dream', ok: true })).toBe('dream:ok');
+  });
+
+  test('key-list object fallback unchanged', () => {
+    expect(lastActionsSummary({ a: 1, b: 2 })).toBe('a, b');
+  });
+
+  test('empty → none yet', () => {
+    expect(lastActionsSummary(undefined)).toBe('none yet');
+    expect(lastActionsSummary([])).toBe('none yet');
+  });
+
+  test('activity detail moves onto the last-actions line', () => {
+    expect(formatLucernaLastActionsLine({ activity: 'compose', lastActions: [] })).toBe('compose');
+    expect(
+      formatLucernaLastActionsLine({
+        activity: 'compose',
+        lastActions: [{ key: 'dream', ok: true }],
+      }),
+    ).toBe('compose · dream:ok');
+    expect(formatLucernaLastActionsLine({ lastActions: [{ key: 'dream', ok: true }] })).toBe(
+      'dream:ok',
+    );
+  });
+});
+
+describe('formatLucernaPulseStatus', () => {
+  test('null pulse is loading, not not-installed', () => {
+    expect(formatLucernaPulseStatus(null, 28)).toBe('…');
+    expect(formatLucernaPulseStatus(undefined, 28)).toBe('…');
+  });
+
+  test('only available === false reads not installed', () => {
+    expect(formatLucernaPulseStatus({ available: false, state: 'not-installed' }, 28)).toBe(
+      'not installed',
+    );
+    expect(formatLucernaPulseStatus({ available: true, state: 'stopped' }, 28)).toBe('stopped');
+  });
+
+  test('running without phase matches prior live · beat copy', () => {
+    expect(
+      formatLucernaPulseStatus({ available: true, state: 'running', beatAgeSec: 180 }, 28),
+    ).toBe('live · beat 3m');
+    expect(
+      formatLucernaPulseStatus({ available: true, state: 'running', beatAgeSec: 12 }, 28),
+    ).toBe('live · beat 12s');
+  });
+
+  test('running includes phase when it fits width', () => {
+    expect(
+      formatLucernaPulseStatus(
+        { available: true, state: 'running', beatAgeSec: 180, phase: 'dreaming' },
+        28,
+      ),
+    ).toBe('live · dreaming · beat 3m');
+  });
+
+  test('running drops phase when width is tight', () => {
+    expect(
+      formatLucernaPulseStatus(
+        { available: true, state: 'running', beatAgeSec: 180, phase: 'dreaming' },
+        14,
+      ),
+    ).toBe('live · beat 3m');
+  });
+
+  test('stale maps to hung; no local re-derivation', () => {
+    expect(formatLucernaPulseStatus({ available: true, state: 'stale' }, 28)).toBe('hung');
+    expect(
+      formatLucernaPulseStatus(
+        { available: true, state: 'running', beatAgeSec: 900, phase: 'dreaming' },
+        28,
+      ),
+    ).toBe('live · dreaming · beat 15m');
+  });
+
+  test('pending review suffix still appends', () => {
+    expect(
+      formatLucernaPulseStatus(
+        { available: true, state: 'stale', pendingReview: { total: 2 } },
+        28,
+      ),
+    ).toBe('hung · 2 rev');
   });
 });

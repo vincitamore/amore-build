@@ -9,7 +9,9 @@ import {
   buildLucernaPulse,
   computeBeatAgeSec,
   isInstalled,
+  isLiveHealth,
   isStaleBeat,
+  isWorkInProgressOpen,
   parseNotificationLine,
   parseNotificationsJsonl,
   readEnablement,
@@ -20,6 +22,7 @@ import {
   readStatus,
   resolveHeartbeatIntervalSec,
   resolveLucernaSpawnPlan,
+  resolveStaleBoundSec,
   startLucerna,
   stopLucerna,
   writeEnablement,
@@ -62,9 +65,14 @@ describe('computeBeatAgeSec / isStaleBeat', () => {
     const now = Date.parse('2026-08-05T00:02:00Z');
     expect(computeBeatAgeSec('2026-08-05T00:00:00Z', now)).toBeCloseTo(120, 5);
   });
-  test('stale when age > 2 intervals', () => {
-    expect(isStaleBeat(121, 60)).toBe(true);
-    expect(isStaleBeat(120, 60)).toBe(false);
+  test('stale when age past max(120, 2.5 × interval)', () => {
+    expect(resolveStaleBoundSec(60)).toBe(150);
+    expect(resolveStaleBoundSec(20)).toBe(120);
+    expect(isStaleBeat(151, 60)).toBe(true);
+    expect(isStaleBeat(150, 60)).toBe(false);
+    expect(isStaleBeat(121, 60)).toBe(false);
+    expect(isStaleBeat(121, 20)).toBe(true);
+    expect(isStaleBeat(120, 20)).toBe(false);
     expect(isStaleBeat(null, 60)).toBe(true);
   });
   test('unparseable → null', () => {
@@ -83,6 +91,16 @@ describe('resolveHeartbeatIntervalSec', () => {
   test('env overrides health', () => {
     process.env.LUCERNA_HEARTBEAT_INTERVAL_SEC = '45';
     expect(resolveHeartbeatIntervalSec(30)).toBe(45);
+  });
+  test('intervalMs / 1000 when heartbeatIntervalSec absent', () => {
+    expect(resolveHeartbeatIntervalSec(undefined, 300000)).toBe(300);
+  });
+  test('heartbeatIntervalSec wins over intervalMs', () => {
+    expect(resolveHeartbeatIntervalSec(90, 300000)).toBe(90);
+  });
+  test('env wins over both health fields', () => {
+    process.env.LUCERNA_HEARTBEAT_INTERVAL_SEC = '45';
+    expect(resolveHeartbeatIntervalSec(90, 300000)).toBe(45);
   });
 });
 
@@ -187,13 +205,44 @@ describe('readEnablement / readStatus', () => {
       }),
     );
     wf('lucerna.enable.json', JSON.stringify({ dreamsEnabled: true, autoCommitLive: false }));
-    const s = readStatus(org, nowMs);
+    const s = readStatus(org, nowMs, { isPidAlive: () => true });
     expect(s.available).toBe(true);
     expect(s.stale).toBe(false);
     expect(s.version).toBe('0.2.0');
     expect(s.activity).toBe('idle');
     expect(s.budgets).toEqual({ tokens: 100 });
     expect(s.enablement).toEqual({ dreamsEnabled: true, autoCommitLive: false });
+  });
+
+  test('status maps lastActivity / lastActionResults and phase', () => {
+    const nowMs = Date.parse('2026-08-05T00:00:10Z');
+    wf(
+      'health.json',
+      JSON.stringify({
+        pid: 1,
+        lastBeat: '2026-08-05T00:00:00Z',
+        phase: 'dreaming',
+      }),
+    );
+    wf(
+      'state.json',
+      JSON.stringify({
+        lastActivity: { type: 'dream', detail: 'cycle', timestamp: '2026-08-05T00:00:00Z' },
+        lastActionResults: [{ key: 'beat', ok: true, detail: 'ok', at: 't' }],
+        activity: 'legacy-idle',
+        lastActions: [{ action: 'legacy' }],
+        budgets: { tokens: 7 },
+      }),
+    );
+    const s = readStatus(org, nowMs, { isPidAlive: () => true });
+    expect(s.activity).toEqual({
+      type: 'dream',
+      detail: 'cycle',
+      timestamp: '2026-08-05T00:00:00Z',
+    });
+    expect(s.lastActions).toEqual([{ key: 'beat', ok: true, detail: 'ok', at: 't' }]);
+    expect(s.phase).toBe('dreaming');
+    expect(s.budgets).toEqual({ tokens: 7 });
   });
 
   test('malformed state.json still available', () => {
@@ -368,7 +417,7 @@ describe('pulse-row data shape', () => {
       }) + '\n',
     );
     // freeze time via health age with real Date.now — use build from known reads
-    const health = readHealth(org, now);
+    const health = readHealth(org, now, { isPidAlive: () => true });
     const notes = readNotifications(org, 1);
     const pulse = buildLucernaPulse(health, notes.entries[0] ?? null);
     expect(pulse.state).toBe('running');
@@ -451,7 +500,7 @@ describe('startLucerna (spawn stub — windows + posix paths)', () => {
 
   test('already-running', async () => {
     liveBeat();
-    const r = await startLucerna(org, { sleep: async () => {} });
+    const r = await startLucerna(org, { sleep: async () => {}, isPidAlive: () => true });
     expect(r.outcome).toBe('already-running');
     expect(r.ok).toBe(true);
     expect(r.pid).toBe(4242);
@@ -496,6 +545,7 @@ describe('startLucerna (spawn stub — windows + posix paths)', () => {
         })(),
         startTimeoutMs: 5_000,
         startPollMs: 1,
+        isPidAlive: () => true,
       };
       // Ensure fake bin "exists" for resolve
       writeFileSync(join(org, 'fake-lucerna'), 'x');
@@ -556,15 +606,17 @@ describe('stopLucerna (graceful + escalation)', () => {
       }),
     );
     let polls = 0;
+    let alive = true;
     const r = await stopLucerna(org, {
       sleep: async () => {
         polls += 1;
         if (polls >= 1) {
           // clear health beat → not live
           wf('health.json', JSON.stringify({ pid: 55 }));
+          alive = false;
         }
       },
-      isPidAlive: () => false,
+      isPidAlive: () => alive,
       nowMs: (() => {
         let t = 0;
         return () => {
@@ -646,5 +698,198 @@ describe('stopLucerna (graceful + escalation)', () => {
     expect(r.outcome).toBe('kill-refused');
     expect(r.ok).toBe(false);
     expect(r.reason).toBe('pid-not-lucerna');
+  });
+});
+
+describe('interval truth + pid liveness + pulse', () => {
+  const alive = { isPidAlive: () => true };
+  const dead = { isPidAlive: () => false };
+
+  test('dreaming intervalMs 300s, beat age 180s, pid alive → not stale, pulse running', () => {
+    const nowMs = Date.parse('2026-08-05T00:03:00Z');
+    wf(
+      'health.json',
+      JSON.stringify({
+        pid: 11,
+        lastBeat: '2026-08-05T00:00:00Z',
+        intervalMs: 300000,
+        phase: 'dreaming',
+        dreaming: true,
+        bpm: 0.2,
+      }),
+    );
+    const h = readHealth(org, nowMs, alive);
+    expect(h.stale).toBe(false);
+    expect(h.pidAlive).toBe(true);
+    expect(h.heartbeatIntervalSec).toBe(300);
+    expect(h.staleBoundSec).toBe(750);
+    expect(h.intervalMs).toBe(300000);
+    expect(h.phase).toBe('dreaming');
+    expect(h.dreaming).toBe(true);
+    expect(h.beatAgeSec).toBeCloseTo(180, 5);
+    const pulse = buildLucernaPulse(h);
+    expect(pulse.state).toBe('running');
+    expect(pulse.phase).toBe('dreaming');
+  });
+
+  test('dead pid + fresh beat → pulse stopped; start proceeds', async () => {
+    wf(
+      'health.json',
+      JSON.stringify({
+        pid: 99,
+        lastBeat: new Date().toISOString(),
+        heartbeatIntervalSec: 60,
+      }),
+    );
+    const h = readHealth(org, Date.now(), dead);
+    expect(h.pidAlive).toBe(false);
+    expect(h.stale).toBe(false);
+    expect(isLiveHealth(h)).toBe(false);
+    expect(buildLucernaPulse(h).state).toBe('stopped');
+    const r = await startLucerna(org, {
+      sleep: async () => {},
+      isPidAlive: () => false,
+      env: {},
+      findOnPath: () => null,
+      exists: (p) => p === ldir || p === join(org, 'instruments', 'lucerna'),
+    });
+    expect(r.outcome).not.toBe('already-running');
+    expect(isLiveHealth(h)).toBe(false);
+  });
+
+  test('alive + beat past max(120, 2.5 × interval) → stale, pulse stale', () => {
+    const nowMs = Date.parse('2026-08-05T00:03:00Z'); // 180s
+    wf(
+      'health.json',
+      JSON.stringify({
+        pid: 12,
+        lastBeat: '2026-08-05T00:00:00Z',
+        heartbeatIntervalSec: 60,
+      }),
+    );
+    const h = readHealth(org, nowMs, alive);
+    expect(h.staleBoundSec).toBe(150);
+    expect(h.stale).toBe(true);
+    expect(h.pidAlive).toBe(true);
+    expect(isLiveHealth(h)).toBe(true);
+    expect(buildLucernaPulse(h).state).toBe('stale');
+  });
+
+  test('alive + old beat still already-running (start gate uses pid, not beat)', async () => {
+    const nowMs = Date.parse('2026-08-05T00:10:00Z');
+    wf(
+      'health.json',
+      JSON.stringify({
+        pid: 12,
+        lastBeat: '2026-08-05T00:00:00Z',
+        heartbeatIntervalSec: 60,
+      }),
+    );
+    const r = await startLucerna(org, {
+      sleep: async () => {},
+      isPidAlive: () => true,
+      nowMs: () => nowMs,
+    });
+    expect(r.outcome).toBe('already-running');
+    expect(r.ok).toBe(true);
+  });
+
+  test('WIP window open + beat old → not stale, pulse running', () => {
+    const nowMs = Date.parse('2026-08-05T00:05:00Z');
+    const startedAt = '2026-08-05T00:04:00Z';
+    expect(
+      isWorkInProgressOpen({ kind: 'dream', startedAt, wallMs: 120_000 }, nowMs),
+    ).toBe(true);
+    wf(
+      'health.json',
+      JSON.stringify({
+        pid: 13,
+        lastBeat: '2026-08-05T00:00:00Z',
+        heartbeatIntervalSec: 60,
+        workInProgress: { kind: 'dream', startedAt, wallMs: 120_000 },
+      }),
+    );
+    const h = readHealth(org, nowMs, alive);
+    expect(h.workInProgress).toBe(true);
+    expect(h.stale).toBe(false);
+    expect(buildLucernaPulse(h).state).toBe('running');
+  });
+
+  test('stopped tombstone → pulse stopped even with fresh beat', () => {
+    const nowMs = Date.parse('2026-08-05T00:00:10Z');
+    wf(
+      'health.json',
+      JSON.stringify({
+        pid: 14,
+        lastBeat: '2026-08-05T00:00:00Z',
+        heartbeatIntervalSec: 60,
+        stopped: true,
+        healthy: false,
+      }),
+    );
+    const h = readHealth(org, nowMs, alive);
+    expect(h.stopped).toBe(true);
+    expect(isLiveHealth(h)).toBe(false);
+    expect(buildLucernaPulse(h).state).toBe('stopped');
+  });
+
+  test('legacy heartbeatIntervalSec fixture, no pid, no new fields', () => {
+    const nowMs = Date.parse('2026-08-05T00:01:00Z');
+    wf(
+      'health.json',
+      JSON.stringify({
+        lastBeat: '2026-08-05T00:00:00Z',
+        heartbeatIntervalSec: 60,
+        version: '0.1.0',
+      }),
+    );
+    const h = readHealth(org, nowMs);
+    expect(h.stale).toBe(false);
+    expect(h.pidAlive).toBeUndefined();
+    expect(h.heartbeatIntervalSec).toBe(60);
+    expect(h.staleBoundSec).toBe(150);
+    expect(h.workInProgress).toBeUndefined();
+    expect(h.stopped).toBeUndefined();
+    expect(h.phase).toBeUndefined();
+    expect(buildLucernaPulse(h).state).toBe('running');
+    expect(isLiveHealth(h)).toBe(true);
+
+    const later = Date.parse('2026-08-05T00:02:31Z'); // 151s > 150 bound
+    const staleH = readHealth(org, later);
+    expect(staleH.stale).toBe(true);
+    expect(buildLucernaPulse(staleH).state).toBe('stale');
+    expect(isLiveHealth(staleH)).toBe(false);
+  });
+
+  test('env LUCERNA_HEARTBEAT_INTERVAL_SEC wins over both health fields', () => {
+    process.env.LUCERNA_HEARTBEAT_INTERVAL_SEC = '40';
+    const nowMs = Date.parse('2026-08-05T00:00:30Z');
+    wf(
+      'health.json',
+      JSON.stringify({
+        lastBeat: '2026-08-05T00:00:00Z',
+        heartbeatIntervalSec: 90,
+        intervalMs: 300000,
+      }),
+    );
+    const h = readHealth(org, nowMs);
+    expect(h.heartbeatIntervalSec).toBe(40);
+    expect(h.staleBoundSec).toBe(120);
+    expect(h.stale).toBe(false);
+  });
+
+  test('pid falls back to daemon.pid when health.pid absent', () => {
+    wf('health.json', JSON.stringify({ lastBeat: '2026-08-05T00:00:00Z' }));
+    wf('daemon.pid', '4242\n');
+    const h = readHealth(org, Date.parse('2026-08-05T00:00:10Z'), alive);
+    expect(h.pid).toBe(4242);
+    expect(h.pidAlive).toBe(true);
+  });
+
+  test('pidAlive omitted when no pid is known', () => {
+    wf('health.json', JSON.stringify({ lastBeat: '2026-08-05T00:00:00Z' }));
+    const h = readHealth(org, Date.parse('2026-08-05T00:00:10Z'));
+    expect(h.pid).toBeUndefined();
+    expect(h.pidAlive).toBeUndefined();
   });
 });

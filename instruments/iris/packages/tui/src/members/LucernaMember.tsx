@@ -7,7 +7,15 @@ import { ConfirmModal } from '../components/Modal';
 import { useFlash } from '../components/use-flash';
 import { useStableDimensions } from '../use-stable-dimensions';
 import { tickRender } from '../debug';
-import { emptyDisplayRow, formatLucernaDisplayLine } from './lucerna-display';
+import {
+  deriveLucernaUiState,
+  emptyDisplayRow,
+  formatLucernaDisplayLine,
+  formatLucernaLastActionsLine,
+  lucernaActivitySub,
+  lucernaActivityValue,
+  lucernaBeatAgeSub,
+} from './lucerna-display';
 import {
   LucernaReviewOverlay,
   type ReviewOverlayModel,
@@ -18,6 +26,11 @@ export {
   formatLogCell,
   formatLucernaDisplayLine,
   collapseHomeInText,
+  deriveLucernaUiState,
+  lastActionsSummary,
+  formatLucernaLastActionsLine,
+  lucernaActivityValue,
+  lucernaActivitySub,
 } from './lucerna-display';
 
 // Lucerna daemon-proxy response shapes (subset rendered here).
@@ -32,6 +45,11 @@ interface Health {
   version?: string;
   beatAgeSec?: number | null;
   heartbeatIntervalSec?: number;
+  pidAlive?: boolean;
+  phase?: string;
+  stopped?: boolean;
+  workInProgress?: boolean;
+  staleBoundSec?: number;
 }
 
 interface Enablement {
@@ -49,6 +67,7 @@ interface Status {
   lastActions?: unknown;
   budgets?: unknown;
   enablement?: Enablement;
+  phase?: string;
 }
 
 interface Notification {
@@ -207,17 +226,6 @@ function uptimeStr(ts?: string): string {
   return `${Math.max(1, m)}m`;
 }
 
-function activityLabel(activity: unknown): string {
-  if (typeof activity === 'string' && activity) return activity;
-  if (activity && typeof activity === 'object') {
-    const a = activity as Record<string, unknown>;
-    if (typeof a.name === 'string') return a.name;
-    if (typeof a.phase === 'string') return a.phase;
-    if (typeof a.type === 'string') return a.type;
-  }
-  return '—';
-}
-
 function budgetSummary(budgets: unknown): string {
   if (!budgets || typeof budgets !== 'object') return '—';
   const entries = Object.entries(budgets as Record<string, unknown>).slice(0, 4);
@@ -227,43 +235,8 @@ function budgetSummary(budgets: unknown): string {
     .join(' · ');
 }
 
-function lastActionsSummary(lastActions: unknown): string {
-  if (Array.isArray(lastActions) && lastActions.length > 0) {
-    const first = lastActions[0];
-    if (typeof first === 'string') return first;
-    if (first && typeof first === 'object') {
-      const a = first as Record<string, unknown>;
-      return String(a.action ?? a.type ?? a.name ?? JSON.stringify(first));
-    }
-  }
-  if (lastActions && typeof lastActions === 'object') {
-    const keys = Object.keys(lastActions as object);
-    if (keys.length) return keys.slice(0, 3).join(', ');
-  }
-  return 'none yet';
-}
-
 function formatNotification(n: Notification): string {
   return `${n.level} ${n.kind}: ${n.message}`;
-}
-
-type UiState = 'daemon-down' | 'not-installed' | 'stopped' | 'running' | 'stale';
-
-function deriveState(daemonUrl: string | null | undefined, health: Health | null, status: Status | null): UiState {
-  if (!daemonUrl) return 'daemon-down';
-  if (!health && !status) return 'stopped'; // still loading or empty
-  const avail = health?.available ?? status?.available;
-  if (avail === false && (health?.reason === 'not-installed' || status?.reason === 'not-installed')) {
-    return 'not-installed';
-  }
-  if (avail === false) return 'not-installed';
-  const stale = health?.stale ?? status?.stale;
-  if (stale) return 'stale';
-  // Dir present, no beat / no pid → stopped
-  if (health && health.available && !health.lastBeat && health.stale === false) return 'stopped';
-  if (health?.available && health.lastBeat && !stale) return 'running';
-  if (status?.available && !stale) return 'running';
-  return 'stopped';
 }
 
 const SCROLLBACK = 200;
@@ -389,7 +362,7 @@ export function LucernaMember({
 
   tickRender('LucernaMember');
 
-  const uiState = deriveState(daemonUrl, health, status);
+  const uiState = deriveLucernaUiState(daemonUrl, health, status);
   const enablement: Enablement = status?.enablement ?? {
     dreamsEnabled: dreamsEnabledFlag,
     autoCommitLive: false,
@@ -646,8 +619,7 @@ export function LucernaMember({
       );
     }
 
-    const phaseValue =
-      uiState === 'stale' ? 'Hung' : uiState === 'stopped' ? 'Stopped' : activityLabel(status?.activity);
+    const phaseValue = lucernaActivityValue(uiState);
     const phaseColor = uiState === 'stale' ? t.error : uiState === 'stopped' ? t.muted : t.success;
     const beat = formatBeatAge(health?.beatAgeSec);
     const dreamsBadge = enablement.dreamsEnabled ? 'dreams on' : 'dreams off';
@@ -656,11 +628,16 @@ export function LucernaMember({
     return (
       <>
         <box flexDirection="row" flexShrink={0}>
-          <Stat value={phaseValue} label="Activity" sub={uiState === 'running' ? 'live' : uiState} color={phaseColor} />
+          <Stat
+            value={phaseValue}
+            label="Activity"
+            sub={lucernaActivitySub(uiState, status, health)}
+            color={phaseColor}
+          />
           <Stat
             value={beat}
             label="Beat age"
-            sub={health?.lastBeat ? 'since lastBeat' : 'no beat'}
+            sub={lucernaBeatAgeSub(health)}
             color={uiState === 'stale' ? t.error : uiState === 'running' ? t.info : t.muted}
           />
           <Stat
@@ -696,7 +673,7 @@ export function LucernaMember({
           </Panel>
         </box>
         <box flexShrink={0} marginTop={1}>
-          <text fg={t.muted}>{`Last actions: ${truncate(lastActionsSummary(status?.lastActions), Math.max(20, dims.width - 20))}`}</text>
+          <text fg={t.muted}>{`Last actions: ${truncate(formatLucernaLastActionsLine(status), Math.max(20, dims.width - 20))}`}</text>
         </box>
       </>
     );

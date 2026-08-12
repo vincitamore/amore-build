@@ -156,3 +156,197 @@ export function formatPulseSubLine(
 export function emptyDisplayRow(width: number): string {
   return formatLogCell('', width);
 }
+
+// ── Lucerna run-state + pulse copy (pure; absent fields match prior behavior) ─
+
+export type LucernaUiState = 'daemon-down' | 'not-installed' | 'stopped' | 'running' | 'stale';
+
+/** Minimal health subset used to derive the member state. All extras optional. */
+export interface LucernaHealthFields {
+  available?: boolean;
+  reason?: string;
+  stale?: boolean;
+  lastBeat?: string;
+  pidAlive?: boolean;
+  phase?: string;
+  stopped?: boolean;
+  staleBoundSec?: number;
+  beatAgeSec?: number | null;
+}
+
+/** Minimal status subset used to derive the member state. */
+export interface LucernaStatusFields {
+  available?: boolean;
+  reason?: string;
+  stale?: boolean;
+  activity?: unknown;
+  lastActions?: unknown;
+  phase?: string;
+}
+
+/**
+ * Member state machine. `stopped` / `pidAlive === false` beat `stale`.
+ * Absent optional fields reproduce the prior mapping exactly.
+ */
+export function deriveLucernaUiState(
+  daemonUrl: string | null | undefined,
+  health: LucernaHealthFields | null,
+  status: LucernaStatusFields | null,
+): LucernaUiState {
+  if (!daemonUrl) return 'daemon-down';
+  if (!health && !status) return 'stopped';
+  const avail = health?.available ?? status?.available;
+  if (avail === false && (health?.reason === 'not-installed' || status?.reason === 'not-installed')) {
+    return 'not-installed';
+  }
+  if (avail === false) return 'not-installed';
+  if (health?.stopped === true || health?.pidAlive === false) return 'stopped';
+  const stale = health?.stale ?? status?.stale;
+  if (stale) return 'stale';
+  if (health && health.available && !health.lastBeat && health.stale === false) return 'stopped';
+  if (health?.available && health.lastBeat && !stale) return 'running';
+  if (status?.available && !stale) return 'running';
+  return 'stopped';
+}
+
+/** Headline word for the Activity Stat. Running is the live label; Hung is reserved for stale. */
+export function lucernaActivityValue(uiState: LucernaUiState): string {
+  if (uiState === 'stale') return 'Hung';
+  if (uiState === 'stopped') return 'Stopped';
+  if (uiState === 'running') return 'Running';
+  return '—';
+}
+
+/** Activity Stat sub: phase when running, else the uiState token. */
+export function lucernaActivitySub(
+  uiState: LucernaUiState,
+  status?: Pick<LucernaStatusFields, 'phase'> | null,
+  health?: Pick<LucernaHealthFields, 'phase'> | null,
+): string {
+  if (uiState !== 'running') return uiState;
+  const fromStatus = typeof status?.phase === 'string' ? status.phase.trim() : '';
+  if (fromStatus) return fromStatus;
+  const fromHealth = typeof health?.phase === 'string' ? health.phase.trim() : '';
+  if (fromHealth) return fromHealth;
+  return 'live';
+}
+
+/** Beat-age Stat sub. Honest bound when the wire sends `staleBoundSec`. */
+export function lucernaBeatAgeSub(
+  health?: Pick<LucernaHealthFields, 'lastBeat' | 'staleBoundSec'> | null,
+): string {
+  if (!health?.lastBeat) return 'no beat';
+  const bound = health.staleBoundSec;
+  if (typeof bound === 'number' && Number.isFinite(bound) && bound > 0) {
+    return `bound ${Math.floor(bound)}s`;
+  }
+  return 'since lastBeat';
+}
+
+function formatActionEntry(entry: unknown): string {
+  if (typeof entry === 'string') return entry;
+  if (entry && typeof entry === 'object') {
+    const a = entry as Record<string, unknown>;
+    if (typeof a.key === 'string' && a.key) {
+      if (a.ok === true) return `${a.key}:ok`;
+      if (a.ok === false) return `${a.key}:fail`;
+      return a.key;
+    }
+    return String(a.action ?? a.type ?? a.name ?? JSON.stringify(entry));
+  }
+  return String(entry);
+}
+
+/**
+ * Compact last-actions copy. Understands `{key, ok, detail?, at?}` plus the
+ * older string / `{action|type|name}` / key-list shapes.
+ */
+export function lastActionsSummary(lastActions: unknown): string {
+  if (Array.isArray(lastActions) && lastActions.length > 0) {
+    const writerShaped = lastActions.every(
+      (x) => x && typeof x === 'object' && typeof (x as Record<string, unknown>).key === 'string',
+    );
+    if (writerShaped) {
+      return lastActions.slice(0, 3).map(formatActionEntry).join(' · ');
+    }
+    return formatActionEntry(lastActions[0]);
+  }
+  if (lastActions && typeof lastActions === 'object') {
+    const rec = lastActions as Record<string, unknown>;
+    if (typeof rec.key === 'string' && rec.key) return formatActionEntry(rec);
+    const keys = Object.keys(rec);
+    if (keys.length) return keys.slice(0, 3).join(', ');
+  }
+  return 'none yet';
+}
+
+/** Free-text activity label from the status wire (string or named object). */
+export function activityDetail(activity: unknown): string {
+  if (typeof activity === 'string' && activity) return activity;
+  if (activity && typeof activity === 'object') {
+    const a = activity as Record<string, unknown>;
+    if (typeof a.name === 'string' && a.name) return a.name;
+    if (typeof a.phase === 'string' && a.phase) return a.phase;
+    if (typeof a.type === 'string' && a.type) return a.type;
+  }
+  return '';
+}
+
+/**
+ * Last-actions line body: real activity detail (when present) sits here so the
+ * Activity Stat value can stay the word "Running".
+ */
+export function formatLucernaLastActionsLine(
+  status?: Pick<LucernaStatusFields, 'activity' | 'lastActions'> | null,
+): string {
+  const summary = lastActionsSummary(status?.lastActions);
+  const detail = activityDetail(status?.activity);
+  if (!detail) return summary;
+  if (summary === 'none yet') return detail;
+  if (summary.includes(detail)) return summary;
+  return `${detail} · ${summary}`;
+}
+
+export interface LucernaPulseView {
+  available: boolean;
+  state: string;
+  beatAgeSec?: number | null;
+  pendingReview?: { total: number };
+  phase?: string;
+}
+
+function formatPulseBeat(sec: number | null | undefined): string {
+  if (sec === null || sec === undefined) return '-';
+  if (sec < 60) return `${Math.floor(sec)}s`;
+  return `${Math.floor(sec / 60)}m`;
+}
+
+/**
+ * Compact Dashboard Lucerna pulse status (right-hand clause).
+ * Null/unfetched → loading ellipsis. `available === false` is the only
+ * "not installed" path. Phase is included on the running line only when it
+ * fits `width` (the caller still clamps via formatLucernaDisplayLine).
+ */
+export function formatLucernaPulseStatus(
+  pulse: LucernaPulseView | null | undefined,
+  width: number,
+): string {
+  if (pulse == null) return '…';
+  const pend =
+    pulse.pendingReview && pulse.pendingReview.total > 0
+      ? ` · ${pulse.pendingReview.total} rev`
+      : '';
+  if (pulse.available === false) return `not installed${pend}`;
+  if (pulse.state === 'running') {
+    const beat = formatPulseBeat(pulse.beatAgeSec);
+    const without = `live · beat ${beat}${pend}`;
+    const phase = typeof pulse.phase === 'string' ? pulse.phase.trim() : '';
+    if (phase) {
+      const withPhase = `live · ${phase} · beat ${beat}${pend}`;
+      if (withPhase.length <= width) return withPhase;
+    }
+    return without;
+  }
+  if (pulse.state === 'stale') return `hung${pend}`;
+  return `stopped${pend}`;
+}

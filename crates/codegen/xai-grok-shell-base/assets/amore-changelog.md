@@ -8,6 +8,20 @@ work it describes.
 
 ## Unreleased
 
+- **Lucerna status tells the truth** — the iris dashboard no longer reports a
+  healthy daemon as Hung between adaptive heartbeats. Iris now honors the
+  daemon's own `intervalMs` for staleness (bound `max(120s, 2.5×interval)`,
+  the same formula the lucerna CLI uses), checks process liveness so a dead
+  daemon reads Stopped instead of running-until-stale — and start/stop no
+  longer double-spawn or refuse a restart on a wrong staleness guess — and
+  the Activity card shows **Running** with the live phase when the daemon is
+  well. Activity, last actions, and phase now render from the fields the
+  daemon actually writes.
+- **Lucerna stays visibly alive during long work** — auto-commit compose and
+  dream cycles advertise a bounded work-in-progress window on health and
+  refresh the heartbeat every 30 seconds while they run, so long work no
+  longer reads as a dead daemon; a graceful stop leaves an honest `stopped`
+  tombstone instead of an eternally-healthy health file.
 - **Horizon theme** — the pager gains the iris app's default palette as a
   selectable theme (`/theme horizon`): a rose brand accent with green success
   and cyan information on the dark `#1c1e26` ground.

@@ -22,8 +22,15 @@
 //      (src/cli.ts or package.json start)
 //
 // Absent runtime dir → available:false, reason:"not-installed".
-// Stale lastBeat (> 2 heartbeat intervals; default interval 60s, overridable via
-// health.heartbeatIntervalSec or LUCERNA_HEARTBEAT_INTERVAL_SEC) → stale:true.
+//
+// Heartbeat interval (seconds), first positive win:
+//   env LUCERNA_HEARTBEAT_INTERVAL_SEC > health.heartbeatIntervalSec >
+//   health.intervalMs / 1000 > default 60.
+// Stale bound: max(120, intervalSec * 2.5). A beat past that bound is stale
+// only when no work-in-progress window is open and the process is not
+// known-dead. Dead pid is stopped, never stale.
+// pidAlive is a signal-0 check on health.pid, else the integer in daemon.pid;
+// the field is omitted when no pid is known.
 
 import { spawn as nodeSpawn, spawnSync } from 'node:child_process';
 import {
@@ -36,7 +43,9 @@ import {
 import { delimiter, dirname, isAbsolute, join, resolve } from 'node:path';
 
 const DEFAULT_HEARTBEAT_INTERVAL_SEC = 60;
-const STALE_MULTIPLIER = 2;
+const STALE_MULTIPLIER = 2.5;
+const STALE_FLOOR_SEC = 120;
+const WIP_GRACE_MS = 60_000;
 
 function isObj(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -67,16 +76,30 @@ export function isInstalled(orgRoot: string): boolean {
   }
 }
 
-/** Resolve heartbeat interval (seconds). Env overrides health field; default 60. */
-export function resolveHeartbeatIntervalSec(healthField?: unknown): number {
+/**
+ * Resolve heartbeat interval (seconds).
+ * Priority: env LUCERNA_HEARTBEAT_INTERVAL_SEC > heartbeatIntervalSec >
+ * intervalMs/1000 > default 60.
+ */
+export function resolveHeartbeatIntervalSec(
+  heartbeatIntervalSec?: unknown,
+  intervalMs?: unknown,
+): number {
   const env = process.env.LUCERNA_HEARTBEAT_INTERVAL_SEC;
   if (env !== undefined && env !== '') {
     const n = Number(env);
     if (Number.isFinite(n) && n > 0) return n;
   }
-  const fromHealth = numOrU(healthField);
-  if (fromHealth !== undefined && fromHealth > 0) return fromHealth;
+  const fromSec = numOrU(heartbeatIntervalSec);
+  if (fromSec !== undefined && fromSec > 0) return fromSec;
+  const fromMs = numOrU(intervalMs);
+  if (fromMs !== undefined && fromMs > 0) return fromMs / 1000;
   return DEFAULT_HEARTBEAT_INTERVAL_SEC;
+}
+
+/** Stale bound in seconds: max(120, intervalSec * 2.5). */
+export function resolveStaleBoundSec(intervalSec: number): number {
+  return Math.max(STALE_FLOOR_SEC, intervalSec * STALE_MULTIPLIER);
 }
 
 /** Seconds since `ts`, or null if unparseable. Accepts RFC3339 and naive local. */
@@ -96,7 +119,45 @@ export function computeBeatAgeSec(ts: unknown, nowMs: number = Date.now()): numb
 
 export function isStaleBeat(beatAgeSec: number | null, intervalSec: number): boolean {
   if (beatAgeSec === null) return true;
-  return beatAgeSec > intervalSec * STALE_MULTIPLIER;
+  return beatAgeSec > resolveStaleBoundSec(intervalSec);
+}
+
+/** True while writer's workInProgress window is open (wallMs + 60s grace). */
+export function isWorkInProgressOpen(raw: unknown, nowMs: number = Date.now()): boolean {
+  if (!isObj(raw)) return false;
+  const wallMs = numOrU(raw.wallMs);
+  if (wallMs === undefined || wallMs < 0) return false;
+  let startedMs: number | null = null;
+  if (typeof raw.startedAt === 'number' && Number.isFinite(raw.startedAt)) {
+    startedMs = raw.startedAt;
+  } else if (typeof raw.startedAt === 'string' && raw.startedAt) {
+    const parsed = Date.parse(raw.startedAt);
+    if (!Number.isNaN(parsed)) {
+      startedMs = parsed;
+    } else {
+      const ageSec = computeBeatAgeSec(raw.startedAt, nowMs);
+      if (ageSec !== null) startedMs = nowMs - ageSec * 1000;
+    }
+  }
+  if (startedMs === null) return false;
+  return nowMs - startedMs < wallMs + WIP_GRACE_MS;
+}
+
+function readDaemonPid(runtimeDir: string): number | undefined {
+  try {
+    const raw = readFileSync(join(runtimeDir, 'daemon.pid'), 'utf8').trim();
+    const n = Number.parseInt(raw, 10);
+    if (Number.isFinite(n) && n > 0) return n;
+  } catch {
+    /* absent or unreadable */
+  }
+  return undefined;
+}
+
+function resolveRuntimePid(healthPid: unknown, runtimeDir: string): number | undefined {
+  const fromHealth = numOrU(healthPid);
+  if (fromHealth !== undefined && fromHealth > 0) return fromHealth;
+  return readDaemonPid(runtimeDir);
 }
 
 // ── health ────────────────────────────────────────────────────────────────────
@@ -111,61 +172,129 @@ export interface LucernaHealthWire {
   version?: string;
   beatAgeSec?: number | null;
   heartbeatIntervalSec?: number;
+  staleBoundSec?: number;
+  pidAlive?: boolean;
+  phase?: string;
+  bpm?: number;
+  dreaming?: boolean;
+  intervalMs?: number;
+  stopped?: boolean;
+  workInProgress?: boolean;
+}
+
+/** Optional probes for health reads. Call sites may omit; defaults are live. */
+export interface LucernaHealthDeps {
+  isPidAlive?: (pid: number) => boolean;
 }
 
 const NOT_INSTALLED = { available: false as const, reason: 'not-installed' as const };
 
-export function readHealth(orgRoot: string, nowMs: number = Date.now()): LucernaHealthWire {
+function attachPid(
+  wire: LucernaHealthWire,
+  pid: number | undefined,
+  isAlive: (pid: number) => boolean,
+): LucernaHealthWire {
+  if (pid === undefined) return wire;
+  const pidAlive = isAlive(pid);
+  return {
+    ...wire,
+    pid,
+    pidAlive,
+    stale: pidAlive === false ? false : wire.stale,
+  };
+}
+
+export function readHealth(
+  orgRoot: string,
+  nowMs: number = Date.now(),
+  deps: LucernaHealthDeps = {},
+): LucernaHealthWire {
   if (!isInstalled(orgRoot)) return { ...NOT_INSTALLED };
 
-  const path = join(lucernaDir(orgRoot), 'health.json');
+  const runtimeDir = lucernaDir(orgRoot);
+  const isAlive = deps.isPidAlive ?? defaultIsPidAlive;
+  const intervalSec = resolveHeartbeatIntervalSec();
+  const staleBoundSec = resolveStaleBoundSec(intervalSec);
+
+  const path = join(runtimeDir, 'health.json');
   let content: string;
   try {
     content = readFileSync(path, 'utf8');
   } catch {
     // Dir present, no health → installed but not running (no beat to age).
-    return {
-      available: true,
-      stale: false,
-      beatAgeSec: null,
-      heartbeatIntervalSec: resolveHeartbeatIntervalSec(),
-    };
+    return attachPid(
+      {
+        available: true,
+        stale: false,
+        beatAgeSec: null,
+        heartbeatIntervalSec: intervalSec,
+        staleBoundSec,
+      },
+      readDaemonPid(runtimeDir),
+      isAlive,
+    );
   }
 
   let h: unknown;
   try {
     h = JSON.parse(content);
   } catch {
-    return {
-      available: true,
-      stale: true,
-      beatAgeSec: null,
-      heartbeatIntervalSec: resolveHeartbeatIntervalSec(),
-    };
+    return attachPid(
+      {
+        available: true,
+        stale: true,
+        beatAgeSec: null,
+        heartbeatIntervalSec: intervalSec,
+        staleBoundSec,
+      },
+      readDaemonPid(runtimeDir),
+      isAlive,
+    );
   }
   if (!isObj(h)) {
-    return {
-      available: true,
-      stale: true,
-      beatAgeSec: null,
-      heartbeatIntervalSec: resolveHeartbeatIntervalSec(),
-    };
+    return attachPid(
+      {
+        available: true,
+        stale: true,
+        beatAgeSec: null,
+        heartbeatIntervalSec: intervalSec,
+        staleBoundSec,
+      },
+      readDaemonPid(runtimeDir),
+      isAlive,
+    );
   }
 
-  const intervalSec = resolveHeartbeatIntervalSec(h.heartbeatIntervalSec);
+  const resolvedInterval = resolveHeartbeatIntervalSec(h.heartbeatIntervalSec, h.intervalMs);
+  const resolvedBound = resolveStaleBoundSec(resolvedInterval);
   const beatAgeSec = computeBeatAgeSec(h.lastBeat, nowMs);
-  const stale = isStaleBeat(beatAgeSec, intervalSec);
+  const beatStale = isStaleBeat(beatAgeSec, resolvedInterval);
+  const wipOpen = isWorkInProgressOpen(h.workInProgress, nowMs);
+  const stopped = typeof h.stopped === 'boolean' ? h.stopped : undefined;
+  const pid = resolveRuntimePid(h.pid, runtimeDir);
 
-  return {
+  // stale: unparseable (handled above) OR beat past bound with no open WIP
+  // and pid not known-dead. attachPid clears stale when pidAlive === false.
+  const stale = beatStale && !wipOpen;
+
+  const wire: LucernaHealthWire = {
     available: true,
     stale,
-    pid: numOrU(h.pid),
     startedAt: strOrU(h.startedAt),
     lastBeat: strOrU(h.lastBeat),
     version: strOrU(h.version),
     beatAgeSec,
-    heartbeatIntervalSec: intervalSec,
+    heartbeatIntervalSec: resolvedInterval,
+    staleBoundSec: resolvedBound,
+    phase: strOrU(h.phase),
+    bpm: numOrU(h.bpm),
+    dreaming: typeof h.dreaming === 'boolean' ? h.dreaming : undefined,
+    intervalMs: numOrU(h.intervalMs),
+    stopped,
+    workInProgress: isObj(h.workInProgress) ? wipOpen : undefined,
   };
+
+  return attachPid(wire, pid, isAlive);
 }
 
 // ── enablement ────────────────────────────────────────────────────────────────
@@ -203,15 +332,20 @@ export interface LucernaStatusWire {
   activity?: unknown;
   lastActions?: unknown;
   budgets?: unknown;
+  phase?: string;
   enablement: LucernaEnablement;
 }
 
-export function readStatus(orgRoot: string, nowMs: number = Date.now()): LucernaStatusWire {
+export function readStatus(
+  orgRoot: string,
+  nowMs: number = Date.now(),
+  deps: LucernaHealthDeps = {},
+): LucernaStatusWire {
   if (!isInstalled(orgRoot)) {
     return { ...NOT_INSTALLED, enablement: { dreamsEnabled: false, autoCommitLive: false } };
   }
 
-  const health = readHealth(orgRoot, nowMs);
+  const health = readHealth(orgRoot, nowMs, deps);
   const enablement = readEnablement(orgRoot);
 
   let activity: unknown;
@@ -220,8 +354,8 @@ export function readStatus(orgRoot: string, nowMs: number = Date.now()): Lucerna
   try {
     const raw: unknown = JSON.parse(readFileSync(join(lucernaDir(orgRoot), 'state.json'), 'utf8'));
     if (isObj(raw)) {
-      activity = raw.activity;
-      lastActions = raw.lastActions;
+      activity = raw.lastActivity ?? raw.activity;
+      lastActions = raw.lastActionResults ?? raw.lastActions;
       budgets = raw.budgets;
     }
   } catch {
@@ -236,6 +370,7 @@ export function readStatus(orgRoot: string, nowMs: number = Date.now()): Lucerna
     activity,
     lastActions,
     budgets,
+    phase: health.phase,
     enablement,
   };
 }
@@ -442,6 +577,7 @@ export interface LucernaPulse {
   lastNotification: LucernaNotification | null;
   pid?: number;
   version?: string;
+  phase?: string;
   /** Pending dream manifests/light dreams + proposals awaiting operator review. */
   pendingReview?: { dreams: number; proposals: number; total: number };
 }
@@ -460,10 +596,20 @@ export function buildLucernaPulse(
       lastNotification: null,
     };
   }
-  let state: LucernaRunState = 'stopped';
-  if (health.stale) state = 'stale';
-  else if (health.lastBeat && !health.stale) state = 'running';
-  else state = 'stopped';
+  // Derivation order: not-installed → stopped tombstone/dead pid →
+  // unparseable stale → fresh beat or open WIP → beat past bound → no beat.
+  let state: LucernaRunState;
+  if (health.stopped === true || health.pidAlive === false) {
+    state = 'stopped';
+  } else if (health.stale) {
+    state = 'stale';
+  } else if (health.lastBeat && !health.stale) {
+    state = 'running';
+  } else if (health.workInProgress) {
+    state = 'running';
+  } else {
+    state = 'stopped';
+  }
   return {
     available: true,
     state,
@@ -471,11 +617,16 @@ export function buildLucernaPulse(
     lastNotification,
     pid: health.pid,
     version: health.version,
+    phase: health.phase,
   };
 }
 
-export function readPulse(orgRoot: string, nowMs: number = Date.now()): LucernaPulse {
-  const health = readHealth(orgRoot, nowMs);
+export function readPulse(
+  orgRoot: string,
+  nowMs: number = Date.now(),
+  deps: LucernaHealthDeps = {},
+): LucernaPulse {
+  const health = readHealth(orgRoot, nowMs, deps);
   const notes = readNotifications(orgRoot, 1);
   return buildLucernaPulse(health, notes.entries[0] ?? null);
 }
@@ -739,8 +890,18 @@ export interface LucernaStartWire {
   plan?: { cmd: string; args: string[]; cwd: string };
 }
 
-function isLiveHealth(h: LucernaHealthWire): boolean {
-  return !!h.available && !h.stale && typeof h.lastBeat === 'string' && !!h.lastBeat;
+/**
+ * Start/stop control gate. Live when the pid is known-alive, or when the pid
+ * is unknown and a lastBeat is present and not past the stale bound.
+ * Never live when pidAlive is false or stopped is true.
+ */
+export function isLiveHealth(h: LucernaHealthWire): boolean {
+  if (!h.available || h.stopped === true || h.pidAlive === false) return false;
+  if (h.pidAlive === true) return true;
+  if (typeof h.lastBeat !== 'string' || !h.lastBeat) return false;
+  const interval = h.heartbeatIntervalSec ?? DEFAULT_HEARTBEAT_INTERVAL_SEC;
+  const beatStale = isStaleBeat(h.beatAgeSec ?? null, interval);
+  return !beatStale;
 }
 
 export async function startLucerna(
@@ -753,7 +914,8 @@ export async function startLucerna(
 
   const nowMs = deps.nowMs ?? (() => Date.now());
   const sleep = deps.sleep ?? defaultSleep;
-  const health0 = readHealth(orgRoot, nowMs());
+  const healthDeps: LucernaHealthDeps = { isPidAlive: deps.isPidAlive };
+  const health0 = readHealth(orgRoot, nowMs(), healthDeps);
   if (isLiveHealth(health0)) {
     return {
       available: true,
@@ -802,7 +964,7 @@ export async function startLucerna(
 
   while (nowMs() < deadline) {
     await sleep(pollMs);
-    const h = readHealth(orgRoot, nowMs());
+    const h = readHealth(orgRoot, nowMs(), healthDeps);
     if (isLiveHealth(h)) {
       return {
         available: true,
@@ -865,7 +1027,8 @@ export async function stopLucerna(
   const isLucerna = deps.isLucernaProcess ?? ((pid: number) => defaultIsLucernaProcess(pid, platform));
   const killPid = deps.killPid ?? defaultKillPid;
 
-  const health0 = readHealth(orgRoot, nowMs());
+  const healthDeps: LucernaHealthDeps = { isPidAlive: deps.isPidAlive };
+  const health0 = readHealth(orgRoot, nowMs(), healthDeps);
   const pid0 = health0.pid;
   const running = isLiveHealth(health0) || (typeof pid0 === 'number' && isAlive(pid0));
   if (!running) {
@@ -884,7 +1047,7 @@ export async function stopLucerna(
 
   while (nowMs() < deadline) {
     await sleep(pollMs);
-    const h = readHealth(orgRoot, nowMs());
+    const h = readHealth(orgRoot, nowMs(), healthDeps);
     const pid = h.pid ?? pid0;
     const stillLive = isLiveHealth(h) || (typeof pid === 'number' && isAlive(pid));
     if (!stillLive) {
@@ -900,7 +1063,7 @@ export async function stopLucerna(
   }
 
   // Escalation: re-read pid from health, verify it is still lucerna, then kill by pid only.
-  const health1 = readHealth(orgRoot, nowMs());
+  const health1 = readHealth(orgRoot, nowMs(), healthDeps);
   const pid = health1.pid ?? pid0;
   if (typeof pid !== 'number' || !isAlive(pid)) {
     return {

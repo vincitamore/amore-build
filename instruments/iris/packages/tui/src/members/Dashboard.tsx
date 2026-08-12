@@ -23,6 +23,7 @@ import { Panel } from '../components/Panel';
 import { Stat } from '../components/Stat';
 import {
   formatLucernaDisplayLine,
+  formatLucernaPulseStatus,
   formatPulseSubLine,
   pulsePanelInnerWidth,
 } from './lucerna-display';
@@ -446,6 +447,7 @@ export function Dashboard({
     beatAgeSec: number | null;
     lastNotification: { message?: string; kind?: string; level?: string } | null;
     pendingReview?: { dreams: number; proposals: number; total: number };
+    phase?: string;
   } | null>(null);
   /** Speculum status freshness pulse — once at mount, again on re-activation. */
   const [speculumPulse, setSpeculumPulse] = useState<SpeculumPulseView | null>(null);
@@ -504,6 +506,7 @@ export function Dashboard({
               beatAgeSec: number | null;
               lastNotification: { message?: string; kind?: string; level?: string } | null;
               pendingReview?: { dreams: number; proposals: number; total: number };
+              phase?: string;
             },
           );
         }
@@ -622,6 +625,7 @@ export function Dashboard({
   //   below Attention. Pulse lives in the left column (agendaW) when wide, full width when stacked.
   const pulseColW = wide ? agendaW : dims.width - 2;
   const pulseInnerW = pulsePanelInnerWidth(pulseColW);
+  const lucernaStatusW = Math.max(12, Math.min(28, Math.floor(dims.width / 4)));
   const speculumLine = speculumPulse?.line ?? '…';
   const speculumHi = hover === 'speculum-pulse';
   const speculumNotInstalled = speculumLine === SPECULUM_NOT_INSTALLED_LINE;
@@ -685,25 +689,8 @@ export function Dashboard({
         <box flexGrow={1} backgroundColor={t.background} />
         <text fg={t.muted} wrapMode="none">
           {formatLucernaDisplayLine(
-            (() => {
-              const pend =
-                lucernaPulse?.pendingReview && lucernaPulse.pendingReview.total > 0
-                  ? ` · ${lucernaPulse.pendingReview.total} rev`
-                  : '';
-              if (!lucernaPulse || !lucernaPulse.available) return `not installed${pend}`;
-              if (lucernaPulse.state === 'running') {
-                const beat =
-                  lucernaPulse.beatAgeSec === null || lucernaPulse.beatAgeSec === undefined
-                    ? '-'
-                    : lucernaPulse.beatAgeSec < 60
-                      ? `${Math.floor(lucernaPulse.beatAgeSec)}s`
-                      : `${Math.floor(lucernaPulse.beatAgeSec / 60)}m`;
-                return `live · beat ${beat}${pend}`;
-              }
-              if (lucernaPulse.state === 'stale') return `hung${pend}`;
-              return `stopped${pend}`;
-            })(),
-            Math.max(12, Math.min(28, Math.floor(dims.width / 4))),
+            formatLucernaPulseStatus(lucernaPulse, lucernaStatusW),
+            lucernaStatusW,
           )}
         </text>
       </box>

@@ -22,12 +22,31 @@ import { StateManager } from "./state.ts";
 import { localTimestamp } from "./time.ts";
 import { RUNTIME_FILES, healthPath, logPath, sentinelPath } from "./paths.ts";
 import { executeLightAction, isAdmittedAction, actionBudgetTier, actionCooldownClass } from "./actions.ts";
-import { isFullAgenticKey } from "./agentic.ts";
+import { DEFAULT_AGENTIC_WALL_MS, isFullAgenticKey } from "./agentic.ts";
 import { mergeGovernanceLists, loadUserGovernance } from "./governance.ts";
-import { AutoCommitter, type HeadlessCaller } from "./auto-commit.ts";
+import { AUTO_COMMIT_WALL_MS, AutoCommitter, type HeadlessCaller } from "./auto-commit.ts";
 import { runDreamCycle, type DreamCycleResult } from "./somniator.ts";
 
 const LOG_MAX_BYTES = 5 * 1024 * 1024;
+
+/** How often health.lastBeat is refreshed while a long work segment is in flight. */
+export const PROGRESS_BEAT_INTERVAL_MS = 30_000;
+
+/** Advertised on health.json only while a long cycle segment is running. */
+export interface HealthWorkInProgress {
+  kind: string;
+  startedAt: string;
+  wallMs: number;
+}
+
+type DreamCycleRunner = (
+  config: LucernaConfig,
+  opts?: {
+    stateManager?: StateManager;
+    force?: boolean;
+    forceAction?: string;
+  },
+) => Promise<DreamCycleResult>;
 
 export function appendLog(runtimeDir: string, line: string): void {
   mkdirSync(runtimeDir, { recursive: true });
@@ -107,6 +126,17 @@ export class DaemonLoop {
   private wakeDreamRequested = false;
   /** Optional inject for tests (stub amore-headless for auto-commit). */
   private autoCommitHeadless?: HeadlessCaller;
+  /** Optional inject for tests (stub the dream-cycle runner). */
+  private dreamCycleRunner: DreamCycleRunner = runDreamCycle;
+  /** Present only while a long work segment is in flight. */
+  private workInProgress: HealthWorkInProgress | undefined;
+  private progressBeatTimer: ReturnType<typeof setInterval> | null = null;
+  private progressBeatIntervalMs = PROGRESS_BEAT_INTERVAL_MS;
+  private progressBeatUnrefed = false;
+  /** Snapshot of the last live health write (tombstone keeps lastBeat/phase). */
+  private lastLiveHealth: Record<string, unknown> | null = null;
+  /** Sentinel poll chunk; injectable so halt tests need not wait seconds. */
+  private sentinelPollMs = 3000;
 
   constructor(private config: LucernaConfig) {
     this.stateManager = new StateManager(config.runtimeDir, {
@@ -131,6 +161,31 @@ export class DaemonLoop {
     this.autoCommitHeadless = headless;
   }
 
+  /** Test / inject hook: replace the dream-cycle runner. */
+  setDreamCycleRunner(runner: DreamCycleRunner | undefined): void {
+    this.dreamCycleRunner = runner ?? runDreamCycle;
+  }
+
+  /** Test / inject hook: progress-beat period while a long work segment runs. */
+  setProgressBeatIntervalMs(ms: number): void {
+    if (ms > 0) this.progressBeatIntervalMs = ms;
+  }
+
+  /** Test / inject hook: halt/wake/sleep poll chunk inside the wait loop. */
+  setSentinelPollMs(ms: number): void {
+    if (ms > 0) this.sentinelPollMs = ms;
+  }
+
+  /** Test hook: whether a progress-beat interval is currently scheduled. */
+  hasProgressBeat(): boolean {
+    return this.progressBeatTimer !== null;
+  }
+
+  /** Test hook: timer was unref'd when last started (does not keep the process alive). */
+  progressBeatWasUnrefed(): boolean {
+    return this.progressBeatUnrefed;
+  }
+
   async start(): Promise<void> {
     this.running = true;
     writePidFile(this.config.runtimeDir, process.pid);
@@ -149,11 +204,10 @@ export class DaemonLoop {
     await this.cycle();
 
     while (this.running) {
-      const SENTINEL_POLL_MS = 3000;
       const targetInterval = this.heartbeat.intervalMs;
       let slept = 0;
       while (slept < targetInterval && this.running) {
-        const chunk = Math.min(SENTINEL_POLL_MS, targetInterval - slept);
+        const chunk = Math.min(this.sentinelPollMs, targetInterval - slept);
         await this.sleep(chunk);
         slept += chunk;
         if (this.checkHalt()) {
@@ -169,6 +223,8 @@ export class DaemonLoop {
       }
       if (this.running) await this.cycle();
     }
+    this.clearProgressBeat();
+    this.writeTombstone();
     clearPidFile(this.config.runtimeDir);
     appendLog(this.config.runtimeDir, "daemon stopped");
     console.log("lucerna stopped.");
@@ -198,6 +254,7 @@ export class DaemonLoop {
       this.config.autoCommitEnabled &&
       (phase === "resting" || phase === "drowsy" || phase === "dreaming")
     ) {
+      this.beginLongWork("auto-commit", AUTO_COMMIT_WALL_MS);
       try {
         const ac = new AutoCommitter(
           this.config,
@@ -218,7 +275,7 @@ export class DaemonLoop {
         appendLog(this.config.runtimeDir, `auto-commit error: ${err}`);
         console.error(`  [CYCLE] auto-commit error: ${err}`);
       } finally {
-        this.writeHealth();
+        this.endLongWork();
       }
     }
 
@@ -229,8 +286,9 @@ export class DaemonLoop {
         (this.heartbeat.isDreaming && this.stateManager.canStartCycle().allowed);
       if (due) {
         this.wakeDreamRequested = false;
+        this.beginLongWork("dream-cycle", DEFAULT_AGENTIC_WALL_MS);
         try {
-          const result = await runDreamCycle(this.config, {
+          const result = await this.dreamCycleRunner(this.config, {
             stateManager: this.stateManager,
             force: false,
           });
@@ -247,7 +305,7 @@ export class DaemonLoop {
           appendLog(this.config.runtimeDir, `dream-cycle error: ${err}`);
           console.error(`  [CYCLE] dream-cycle error: ${err}`);
         } finally {
-          this.writeHealth();
+          this.endLongWork();
         }
       }
     }
@@ -332,7 +390,7 @@ export class DaemonLoop {
   }
 
   private writeHealth(): void {
-    writeHealthFile(this.config.runtimeDir, {
+    const health: Record<string, unknown> = {
       available: true,
       healthy: true,
       pid: process.pid,
@@ -346,7 +404,79 @@ export class DaemonLoop {
       processName: this.config.processName,
       driver: "amore-headless",
       houseRoot: this.config.houseRoot,
+    };
+    if (this.workInProgress) {
+      health.workInProgress = { ...this.workInProgress };
+    }
+    this.lastLiveHealth = health;
+    writeHealthFile(this.config.runtimeDir, health);
+  }
+
+  /**
+   * Graceful-exit health: last live fields kept, stopped + not healthy.
+   * Must be the last health write on this process so nothing resurrects a live shape.
+   */
+  private writeTombstone(): void {
+    const base = this.lastLiveHealth ?? {
+      available: true,
+      pid: process.pid,
+      startedAt: new Date(this.startedAt).toISOString(),
+      lastBeat: localTimestamp(),
+      version: this.config.version,
+      phase: this.heartbeat.current,
+      intervalMs: this.heartbeat.intervalMs,
+      bpm: this.heartbeat.bpm,
+      dreaming: this.heartbeat.isDreaming,
+      processName: this.config.processName,
+      driver: "amore-headless",
+      houseRoot: this.config.houseRoot,
+    };
+    const { workInProgress: _wip, ...rest } = base as {
+      workInProgress?: unknown;
+      [key: string]: unknown;
+    };
+    writeHealthFile(this.config.runtimeDir, {
+      ...rest,
+      healthy: false,
+      stopped: true,
     });
+  }
+
+  private beginLongWork(kind: string, wallMs: number): void {
+    this.clearProgressBeat();
+    this.workInProgress = {
+      kind,
+      startedAt: new Date().toISOString(),
+      wallMs,
+    };
+    this.writeHealth();
+    this.startProgressBeat();
+  }
+
+  private endLongWork(): void {
+    this.clearProgressBeat();
+    this.workInProgress = undefined;
+    this.writeHealth();
+  }
+
+  private startProgressBeat(): void {
+    this.clearProgressBeat();
+    this.progressBeatUnrefed = false;
+    const timer = setInterval(() => {
+      if (this.workInProgress) this.writeHealth();
+    }, this.progressBeatIntervalMs);
+    if (typeof timer.unref === "function") {
+      timer.unref();
+      this.progressBeatUnrefed = true;
+    }
+    this.progressBeatTimer = timer;
+  }
+
+  private clearProgressBeat(): void {
+    if (this.progressBeatTimer !== null) {
+      clearInterval(this.progressBeatTimer);
+      this.progressBeatTimer = null;
+    }
   }
 
   private checkHalt(): boolean {

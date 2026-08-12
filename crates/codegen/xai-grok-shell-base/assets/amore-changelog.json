@@ -1,5 +1,15 @@
 [
   {
+    "category": "fixes",
+    "description": "**Lucerna status tells the truth** — iris honors the daemon's adaptive `intervalMs` for staleness, checks process liveness (a dead daemon reads Stopped; start/stop stop guessing), and the Activity card shows **Running** with the live phase; activity and last actions render from the fields the daemon writes.",
+    "breaking_change": false
+  },
+  {
+    "category": "fixes",
+    "description": "**Lucerna stays visibly alive during long work** — auto-commit and dream cycles advertise a bounded work-in-progress window and refresh the heartbeat while they run; a graceful stop leaves an honest stopped tombstone.",
+    "breaking_change": false
+  },
+  {
     "category": "features",
     "description": "**Horizon theme** — the pager gains the iris app's default palette as a selectable theme (`/theme horizon`): a rose brand accent with green success and cyan information on the dark `#1c1e26` ground.",
     "breaking_change": false
