@@ -130,7 +130,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        # macos-latest is included so the apply-path integration binary
+        # (`self_update_apply`) runs on all three desktop targets. Other
+        # steps below stay OS-gated; macos only pays for toolchain + that
+        # one test binary.
+        os: [ubuntu-latest, windows-latest, macos-latest]
     env:
       CARGO_TERM_COLOR: always
       CARGO_INCREMENTAL: "0"
@@ -165,6 +169,13 @@ jobs:
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           shared-key: ci-test
+
+      # Apply-path integration matrix (fetch/swap/fleet against a local
+      # artifact server). Scoped to this one test binary — never a bare
+      # `cargo test -p xai-grok-pager` — and intentionally NOT cfg(unix).
+      # Runs on every matrix OS (ubuntu / windows / macos).
+      - name: Test self-update apply path (3-OS matrix)
+        run: cargo test -p xai-grok-pager --test self_update_apply
 
       # Suites run in DEBUG. `--release` compiles out `debug_assert!`, which
       # silently breaks every `#[should_panic]` test that rides one (they fail
