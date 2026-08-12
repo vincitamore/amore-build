@@ -1,6 +1,11 @@
 [
   {
     "category": "features",
+    "description": "**Horizon theme** — the pager gains the iris app's default palette as a selectable theme (`/theme horizon`): a rose brand accent with green success and cyan information on the dark `#1c1e26` ground.",
+    "breaking_change": false
+  },
+  {
+    "category": "features",
     "description": "**Amore Build 1.0** — the Sessions member lands at full depth: a microscope that navigates the whole corpus with turn-level detail, scoped probes with trends, a map drawing real resume and shared-artifact links, and generated session titles.",
     "breaking_change": false
   },

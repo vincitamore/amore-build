@@ -75,6 +75,11 @@ const THEME_CHOICES: &[EnumChoice] = &[
         display: "Amore",
         description: "Rain-dark with colour accents; needs truecolor.",
     },
+    EnumChoice {
+        canonical: "horizon",
+        display: "Horizon",
+        description: "Rose-accented dark, the iris app's default; needs truecolor.",
+    },
 ];
 
 // ---------------------------------------------------------------------------
@@ -511,6 +516,11 @@ const CONCRETE_THEME_CHOICES: &[EnumChoice] = &[
         canonical: "amore",
         display: "Amore",
         description: "Rain-dark with colour accents; needs truecolor.",
+    },
+    EnumChoice {
+        canonical: "horizon",
+        display: "Horizon",
+        description: "Rose-accented dark, the iris app's default; needs truecolor.",
     },
 ];
 

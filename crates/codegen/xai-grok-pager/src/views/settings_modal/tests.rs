@@ -7163,6 +7163,7 @@ fn max_thoughts_width_preview_title_styling_distinguishes_from_content() {
         // because `theme::oscura` is a private module.
         crate::theme::ThemeKind::OscuraMidnight => crate::theme::Theme::current(),
         crate::theme::ThemeKind::Amore => crate::theme::Theme::amore(),
+        crate::theme::ThemeKind::Horizon => crate::theme::Theme::horizon(),
         crate::theme::ThemeKind::Auto => crate::theme::Theme::groknight(),
     };
     assert_ne!(

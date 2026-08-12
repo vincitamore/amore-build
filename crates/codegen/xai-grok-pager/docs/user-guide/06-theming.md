@@ -6,7 +6,7 @@ Grok Build draws all TUI colors from a central theme. You can switch themes whil
 
 ## Available Themes
 
-Grok includes five built-in themes, plus an `auto` option that follows your system appearance:
+Grok includes seven built-in themes, plus an `auto` option that follows your system appearance:
 
 | Theme | Config Names | Description | Truecolor Required |
 |-------|-------------|-------------|--------------------|
@@ -15,6 +15,8 @@ Grok includes five built-in themes, plus an `auto` option that follows your syst
 | **TokyoNight** | `tokyonight`, `tokyo-night`, `tokyo` | Dark, blue-tinted backgrounds from the Tokyo Night palette. Loses its character when quantized. | Yes |
 | **RosePineMoon** | `rosepine`, `rose-pine`, `rosepine-moon`, `rose-pine-moon` | Muted dark palette with mauve accents, from the Rosé Pine family. | Yes |
 | **OscuraMidnight** | `oscura`, `oscura-midnight` | Deep dark base with purple accents. | Yes |
+| **Amore** | `amore`, `amore-night`, `bow` | Rain-dark base, bow-blue accents, gold user accent. | Yes |
+| **Horizon** | `horizon` | Rose-accented dark, the iris app's default palette. | Yes |
 
 Theme names are case-insensitive. The `auto` option (alias `system`) is documented under [Auto Theme (System Appearance)](#auto-theme-system-appearance).
 
@@ -149,7 +151,7 @@ Use compact mode on small screens to maximize content area.
 
 Grok bundles three `.tmTheme` files for code-block syntax highlighting and selects one based on the active theme:
 
-- `grok-night.tmTheme` -- GrokNight, RosePineMoon, and OscuraMidnight
+- `grok-night.tmTheme` -- GrokNight, RosePineMoon, OscuraMidnight, Amore, and Horizon
 - `grok-day.tmTheme` -- GrokDay
 - `tokyo-night.tmTheme` -- TokyoNight
 

@@ -6,6 +6,12 @@ monorepo sync commits; everything below is the fork's own delta, newest first.
 This document is compiled into the binary — update it in the same change as the
 work it describes.
 
+## Unreleased
+
+- **Horizon theme** — the pager gains the iris app's default palette as a
+  selectable theme (`/theme horizon`): a rose brand accent with green success
+  and cyan information on the dark `#1c1e26` ground.
+
 ## v1.0.1
 
 Amore Build 1.0 — the first major release. Two headline surfaces land

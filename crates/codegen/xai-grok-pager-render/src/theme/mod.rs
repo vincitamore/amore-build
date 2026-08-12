@@ -20,6 +20,7 @@ pub mod osc11;
 mod oscura;
 mod rosepine;
 mod amore;
+mod horizon;
 pub mod system_appearance;
 mod terminal_default;
 pub mod tokyonight;
@@ -36,6 +37,7 @@ pub enum ThemeKind {
     RosePineMoon = 3,
     OscuraMidnight = 5,
     Amore = 6,
+    Horizon = 7,
     /// Meta-variant: follow system dark/light appearance.
     ///
     /// Never stored in `cache::CURRENT` — resolved to a concrete
@@ -55,6 +57,7 @@ impl ThemeKind {
         ThemeKind::RosePineMoon,
         ThemeKind::OscuraMidnight,
         ThemeKind::Amore,
+        ThemeKind::Horizon,
     ];
 
     /// Theme kinds available on the current terminal.
@@ -83,6 +86,7 @@ impl ThemeKind {
             Self::RosePineMoon => "rosepine-moon",
             Self::OscuraMidnight => "oscura-midnight",
             Self::Amore => "amore",
+            Self::Horizon => "horizon",
             Self::Auto => "auto",
         }
     }
@@ -100,6 +104,7 @@ impl ThemeKind {
             Self::RosePineMoon => true,
             Self::OscuraMidnight => true,
             Self::Amore => true,
+            Self::Horizon => true,
             // Auto is resolved to a concrete theme before rendering.
             Self::Auto => false,
         }
@@ -119,6 +124,7 @@ impl ThemeKind {
             }
             "oscura" | "oscura-midnight" => Some(Self::OscuraMidnight),
             "amore" | "amore-night" | "bow" => Some(Self::Amore),
+            "horizon" => Some(Self::Horizon),
             _ => None,
         }
     }
@@ -154,6 +160,7 @@ pub fn display_name_for_canonical(value: &str) -> &str {
         "grokday" => "Grok Day",
         "tokyonight" => "Tokyo Night",
         "rosepine-moon" => "Rose Pine Moon",
+        "horizon" => "Horizon",
         other => other,
     }
 }
@@ -281,6 +288,7 @@ impl Theme {
             ThemeKind::RosePineMoon => Self::rosepine_moon(),
             ThemeKind::OscuraMidnight => Self::oscura_midnight(),
             ThemeKind::Amore => Self::amore(),
+            ThemeKind::Horizon => Self::horizon(),
             // Auto is resolved to a concrete theme before being stored;
             // if reached, fall back to GrokNight.
             ThemeKind::Auto => Self::groknight(),
@@ -713,6 +721,8 @@ mod tests {
         assert!(!ThemeKind::TokyoNight.is_auto());
         assert!(!ThemeKind::RosePineMoon.is_auto());
         assert!(!ThemeKind::OscuraMidnight.is_auto());
+        assert!(!ThemeKind::Amore.is_auto());
+        assert!(!ThemeKind::Horizon.is_auto());
     }
 
     #[test]
@@ -733,6 +743,7 @@ mod tests {
         assert!(Theme::rosepine_moon().is_dark());
         assert!(Theme::oscura_midnight().is_dark());
         assert!(Theme::amore().is_dark());
+        assert!(Theme::horizon().is_dark());
         assert!(!Theme::grokday().is_dark());
     }
 
@@ -1072,6 +1083,7 @@ mod tests {
                 ThemeKind::RosePineMoon => Theme::rosepine_moon(),
                 ThemeKind::OscuraMidnight => Theme::oscura_midnight(),
                 ThemeKind::Amore => Theme::amore(),
+                ThemeKind::Horizon => Theme::horizon(),
                 ThemeKind::Auto => unreachable!("ALL excludes Auto"),
             };
             let track = lum(theme.scrollbar_bg, "scrollbar_bg", kind);
@@ -1220,6 +1232,7 @@ mod tests {
             ThemeKind::from_name("oscura-midnight"),
             Some(ThemeKind::OscuraMidnight)
         );
+        assert_eq!(ThemeKind::from_name("horizon"), Some(ThemeKind::Horizon));
     }
 
     /// `FromStr` agrees with `from_name` for all canonicals + aliases.
@@ -1243,6 +1256,7 @@ mod tests {
             ("rose-pine", ThemeKind::RosePineMoon),
             ("rosepine-moon", ThemeKind::RosePineMoon),
             ("rose-pine-moon", ThemeKind::RosePineMoon),
+            ("horizon", ThemeKind::Horizon),
         ];
         for (name, expected) in cases {
             assert_eq!(
