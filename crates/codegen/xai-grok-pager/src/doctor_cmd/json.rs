@@ -142,6 +142,20 @@ struct JsonUpdateFacts<'a> {
     last_seen_tag: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     install_dir: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    fleet_coherent: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tag: Option<&'a str>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    mismatches: Vec<JsonFleetMismatch<'a>>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct JsonFleetMismatch<'a> {
+    component: &'a str,
+    installed: &'a str,
+    expected: &'a str,
 }
 
 impl<'a> From<&'a crate::diagnostics::UpdateFacts> for JsonUpdateFacts<'a> {
@@ -152,6 +166,17 @@ impl<'a> From<&'a crate::diagnostics::UpdateFacts> for JsonUpdateFacts<'a> {
             last_check_at: f.last_check_at.as_deref(),
             last_seen_tag: f.last_seen_tag.as_deref(),
             install_dir: f.install_dir.as_deref(),
+            fleet_coherent: f.fleet_coherent,
+            tag: f.fleet_tag.as_deref(),
+            mismatches: f
+                .fleet_mismatches
+                .iter()
+                .map(|m| JsonFleetMismatch {
+                    component: m.component.as_str(),
+                    installed: m.installed.as_str(),
+                    expected: m.expected.as_str(),
+                })
+                .collect(),
         }
     }
 }

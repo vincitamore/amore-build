@@ -1847,6 +1847,29 @@ fn dispatch_setup_wizard_if_requested(args: &PagerArgs) -> bool {
     true
 }
 fn main() {
+    // Debug PE default stack overflows during init on this binary (Windows).
+    // Hop immediately onto an 8 MiB stack so every host/link profile survives
+    // without link-time /STACK or editbin. The update worker uses the same size.
+    const MAIN_STACK: usize = 8 * 1024 * 1024;
+    match std::thread::Builder::new()
+        .name("amore-main".into())
+        .stack_size(MAIN_STACK)
+        .spawn(main_body)
+    {
+        Ok(handle) => {
+            if handle.join().is_err() {
+                eprintln!("amore: fatal panic on main stack");
+                std::process::exit(101);
+            }
+        }
+        Err(e) => {
+            eprintln!("amore: could not start main stack ({e})");
+            std::process::exit(101);
+        }
+    }
+}
+
+fn main_body() {
     xai_grok_telemetry::startup::mark_process_start();
     if let Some(code) = xai_grok_pager::app::mermaid_worker::maybe_run_render_subprocess() {
         std::process::exit(code);
@@ -2143,26 +2166,31 @@ async fn async_main(args: PagerArgs) -> Result<()> {
             Command::Update {
                 check,
                 json,
+                dry_run,
+                yes,
+                allow_downgrade,
+                rollback,
                 force_reinstall,
                 version,
                 alpha,
                 stable,
                 enterprise,
-                trigger,
-                auto,
+                trigger: _,
+                auto: _,
             } => {
                 init_tracing_simple("cli");
                 let _otel_guard = xai_grok_telemetry::otel_layer::otel_guard();
                 let channel_switch = get_channel_switch(alpha, stable, enterprise);
-                let trigger = resolve_update_trigger(trigger.as_deref(), auto);
                 return run_update_command(
                     check,
                     json,
+                    dry_run,
+                    yes,
+                    allow_downgrade,
+                    rollback,
                     force_reinstall,
                     version,
                     channel_switch,
-                    trigger,
-                    &update_config,
                 )
                 .await;
             }
@@ -2328,28 +2356,22 @@ async fn async_main(args: PagerArgs) -> Result<()> {
 /// Prefers awaiting the parked waiter for the background update child spawned
 /// at startup. On child exit 0, re-reads the on-disk version rather than
 /// trusting the exit code. When there is no waiter or the child failed, falls
-/// back to a blocking `run_update` and classifies its real `Result<Option<String>>`.
+/// back to the fork apply path (`self_update::run_apply_result`, --yes
+/// semantics — the user already confirmed with Ctrl+U) and classifies through
+/// [`update_outcome::classify_run_update`].
 async fn finish_update_on_exit(
     adopted: Option<tokio::task::JoinHandle<std::io::Result<std::process::ExitStatus>>>,
-    update_config: &UpdateConfig,
+    _update_config: &UpdateConfig,
 ) -> update_outcome::UpdateOutcome {
-    let run_blocking = |reason: Option<String>| {
-        let mut cfg = update_config.clone();
-        async move {
-            if let Some(reason) = reason {
-                eprintln!("{reason}");
-            }
-            // Unconditional path: one-line re-point when self-update is re-enabled.
-            let result = auto_update::run_update(
-                false,
-                None,
-                None,
-                &mut cfg,
-                auto_update::CliUpdateTrigger::UserCommand,
-            )
-            .await;
-            update_outcome::classify_run_update(result.map_err(|e| format!("{e:#}")))
+    let run_blocking = |reason: Option<String>| async move {
+        if let Some(reason) = reason {
+            eprintln!("{reason}");
         }
+        // Same fleet apply entry as `amore update --yes` (no prompt).
+        let result = tokio::task::spawn_blocking(xai_grok_pager::self_update::run_apply_result)
+            .await
+            .unwrap_or_else(|e| Err(format!("update task failed: {e}")));
+        update_outcome::classify_run_update(result)
     };
     match adopted {
         Some(handle) => {
@@ -2475,88 +2497,33 @@ fn resolve_update_trigger(flag: Option<&str>, auto: bool) -> auto_update::CliUpd
 async fn run_update_command(
     check: bool,
     json: bool,
+    dry_run: bool,
+    yes: bool,
+    allow_downgrade: bool,
+    rollback: bool,
     force_reinstall: bool,
     version: Option<String>,
     channel_switch: Option<&str>,
-    trigger: auto_update::CliUpdateTrigger,
-    base_update_config: &UpdateConfig,
 ) -> Result<()> {
-    if json && !check {
-        anyhow::bail!("--json requires --check");
-    }
-    let mut update_config = base_update_config.clone();
-    if check {
-        if version.is_some() {
-            anyhow::bail!("--version cannot be used with --check");
-        }
-        if let Some(ch) = channel_switch {
-            if let Some(msg) = xai_grok_pager::self_update::channel_refusal_message(ch) {
-                eprintln!("{msg}");
-                std::process::exit(2);
-            }
-        }
-        let mut cfg = xai_grok_pager::self_update::CheckConfig::from_disk(false, false);
-        if let Some(ch) = channel_switch {
-            cfg.channel = Some(ch.to_string());
-        }
-        // Blocking HTTP (reqwest::blocking) must not run on the tokio worker.
-        let outcome = tokio::task::spawn_blocking(move || {
-            xai_grok_pager::self_update::check_status(&cfg)
-        })
-        .await
-        .map_err(|e| anyhow::anyhow!("update check task failed: {e}"))?;
-        xai_grok_pager::self_update::print_status(outcome.status(), json);
-        let code = outcome.exit_code();
-        if code != 0 {
-            std::process::exit(code);
-        }
-        return Ok(());
-    }
-    if let Some(ch) = channel_switch {
-        if let Some(msg) = xai_grok_pager::self_update::channel_refusal_message(ch) {
-            eprintln!("{msg}");
-            std::process::exit(2);
-        }
-    }
-    if let Some(ref v) = version
-        && semver::Version::parse(v).is_err()
-    {
-        anyhow::bail!(
-            "'{}' is not a valid version. Expected semver like 0.1.150",
-            v
-        );
-    }
-    let telemetry_cfg = xai_grok_shell::config::load_effective_config_disk_only()
-        .map_err(|e| tracing::warn!("grok update: telemetry init skipped (config load: {e})"))
-        .ok()
-        .and_then(|raw| {
-            AgentConfig::new_from_toml_cfg(&raw)
-                .map_err(|e| {
-                    tracing::warn!("grok update: telemetry init skipped (agent config: {e})")
-                })
-                .ok()
-        });
-    if let Some(agent_cfg) = telemetry_cfg {
-        let auth_manager = std::sync::Arc::new(xai_grok_shell::auth::AuthManager::new(
-            &xai_grok_shell::util::grok_home::grok_home(),
-            agent_cfg.grok_com_config.clone(),
-        ));
-        xai_grok_shell::agent::init::update_telemetry_config(&agent_cfg, &auth_manager);
-    }
-    let result = auto_update::run_update(
+    let cmd = xai_grok_pager::self_update::UpdateCommand {
+        check,
+        json,
+        dry_run,
+        yes,
+        allow_downgrade,
+        rollback,
         force_reinstall,
-        version.as_deref(),
-        channel_switch,
-        &mut update_config,
-        trigger,
-    )
-    .await;
-    if let Ok(Some(installed_version)) = &result {
-        signal_leaders_to_relaunch(installed_version).await;
+        version,
+        channel_switch: channel_switch.map(|s| s.to_string()),
+        cli_disable: false,
+    };
+    // Blocking HTTP / fleet I/O must not run on the tokio worker.
+    let code = tokio::task::spawn_blocking(move || xai_grok_pager::self_update::run_update(&cmd))
+        .await
+        .map_err(|e| anyhow::anyhow!("update task failed: {e}"))?;
+    if code != 0 {
+        std::process::exit(code);
     }
-    xai_grok_telemetry::session_ctx::drain_pending(xai_grok_telemetry::session_ctx::CLI_DRAIN)
-        .await;
-    result?;
     Ok(())
 }
 /// After a successful `grok update`, ask any running leader on this machine that

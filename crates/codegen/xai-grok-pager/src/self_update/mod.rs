@@ -17,4 +17,7 @@ pub use check::{
     UpdateStatus, check_background, check_background_with, check_status, check_status_with,
     doctor_update_facts,
 };
-pub use cmd::{CheckCommand, channel_refusal_message, print_status, run_check};
+pub use cmd::{
+    CheckCommand, UpdateCommand, channel_refusal_message, print_status, run_apply_result,
+    run_check, run_update,
+};

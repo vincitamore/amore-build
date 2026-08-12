@@ -1,14 +1,11 @@
-//! `grok update` is a recovery command: a config failure must not block it.
+//! `amore update` is a recovery command: a config failure must not block it.
 //!
-//! Hermetic: a local server serves the binary's own version as the channel
-//! pointer, so a healthy run exits 0 ("already up to date") and a corrupt
-//! config must too — reintroducing a config `?` fails exactly that run.
-//! The pointer must equal the current version: the installer converges in
-//! both directions, so an older pointer triggers a downgrade attempt.
+//! After the fork apply-path re-point, plain `update` must not touch live
+//! network from a test. Both runs set `AMORE_DISABLE_UPDATES=1` so the command
+//! exits 2 by policy in both cases, proving a corrupt config.toml cannot
+//! change the outcome or crash the policy path (option (a) from the seam brief).
 
-use std::io::{Read, Write};
 use std::process::Command;
-use std::sync::{Arc, Mutex};
 
 /// Resolve the pager binary like the PTY harness: `PAGER_BINARY` under
 /// Bazel (runfiles-relative), else cargo's compile-time constant.
@@ -22,76 +19,58 @@ fn pager_binary() -> std::path::PathBuf {
         .expect("PAGER_BINARY is unset and this build is not `cargo test`")
 }
 
-/// Local base answering every request with the channel pointer body.
-fn spawn_pointer_server(body: Arc<Mutex<String>>) -> (std::net::TcpListener, String) {
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let base = format!("http://{}", listener.local_addr().unwrap());
-    let serving = listener.try_clone().unwrap();
-    std::thread::spawn(move || {
-        for stream in serving.incoming() {
-            let Ok(mut stream) = stream else { return };
-            let mut buf = [0u8; 1024];
-            let _ = stream.read(&mut buf);
-            let version = body.lock().unwrap_or_else(|e| e.into_inner()).clone();
-            let _ = stream.write_all(
-                format!(
-                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                    version.len(),
-                    version
-                )
-                .as_bytes(),
-            );
-        }
-    });
-    (listener, base)
-}
-
-/// Run `grok update` in an isolated home against the local pointer base.
-fn run_update(base: &str, config_toml: &str, extra_args: &[&str]) -> std::process::Output {
+/// Run `amore update` in an isolated home with the kill switch set.
+fn run_update(config_toml: &str) -> std::process::Output {
     let home = tempfile::tempdir().unwrap();
     std::fs::write(home.path().join("config.toml"), config_toml).unwrap();
     Command::new(pager_binary())
         .arg("update")
-        .args(extra_args)
+        .arg("--yes")
         .env_clear()
         .env("HOME", home.path())
         .env("GROK_HOME", home.path())
         .env("PATH", std::env::var("PATH").unwrap_or_default())
-        .env("GROK_CLI_BASE_URL", base)
+        // Policy path only: never reach discovery / fleet network.
+        .env("AMORE_DISABLE_UPDATES", "1")
         .output()
-        .expect("spawn grok update")
+        .expect("spawn amore update")
 }
 
-/// The valid run proves the environment resolves to success, so a nonzero
-/// corrupt run can only mean a config failure aborted the update.
+fn exit_code(out: &std::process::Output) -> i32 {
+    out.status.code().unwrap_or(-1)
+}
+
+/// The valid run and the corrupt run must exit with the same policy code (2).
+/// A config parse failure must not change that outcome or abort before policy.
 #[test]
 fn corrupt_config_never_changes_update_outcome() {
-    let body = Arc::new(Mutex::new("0.0.1".to_owned()));
-    let (_listener, base) = spawn_pointer_server(body.clone());
+    let valid = run_update("[cli]\n");
+    let corrupt = run_update("this is not toml {{{[[[");
 
-    // Probe the binary's own version so the pointer matches it exactly.
-    let check = run_update(&base, "[cli]\n", &["--check", "--json"]);
-    let status: serde_json::Value = serde_json::from_slice(&check.stdout)
-        .unwrap_or_else(|e| panic!("update --check --json must emit JSON: {e}"));
-    let current = status["currentVersion"]
-        .as_str()
-        .expect("currentVersion in update --check --json")
-        .to_owned();
-    *body.lock().unwrap_or_else(|e| e.into_inner()) = current;
+    let valid_code = exit_code(&valid);
+    let corrupt_code = exit_code(&corrupt);
 
-    let valid = run_update(&base, "[cli]\n", &[]);
-    assert!(
-        valid.status.success(),
-        "healthy grok update against the local base must exit 0\nstdout:\n{}\nstderr:\n{}",
+    assert_eq!(
+        valid_code, 2,
+        "healthy config under AMORE_DISABLE_UPDATES=1 must exit 2 (policy)\nstdout:\n{}\nstderr:\n{}",
         String::from_utf8_lossy(&valid.stdout),
         String::from_utf8_lossy(&valid.stderr)
     );
-
-    let corrupt = run_update(&base, "this is not toml {{{[[[", &[]);
-    assert!(
-        corrupt.status.success(),
-        "a corrupt config.toml must not block grok update\nstdout:\n{}\nstderr:\n{}",
-        String::from_utf8_lossy(&corrupt.stdout),
+    assert_eq!(
+        corrupt_code, valid_code,
+        "a corrupt config.toml must not change the update outcome (both exit 2 by policy)\nvalid stderr:\n{}\ncorrupt stderr:\n{}",
+        String::from_utf8_lossy(&valid.stderr),
         String::from_utf8_lossy(&corrupt.stderr)
+    );
+    // Policy notice should appear without a panic / config hard-fail.
+    let valid_err = String::from_utf8_lossy(&valid.stderr);
+    let corrupt_err = String::from_utf8_lossy(&corrupt.stderr);
+    assert!(
+        valid_err.contains("AMORE_DISABLE_UPDATES") || valid_err.contains("blocked by policy"),
+        "expected policy notice on valid run, got: {valid_err}"
+    );
+    assert!(
+        corrupt_err.contains("AMORE_DISABLE_UPDATES") || corrupt_err.contains("blocked by policy"),
+        "expected policy notice on corrupt run, got: {corrupt_err}"
     );
 }

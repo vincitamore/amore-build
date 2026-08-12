@@ -40,10 +40,24 @@ pub const STATE_FILE_NAME: &str = ".amore-install.json";
 pub const SPEC_VERSION: u32 = 1;
 
 /// Per-file record of an activated install member.
+///
+/// `sha256` is always the **content** digest of the on-disk file (not the
+/// release archive). Archive / sidecar digests live in [`TargetRecord`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FileRecord {
     pub sha256: String,
     pub size: u64,
+}
+
+/// Per-target metadata that is not the on-disk content hash.
+///
+/// `archive_sha256` is the release-asset / sidecar digest used for
+/// content-addressed skip (compare remote `.sha256` without re-fetching the
+/// archive when it still matches).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct TargetRecord {
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub archive_sha256: String,
 }
 
 /// Contents of `.amore-install.json`.
@@ -51,6 +65,10 @@ pub struct FileRecord {
 /// Unknown fields are tolerated on read (serde default) so a newer writer can
 /// extend the document without breaking older readers. A `spec` other than
 /// [`SPEC_VERSION`] is treated as absent state by [`load`].
+///
+/// `files` holds content hashes; `targets` holds archive digests. Adding
+/// `targets` is forward-compatible (default empty on old documents), so
+/// [`SPEC_VERSION`] stays at 1.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InstallState {
     pub spec: u32,
@@ -64,6 +82,9 @@ pub struct InstallState {
     pub last_seen_tag: Option<String>,
     #[serde(default)]
     pub files: BTreeMap<String, FileRecord>,
+    /// Archive/sidecar digests keyed by the same basenames as [`Self::files`].
+    #[serde(default)]
+    pub targets: BTreeMap<String, TargetRecord>,
 }
 
 impl InstallState {
@@ -80,6 +101,7 @@ impl InstallState {
             last_check_at: None,
             last_seen_tag: None,
             files: BTreeMap::new(),
+            targets: BTreeMap::new(),
         }
     }
 }
@@ -262,7 +284,48 @@ mod tests {
                 size: 41943040,
             },
         );
+        state.targets.insert(
+            "amore.exe".into(),
+            TargetRecord {
+                archive_sha256: "archive-abc".into(),
+            },
+        );
         state
+    }
+
+    #[test]
+    fn targets_archive_digest_round_trips() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = sample_state();
+        store_atomic(dir.path(), &state).unwrap();
+        let loaded = load(dir.path()).unwrap().expect("state present");
+        assert_eq!(
+            loaded.targets.get("amore.exe").map(|t| t.archive_sha256.as_str()),
+            Some("archive-abc")
+        );
+        // files{} is the content hash, not the archive digest.
+        assert_eq!(
+            loaded.files.get("amore.exe").map(|f| f.sha256.as_str()),
+            Some("abc")
+        );
+    }
+
+    #[test]
+    fn missing_targets_map_defaults_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = state_path(dir.path());
+        let json = r#"{
+            "spec": 1,
+            "tag": "v1.0.0",
+            "channel": "stable",
+            "installed_at": "2026-08-11T00:00:00Z",
+            "version_floor": "1.0.0",
+            "files": {}
+        }"#;
+        fs::write(&path, json).unwrap();
+        let loaded = load(dir.path()).unwrap().expect("legacy shape");
+        assert!(loaded.targets.is_empty());
+        assert_eq!(loaded.spec, SPEC_VERSION);
     }
 
     #[test]

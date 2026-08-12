@@ -96,6 +96,18 @@ See ~/.amore/README.md for more information.
         /// Emit machine-readable JSON output (for --check).
         #[arg(long)]
         json: bool,
+        /// Report what would update without downloading or installing.
+        #[arg(long)]
+        dry_run: bool,
+        /// Skip the confirmation prompt and apply the update.
+        #[arg(long)]
+        yes: bool,
+        /// Allow installing a version at or below the recorded version floor.
+        #[arg(long)]
+        allow_downgrade: bool,
+        /// Restore the previous binary for each fleet target that has a `.prev`.
+        #[arg(long)]
+        rollback: bool,
         /// Force re-download and install even if already up to date.
         #[arg(long)]
         force_reinstall: bool,

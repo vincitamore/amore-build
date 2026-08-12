@@ -28,7 +28,7 @@ use serde::{Deserialize, Serialize};
 
 use super::discover::{self, Component};
 use super::fetch::{self, StagedArtifact};
-use super::state::{self, FileRecord, InstallState};
+use super::state::{self, FileRecord, InstallState, TargetRecord};
 use super::swap::{self, Rollback};
 
 /// Transaction marker filename (beside the install-state file).
@@ -828,10 +828,13 @@ where
     let mut archive_digests: std::collections::BTreeMap<String, String> =
         std::collections::BTreeMap::new();
 
-    // Carry digests for already-completed (skipped) files from install state.
+    // Carry archive digests for already-completed (skipped) files from install
+    // state targets{} (not files{}, which holds content hashes).
     for name in &marker.completed {
-        if let Some(rec) = install_state.files.get(name) {
-            archive_digests.insert(name.clone(), rec.sha256.clone());
+        if let Some(t) = install_state.targets.get(name) {
+            if !t.archive_sha256.is_empty() {
+                archive_digests.insert(name.clone(), t.archive_sha256.clone());
+            }
         }
     }
 
@@ -896,6 +899,9 @@ where
     }
 
     // FINALIZE
+    // files{} always stores the content sha256 of the activated on-disk file
+    // (re-hash unconditionally). targets{} stores the archive/sidecar digest
+    // used by content-addressed skip.
     let mut new_state = InstallState::new(&tag, opts.channel.as_str(), rfc3339_now());
     new_state.last_check_at = install_state.last_check_at.clone();
     new_state.last_seen_tag = Some(tag.clone());
@@ -907,23 +913,37 @@ where
             let meta = fs::metadata(&file.dest).map_err(|e| {
                 FleetError::Other(format!("stat {}: {e}", file.dest.display()))
             })?;
-            let digest = archive_digests
-                .get(&file.name)
-                .cloned()
-                .or_else(|| install_state.files.get(&file.name).map(|r| r.sha256.clone()))
-                .unwrap_or_else(|| {
-                    // Fall back to content hash of the activated file.
-                    xai_file_utils::sha256_hex_from_file(&file.dest, None)
-                        .unwrap_or_else(|_| String::new())
-                        .to_ascii_lowercase()
-                });
+            let content_sha = xai_file_utils::sha256_hex_from_file(&file.dest, None)
+                .map_err(|e| {
+                    FleetError::Other(format!("content hash {}: {e}", file.dest.display()))
+                })?
+                .to_ascii_lowercase();
             new_state.files.insert(
                 file.name.clone(),
                 FileRecord {
-                    sha256: digest,
+                    sha256: content_sha,
                     size: meta.len(),
                 },
             );
+            let archive = archive_digests
+                .get(&file.name)
+                .cloned()
+                .or_else(|| {
+                    install_state
+                        .targets
+                        .get(&file.name)
+                        .map(|t| t.archive_sha256.clone())
+                        .filter(|s| !s.is_empty())
+                })
+                .unwrap_or_default();
+            if !archive.is_empty() {
+                new_state.targets.insert(
+                    file.name.clone(),
+                    TargetRecord {
+                        archive_sha256: archive,
+                    },
+                );
+            }
         }
     }
     state::store_atomic(install_dir, &new_state)?;
@@ -1005,29 +1025,32 @@ where
     R: Fn(&str, &Path) -> Result<(), FleetError>,
 {
     // One sidecar GET per unit (shared archive for iris + dash).
+    // Compare against targets{}.archive_sha256 (not files{}.sha256, which is
+    // the on-disk content hash).
     let Some(first) = pending.first() else {
         return Ok(true);
     };
-    let Some(rec) = install_state.files.get(&first.name) else {
+    let Some(target) = install_state.targets.get(&first.name) else {
         return Ok(false);
     };
-    if rec.sha256.is_empty() {
+    if target.archive_sha256.is_empty() {
         return Ok(false);
     }
+    let archive = target.archive_sha256.as_str();
     let matches = (seams.sidecar_matches)(
         unit.component,
         tag,
         &opts.os,
         &opts.arch,
-        &rec.sha256,
+        archive,
     )?;
     if !matches {
         return Ok(false);
     }
-    // Require every pending file to have the same recorded digest (same archive).
+    // Require every pending file to share the same recorded archive digest.
     for f in pending {
-        match install_state.files.get(&f.name) {
-            Some(r) if r.sha256.eq_ignore_ascii_case(&rec.sha256) => {}
+        match install_state.targets.get(&f.name) {
+            Some(t) if t.archive_sha256.eq_ignore_ascii_case(archive) => {}
             _ => return Ok(false),
         }
     }
@@ -1654,13 +1677,21 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let install = dir.path();
         write_bin(&install.join("amore.exe"), "current-amore");
-        let digest = xai_file_utils::sha256_hex(b"amore.exe-v2.0.0");
+        let archive_digest = xai_file_utils::sha256_hex(b"amore.exe-v2.0.0");
+        let content_digest = xai_file_utils::sha256_hex(b"current-amore").to_ascii_lowercase();
         let mut st = InstallState::new("v1.0.0", "stable", "t0");
+        // files{} = content hash of on-disk binary; targets{} = archive digest.
         st.files.insert(
             "amore.exe".into(),
             FileRecord {
-                sha256: digest.clone(),
-                size: 12,
+                sha256: content_digest,
+                size: b"current-amore".len() as u64,
+            },
+        );
+        st.targets.insert(
+            "amore.exe".into(),
+            TargetRecord {
+                archive_sha256: archive_digest.clone(),
             },
         );
         // Floor below candidate so policy allows the transaction.
@@ -1673,7 +1704,7 @@ mod tests {
         let sidecar_hits2 = Arc::clone(&sidecar_hits);
 
         let opts = test_opts("windows", "x64");
-        let digest2 = digest.clone();
+        let digest2 = archive_digest.clone();
         let seams = FleetSeams {
             discover: || Ok("v2.0.0".into()),
             fetch: move |c, tag, os, arch, staging| {
@@ -1706,6 +1737,20 @@ mod tests {
         assert!(Marker::load(install).unwrap().is_none());
         let loaded = state::load(install).unwrap().unwrap();
         assert_eq!(loaded.tag, "v2.0.0");
+        // Content hash of the still-on-disk file is recorded in files{}.
+        let content = loaded.files.get("amore.exe").expect("content record");
+        assert_eq!(
+            content.sha256,
+            xai_file_utils::sha256_hex(b"current-amore").to_ascii_lowercase()
+        );
+        // Archive digest preserved in targets{}.
+        assert_eq!(
+            loaded
+                .targets
+                .get("amore.exe")
+                .map(|t| t.archive_sha256.as_str()),
+            Some(archive_digest.as_str())
+        );
     }
 
     #[test]

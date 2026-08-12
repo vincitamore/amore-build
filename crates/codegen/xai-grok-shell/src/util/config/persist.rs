@@ -722,6 +722,9 @@ auto_update = true
     /// newly-added fields without copy-pasting assertion lists.
     const CLI_CONFIG_OPTION_FIELDS: &[&str] = &[
         "auto_update",
+        "update_check",
+        "update_channel",
+        "update_pin",
         "dismissed_version",
         "installer",
         "npm_registry",
