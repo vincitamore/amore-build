@@ -1,0 +1,9 @@
+{
+  "hookEventName": "post_compact",
+  "sessionId": "compact-sess-7",
+  "cwd": "__HOUSE__",
+  "workspaceRoot": "__HOUSE__",
+  "timestamp": "2026-07-30T12:00:00Z",
+  "permissionMode": "default",
+  "source": "auto"
+}

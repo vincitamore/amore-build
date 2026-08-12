@@ -29,6 +29,7 @@ own tool spellings.
 |------|-------|------|
 | **Stop gate** | `Stop` (turn end) | Maintenance vigilance - durable work uncaptured? |
 | **Session init** | `SessionStart` | Orientation pointer + surface due reminders |
+| **Compact** | `PreCompact` / `PostCompact` | Disk-orientation packet; summary is forensics |
 
 **Stop gate release.** Fires at most once per operator turn on org workspaces
 (this tree has `AGENTS.md` + `tasks/`). Releases when any of:
@@ -64,7 +65,9 @@ not on origin → commit (push per operator policy).
 
 At arrival: run this ladder, then surface **due reminders**. The SessionStart
 hook points at this ladder and lists due items - a prompt, not a substitute
-for reading the surfaces.
+for reading the surfaces. After a compact boundary, re-read current-state
+and the active task from disk; the summary is forensics, not warrant. The
+compact hook points at that ladder.
 
 <!-- IF NO-LATTICE: begin remove - lattice orientation paragraph -->
 The principle lattice (`context/principle-lattice.md`) ships **default-on**
@@ -160,7 +163,7 @@ Frontmatter is the single source of truth.
 ├── projects/              # the work itself (see projects/README.md)
 ├── instruments/           # tools that act on this house (iris lands here)
 ├── scripts/               # house utilities (lint, orientation sync, …)
-└── .amore/               # skills/, hooks/ (stop gate + session init)
+└── .amore/               # skills/, hooks/ (stop gate + session init + compact)
 ```
 
 Empty containers carry `.gitkeep` so they survive a clone.

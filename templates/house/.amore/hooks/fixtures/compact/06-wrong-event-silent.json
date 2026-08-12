@@ -1,0 +1,9 @@
+{
+  "hookEventName": "session_start",
+  "sessionId": "compact-sess-6",
+  "cwd": "__HOUSE_WITH_ACTIVE__",
+  "workspaceRoot": "__HOUSE_WITH_ACTIVE__",
+  "timestamp": "2026-07-30T12:00:00Z",
+  "permissionMode": "default",
+  "source": "startup"
+}

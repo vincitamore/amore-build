@@ -6,6 +6,13 @@ monorepo sync commits; everything below is the fork's own delta, newest first.
 This document is compiled into the binary — update it in the same change as the
 work it describes.
 
+## v1.0.3
+
+- **House compact hook** — `amore init` plants a `PreCompact` / `PostCompact`
+  hook that emits a disk-orientation packet (re-read current-state and the
+  active task; the summary is forensics). The harness does not yet inject
+  that packet into the successor conversation.
+
 ## v1.0.2
 
 - **Lucerna status tells the truth** — the iris dashboard no longer reports a

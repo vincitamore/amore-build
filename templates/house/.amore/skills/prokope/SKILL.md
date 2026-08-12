@@ -20,7 +20,15 @@ description: >
 
 Named for Greek **προκοπή** (*prokopē*): progress as continuous advancement — the *viator* climb, not arrival. Matches the house lattice floor (never-arriving perfection): the loop is for the road.
 
-> Written for **Amore Build**: native task-tool dispatch, automatic context compaction (there is no reliable pre-compact hook, so the operational write is agent-owned), the git-committed task file as the durable handoff surface, and the tasks/knowledge/inbox lifecycle from AGENTS.md. The worked numbers below are illustrative — do not hardcode wave rates or domain-specific success bars as universal constants.
+> Written for **Amore Build**: native task-tool dispatch, automatic context
+> compaction (`PreCompact` / `PostCompact` events exist; the house pack
+> emits a disk-orientation packet; the harness does not yet consume hook
+> `additionalContext` on those events), the git-committed task file as
+> the durable handoff surface, and the tasks/knowledge/inbox lifecycle
+> from AGENTS.md. Tip-write before the boundary is still agent-owned: a
+> hook cannot update the task file. The worked numbers below are
+> illustrative — do not hardcode wave rates or domain-specific success
+> bars as universal constants.
 
 ## §0 · Self-updating
 
@@ -48,7 +56,7 @@ Ephemeral campaign state lives in the goal’s own surfaces (attack graph, statu
 | How to structure working surfaces (graph, ledger, notes) so tips outlive context | forge-master (no agent dispatch) |
 | How to keep **honesty** and **pressure** both alive across boundaries | A checklist that completes the goal |
 | How to wire sortes / isda / forge-master into the loop | Universal wave-count or hour-count quotas as success |
-| Compactification survival methodology (pre/post boundary protocols) | A compaction-hook substitute (automatic summary is not tip-write discipline) |
+| Compactification survival methodology (pre/post boundary protocols) | A substitute for tip-write (the house compact hook re-points at disk; it does not write tips, and the harness does not yet inject its packet) |
 
 **One-line law:** True success is named and hard; process volume is never success; state lives in **tips on disk**, not in the context window; when pressure dies **or** a compact boundary corrupts continuity, **re-arm** — do not add more waves in the same dead or ghost basin.
 
@@ -227,7 +235,17 @@ Generalize the pattern; rename for domain. **Surfaces exist so compactification 
 | **Soft compact** | Mid-session summarization; same session continues with degraded memory | Disk tips + brief (must already be written) |
 | **Hard re-arm** | Session ends; fresh session re-posts goal brief | Same surfaces + cold brief re-read |
 
-This harness runs compaction **automatically** when context fills. Do not depend on a pre-compact hook to write tips — Prokopē owns the operational write. What the harness gives you: automatic compaction plus the git-committed task file as the durable surface the next session orients from; the handoff discipline is the substance, not the machinery.
+This harness runs compaction **automatically** when context fills.
+`PreCompact` / `PostCompact` exist; the house pack emits a pointer
+packet (re-read current-state → active task → named tips; summary is
+forensics). The harness does **not** yet forward that
+`additionalContext` into the summarizer or the successor conversation
+— SessionStart is the consume pattern still waiting to be copied. Do
+not depend on a hook to write tips — Prokopē owns the operational
+write. What the harness gives you: automatic compaction plus the
+git-committed task file as the durable surface the next session
+orients from; the handoff discipline is the substance, not the
+machinery.
 
 ### One law
 

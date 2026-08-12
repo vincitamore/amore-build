@@ -1,5 +1,10 @@
 [
   {
+    "category": "features",
+    "description": "**House compact hook** — `amore init` plants a PreCompact / PostCompact hook that emits a disk-orientation packet (re-read current-state and the active task; the summary is forensics). The harness does not yet inject that packet into the successor conversation.",
+    "breaking_change": false
+  },
+  {
     "category": "fixes",
     "description": "**Lucerna status tells the truth** — iris honors the daemon's adaptive `intervalMs` for staleness, checks process liveness (a dead daemon reads Stopped; start/stop stop guessing), and the Activity card shows **Running** with the live phase; activity and last actions render from the fields the daemon writes.",
     "breaking_change": false

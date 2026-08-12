@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Branch-test matrix for house stop-gate + session-init hooks.
+"""Branch-test matrix for house stop-gate + session-init + compact hooks.
 
-Reads canned-envelope fixtures under fixtures/{stop-gate,session-init}/,
+Reads canned-envelope fixtures under fixtures/{stop-gate,session-init,compact}/,
 substitutes tempfile paths for placeholders (__HOUSE__, __BUSY_TRANSCRIPT__,
 …), then drives each script as:
 
@@ -22,8 +22,10 @@ from pathlib import Path
 HOOKS = Path(__file__).resolve().parent.parent
 STOP_PY = HOOKS / "bin" / "house_stop_gate.py"
 INIT_PY = HOOKS / "bin" / "house_session_init.py"
+COMPACT_PY = HOOKS / "bin" / "house_compact.py"
 FIXTURES_STOP = HOOKS / "fixtures" / "stop-gate"
 FIXTURES_INIT = HOOKS / "fixtures" / "session-init"
+FIXTURES_COMPACT = HOOKS / "fixtures" / "compact"
 
 USERQ = {
     "type": "user",
@@ -152,6 +154,26 @@ def main() -> int:
             encoding="utf-8",
         )
 
+        house_active = td_path / "house-active"
+        make_house(house_active)
+        (house_active / "tasks" / "ship-it.md").write_text(
+            "---\n"
+            "type: task\n"
+            "status: active\n"
+            "created: 2026-07-01\n"
+            "completed: null\n"
+            "tags: []\n"
+            "---\n\n"
+            "# Ship the thing\n\nDo the work.\n",
+            encoding="utf-8",
+        )
+        cs = house_active / "context" / "current-state.md"
+        cs.write_text(
+            "---\ntype: context\nupdated: 2026-07-30\n---\n\n"
+            "# Current state\n\nSee [[tasks/ship-it]].\n",
+            encoding="utf-8",
+        )
+
         house_future = td_path / "house-future"
         make_house(house_future)
         (house_future / "reminders" / "future.md").write_text(
@@ -181,12 +203,13 @@ def main() -> int:
             "__HOUSE_WITH_DUE__": str(house_due).replace("\\", "/"),
             "__HOUSE_WITH_MALFORMED__": str(house_bad).replace("\\", "/"),
             "__HOUSE_WITH_FUTURE__": str(house_future).replace("\\", "/"),
+            "__HOUSE_WITH_ACTIVE__": str(house_active).replace("\\", "/"),
         }
 
         env = dict(os.environ)
         env["GROK_HOME"] = str(home)
-        env["AMORE_HOME"] = str(home)
-        env.pop("AMORE_SESSION_INIT_NOW", None)
+        env["ARCUS_HOME"] = str(home)
+        env.pop("ARCUS_SESSION_INIT_NOW", None)
 
         # --- Stop gate (order matters for fired-state: 01 then 02 same session) ---
         stop_cases = [
@@ -214,7 +237,7 @@ def main() -> int:
 
         # --- Session-init ---
         env_due = dict(env)
-        env_due["AMORE_SESSION_INIT_NOW"] = "2026-07-30T12:00:00"
+        env_due["ARCUS_SESSION_INIT_NOW"] = "2026-07-30T12:00:00"
 
         init_cases = [
             ("01-no-reminders-silent.json", "init: no reminders → silent", env,
@@ -242,6 +265,57 @@ def main() -> int:
             envelope = materialize(raw, mapping)
             rc, out, err = pipe_script(INIT_PY, envelope, e, mat_dir / fname)
             check(label, pred(rc, out), f"rc={rc} out={out[:120]!r}")
+
+        # --- Compact ---
+        env_due = dict(env)
+        env_due["ARCUS_SESSION_INIT_NOW"] = "2026-07-30T12:00:00"
+
+        compact_cases = [
+            ("01-pre-non-house-silent.json", "compact: pre non-house → silent", env,
+             lambda rc, out: rc == 0 and out == ""),
+            ("02-pre-house-snapshot.json", "compact: pre house → snapshot", env,
+             lambda rc, out: (
+                 rc == 0
+                 and "hookSpecificOutput" in out
+                 and "PreCompact" in out
+                 and "source of record" in out
+                 and "tasks/ship-it.md" in out
+                 and "Ship the thing" in out
+                 and "cited by current-state" in out
+             )),
+            ("03-post-house-orientation.json", "compact: post house → orientation", env,
+             lambda rc, out: (
+                 rc == 0
+                 and "PostCompact" in out
+                 and "forensics, not warrant" in out
+                 and "context/current-state.md" in out
+                 and "tasks/ship-it.md" in out
+             )),
+            ("04-post-non-house-silent.json", "compact: post non-house → silent", env,
+             lambda rc, out: rc == 0 and out == ""),
+            ("05-post-due-reminder.json", "compact: post due reminder listed", env_due,
+             lambda rc, out: (
+                 rc == 0
+                 and "PostCompact" in out
+                 and "Renew certs" in out
+                 and "forensics, not warrant" in out
+             )),
+            ("06-wrong-event-silent.json", "compact: wrong event → silent", env,
+             lambda rc, out: rc == 0 and out == ""),
+            ("07-post-no-active-task.json", "compact: post no active task still emits", env,
+             lambda rc, out: (
+                 rc == 0
+                 and "PostCompact" in out
+                 and "Active tasks on disk: none" in out
+                 and "forensics, not warrant" in out
+             )),
+        ]
+
+        for fname, label, e, pred in compact_cases:
+            raw = (FIXTURES_COMPACT / fname).read_text(encoding="utf-8")
+            envelope = materialize(raw, mapping)
+            rc, out, err = pipe_script(COMPACT_PY, envelope, e, mat_dir / fname)
+            check(label, pred(rc, out), f"rc={rc} out={out[:140]!r}")
 
     failed = [r for r in results if not r[1]]
     print(f"\n{len(results) - len(failed)}/{len(results)} passed")

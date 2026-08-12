@@ -25,7 +25,7 @@ share one contract.
 | [[reminders/README\|reminders/]] | Time-based obligations |
 | [[forge/README\|forge/]] | Pipeline products (handles, outputs, session manifests) |
 | `scripts/` | House utilities (lint, orientation sync, …) |
-| `.amore/` | Skills and hooks (stop gate + session init) |
+| `.amore/` | Skills and hooks (stop gate + session init + compact) |
 
 ## Frontmatter
 
