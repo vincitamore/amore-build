@@ -6,6 +6,45 @@ monorepo sync commits; everything below is the fork's own delta, newest first.
 This document is compiled into the binary — update it in the same change as the
 work it describes.
 
+## v1.0.1
+
+Amore Build 1.0 — the first major release. Two headline surfaces land
+together: a Sessions member that makes the working record navigable, and an
+integrated update path that keeps an installation current from this fork's
+own releases. Version numbering follows the upstream line, which crossed
+1.0 in the same window.
+
+- **The Sessions member, at full depth.** The iris dash now carries the
+  whole session corpus: a microscope with honest full-corpus navigation
+  (filters, sort, parentage jumps, in-session search) and a turn-level
+  detail pane that actually magnifies; probes with scope controls, trend
+  sparklines, and per-probe methodology detail; a session map that draws
+  real evidence — resume lineage and shared-artifact edges — with a time
+  axis and hover readouts; search filter chips, usage windows, and lens
+  reports rendered readable. Sessions gain generated one-line titles from
+  a cheap opt-in summarizer, so the picker reads as a record instead of a
+  wall of id prefixes.
+- **`amore update`, end to end.** A default-on, kill-switchable version
+  check (24-hour cadence, zero-quota redirect probe) surfaces a welcome
+  tip; Ctrl+U or `amore update` applies a fleet transaction that moves
+  `amore` and every installed companion to the same tag together —
+  sidecar-verified digests, staging smoke before activation, an exclusive
+  lock, content-addressed skip so unchanged targets download nothing, and
+  `--rollback` restoring the previous binaries and config beside them.
+  `amore doctor` reports install state and fleet coherence. Apply is
+  always user-initiated; there is no unattended install path.
+- **The update origin is locked.** Updates come only from this
+  repository's releases: the origin is named in exactly one module,
+  verify-pinned, and the inherited upstream installer paths stay
+  hard-off behind guarded, tested refusals. Companions now report their
+  release tag, so staleness is visible instead of silent.
+- **Supply-chain and startup hardening.** Every workflow action is
+  SHA-pinned with automated update review; the release pipeline smokes
+  its installers against real published assets and the released binaries
+  prove their own update surface on all five targets; a remote
+  deployment-config response can no longer prevent the binary from
+  starting.
+
 ## v0.3.1
 
 A reliability and hygiene patch on the v0.3.0 line, driven by a verified

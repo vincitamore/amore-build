@@ -1,5 +1,20 @@
 [
   {
+    "category": "features",
+    "description": "**Amore Build 1.0** — the Sessions member lands at full depth: a microscope that navigates the whole corpus with turn-level detail, scoped probes with trends, a map drawing real resume and shared-artifact links, and generated session titles.",
+    "breaking_change": false
+  },
+  {
+    "category": "features",
+    "description": "**`amore update`, end to end** — a default-on kill-switchable check surfaces a welcome tip; Ctrl+U or `amore update` applies a verified fleet transaction moving amore and every installed companion together, with `--rollback` and doctor fleet coherence. Never unattended.",
+    "breaking_change": false
+  },
+  {
+    "category": "fixes",
+    "description": "**Hardening** — the update origin is single-sourced and gate-pinned to this repository's releases; workflow actions are SHA-pinned; released assets prove their own update surface on all five targets; a remote config response can no longer block startup.",
+    "breaking_change": false
+  },
+  {
     "category": "fixes",
     "description": "**Agent turns are more reliable** — a delta carrying more than one reasoning-trace spelling no longer ends the turn; a zero-output length stop is treated as input overflow and routes to compaction; foreign reasoning signatures are stripped on a model-backend switch.",
     "breaking_change": false
