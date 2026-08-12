@@ -30,7 +30,7 @@ import {
   agenticMaxTurns,
 } from "./agentic.ts";
 import { killProcessTree, runAmoreProcess } from "./engine/amore-headless.ts";
-import { houseRuntimeDir } from "./paths.ts";
+import { houseRuntimeDir, enablementPath } from "./paths.ts";
 import type { LucernaConfig } from "./config.ts";
 import { runDreamCycle, type HeadlessCaller } from "./somniator.ts";
 import { StateManager } from "./state.ts";
@@ -54,6 +54,14 @@ function syntheticHouse(): string {
 function makeConfig(house: string, dreamsEnabled: boolean): LucernaConfig {
   const runtimeDir = houseRuntimeDir(house);
   mkdirSync(runtimeDir, { recursive: true });
+  if (dreamsEnabled) {
+    mkdirSync(join(house, ".amore", "lucerna"), { recursive: true });
+    writeFileSync(
+      enablementPath(house),
+      JSON.stringify({ dreamsEnabled: true, autoCommitLive: false }),
+      "utf-8",
+    );
+  }
   return {
     houseRoot: house,
     runtimeDir,

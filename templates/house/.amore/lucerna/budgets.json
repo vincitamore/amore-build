@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "dailyActionCap": 12,
+  "weeklyExpensiveCap": 6,
+  "cycleCooldownMinutes": 120,
+  "dailyTokenCeiling": 200000,
+  "dreamsReserveTokens": 80000,
+  "autoCommitCooldownMinutes": 30
+}

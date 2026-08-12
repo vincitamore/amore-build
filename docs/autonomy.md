@@ -18,12 +18,21 @@ house tree, enforces budgets and default-deny writes, and runs **opt-in**
 maintenance actions. Model calls go only through the operator's own `amore`
 configuration via a headless process spawn. Lucerna embeds no provider SDK,
 no API keys, and no hardcoded model identifiers. It opens **no network
-listener**. Control stays file-based under
-`<house>/instruments/lucerna/`.
+listener**.
+
+Control is file-based, in two directories:
+
+| Directory | Role |
+|-----------|------|
+| `<house>/.amore/lucerna/` | Charter — what the daemon **may do** (`enable.json`, `budgets.json`, `chores.json`, `governance.user.toml`). The daemon cannot write here. |
+| `<house>/instruments/lucerna/` | Runtime — what the daemon **has done** (health, state, log, notifications, sentinels). |
 
 Iris can observe and operate Lucerna through a loopback file proxy
 (`127.0.0.1:3853`) without giving Lucerna a second listener. That surface is
-documented in [iris-lucerna.md](iris-lucerna.md).
+loopback-unauthenticated. Documented in [iris-lucerna.md](iris-lucerna.md).
+
+Per-house caps do not sum to a machine cap. Several houses sharing one API
+key each have their own ceilings.
 
 ---
 
@@ -42,7 +51,7 @@ autonomy requires both install and a later enablement flip.
 
 ## Enablement defaults
 
-File: `<house>/instruments/lucerna/lucerna.enable.json`
+File: `<house>/.amore/lucerna/enable.json`
 
 ```json
 {
@@ -54,18 +63,25 @@ File: `<house>/instruments/lucerna/lucerna.enable.json`
 | Field | Default | Meaning |
 |-------|---------|---------|
 | `dreamsEnabled` | `false` | Autonomous dream scheduling |
-| `autoCommitLive` | `false` | Live auto-commit; dry-run when false |
+| `autoCommitLive` | `false` | Live auto-commit; dry-run (git word: draft only, no commit) when false |
 
 **Absent file: both false.** Malformed JSON: both false (with a log line).
 CLI flags (`--dreams-enabled`, `--auto-commit-live`) and env vars
 (`LUCERNA_DREAMS_ENABLED=1`, `LUCERNA_AUTO_COMMIT_LIVE=1`) OR with the file
-for one-shot override. Safe defaults never flip themselves on.
+for one-shot override. Safe defaults never flip themselves on. A file edit
+does not revoke an env/argv enablement.
 
-Auto-commit drafting may still run on its own schedule when auto-commit is
-not fully disabled (`LUCERNA_AUTO_COMMIT=0` or `--no-auto-commit` turns it
-off). With `autoCommitLive` false, drafts are dry-run only. Live mode
-remains draft-only until a hardened live path ships; treat live as "not a
-silent git commit" regardless of the flag name.
+If the charter file is absent and a legacy
+`<house>/instruments/lucerna/lucerna.enable.json` exists, that file is
+still *read*. It is never written.
+
+**Dreams-off is not spend-off.** Auto-commit drafting still runs on its own
+schedule (default 30 minutes) against your configured model and key, from
+its own token allowance, whether or not dreams are enabled. Dry-run means
+"do not commit," not "do not call a model." Turn drafting off with
+`LUCERNA_AUTO_COMMIT=0` or `--no-auto-commit`. Live mode remains draft-only
+until a hardened live path ships; treat live as "not a silent git commit"
+regardless of the flag name.
 
 ---
 
@@ -77,9 +93,15 @@ match **protected**. Paths outside the house root are always protected.
 ### Never writable autonomously (shipped protected)
 
 `AGENTS.md`, `CLAUDE.md`, `context/`, `knowledge/`, `tasks/`, `reminders/`,
-`tags/`, `graph/`, `projects/`, `archive/`, `scripts/`, `.amore/`, `.grok/`,
-`.claude/`, `instruments/` (with residual write only for Lucerna runtime
-files under `instruments/lucerna/`, not package source).
+`tags/`, `graph/`, `projects/`, `archive/`, `scripts/`, `.amore/` (including
+charter), `.grok/`, `.claude/`, `instruments/` (package and instrument
+source). Residual write is an **allow-list** of Lucerna runtime basenames
+under `instruments/lucerna/` only: `health.json`, `state.json`, `log`,
+`notifications.jsonl`, `daemon.pid`, `halt`, `wake`, `sleep`, plus write
+artifacts (`log.N`, `*.tmp`, `draft-*`). Enablement and user-governance
+files are not on that list.
+
+These lists bound **writes**, not reads.
 
 ### Shipped writable
 
@@ -88,12 +110,12 @@ files under `instruments/lucerna/`, not package source).
 ### User extension (`protected_extra`)
 
 ```toml
-# <house>/instruments/lucerna/governance.user.toml
+# <house>/.amore/lucerna/governance.user.toml
 protected_extra = ["secrets/", "private/"]
 ```
 
 User entries are **additive only**. They never remove shipped protection and
-never widen the writable set.
+never widen the writable set. A user extra outranks the residual allow-list.
 
 All autonomous writers call a shared write guard before creating files.
 
@@ -101,19 +123,65 @@ All autonomous writers call a shared write guard before creating files.
 
 ## Budgets and ceilings
 
-| Cap | Shipped default |
-|-----|-----------------|
-| Actions per calendar day | 12 |
-| Expensive (recipe / agentic) actions per ISO week | 6 |
-| Cycle cooldown | 2 hours (1 hour short cooldown after a zero-action cycle) |
-| Light-action cooldown | 24 hours per action key |
-| Recipe / agentic cooldown | 12 hours per action key |
-| Soft daily token ceiling | 200_000 tokens from driver usage envelopes |
+File: `<house>/.amore/lucerna/budgets.json`. Absent file → shipped defaults,
+no warning. Malformed file → shipped defaults, a warning, and a
+`charter-malformed` notice; the panel still renders. The daemon never
+writes this file.
+
+Precedence for every knob: **`argv > env > file > shipped`**. Each resolved
+knob carries `source` (`shipped` / `file` / `env` / `argv`) and
+`aboveShipped`. The file **may** raise a cap above the shipped default;
+surfaces show `aboveShipped` when that happens.
+
+| Cap | Shipped default | Notes |
+|-----|-----------------|-------|
+| Actions per calendar day (`dailyActionCap`) | 12 | `0` is an explicit disable (daemon may run, takes no actions). Rendered "disabled (cap 0)", never `0/0`. |
+| Expensive (recipe / agentic) actions per ISO week | 6 | Resets on the ISO week. |
+| Cycle cooldown | 2 hours | File floor 30 minutes. **1 hour short cooldown** after a zero-action cycle (wired: all-disabled / cap-0 pre-planner refusal, and any completed cycle that took no catalog action). |
+| Light-action cooldown | 24 hours per action key | Compile-time class floor; roster may only lengthen. |
+| Recipe / agentic cooldown | 12 hours per action key | Same lengthen-only rule. |
+| Soft daily token ceiling | 200_000 tokens from driver usage envelopes | Soft: a running call can overshoot. `0` disables spend. |
+| Dreams reserve (`dreamsReserveTokens`) | 80_000 | Auto-commit effective ceiling is `dailyTokenCeiling − reserve` (shipped: **120_000**). Dreams test the full ceiling. Reserve ≥ ceiling is invalid → that field falls back to shipped. |
+
+Capability on the snapshot (composed with Running; never a fifth liveness
+state): **`ready` | `cooling` | `refusing`**, plus a named `reasonCode`
+(`token-ceiling`, `daily-cap`, `cooldown`, `config-invalid`,
+`roster-empty`, `cap-zero`).
+
+Token counters: one `tokensToday`, equal to the sum of
+`tokensTodayBySource` (`planner`, `agentic`, `autoCommit`) when the map is
+present. Auto-commit drafts refuse at `ceiling − reserve` while dreams may
+still start. A planner call is not started unless `tokensToday` plus a
+reservation room fits the dreams ceiling. That states the overshoot bound;
+it is not a hard per-call limit.
 
 Operator overrides (env): `LUCERNA_DAILY_ACTION_CAP`,
 `LUCERNA_WEEKLY_EXPENSIVE_CAP`, `LUCERNA_CYCLE_COOLDOWN_HOURS`,
-`LUCERNA_DAILY_TOKEN_CEILING`. A refused cycle records its reason in
-`state.json` and the activity log.
+`LUCERNA_DAILY_TOKEN_CEILING`, `LUCERNA_DREAMS_RESERVE_TOKENS`,
+`LUCERNA_AUTO_COMMIT_COOLDOWN_MINUTES`. Invalid integer forms (`1e9`,
+`200_000`) are rejected and that field stays at shipped. A refused cycle
+records its reason in `state.json` and the activity log.
+
+Edit the three integer caps from the Lucerna tab (`b`) or
+`iris lucerna budgets set <cap> <value>`. Cooldown knobs are CLI-only.
+Changes apply at the next cycle.
+
+## Chore roster
+
+File: `<house>/.amore/lucerna/chores.json`. The user-facing noun is
+**chores**. The roster **narrows**; it cannot invent a key the build does
+not ship, and it cannot change spawn flags (tools, wall, turns, model,
+subagents, budget class, governance paths). Unlisted keys, an absent file,
+or an absent `enabled` field mean **enabled**. Unknown keys and unknown
+entry fields are ignored. Malformed roster JSON refuses the cycle (falling
+back to "everything admitted" would widen).
+
+Admitted fields per entry: `enabled`, `minIntervalHours`. Interval is
+lengthen-only against the compiled class floor.
+
+`--force` / `--action <key>` will not run a chore the roster has disabled.
+Open the overlay with `c`; toggle a row with `t`. CLI:
+`iris lucerna chores list|show|enable|disable|interval`.
 
 ---
 
@@ -123,12 +191,13 @@ Operator overrides (env): `LUCERNA_DAILY_ACTION_CAP`,
 
 When `dreamsEnabled` is true, Lucerna may run one planner call per cycle and
 execute at most one admitted light action (`survey-org`, `substrate-health`,
-`inbox-age-report`, `state-cleanup`) or skip. Light actions themselves do not
-call a model; the planner pick does, through `amore` headless. Reports land
+`inbox-age-report`, `state-cleanup`, `edges-update`, `qmd-refresh`) or skip.
+Light actions themselves do not call a model; the planner pick does, through
+`amore` headless. A `skip` still spends that planner call. Reports land
 under `forge/dreams/` with frontmatter including `triggered-by: dream`.
 
 `lucerna dream-cycle --force` may override the cycle schedule only. It never
-overrides enablement.
+overrides enablement, and it will not run a roster-disabled chore.
 
 ### Agentic maintenance dreams
 
@@ -188,7 +257,7 @@ seconds. A timeout is a failed action, not a hang.
 
 | Claim | How to verify |
 |-------|----------------|
-| Lucerna has no listener | no bind in package; control is files under `instruments/lucerna/` |
+| Lucerna has no listener | no bind in package; charter under `.amore/lucerna/`; runtime under `instruments/lucerna/` |
 | Iris is loopback only | [ports.md](ports.md); default `127.0.0.1:3853` |
 | Model traffic uses operator config only | [egress.md](egress.md); capture scripts below |
 | No daemon-owned provider endpoints | no SDK/keys/model ids in Lucerna sources |
@@ -213,14 +282,21 @@ Non-Linux hosts exit with an honest message; the method is not emulated.
 
 ## Disable and kill paths
 
-| Action | Effect |
-|--------|--------|
-| `echo > <house>/instruments/lucerna/halt` or `iris lucerna halt` | request graceful stop |
-| `iris lucerna stop` / tab `k` | halt, then pid-verified kill if still alive |
-| Set `dreamsEnabled` to `false` | autonomous dreams stop |
-| Delete or break `lucerna.enable.json` | both knobs false |
-| `LUCERNA_AUTO_COMMIT=0` | auto-commit drafting off |
-| Remove binary / uninstall companion | nothing left to schedule |
+Editing or deleting a charter file (`enable.json`, `budgets.json`,
+`chores.json`, `governance.user.toml`) stops the **next** cycle from
+starting. The `halt` sentinel and process stop are the only paths that
+interrupt work already running. Deleting a file does not stop a cycle that
+is already in flight.
+
+| Action | Effect | Scope |
+|--------|--------|-------|
+| `echo > <house>/instruments/lucerna/halt` or `iris lucerna halt` | request graceful stop | current unit finishes; next unit does not start |
+| `iris lucerna stop` / tab `k` | halt, then pid-verified kill if still alive | **immediate** after halt timeout |
+| Set `dreamsEnabled` to `false` | autonomous dreams will not start | **next cycle** (file edit does not revoke env/argv) |
+| Delete or break `enable.json` | both knobs false | **next cycle** |
+| Edit or delete `budgets.json` / `chores.json` | new caps / roster take effect | **next cycle** (or next auto-commit draft attempt) |
+| `LUCERNA_AUTO_COMMIT=0` | auto-commit drafting off | **next draft attempt** |
+| Remove binary / uninstall companion | nothing left to schedule | **immediate** (no process) |
 
 `sleep` and `wake` sentinels only affect heartbeat phase and cycle timing;
 they do not invent enablement. `wake` can request an immediate cycle only
@@ -231,10 +307,15 @@ when dreams are already enabled.
 ## Operator checklist
 
 1. Confirm Lucerna was installed only if `--with-lucerna` was used.
-2. Read `lucerna.enable.json` (or confirm it is absent).
-3. Read `governance.user.toml` if present; know your `protected_extra` list.
-4. Run `lucerna status --house <house>` (or `iris lucerna status`) and confirm
-   dreams OFF unless you flipped them.
-5. On Linux, run `scripts/lucerna_egress_capture.sh` against your own config
+2. Read `.amore/lucerna/enable.json` (or confirm it is absent).
+3. Read `.amore/lucerna/budgets.json` and `.amore/lucerna/chores.json`
+   (the roster). Know which chores are enabled and which caps are
+   `aboveShipped`.
+4. Read `.amore/lucerna/governance.user.toml` if present; know your
+   `protected_extra` list.
+5. Run `lucerna status --house <house>` (or `iris lucerna status` /
+   `iris lucerna budgets`) and confirm dreams OFF unless you flipped them.
+6. On Linux, run `scripts/lucerna_egress_capture.sh` against your own config
    and require PASS with only configured host / DNS / local endpoints.
-6. Know the halt path before enabling dreams on a shared machine.
+7. Know the halt / stop path (and its scope) before enabling dreams on a
+   shared machine.

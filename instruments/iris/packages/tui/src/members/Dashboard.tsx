@@ -24,6 +24,7 @@ import { Stat } from '../components/Stat';
 import {
   formatLucernaDisplayLine,
   formatLucernaPulseStatus,
+  formatPulseRefusingSubLine,
   formatPulseSubLine,
   pulsePanelInnerWidth,
 } from './lucerna-display';
@@ -448,6 +449,9 @@ export function Dashboard({
     lastNotification: { message?: string; kind?: string; level?: string } | null;
     pendingReview?: { dreams: number; proposals: number; total: number };
     phase?: string;
+    capability?: { state?: string; resumesAt?: string; reasonCode?: string };
+    tokens?: string;
+    actionsToday?: number;
   } | null>(null);
   /** Speculum status freshness pulse — once at mount, again on re-activation. */
   const [speculumPulse, setSpeculumPulse] = useState<SpeculumPulseView | null>(null);
@@ -507,6 +511,9 @@ export function Dashboard({
               lastNotification: { message?: string; kind?: string; level?: string } | null;
               pendingReview?: { dreams: number; proposals: number; total: number };
               phase?: string;
+              capability?: { state?: string; resumesAt?: string; reasonCode?: string };
+              tokens?: string;
+              actionsToday?: number;
             },
           );
         }
@@ -673,11 +680,13 @@ export function Dashboard({
       >
         <text
           fg={
-            lucernaPulse?.state === 'running'
-              ? t.success
-              : lucernaPulse?.state === 'stale'
-                ? t.error
-                : t.muted
+            lucernaPulse?.state === 'running' && lucernaPulse.capability?.state === 'refusing'
+              ? t.warning
+              : lucernaPulse?.state === 'running'
+                ? t.success
+                : lucernaPulse?.state === 'stale'
+                  ? t.error
+                  : t.muted
           }
           wrapMode="none"
         >
@@ -702,7 +711,13 @@ export function Dashboard({
         backgroundColor={t.background}
       >
         <text fg={t.muted} wrapMode="none">
-          {formatPulseSubLine(lucernaPulse?.lastNotification?.message, pulseInnerW)}
+          {lucernaPulse?.state === 'running' && lucernaPulse.capability?.state === 'refusing'
+            ? formatPulseRefusingSubLine(
+                lucernaPulse.tokens,
+                lucernaPulse.actionsToday,
+                pulseInnerW,
+              )
+            : formatPulseSubLine(lucernaPulse?.lastNotification?.message, pulseInnerW)}
         </text>
       </box>
       {/* Speculum pulse — one status line; click opens Sessions. No analytics here. */}

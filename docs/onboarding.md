@@ -88,8 +88,12 @@ iris companion install (§ below).
       house-session-init.json
       README.md
       bin/  fixtures/
-    skills/                       # 6-skill pack + README
+    lucerna/
+      budgets.json                # shipped spend caps (--refresh preserves edits)
+      chores.json                 # shipped chore roster (--refresh preserves edits)
+    skills/                       # 9-skill pack + README
       forge-master/  auriga/  oeconomia/  prokope/  sortes/  isda/
+      somniator/  iris/  speculum/
 ```
 
 **Iris companion (also installed by default):** init downloads the iris
@@ -161,7 +165,9 @@ content belongs to and how to customize it safely.
 | Org scaffolds | `inbox/ tasks/ knowledge/ reminders/ forge/` READMEs + `.gitkeep` skeletons | Scaffold is tool-managed; **everything you add under them is yours** and never touched by init. Leave READMEs until you intentionally fork the schema docs. |
 | House/projects boundary | `.gitignore`, `projects/README.md`, `instruments/README.md` | Tool-managed while untouched. The boundary keeps project repos out of the house repo (`projects/*` ignored, READMEs tracked). |
 | Hooks pack | `.amore/hooks/**` (registrations, `bin/`, `fixtures/`) | Tool-managed pack; yours after you edit. Prefer config tweaks over forking scripts; `--no-hooks` drops the pack + registry line. |
-| Skills pack | `.amore/skills/**` (6 skills + README) | Tool-managed pack; edit `SKILL.md` + support files freely, skill-local changes preserved on `--refresh`. `--no-skills` drops the tree. |
+| Skills pack | `.amore/skills/**` (9 skills + README, including `somniator`) | Tool-managed pack; edit `SKILL.md` + support files freely, skill-local changes preserved on `--refresh`. `--no-skills` drops the tree. |
+| Lucerna charter (planted) | `.amore/lucerna/budgets.json`, `.amore/lucerna/chores.json` | Tool-managed while untouched. **`--refresh` preserves edits** (disk sha ≠ manifest sha). The daemon never writes these. `enable.json` and `governance.user.toml` are not in the pack — they appear when you (or iris) first write them and init will not create or clobber them. |
+| Lucerna charter (operator-created) | `.amore/lucerna/enable.json`, `.amore/lucerna/governance.user.toml` | Yours. Not planted. Absent means both enablement knobs false / no extra protection. |
 | House scripts | `scripts/README.md`, `scripts/sync_orientation_rules.py` | Tool-managed utilities; extend freely. (The pack's `scripts/tests/` fixtures are **not** installed; they exist for the template's own CI.) |
 | Root index | `README.md` | Tool-managed while untouched; yours after you edit. |
 
@@ -260,7 +266,7 @@ Exact effect of each `--no-*` opt-out on the default tree:
 | Flag | Removes / skips | Still installed |
 |------|-----------------|-----------------|
 | `--no-lattice` | `context/principle-lattice.md`; `.amore/rules/principle-lattice.md` (any path ending in `/principle-lattice.md`) | Everything else, including `AGENTS.md` (markers retained as comments) |
-| `--no-skills` | Entire `.amore/skills/**` tree (all 6 skills + support files) | Hooks, lattice, scaffolds, scripts, AGENTS |
+| `--no-skills` | Entire `.amore/skills/**` tree (all 9 skills + support files) | Hooks, lattice, scaffolds, scripts, AGENTS |
 | `--no-hooks` | Write of `.amore/hooks/**` (plan shows them **skipped**) **and** `hooks-paths` registration | Skills, lattice, scaffolds, scripts, AGENTS |
 | `--no-iris` | The `instruments/iris/` companion download (and, implied, the qmd setup step); no network request at all when no optional companions are requested | Default tree otherwise unchanged |
 | `--no-qmd` | The automatic `iris qmd setup` step (package install, house index, model downloads) | Iris itself still installs; finish search later with `iris qmd setup` |

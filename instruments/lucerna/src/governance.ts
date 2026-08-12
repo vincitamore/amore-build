@@ -4,11 +4,18 @@
  * Writes are allowed only when the path matches WRITABLE and does not match
  * PROTECTED. Paths outside the house root are always protected.
  * Users may add protected paths via governance.user.toml (additive only).
+ *
+ * Decision order: user extras deny, then residual allow-list, then
+ * protected, then writable.
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
-import { houseRuntimeDir, governanceUserPath } from "./paths.ts";
+import {
+  houseRuntimeDir,
+  governanceUserPath,
+  legacyGovernanceUserPath,
+} from "./paths.ts";
 
 /** Shipped protected surfaces relative to house root  -  exact-equality tested. */
 export const PROTECTED_PATTERNS = [
@@ -31,24 +38,48 @@ export const PROTECTED_PATTERNS = [
 
 /**
  * Shipped writable surfaces. Lucerna runtime residual under instruments/lucerna/
- * is also admitted by residual rule after instruments/ protection is applied.
+ * is also admitted by the residual allow-list.
  */
 export const WRITABLE_PATTERNS = [
   "inbox/captures/",
   "forge/",
 ] as const;
 
+/** Legacy charter basenames under the runtime dir. Residual never admits these. */
+export const LEGACY_CHARTER_FILES = [
+  "lucerna.enable.json",
+  "governance.user.toml",
+] as const;
+
+/** Residual-writable runtime state files (exact basename, top-level only). */
+export const RUNTIME_STATE_FILES = [
+  "health.json",
+  "state.json",
+  "log",
+  "notifications.jsonl",
+  "daemon.pid",
+  "halt",
+  "wake",
+  "sleep",
+] as const;
+
+const RUNTIME_PREFIX = "instruments/lucerna/";
+const RUNTIME_STATE_SET = new Set<string>(RUNTIME_STATE_FILES);
+const LEGACY_CHARTER_SET = new Set<string>(LEGACY_CHARTER_FILES);
+
 export type PatternList = readonly string[];
 
 export interface GovernanceLists {
   protected: string[];
   writable: string[];
+  protectedUserExtra: string[];
 }
 
 export function defaultLists(): GovernanceLists {
   return {
     protected: [...PROTECTED_PATTERNS],
     writable: [...WRITABLE_PATTERNS],
+    protectedUserExtra: [],
   };
 }
 
@@ -70,12 +101,17 @@ export function parseGovernanceUserToml(raw: string): { protectedExtra: string[]
   return { protectedExtra };
 }
 
-/** Load user governance from house runtime dir. Absent or invalid → no extras. */
+/** Load user governance: charter path first, then legacy runtime path. */
 export function loadUserGovernance(houseRoot: string): { protectedExtra: string[] } {
-  const path = governanceUserPath(houseRoot);
-  if (!existsSync(path)) return { protectedExtra: [] };
+  const primary = governanceUserPath(houseRoot);
+  const chosen = existsSync(primary)
+    ? primary
+    : existsSync(legacyGovernanceUserPath(houseRoot))
+      ? legacyGovernanceUserPath(houseRoot)
+      : null;
+  if (!chosen) return { protectedExtra: [] };
   try {
-    return parseGovernanceUserToml(readFileSync(path, "utf-8"));
+    return parseGovernanceUserToml(readFileSync(chosen, "utf-8"));
   } catch {
     return { protectedExtra: [] };
   }
@@ -92,6 +128,7 @@ export function mergeGovernanceLists(
   const extra = user.protectedExtra ?? [];
   for (const p of extra) {
     const norm = p.replace(/\\/g, "/");
+    if (!lists.protectedUserExtra.includes(norm)) lists.protectedUserExtra.push(norm);
     if (!lists.protected.includes(norm)) lists.protected.push(norm);
   }
   return lists;
@@ -127,21 +164,75 @@ export function isProtectedPath(
   return false;
 }
 
+function runtimeBasename(rel: string): string | null {
+  if (!rel.startsWith(RUNTIME_PREFIX)) return null;
+  const rest = rel.slice(RUNTIME_PREFIX.length);
+  if (!rest || rest.includes("/")) return null;
+  return rest;
+}
+
+function isRuntimeWriteArtifact(name: string): boolean {
+  if (/^log\.\d+$/.test(name)) return true;
+  if (name.endsWith(".tmp")) return true;
+  if (name.startsWith("draft-")) return true;
+  return false;
+}
+
 /**
- * Residual writable: house-local lucerna runtime files under instruments/lucerna/
- * excluding package source and metadata.
+ * Residual writable: allow-listed runtime state and write artifacts at the
+ * top of instruments/lucerna/. Nested paths and legacy charter names are not.
  */
 export function isLucernaRuntimePath(houseRoot: string, targetPath: string): boolean {
   const rel = relFromHouse(houseRoot, targetPath);
   if (rel === null) return false;
-  if (!rel.startsWith("instruments/lucerna/") && rel !== "instruments/lucerna") return false;
-  if (rel.startsWith("instruments/lucerna/src/")) return false;
-  if (rel.startsWith("instruments/lucerna/scripts/")) return false;
-  if (rel === "instruments/lucerna/package.json") return false;
-  if (rel === "instruments/lucerna/tsconfig.json") return false;
-  if (rel === "instruments/lucerna/README.md") return false;
-  if (rel === "instruments/lucerna/bun.lock") return false;
-  return true;
+  const name = runtimeBasename(rel);
+  if (name === null) return false;
+  if (LEGACY_CHARTER_SET.has(name)) return false;
+  if (RUNTIME_STATE_SET.has(name)) return true;
+  return isRuntimeWriteArtifact(name);
+}
+
+export interface WriteDecision {
+  allowed: boolean;
+  residual: boolean;
+  userExtra: boolean;
+  protected: boolean;
+}
+
+/**
+ * Single write decision. Order: user-extra deny, residual, protected, writable.
+ */
+export function writeDecision(
+  houseRoot: string,
+  targetPath: string,
+  lists: GovernanceLists = defaultLists(),
+): WriteDecision {
+  const rel = relFromHouse(houseRoot, targetPath);
+  if (rel === null) {
+    return { allowed: false, residual: false, userExtra: false, protected: true };
+  }
+
+  const extras = lists.protectedUserExtra ?? [];
+  for (const p of extras) {
+    if (matchesPattern(rel, p)) {
+      return { allowed: false, residual: false, userExtra: true, protected: true };
+    }
+  }
+
+  if (isLucernaRuntimePath(houseRoot, targetPath)) {
+    return { allowed: true, residual: true, userExtra: false, protected: false };
+  }
+
+  if (isProtectedPath(houseRoot, targetPath, lists)) {
+    return { allowed: false, residual: false, userExtra: false, protected: true };
+  }
+
+  for (const p of lists.writable) {
+    if (matchesPattern(rel, p)) {
+      return { allowed: true, residual: false, userExtra: false, protected: false };
+    }
+  }
+  return { allowed: false, residual: false, userExtra: false, protected: false };
 }
 
 export function canWrite(
@@ -149,17 +240,7 @@ export function canWrite(
   targetPath: string,
   lists: GovernanceLists = defaultLists(),
 ): boolean {
-  const rel = relFromHouse(houseRoot, targetPath);
-  if (rel === null) return false;
-
-  if (isLucernaRuntimePath(houseRoot, targetPath)) return true;
-
-  if (isProtectedPath(houseRoot, targetPath, lists)) return false;
-
-  for (const p of lists.writable) {
-    if (matchesPattern(rel, p)) return true;
-  }
-  return false;
+  return writeDecision(houseRoot, targetPath, lists).allowed;
 }
 
 export class Governance {
@@ -177,8 +258,9 @@ export class Governance {
   }
 
   isProtected(targetPath: string): boolean {
-    if (isLucernaRuntimePath(this.houseRoot, targetPath)) return false;
-    return isProtectedPath(this.houseRoot, targetPath, this.lists);
+    const d = writeDecision(this.houseRoot, targetPath, this.lists);
+    if (d.residual) return false;
+    return d.protected || isProtectedPath(this.houseRoot, targetPath, this.lists);
   }
 
   resolve(...parts: string[]): string {

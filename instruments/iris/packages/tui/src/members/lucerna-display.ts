@@ -217,12 +217,24 @@ export function lucernaActivityValue(uiState: LucernaUiState): string {
   return '—';
 }
 
+/** Wall-clock HH:MM from a snapshot instant (civil time in the ISO, not client TZ). */
+export function formatResumesClock(iso?: string | null): string | null {
+  if (!iso) return null;
+  const m = iso.match(/T(\d{2}):(\d{2})/);
+  return m ? `${m[1]}:${m[2]}` : null;
+}
+
 /** Activity Stat sub: phase when running, else the uiState token. */
 export function lucernaActivitySub(
   uiState: LucernaUiState,
   status?: Pick<LucernaStatusFields, 'phase'> | null,
   health?: Pick<LucernaHealthFields, 'phase'> | null,
+  capability?: { state?: string; resumesAt?: string } | null,
 ): string {
+  if (uiState === 'running' && capability?.state === 'refusing') {
+    const clock = formatResumesClock(capability.resumesAt);
+    return clock ? `refusing · resumes ${clock}` : 'refusing';
+  }
   if (uiState !== 'running') return uiState;
   const fromStatus = typeof status?.phase === 'string' ? status.phase.trim() : '';
   if (fromStatus) return fromStatus;
@@ -313,6 +325,9 @@ export interface LucernaPulseView {
   beatAgeSec?: number | null;
   pendingReview?: { total: number };
   phase?: string;
+  capability?: { state?: string; resumesAt?: string; reasonCode?: string };
+  tokens?: string;
+  actionsToday?: number;
 }
 
 function formatPulseBeat(sec: number | null | undefined): string {
@@ -327,6 +342,27 @@ function formatPulseBeat(sec: number | null | undefined): string {
  * "not installed" path. Phase is included on the running line only when it
  * fits `width` (the caller still clamps via formatLucernaDisplayLine).
  */
+function formatRefusingPulseStatus(
+  resumesAt: string | undefined,
+  pend: string,
+  width: number,
+): string {
+  const clock = formatResumesClock(resumesAt);
+  const candidates: string[] = [];
+  if (clock) {
+    candidates.push(`refusing · resumes ${clock}${pend}`);
+    candidates.push(`refusing · resumes ${clock}`);
+    candidates.push(`refusing · ${clock}${pend}`);
+    candidates.push(`refusing · ${clock}`);
+  }
+  if (pend) candidates.push(`refusing${pend}`);
+  candidates.push('refusing');
+  for (const c of candidates) {
+    if (c.length <= width) return c;
+  }
+  return 'refusing';
+}
+
 export function formatLucernaPulseStatus(
   pulse: LucernaPulseView | null | undefined,
   width: number,
@@ -337,6 +373,10 @@ export function formatLucernaPulseStatus(
       ? ` · ${pulse.pendingReview.total} rev`
       : '';
   if (pulse.available === false) return `not installed${pend}`;
+  if (pulse.state === 'stale') return `hung${pend}`;
+  if (pulse.state === 'running' && pulse.capability?.state === 'refusing') {
+    return formatRefusingPulseStatus(pulse.capability.resumesAt, pend, width);
+  }
   if (pulse.state === 'running') {
     const beat = formatPulseBeat(pulse.beatAgeSec);
     const without = `live · beat ${beat}${pend}`;
@@ -347,6 +387,440 @@ export function formatLucernaPulseStatus(
     }
     return without;
   }
-  if (pulse.state === 'stale') return `hung${pend}`;
   return `stopped${pend}`;
+}
+
+/**
+ * Pulse sub-line while refusing. Ceiling first; chores clause only when the
+ * snapshot can say zero without inventing a count.
+ */
+export function formatPulseRefusingSubLine(
+  tokens: string | undefined,
+  choresToday: number | undefined,
+  innerWidth: number,
+  home: string = homedir(),
+): string {
+  const tok = tokens && tokens.trim() ? tokens.trim() : '';
+  const chores =
+    typeof choresToday === 'number' && choresToday === 0 ? '0 chores today' : '';
+  const candidates: string[] = [];
+  if (tok) {
+    if (chores) candidates.push(`   token ceiling ${tok} · ${chores}`);
+    candidates.push(`   token ceiling ${tok}`);
+    candidates.push(`   ceiling ${tok}`);
+  } else {
+    candidates.push('   token ceiling');
+  }
+  let body = candidates[candidates.length - 1] ?? '   token ceiling';
+  for (const c of candidates) {
+    if (c.length <= innerWidth) {
+      body = c;
+      break;
+    }
+  }
+  return formatLucernaDisplayLine(body, innerWidth, home);
+}
+
+// ── Budgets panel + chores overlay (reads of the persisted snapshot) ──────────
+
+export const BUDGETS_EMPTY_NEVER_RAN =
+  'no cycle has run yet · caps shipped at 12/day, 6/week, 200K tokens';
+export const BUDGETS_EMPTY_UNAVAILABLE =
+  'budgets unavailable — restart Lucerna to populate';
+export const BUDGETS_HINT = 'b edit caps · c chores';
+
+export type BudgetsPanelKind = 'never-ran' | 'unavailable' | 'rows';
+
+export interface LucernaCapabilityView {
+  state: 'ready' | 'cooling' | 'refusing';
+  reasonCode?: string;
+  reason?: string;
+  resumesAt?: string;
+}
+
+export interface BudgetWindowView {
+  used: number;
+  cap: number;
+  remaining?: number;
+  resetsAt?: string;
+  readyAt?: string;
+  source?: string;
+  aboveShipped?: boolean;
+  over?: number;
+  bySource?: { planner?: number; agentic?: number; autoCommit?: number };
+}
+
+export interface LucernaChoreEntryView {
+  key: string;
+  class: string;
+  tier: string;
+  enabled: boolean;
+  lastRun: string | null;
+}
+
+export interface LucernaRosterView {
+  enabledCount: number;
+  shippedCount: number;
+  disabled: string[];
+  entries: LucernaChoreEntryView[];
+}
+
+export interface LucernaBudgetsView {
+  actions: string;
+  weekly: string;
+  tokens: string;
+  actionsToday: number;
+  dailyCap: number;
+  tokensToday: number;
+  dailyTokenCeiling: number;
+  capability?: LucernaCapabilityView;
+  windows?: {
+    daily?: BudgetWindowView;
+    weekly?: BudgetWindowView;
+    tokens?: BudgetWindowView;
+    cycle?: BudgetWindowView;
+  };
+  roster?: LucernaRosterView;
+}
+
+export type BudgetPanelTone = 'muted' | 'warning';
+
+export interface BudgetPanelLine {
+  text: string;
+  tone: BudgetPanelTone;
+}
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
+function parseWindow(raw: unknown): BudgetWindowView | undefined {
+  if (!isRecord(raw) || typeof raw.used !== 'number' || typeof raw.cap !== 'number') {
+    return undefined;
+  }
+  const by =
+    isRecord(raw.bySource)
+      ? {
+          planner: typeof raw.bySource.planner === 'number' ? raw.bySource.planner : undefined,
+          agentic: typeof raw.bySource.agentic === 'number' ? raw.bySource.agentic : undefined,
+          autoCommit:
+            typeof raw.bySource.autoCommit === 'number' ? raw.bySource.autoCommit : undefined,
+        }
+      : undefined;
+  return {
+    used: raw.used,
+    cap: raw.cap,
+    remaining: typeof raw.remaining === 'number' ? raw.remaining : undefined,
+    resetsAt: typeof raw.resetsAt === 'string' ? raw.resetsAt : undefined,
+    readyAt: typeof raw.readyAt === 'string' ? raw.readyAt : undefined,
+    source: typeof raw.source === 'string' ? raw.source : undefined,
+    aboveShipped: raw.aboveShipped === true,
+    over: typeof raw.over === 'number' ? raw.over : undefined,
+    bySource: by,
+  };
+}
+
+function parseCapability(raw: unknown): LucernaCapabilityView | undefined {
+  if (!isRecord(raw)) return undefined;
+  const state = raw.state;
+  if (state !== 'ready' && state !== 'cooling' && state !== 'refusing') return undefined;
+  return {
+    state,
+    reasonCode: typeof raw.reasonCode === 'string' ? raw.reasonCode : undefined,
+    reason: typeof raw.reason === 'string' ? raw.reason : undefined,
+    resumesAt: typeof raw.resumesAt === 'string' ? raw.resumesAt : undefined,
+  };
+}
+
+function parseRoster(raw: unknown): LucernaRosterView | undefined {
+  if (!isRecord(raw)) return undefined;
+  const entries: LucernaChoreEntryView[] = [];
+  if (Array.isArray(raw.entries)) {
+    for (const e of raw.entries) {
+      if (!isRecord(e) || typeof e.key !== 'string' || !e.key) continue;
+      entries.push({
+        key: e.key,
+        class: typeof e.class === 'string' ? e.class : '',
+        tier: typeof e.tier === 'string' ? e.tier : '',
+        enabled: e.enabled !== false,
+        lastRun: typeof e.lastRun === 'string' ? e.lastRun : null,
+      });
+    }
+  }
+  const disabled = Array.isArray(raw.disabled)
+    ? raw.disabled.filter((x): x is string => typeof x === 'string' && x.length > 0)
+    : [];
+  return {
+    enabledCount: typeof raw.enabledCount === 'number' ? raw.enabledCount : entries.filter((e) => e.enabled).length,
+    shippedCount: typeof raw.shippedCount === 'number' ? raw.shippedCount : entries.length,
+    disabled,
+    entries,
+  };
+}
+
+/** Parse the persisted EffectiveBudgetsDisplay. Null when the snapshot is absent or pre-wire. */
+export function parseLucernaBudgets(budgets: unknown): LucernaBudgetsView | null {
+  if (!isRecord(budgets)) return null;
+  if (
+    typeof budgets.actions !== 'string' ||
+    typeof budgets.weekly !== 'string' ||
+    typeof budgets.tokens !== 'string'
+  ) {
+    return null;
+  }
+  const windows = isRecord(budgets.windows)
+    ? {
+        daily: parseWindow(budgets.windows.daily),
+        weekly: parseWindow(budgets.windows.weekly),
+        tokens: parseWindow(budgets.windows.tokens),
+        cycle: parseWindow(budgets.windows.cycle),
+      }
+    : undefined;
+  return {
+    actions: budgets.actions,
+    weekly: budgets.weekly,
+    tokens: budgets.tokens,
+    actionsToday: typeof budgets.actionsToday === 'number' ? budgets.actionsToday : 0,
+    dailyCap: typeof budgets.dailyCap === 'number' ? budgets.dailyCap : 0,
+    tokensToday: typeof budgets.tokensToday === 'number' ? budgets.tokensToday : 0,
+    dailyTokenCeiling:
+      typeof budgets.dailyTokenCeiling === 'number' ? budgets.dailyTokenCeiling : 0,
+    capability: parseCapability(budgets.capability) ?? parseCapability(budgets),
+    windows,
+    roster: parseRoster(budgets.roster),
+  };
+}
+
+export function budgetsPanelKind(
+  budgets: unknown,
+  hasOtherState: boolean,
+): BudgetsPanelKind {
+  if (parseLucernaBudgets(budgets)) return 'rows';
+  if (hasOtherState) return 'unavailable';
+  return 'never-ran';
+}
+
+/** Abbreviate counts ≥ 10,000 with K (display only). */
+export function formatBudgetTokenCount(n: number): string {
+  if (n >= 10_000 || n <= -10_000) return `${Math.round(n / 1000)}K`;
+  return String(n);
+}
+
+export function tokenOverPercent(used: number, cap: number): string | null {
+  if (!(cap > 0) || used <= cap) return null;
+  return `${Math.round((used / cap) * 100)}%`;
+}
+
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
+
+function weekdayFromIso(iso: string): string | null {
+  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})T/);
+  if (!m) return null;
+  const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+  return WEEKDAYS[d.getUTCDay()] ?? null;
+}
+
+function formatDurationMs(ms: number): string {
+  if (!Number.isFinite(ms) || ms <= 0) return '';
+  const m = Math.floor(ms / 60_000);
+  const h = Math.floor(m / 60);
+  const d = Math.floor(h / 24);
+  if (d >= 1) return h % 24 ? `${d}d${h % 24}h` : `${d}d`;
+  if (h >= 1) return m % 60 ? `${h}h${m % 60}m` : `${h}h`;
+  return `${Math.max(1, m)}m`;
+}
+
+function remainingUntil(iso: string | undefined, now: number): string {
+  if (!iso) return '';
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return '';
+  return formatDurationMs(t - now);
+}
+
+function padCell(s: string, n: number): string {
+  return s.length >= n ? s.slice(0, n) : s.padEnd(n, ' ');
+}
+
+function formatSourceMark(source?: string, aboveShipped?: boolean): string {
+  if (!source || source === 'shipped' || source === 'default') return '';
+  return aboveShipped ? `${source} !` : source;
+}
+
+function formatResetWindow(
+  resetsAt: string | undefined,
+  inner: number,
+  now: number,
+  weekly: boolean,
+): string {
+  const clock = formatResumesClock(resetsAt);
+  if (!clock) return '';
+  const day = weekly && resetsAt ? weekdayFromIso(resetsAt) : null;
+  const clockPart = day ? `${day} ${clock}` : clock;
+  if (inner < 28) return clockPart;
+  if (weekly || inner < 40) return `resets ${clockPart}`;
+  const dur = remainingUntil(resetsAt, now);
+  return dur ? `resets ${clockPart} (${dur})` : `resets ${clockPart}`;
+}
+
+function composeGaugeRow(
+  label: string,
+  gauge: string,
+  window: string,
+  source: string,
+  inner: number,
+): string {
+  const showSourceCol = inner >= 56;
+  const left = `${padCell(label, 10)}${padCell(gauge, 16)}${padCell(window, inner >= 40 ? 24 : Math.max(8, window.length))}`;
+  if (!source) return left.trimEnd();
+  if (showSourceCol) return `${left}${padCell(source, 6)}`.trimEnd();
+  return `${left.trimEnd()}  ${source}`;
+}
+
+function tokensGauge(view: LucernaBudgetsView): { text: string; over: boolean } {
+  const used = view.windows?.tokens?.used ?? view.tokensToday;
+  const cap = view.windows?.tokens?.cap ?? view.dailyTokenCeiling;
+  const pct = tokenOverPercent(used, cap);
+  const base = view.tokens;
+  if (!pct) return { text: base, over: false };
+  return { text: `${base} ${pct}`, over: true };
+}
+
+function attributionLines(view: LucernaBudgetsView): string[] {
+  const by = view.windows?.tokens?.bySource;
+  if (!by) return [];
+  const dreams = (by.planner ?? 0) + (by.agentic ?? 0);
+  const ac = by.autoCommit ?? 0;
+  const out: string[] = [];
+  if (dreams > 0) out.push(`  dreams      ${formatBudgetTokenCount(dreams)}`);
+  if (ac > 0) out.push(`  auto-commit ${formatBudgetTokenCount(ac)}`);
+  return out;
+}
+
+function cooldownGauge(view: LucernaBudgetsView): { text: string; window: string } {
+  const cycle = view.windows?.cycle;
+  const remaining = cycle?.remaining ?? 0;
+  if (remaining > 0) {
+    const clock = formatResumesClock(cycle?.readyAt);
+    return {
+      text: formatDurationMs(remaining) || 'cooling',
+      window: clock ? `ready ${clock}` : '',
+    };
+  }
+  return { text: 'ready', window: '' };
+}
+
+/** Live Budgets panel rows from a parsed snapshot. Artifact join omitted (no count on the wire). */
+export function formatBudgetPanelLines(
+  view: LucernaBudgetsView,
+  inner: number,
+  now: number = Date.now(),
+): BudgetPanelLine[] {
+  const daily = view.windows?.daily;
+  const weekly = view.windows?.weekly;
+  const tokens = view.windows?.tokens;
+  const tok = tokensGauge(view);
+  const cool = cooldownGauge(view);
+  const lines: BudgetPanelLine[] = [
+    {
+      text: composeGaugeRow(
+        'actions',
+        view.actions,
+        formatResetWindow(daily?.resetsAt, inner, now, false),
+        formatSourceMark(daily?.source, daily?.aboveShipped),
+        inner,
+      ),
+      tone: daily?.aboveShipped ? 'warning' : 'muted',
+    },
+    {
+      text: composeGaugeRow(
+        'expensive',
+        view.weekly,
+        formatResetWindow(weekly?.resetsAt, inner, now, true),
+        formatSourceMark(weekly?.source, weekly?.aboveShipped),
+        inner,
+      ),
+      tone: weekly?.aboveShipped ? 'warning' : 'muted',
+    },
+    {
+      text: composeGaugeRow(
+        'tokens',
+        tok.text,
+        formatResetWindow(tokens?.resetsAt, inner, now, false),
+        formatSourceMark(tokens?.source, tokens?.aboveShipped),
+        inner,
+      ),
+      tone: tok.over || tokens?.aboveShipped ? 'warning' : 'muted',
+    },
+  ];
+  for (const a of attributionLines(view)) {
+    lines.push({ text: a, tone: 'muted' });
+  }
+  lines.push({
+    text: composeGaugeRow(
+      'cooldown',
+      cool.text,
+      cool.window,
+      formatSourceMark(view.windows?.cycle?.source, view.windows?.cycle?.aboveShipped),
+      inner,
+    ),
+    tone: view.windows?.cycle?.aboveShipped ? 'warning' : 'muted',
+  });
+  lines.push({ text: BUDGETS_HINT, tone: 'muted' });
+  return lines;
+}
+
+export function formatChoresOverlayHeader(roster: LucernaRosterView): string {
+  const n = roster.enabledCount;
+  const m = roster.shippedCount;
+  const k =
+    roster.disabled.length > 0
+      ? roster.disabled.length
+      : Math.max(0, m - n, roster.entries.filter((e) => !e.enabled).length);
+  return `planner may pick ${n} of ${m} chores · ${k} disabled`;
+}
+
+function formatAgeAgo(iso: string, now: number): string {
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return 'ready';
+  const ms = now - t;
+  if (ms < 0) return 'ready';
+  const dur = formatDurationMs(ms) || '0m';
+  return `ran ${dur} ago`;
+}
+
+export function formatChoreOverlayRow(
+  entry: LucernaChoreEntryView,
+  selected: boolean,
+  now: number = Date.now(),
+): string {
+  const prefix = selected ? '>' : ' ';
+  const mark = entry.enabled ? '[on ]' : '[off]';
+  const tail = entry.enabled
+    ? entry.lastRun
+      ? formatAgeAgo(entry.lastRun, now)
+      : 'ready'
+    : 'planner will not pick';
+  const cls = entry.class ? ` ${entry.class}` : '';
+  const tier = entry.tier ? ` ${entry.tier}` : '';
+  return `${prefix} ${mark} ${entry.key}${cls}${tier}  ${tail}`;
+}
+
+export function formatUnknownChoreRow(key: string, selected: boolean): string {
+  const prefix = selected ? '>' : ' ';
+  return `${prefix} [??] ${key}    unknown — this build ships no such chore`;
+}
+
+export function choreOverlayItems(roster: LucernaRosterView): Array<
+  | { kind: 'entry'; entry: LucernaChoreEntryView }
+  | { kind: 'unknown'; key: string }
+> {
+  const known = new Set(roster.entries.map((e) => e.key));
+  const items: Array<
+    | { kind: 'entry'; entry: LucernaChoreEntryView }
+    | { kind: 'unknown'; key: string }
+  > = roster.entries.map((entry) => ({ kind: 'entry' as const, entry }));
+  for (const key of roster.disabled) {
+    if (!known.has(key)) items.push({ kind: 'unknown', key });
+  }
+  return items;
 }

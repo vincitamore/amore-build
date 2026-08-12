@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "chores": {
+    "survey-org": { "enabled": true },
+    "substrate-health": { "enabled": true },
+    "inbox-age-report": { "enabled": true },
+    "state-cleanup": { "enabled": true },
+    "edges-update": { "enabled": true },
+    "qmd-refresh": { "enabled": true },
+    "self-orient": { "enabled": true },
+    "agentic-housekeeping": { "enabled": true },
+    "edges-densify": { "enabled": true }
+  }
+}

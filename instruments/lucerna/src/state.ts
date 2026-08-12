@@ -10,6 +10,10 @@ import {
   WEEKLY_EXPENSIVE_BUDGET,
   CYCLE_COOLDOWN_MS,
   DEFAULT_DAILY_TOKEN_CEILING,
+  DEFAULT_DREAMS_RESERVE_TOKENS,
+  SHORT_CYCLE_COOLDOWN_MS,
+  countersHaveClockSkew,
+  effectiveCeiling,
   getRemainingDailyBudget,
   getRemainingWeeklyBudget,
   hasActionBudget,
@@ -19,20 +23,36 @@ import {
   recordAction,
   recordTokenUsage,
   budgetSnapshot,
+  sumTokensBySource,
+  TOKEN_SOURCES,
+  isTokenSource,
   type BudgetSnapshot,
   type BudgetTier,
   type ActionCooldownClass,
   type TokenUsage,
+  type TokenSource,
+  type TokensTodayBySource,
   type BudgetCounters,
 } from "./budget.ts";
+import {
+  buildEffectiveBudgetsDisplay,
+  type BudgetReasonCode,
+  type EffectiveBudgetsDisplay,
+} from "./budgets-display.ts";
+import type { ResolvedCharter } from "./charter.ts";
 import { RUNTIME_FILES } from "./paths.ts";
 
 export interface DreamCycleOutcome {
   at: string;
-  status: "ran" | "skipped" | "refused" | "failed";
+  status: "ran" | "skipped" | "refused" | "failed" | "idle";
   reason: string;
   action?: string;
   artifactPath?: string;
+}
+
+export interface CharterPresence {
+  budgets: boolean;
+  chores: boolean;
 }
 
 export interface DreamState {
@@ -49,9 +69,18 @@ export interface DreamState {
   recentActions?: Record<string, string>;
   tokensToday: number;
   lastTokenDate: string | null;
+  tokensTodayBySource?: TokensTodayBySource;
+  maxCallTokens?: number;
+  maxCallTokensAt?: string | null;
   /** Most recent cycle outcomes (newest first). */
   cycleHistory?: DreamCycleOutcome[];
   lastCycleOutcome?: DreamCycleOutcome | null;
+  /** Cooldown applied when the last cycle ended (short vs full). */
+  lastCycleCooldownMs?: number | null;
+  /** Last pre-planner idle notify, so we fire once on transition. */
+  lastIdleNotify?: "roster-empty" | "cap-zero" | null;
+  /** Measurement: charter files seen while this process ran. */
+  charterPresence?: CharterPresence;
 }
 
 export interface AutoCommitDraft {
@@ -80,6 +109,19 @@ export interface LucernaState {
   heartbeat?: { phase: string; intervalMs: number; bpm: number };
   autoCommitDraft?: AutoCommitDraft | null;
   autoCommitMeta?: AutoCommitMeta;
+  /** Display-only snapshot. Enforcement reads config caps, never this block. */
+  budgets?: EffectiveBudgetsDisplay;
+}
+
+function parseTokensBySource(raw: unknown): TokensTodayBySource | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const src = raw as Record<string, unknown>;
+  const out: TokensTodayBySource = {};
+  for (const k of TOKEN_SOURCES) {
+    const v = src[k];
+    if (typeof v === "number" && Number.isFinite(v)) out[k] = v;
+  }
+  return out;
 }
 
 function emptyState(): LucernaState {
@@ -100,8 +142,13 @@ function emptyState(): LucernaState {
       recentActions: {},
       tokensToday: 0,
       lastTokenDate: null,
+      maxCallTokens: 0,
+      maxCallTokensAt: null,
       cycleHistory: [],
       lastCycleOutcome: null,
+      lastCycleCooldownMs: null,
+      lastIdleNotify: null,
+      charterPresence: { budgets: false, chores: false },
     },
     lastActivity: null,
     lastActionResults: [],
@@ -122,6 +169,11 @@ export class StateManager {
   private weeklyCap: number;
   private cooldownMs: number;
   private tokenCeiling: number;
+  private dreamsReserveTokens: number;
+  private cooldownOverridesMs: Record<string, number>;
+  private charter: ResolvedCharter | undefined;
+  private reasonCodeOverride: BudgetReasonCode | undefined;
+  private runtimeDir: string;
 
   constructor(
     runtimeDir: string,
@@ -130,22 +182,108 @@ export class StateManager {
       weeklyCap?: number;
       cooldownMs?: number;
       tokenCeiling?: number;
+      dreamsReserveTokens?: number;
+      cooldownOverridesMs?: Record<string, number>;
+      charter?: ResolvedCharter;
     },
   ) {
     mkdirSync(runtimeDir, { recursive: true });
+    this.runtimeDir = runtimeDir;
     this.path = join(runtimeDir, RUNTIME_FILES.state);
     this.tmpPath = this.path + ".tmp";
     this.dailyCap = opts?.dailyCap ?? DAILY_ACTION_BUDGET;
     this.weeklyCap = opts?.weeklyCap ?? WEEKLY_EXPENSIVE_BUDGET;
     this.cooldownMs = opts?.cooldownMs ?? CYCLE_COOLDOWN_MS;
     this.tokenCeiling = opts?.tokenCeiling ?? DEFAULT_DAILY_TOKEN_CEILING;
+    this.dreamsReserveTokens = opts?.dreamsReserveTokens ?? DEFAULT_DREAMS_RESERVE_TOKENS;
+    this.cooldownOverridesMs = opts?.cooldownOverridesMs ?? {};
+    this.charter = opts?.charter;
     this.state = this.load();
+  }
+
+  applyCharter(
+    charter: ResolvedCharter,
+    reasonCodeOverride?: BudgetReasonCode,
+    applyShippedBudgets = true,
+  ): void {
+    this.charter = charter;
+    const b = charter.budgets;
+    const take = (knob: { source: string }) =>
+      applyShippedBudgets || knob.source !== "shipped";
+    if (take(b.dailyActionCap)) this.dailyCap = b.dailyActionCap.value;
+    if (take(b.weeklyExpensiveCap)) this.weeklyCap = b.weeklyExpensiveCap.value;
+    if (take(b.cycleCooldownMinutes)) this.cooldownMs = b.cycleCooldownMs;
+    if (take(b.dailyTokenCeiling)) this.tokenCeiling = b.dailyTokenCeiling.value;
+    if (take(b.dreamsReserveTokens)) {
+      this.dreamsReserveTokens = b.dreamsReserveTokens.value;
+    }
+    this.cooldownOverridesMs = charter.roster.cooldownOverridesMs;
+    this.reasonCodeOverride = reasonCodeOverride;
+    this.state.dream.charterPresence = {
+      budgets: charter.budgets.file.present,
+      chores: charter.roster.file.present,
+    };
+  }
+
+  getCharterPresence(): CharterPresence {
+    return (
+      this.state.dream.charterPresence ?? { budgets: false, chores: false }
+    );
+  }
+
+  getDreamsReserveTokens(): number {
+    return this.dreamsReserveTokens;
+  }
+
+  getCooldownOverridesMs(): Record<string, number> {
+    return this.cooldownOverridesMs;
+  }
+
+  getCharter(): ResolvedCharter | undefined {
+    return this.charter;
+  }
+
+  getRuntimeDir(): string {
+    return this.runtimeDir;
+  }
+
+  setReasonCodeOverride(code: BudgetReasonCode | undefined): void {
+    this.reasonCodeOverride = code;
+  }
+
+  lastIdleNotify(): "roster-empty" | "cap-zero" | null {
+    return this.state.dream.lastIdleNotify ?? null;
+  }
+
+  setLastIdleNotify(kind: "roster-empty" | "cap-zero" | null): void {
+    this.state.dream.lastIdleNotify = kind;
+  }
+
+  applyShortCycleCooldown(): void {
+    this.state.dream.lastCycleCooldownMs = SHORT_CYCLE_COOLDOWN_MS;
+  }
+
+  applyFullCycleCooldown(): void {
+    this.state.dream.lastCycleCooldownMs = this.cooldownMs;
+  }
+
+  hasClockSkew(now: Date = new Date()): boolean {
+    return countersHaveClockSkew(this.asCounters(), now);
   }
 
   private load(): LucernaState {
     if (!existsSync(this.path)) return emptyState();
     try {
       const raw = JSON.parse(readFileSync(this.path, "utf-8"));
+      const bySource = Object.prototype.hasOwnProperty.call(
+        raw.dream ?? {},
+        "tokensTodayBySource",
+      )
+        ? parseTokensBySource(raw.dream?.tokensTodayBySource)
+        : undefined;
+      const tokensToday = bySource
+        ? sumTokensBySource(bySource)
+        : (raw.dream?.tokensToday ?? 0);
       return {
         ...emptyState(),
         ...raw,
@@ -156,8 +294,18 @@ export class StateManager {
           ...(raw.dream ?? {}),
           actionsThisWeek: raw.dream?.actionsThisWeek ?? 0,
           lastActionWeek: raw.dream?.lastActionWeek ?? null,
-          tokensToday: raw.dream?.tokensToday ?? 0,
+          tokensToday,
           lastTokenDate: raw.dream?.lastTokenDate ?? null,
+          tokensTodayBySource: bySource,
+          maxCallTokens:
+            typeof raw.dream?.maxCallTokens === "number" &&
+            Number.isFinite(raw.dream.maxCallTokens)
+              ? raw.dream.maxCallTokens
+              : 0,
+          maxCallTokensAt:
+            typeof raw.dream?.maxCallTokensAt === "string"
+              ? raw.dream.maxCallTokensAt
+              : null,
           recentActions: {
             ...(emptyState().dream.recentActions ?? {}),
             ...(raw.dream?.recentActions ?? {}),
@@ -166,6 +314,20 @@ export class StateManager {
             ? raw.dream.cycleHistory
             : [],
           lastCycleOutcome: raw.dream?.lastCycleOutcome ?? null,
+          lastCycleCooldownMs:
+            typeof raw.dream?.lastCycleCooldownMs === "number" &&
+            Number.isFinite(raw.dream.lastCycleCooldownMs)
+              ? raw.dream.lastCycleCooldownMs
+              : null,
+          lastIdleNotify:
+            raw.dream?.lastIdleNotify === "roster-empty" ||
+            raw.dream?.lastIdleNotify === "cap-zero"
+              ? raw.dream.lastIdleNotify
+              : null,
+          charterPresence: {
+            budgets: raw.dream?.charterPresence?.budgets === true,
+            chores: raw.dream?.charterPresence?.chores === true,
+          },
         },
         lastActionResults: Array.isArray(raw.lastActionResults) ? raw.lastActionResults : [],
         autoCommitMeta: {
@@ -194,11 +356,25 @@ export class StateManager {
       recentActions: this.state.dream.recentActions,
       tokensToday: this.state.dream.tokensToday,
       lastTokenDate: this.state.dream.lastTokenDate,
+      tokensTodayBySource: this.state.dream.tokensTodayBySource,
+      maxCallTokens: this.state.dream.maxCallTokens,
+      maxCallTokensAt: this.state.dream.maxCallTokensAt,
     };
   }
 
   save(): void {
     this.state.lastSaved = localTimestamp();
+    // Heartbeat cycle calls save() each tick, so a running daemon rewrites
+    // this block after local-date rollover on the next tick.
+    this.state.budgets = buildEffectiveBudgetsDisplay({
+      snapshot: this.budgetSnapshot(),
+      counters: this.asCounters(),
+      cooldownMs: this.activeCooldownMs(),
+      recentActions: this.state.dream.recentActions,
+      charter: this.charter,
+      reasonCodeOverride: this.reasonCodeOverride,
+      dreamsReserveTokens: this.dreamsReserveTokens,
+    });
     mkdirSync(dirname(this.path), { recursive: true });
     writeFileSync(this.tmpPath, JSON.stringify(this.state, null, 2), "utf-8");
     renameSync(this.tmpPath, this.path);
@@ -255,24 +431,44 @@ export class StateManager {
     return nowMs - t >= cooldownMs;
   }
 
+  /** Auto-commit ceiling: dailyTokenCeiling − dreamsReserveTokens. */
   isTokenCeilingReached(now: Date = new Date()): boolean {
-    const snap = this.budgetSnapshot(now);
-    return snap.tokenCeilingReached;
+    const rolled = this.budgetSnapshot(now);
+    const ceiling = effectiveCeiling(
+      "autoCommit",
+      this.tokenCeiling,
+      this.dreamsReserveTokens,
+    );
+    return rolled.tokensToday >= ceiling;
   }
 
-  markDreamCycle(active: boolean): void {
+  isDreamsCeilingReached(now: Date = new Date()): boolean {
+    return this.budgetSnapshot(now).tokenCeilingReached;
+  }
+
+  autoCommitCeiling(): number {
+    return effectiveCeiling("autoCommit", this.tokenCeiling, this.dreamsReserveTokens);
+  }
+
+  private activeCooldownMs(): number {
+    return this.state.dream.lastCycleCooldownMs ?? this.cooldownMs;
+  }
+
+  markDreamCycle(active: boolean, cooldownMs?: number): void {
     this.state.dream.cycleActive = active;
     if (active) {
       this.state.dream.cycleStarted = localTimestamp();
     } else {
       this.state.dream.lastCycleEnded = localTimestamp();
       this.state.dream.totalDreams += 1;
+      this.state.dream.lastCycleCooldownMs = cooldownMs ?? this.cooldownMs;
     }
   }
 
-  markCycleEndedOnly(): void {
+  markCycleEndedOnly(cooldownMs?: number): void {
     this.state.dream.cycleActive = false;
     this.state.dream.lastCycleEnded = localTimestamp();
+    this.state.dream.lastCycleCooldownMs = cooldownMs ?? this.cooldownMs;
   }
 
   getRemainingBudget(now: Date = new Date()): number {
@@ -288,7 +484,11 @@ export class StateManager {
   }
 
   isCycleCooldownElapsed(nowMs: number = Date.now()): boolean {
-    return isCycleCooldownElapsed(this.state.dream.lastCycleEnded, nowMs, this.cooldownMs);
+    return isCycleCooldownElapsed(
+      this.state.dream.lastCycleEnded,
+      nowMs,
+      this.activeCooldownMs(),
+    );
   }
 
   canStartCycle(now: Date = new Date()): {
@@ -299,7 +499,8 @@ export class StateManager {
   } {
     return canStartCycle(this.asCounters(), now, {
       dailyCap: this.dailyCap,
-      cooldownMs: this.cooldownMs,
+      weeklyCap: this.weeklyCap,
+      cooldownMs: this.activeCooldownMs(),
       tokenCeiling: this.tokenCeiling,
     });
   }
@@ -318,6 +519,7 @@ export class StateManager {
       dailyCap: this.dailyCap,
       weeklyCap: this.weeklyCap,
       tokenCeiling: this.tokenCeiling,
+      cooldownOverridesMs: this.cooldownOverridesMs,
     });
   }
 
@@ -325,7 +527,7 @@ export class StateManager {
     return budgetSnapshot(this.asCounters(), now, {
       dailyCap: this.dailyCap,
       weeklyCap: this.weeklyCap,
-      cooldownMs: this.cooldownMs,
+      cooldownMs: this.activeCooldownMs(),
       tokenCeiling: this.tokenCeiling,
     });
   }
@@ -348,10 +550,23 @@ export class StateManager {
     }
   }
 
-  recordTokens(usage: TokenUsage | undefined | null, now: Date = new Date()): void {
-    const next = recordTokenUsage(this.asCounters(), usage, now);
+  recordTokens(
+    usage: TokenUsage | undefined | null,
+    sourceOrNow?: TokenSource | Date,
+    now?: Date,
+  ): void {
+    const source = isTokenSource(sourceOrNow) ? sourceOrNow : undefined;
+    const when = isTokenSource(sourceOrNow)
+      ? (now ?? new Date())
+      : (sourceOrNow ?? now ?? new Date());
+    const next = source
+      ? recordTokenUsage(this.asCounters(), usage, source, when)
+      : recordTokenUsage(this.asCounters(), usage, when);
     this.state.dream.tokensToday = next.tokensToday;
     this.state.dream.lastTokenDate = next.lastTokenDate;
+    this.state.dream.tokensTodayBySource = next.tokensTodayBySource;
+    this.state.dream.maxCallTokens = next.maxCallTokens;
+    this.state.dream.maxCallTokensAt = next.maxCallTokensAt;
   }
 
   pushDreamCycleOutcome(outcome: DreamCycleOutcome): void {

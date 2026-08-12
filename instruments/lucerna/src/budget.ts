@@ -6,6 +6,8 @@
  * halts dreaming when crossed.
  */
 
+import { toLocalISO } from "./time.ts";
+
 /** Max actions per calendar day (all tiers). */
 export const DAILY_ACTION_BUDGET = 12;
 
@@ -30,8 +32,95 @@ export const RECIPE_ACTION_COOLDOWN_MS = 12 * 60 * 60 * 1000;
  */
 export const DEFAULT_DAILY_TOKEN_CEILING = 200_000;
 
+/** Tokens held back from auto-commit so dreams keep a floor. */
+export const DEFAULT_DREAMS_RESERVE_TOKENS = 80_000;
+
+/**
+ * Pre-spawn reservation for the planner call. Not a hard per-call cap —
+ * refuse starting a planner unless tokensToday + this <= dreams ceiling.
+ */
+export const PLANNER_RESERVE = 10_000;
+
+/** Notify (do not clamp) when one envelope exceeds this fraction of the daily ceiling. */
+export const SINGLE_CALL_SPEND_FRACTION = 0.25;
+
+export type TokenCeilingSource = "dreams" | "autoCommit";
+
+/** Planner rides the dreams ceiling. Drafts use ceiling − reserve. */
+export function effectiveCeiling(
+  source: TokenCeilingSource,
+  dailyTokenCeiling: number,
+  dreamsReserveTokens: number = DEFAULT_DREAMS_RESERVE_TOKENS,
+): number {
+  if (source === "autoCommit") {
+    return Math.max(0, dailyTokenCeiling - dreamsReserveTokens);
+  }
+  return dailyTokenCeiling;
+}
+
+export function isSingleCallSpend(
+  envelopeTokens: number,
+  dailyTokenCeiling: number,
+): boolean {
+  if (dailyTokenCeiling <= 0) return envelopeTokens > 0;
+  return envelopeTokens > dailyTokenCeiling * SINGLE_CALL_SPEND_FRACTION;
+}
+
+export function countersHaveClockSkew(
+  counters: Pick<
+    BudgetCounters,
+    | "actionsToday"
+    | "lastActionDate"
+    | "actionsThisWeek"
+    | "lastActionWeek"
+    | "tokensToday"
+    | "lastTokenDate"
+    | "tokensTodayBySource"
+    | "maxCallTokens"
+    | "maxCallTokensAt"
+  >,
+  now: Date = new Date(),
+): boolean {
+  return !!(
+    rollDailyBudget(counters, now).clockSkew ||
+    rollWeeklyBudget(counters, now).clockSkew ||
+    rollTokenBudget(counters, now).clockSkew
+  );
+}
+
 export type BudgetTier = "daily" | "weekly";
 export type ActionCooldownClass = "light" | "recipe";
+
+/** Attribution source for a single driver envelope. */
+export type TokenSource = "planner" | "agentic" | "autoCommit";
+
+export const TOKEN_SOURCES: readonly TokenSource[] = [
+  "planner",
+  "agentic",
+  "autoCommit",
+] as const;
+
+export interface TokensTodayBySource {
+  planner?: number;
+  agentic?: number;
+  autoCommit?: number;
+}
+
+export function isTokenSource(value: unknown): value is TokenSource {
+  return value === "planner" || value === "agentic" || value === "autoCommit";
+}
+
+export function sumTokensBySource(
+  map: TokensTodayBySource | undefined | null,
+): number {
+  if (!map) return 0;
+  let n = 0;
+  for (const k of TOKEN_SOURCES) {
+    const v = map[k];
+    if (typeof v === "number" && Number.isFinite(v)) n += v;
+  }
+  return n;
+}
 
 export interface BudgetCounters {
   actionsToday: number;
@@ -44,6 +133,11 @@ export interface BudgetCounters {
   /** Total tokens recorded today from driver envelopes. */
   tokensToday?: number;
   lastTokenDate?: string | null;
+  /** Per-source spend; when present, tokensToday is the sum. */
+  tokensTodayBySource?: TokensTodayBySource;
+  /** Largest single envelope recorded today. */
+  maxCallTokens?: number;
+  maxCallTokensAt?: string | null;
 }
 
 export interface TokenUsage {
@@ -95,8 +189,21 @@ export function isoWeekKey(date: Date = new Date()): string {
 export function rollDailyBudget(
   counters: Pick<BudgetCounters, "actionsToday" | "lastActionDate">,
   now: Date = new Date(),
-): { actionsToday: number; lastActionDate: string; rolled: boolean } {
+): {
+  actionsToday: number;
+  lastActionDate: string;
+  rolled: boolean;
+  clockSkew?: boolean;
+} {
   const today = localDateFromDate(now);
+  if (counters.lastActionDate && counters.lastActionDate > today) {
+    return {
+      actionsToday: counters.actionsToday,
+      lastActionDate: counters.lastActionDate,
+      rolled: false,
+      clockSkew: true,
+    };
+  }
   if (counters.lastActionDate !== today) {
     return { actionsToday: 0, lastActionDate: today, rolled: true };
   }
@@ -110,8 +217,21 @@ export function rollDailyBudget(
 export function rollWeeklyBudget(
   counters: Pick<BudgetCounters, "actionsThisWeek" | "lastActionWeek">,
   now: Date = new Date(),
-): { actionsThisWeek: number; lastActionWeek: string; rolled: boolean } {
+): {
+  actionsThisWeek: number;
+  lastActionWeek: string;
+  rolled: boolean;
+  clockSkew?: boolean;
+} {
   const week = isoWeekKey(now);
+  if (counters.lastActionWeek && counters.lastActionWeek > week) {
+    return {
+      actionsThisWeek: counters.actionsThisWeek ?? 0,
+      lastActionWeek: counters.lastActionWeek,
+      rolled: false,
+      clockSkew: true,
+    };
+  }
   if (counters.lastActionWeek !== week) {
     return { actionsThisWeek: 0, lastActionWeek: week, rolled: true };
   }
@@ -123,16 +243,56 @@ export function rollWeeklyBudget(
 }
 
 export function rollTokenBudget(
-  counters: Pick<BudgetCounters, "tokensToday" | "lastTokenDate">,
+  counters: Pick<
+    BudgetCounters,
+    | "tokensToday"
+    | "lastTokenDate"
+    | "tokensTodayBySource"
+    | "maxCallTokens"
+    | "maxCallTokensAt"
+  >,
   now: Date = new Date(),
-): { tokensToday: number; lastTokenDate: string; rolled: boolean } {
+): {
+  tokensToday: number;
+  lastTokenDate: string;
+  tokensTodayBySource?: TokensTodayBySource;
+  maxCallTokens: number;
+  maxCallTokensAt: string | null;
+  rolled: boolean;
+  clockSkew?: boolean;
+} {
   const today = localDateFromDate(now);
-  if (counters.lastTokenDate !== today) {
-    return { tokensToday: 0, lastTokenDate: today, rolled: true };
+  if (counters.lastTokenDate && counters.lastTokenDate > today) {
+    const map = counters.tokensTodayBySource;
+    const hasMap = map !== undefined && map !== null;
+    return {
+      tokensToday: hasMap ? sumTokensBySource(map) : (counters.tokensToday ?? 0),
+      lastTokenDate: counters.lastTokenDate,
+      tokensTodayBySource: hasMap ? map : undefined,
+      maxCallTokens: counters.maxCallTokens ?? 0,
+      maxCallTokensAt: counters.maxCallTokensAt ?? null,
+      rolled: false,
+      clockSkew: true,
+    };
   }
+  if (counters.lastTokenDate !== today) {
+    return {
+      tokensToday: 0,
+      lastTokenDate: today,
+      tokensTodayBySource: undefined,
+      maxCallTokens: 0,
+      maxCallTokensAt: null,
+      rolled: true,
+    };
+  }
+  const map = counters.tokensTodayBySource;
+  const hasMap = map !== undefined && map !== null;
   return {
-    tokensToday: counters.tokensToday ?? 0,
+    tokensToday: hasMap ? sumTokensBySource(map) : (counters.tokensToday ?? 0),
     lastTokenDate: counters.lastTokenDate ?? today,
+    tokensTodayBySource: hasMap ? map : undefined,
+    maxCallTokens: counters.maxCallTokens ?? 0,
+    maxCallTokensAt: counters.maxCallTokensAt ?? null,
     rolled: false,
   };
 }
@@ -181,13 +341,52 @@ export function sumTokenUsage(usage: TokenUsage | undefined | null): number {
 export function recordTokenUsage(
   counters: BudgetCounters,
   usage: TokenUsage | undefined | null,
-  now: Date = new Date(),
-): { tokensToday: number; lastTokenDate: string } {
-  const rolled = rollTokenBudget(counters, now);
+  sourceOrNow?: TokenSource | Date,
+  now?: Date,
+): {
+  tokensToday: number;
+  lastTokenDate: string;
+  tokensTodayBySource?: TokensTodayBySource;
+  maxCallTokens: number;
+  maxCallTokensAt: string | null;
+} {
+  const source = isTokenSource(sourceOrNow) ? sourceOrNow : undefined;
+  const when = isTokenSource(sourceOrNow)
+    ? (now ?? new Date())
+    : (sourceOrNow ?? now ?? new Date());
+  const rolled = rollTokenBudget(counters, when);
   const add = sumTokenUsage(usage);
+  let maxCallTokens = rolled.maxCallTokens;
+  let maxCallTokensAt = rolled.maxCallTokensAt;
+  if (add > maxCallTokens) {
+    maxCallTokens = add;
+    maxCallTokensAt = toLocalISO(when);
+  }
+
+  if (source) {
+    const map: TokensTodayBySource = rolled.tokensTodayBySource
+      ? { ...rolled.tokensTodayBySource }
+      : {};
+    if (!rolled.tokensTodayBySource) {
+      map[source] = rolled.tokensToday + add;
+    } else {
+      map[source] = (map[source] ?? 0) + add;
+    }
+    return {
+      tokensToday: sumTokensBySource(map),
+      lastTokenDate: rolled.lastTokenDate,
+      tokensTodayBySource: map,
+      maxCallTokens,
+      maxCallTokensAt,
+    };
+  }
+
   return {
     tokensToday: rolled.tokensToday + add,
     lastTokenDate: rolled.lastTokenDate,
+    tokensTodayBySource: undefined,
+    maxCallTokens,
+    maxCallTokensAt,
   };
 }
 
@@ -302,13 +501,19 @@ export function canRunAction(
 export function canStartCycle(
   counters: BudgetCounters,
   now: Date = new Date(),
-  opts?: { dailyCap?: number; cooldownMs?: number; tokenCeiling?: number },
+  opts?: {
+    dailyCap?: number;
+    weeklyCap?: number;
+    cooldownMs?: number;
+    tokenCeiling?: number;
+  },
 ): { allowed: boolean; reason: string; remaining: number; remainingWeekly: number } {
   const dailyCap = opts?.dailyCap ?? DAILY_ACTION_BUDGET;
+  const weeklyCap = opts?.weeklyCap ?? WEEKLY_EXPENSIVE_BUDGET;
   const cooldownMs = opts?.cooldownMs ?? CYCLE_COOLDOWN_MS;
   const tokenCeiling = opts?.tokenCeiling ?? DEFAULT_DAILY_TOKEN_CEILING;
   const remaining = getRemainingDailyBudget(counters, now, dailyCap);
-  const remainingWeekly = getRemainingWeeklyBudget(counters, now);
+  const remainingWeekly = getRemainingWeeklyBudget(counters, now, weeklyCap);
 
   if (isTokenCeilingReached(counters, now, tokenCeiling)) {
     return {
@@ -399,9 +604,10 @@ export function budgetSnapshot(
       lastActionWeek: weekly.lastActionWeek,
       tokensToday: tokens.tokensToday,
       lastTokenDate: tokens.lastTokenDate,
+      tokensTodayBySource: tokens.tokensTodayBySource,
     },
     now,
-    { dailyCap, cooldownMs, tokenCeiling },
+    { dailyCap, weeklyCap, cooldownMs, tokenCeiling },
   );
   return {
     actionsToday: daily.actionsToday,

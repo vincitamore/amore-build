@@ -4,12 +4,15 @@
 // enablement atomically (write-temp-rename).
 //
 // File map:
-//   health.json            → readHealth (pid, startedAt, lastBeat, version)
-//   state.json             → readStatus (activity, lastActions, budgets)
-//   lucerna.enable.json    → enablement (dreamsEnabled, autoCommitLive; absent = both false)
-//   log                    → readLog (plaintext tail)
-//   notifications.jsonl    → readNotifications (append-only queue; absent = empty)
-//   halt / wake / sleep    ← write sentinels
+//   health.json                    → readHealth (pid, startedAt, lastBeat, version)
+//   state.json                     → readStatus (activity, lastActions, budgets)
+//   .amore/lucerna/enable.json     → enablement (dreamsEnabled, autoCommitLive; absent = both false)
+//   .amore/lucerna/budgets.json    ← writeBudgets (merge-patch, tmp+rename)
+//   .amore/lucerna/chores.json     ← writeChores (per-entry assignment, tmp+rename)
+//   instruments/lucerna/lucerna.enable.json → legacy enablement read (never written)
+//   log                            → readLog (plaintext tail)
+//   notifications.jsonl            → readNotifications (append-only queue; absent = empty)
+//   halt / wake / sleep            ← write sentinels
 //
 // Process control:
 //   start  → resolve binary, spawn detached+unref in the house root, poll health
@@ -34,6 +37,7 @@
 
 import { spawn as nodeSpawn, spawnSync } from 'node:child_process';
 import {
+  appendFileSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -65,6 +69,11 @@ function boolOr(v: unknown, d: boolean): boolean {
 
 export function lucernaDir(orgRoot: string): string {
   return join(orgRoot, 'instruments', 'lucerna');
+}
+
+/** Charter directory: operator intent. Distinct from lucernaDir (runtime). */
+export function lucernaCharterDir(orgRoot: string): string {
+  return join(orgRoot, '.amore', 'lucerna');
 }
 
 /** Whether the Lucerna runtime directory exists on disk. */
@@ -304,24 +313,44 @@ export interface LucernaEnablement {
   autoCommitLive: boolean;
 }
 
-/** Absent enablement file → both false (honest defaults). */
-export function readEnablement(orgRoot: string): LucernaEnablement {
-  if (!isInstalled(orgRoot)) {
-    return { dreamsEnabled: false, autoCommitLive: false };
-  }
+function parseEnablementRaw(raw: unknown): LucernaEnablement {
+  if (!isObj(raw)) return { dreamsEnabled: false, autoCommitLive: false };
+  return {
+    dreamsEnabled: boolOr(raw.dreamsEnabled, false),
+    autoCommitLive: boolOr(raw.autoCommitLive, false),
+  };
+}
+
+function readEnablementAt(path: string): LucernaEnablement {
   try {
-    const raw: unknown = JSON.parse(readFileSync(join(lucernaDir(orgRoot), 'lucerna.enable.json'), 'utf8'));
-    if (!isObj(raw)) return { dreamsEnabled: false, autoCommitLive: false };
-    return {
-      dreamsEnabled: boolOr(raw.dreamsEnabled, false),
-      autoCommitLive: boolOr(raw.autoCommitLive, false),
-    };
+    return parseEnablementRaw(JSON.parse(readFileSync(path, 'utf8')));
   } catch {
     return { dreamsEnabled: false, autoCommitLive: false };
   }
 }
 
+/** Absent enablement file → both false (honest defaults). New path first, then legacy. */
+export function readEnablement(orgRoot: string): LucernaEnablement {
+  if (!isInstalled(orgRoot)) {
+    return { dreamsEnabled: false, autoCommitLive: false };
+  }
+  const primary = join(lucernaCharterDir(orgRoot), 'enable.json');
+  if (existsSync(primary)) {
+    return readEnablementAt(primary);
+  }
+  return readEnablementAt(join(lucernaDir(orgRoot), 'lucerna.enable.json'));
+}
+
 // ── status ────────────────────────────────────────────────────────────────────
+
+export type LucernaCapabilityState = 'ready' | 'cooling' | 'refusing';
+
+export interface LucernaCapabilityWire {
+  state: LucernaCapabilityState;
+  reasonCode?: string;
+  reason?: string;
+  resumesAt?: string;
+}
 
 export interface LucernaStatusWire {
   available: boolean;
@@ -332,8 +361,36 @@ export interface LucernaStatusWire {
   activity?: unknown;
   lastActions?: unknown;
   budgets?: unknown;
+  capability?: LucernaCapabilityWire;
   phase?: string;
   enablement: LucernaEnablement;
+}
+
+function capabilityFromBudgets(budgets: unknown): LucernaCapabilityWire | undefined {
+  if (!isObj(budgets)) return undefined;
+  const raw = isObj(budgets.capability) ? budgets.capability : budgets;
+  const state = raw.state;
+  if (state !== 'ready' && state !== 'cooling' && state !== 'refusing') return undefined;
+  const out: LucernaCapabilityWire = { state };
+  const reasonCode = strOrU(raw.reasonCode);
+  const reason = strOrU(raw.reason);
+  const resumesAt = strOrU(raw.resumesAt);
+  if (reasonCode) out.reasonCode = reasonCode;
+  if (reason) out.reason = reason;
+  if (resumesAt) out.resumesAt = resumesAt;
+  return out;
+}
+
+function tokensFromBudgets(budgets: unknown): string | undefined {
+  if (!isObj(budgets)) return undefined;
+  return typeof budgets.tokens === 'string' && budgets.tokens ? budgets.tokens : undefined;
+}
+
+function actionsTodayFromBudgets(budgets: unknown): number | undefined {
+  if (!isObj(budgets)) return undefined;
+  return typeof budgets.actionsToday === 'number' && Number.isFinite(budgets.actionsToday)
+    ? budgets.actionsToday
+    : undefined;
 }
 
 export function readStatus(
@@ -362,6 +419,7 @@ export function readStatus(
     // state missing or malformed — still available if dir exists
   }
 
+  const capability = capabilityFromBudgets(budgets);
   return {
     available: true,
     stale: health.stale,
@@ -370,6 +428,7 @@ export function readStatus(
     activity,
     lastActions,
     budgets,
+    ...(capability ? { capability } : {}),
     phase: health.phase,
     enablement,
   };
@@ -459,8 +518,8 @@ export function writeEnablement(
     autoCommitLive:
       typeof patch.autoCommitLive === 'boolean' ? patch.autoCommitLive : current.autoCommitLive,
   };
-  const dir = lucernaDir(orgRoot);
-  const target = join(dir, 'lucerna.enable.json');
+  const dir = lucernaCharterDir(orgRoot);
+  const target = join(dir, 'enable.json');
   const tmp = `${target}.tmp`;
   try {
     mkdirSync(dir, { recursive: true });
@@ -476,6 +535,324 @@ export function writeEnablement(
     }
     return { available: true, ok: false, enablement: current };
   }
+}
+
+// ── charter writes (atomic, same tmp+rename seam as writeEnablement) ───────────
+
+export const SHIPPED_BUDGET_DEFAULTS = {
+  schemaVersion: 1,
+  dailyActionCap: 12,
+  weeklyExpensiveCap: 6,
+  cycleCooldownMinutes: 120,
+  dailyTokenCeiling: 200_000,
+  dreamsReserveTokens: 80_000,
+  autoCommitCooldownMinutes: 30,
+} as const;
+
+export type BudgetFileKnob =
+  | 'dailyActionCap'
+  | 'weeklyExpensiveCap'
+  | 'cycleCooldownMinutes'
+  | 'dailyTokenCeiling'
+  | 'dreamsReserveTokens'
+  | 'autoCommitCooldownMinutes';
+
+export interface LucernaBudgetsFile {
+  schemaVersion: number;
+  dailyActionCap: number;
+  weeklyExpensiveCap: number;
+  cycleCooldownMinutes: number;
+  dailyTokenCeiling: number;
+  dreamsReserveTokens: number;
+  autoCommitCooldownMinutes: number;
+}
+
+export interface LucernaChoreAssignment {
+  enabled?: boolean;
+  minIntervalHours?: number;
+}
+
+export interface LucernaChoresFile {
+  schemaVersion: number;
+  chores: Record<string, LucernaChoreAssignment>;
+}
+
+export interface LucernaBudgetsWriteWire extends LucernaWriteWire {
+  budgets?: LucernaBudgetsFile;
+}
+
+export interface LucernaChoresWriteWire extends LucernaWriteWire {
+  chores?: LucernaChoresFile;
+}
+
+export interface LucernaChorePatch {
+  key: string;
+  enabled?: boolean;
+  minIntervalHours?: number;
+}
+
+const STRICT_UINT_RE = /^\d+$/;
+const HOUR_KEYS = new Set(['cooldown', 'cycle-cooldown-hours', 'cycleCooldownHours']);
+const SPEND_BOUNDING = new Set<BudgetFileKnob>([
+  'dailyActionCap',
+  'weeklyExpensiveCap',
+  'dailyTokenCeiling',
+  'dreamsReserveTokens',
+]);
+
+const BUDGET_ALIASES: Record<string, BudgetFileKnob> = {
+  dailyActionCap: 'dailyActionCap',
+  weeklyExpensiveCap: 'weeklyExpensiveCap',
+  cycleCooldownMinutes: 'cycleCooldownMinutes',
+  dailyTokenCeiling: 'dailyTokenCeiling',
+  dreamsReserveTokens: 'dreamsReserveTokens',
+  autoCommitCooldownMinutes: 'autoCommitCooldownMinutes',
+  'actions-per-day': 'dailyActionCap',
+  actions: 'dailyActionCap',
+  'expensive-per-week': 'weeklyExpensiveCap',
+  expensive: 'weeklyExpensiveCap',
+  'tokens-per-day': 'dailyTokenCeiling',
+  tokens: 'dailyTokenCeiling',
+  'cycle-cooldown-hours': 'cycleCooldownMinutes',
+  cooldown: 'cycleCooldownMinutes',
+  cycleCooldownHours: 'cycleCooldownMinutes',
+  'dreams-reserve': 'dreamsReserveTokens',
+  reserve: 'dreamsReserveTokens',
+  'auto-commit-cooldown-minutes': 'autoCommitCooldownMinutes',
+  'auto-commit': 'autoCommitCooldownMinutes',
+};
+
+const BUDGET_WRITE_BOUNDS: Record<BudgetFileKnob, { min: number; max: number }> = {
+  dailyActionCap: { min: 0, max: 100 },
+  weeklyExpensiveCap: { min: 0, max: 100 },
+  cycleCooldownMinutes: { min: 30, max: 10_080 },
+  dailyTokenCeiling: { min: 0, max: 10_000_000 },
+  dreamsReserveTokens: { min: 0, max: 10_000_000 },
+  autoCommitCooldownMinutes: { min: 1, max: 10_080 },
+};
+
+function usageWrite<T extends LucernaWriteWire>(extra?: Omit<T, keyof LucernaWriteWire>): T {
+  return { available: true, ok: false, reason: 'usage', ...(extra as object) } as T;
+}
+
+function parseNonNegInt(v: unknown): number | null {
+  if (typeof v === 'string') {
+    const t = v.trim();
+    if (!STRICT_UINT_RE.test(t)) return null;
+    const n = Number(t);
+    if (!Number.isInteger(n) || n < 0 || !Number.isSafeInteger(n)) return null;
+    return n;
+  }
+  if (typeof v === 'number') {
+    if (!Number.isInteger(v) || v < 0 || !Number.isSafeInteger(v)) return null;
+    return v;
+  }
+  return null;
+}
+
+function parseHoursToMinutes(v: unknown): number | null {
+  let h: number;
+  if (typeof v === 'string') {
+    const t = v.trim();
+    if (!/^\d+(\.\d+)?$/.test(t)) return null;
+    h = Number(t);
+  } else if (typeof v === 'number') {
+    h = v;
+  } else {
+    return null;
+  }
+  if (!Number.isFinite(h) || h < 0.5) return null;
+  const mins = h * 60;
+  if (!Number.isInteger(mins) || !Number.isSafeInteger(mins) || mins < 0) return null;
+  return mins;
+}
+
+function inKnobBounds(knob: BudgetFileKnob, n: number): boolean {
+  const { min, max } = BUDGET_WRITE_BOUNDS[knob];
+  if (n < min || n > max) return false;
+  if (knob === 'dailyTokenCeiling' && n > 0 && n < 10_000) return false;
+  return true;
+}
+
+/** Parse a merge-patch of known budget knobs. Null → usage (wrong types / empty). */
+export function parseBudgetPatch(body: unknown): Partial<Record<BudgetFileKnob, number>> | null {
+  if (!isObj(body)) return null;
+  const patch: Partial<Record<BudgetFileKnob, number>> = {};
+  for (const [rawKey, rawVal] of Object.entries(body)) {
+    const knob = BUDGET_ALIASES[rawKey];
+    if (!knob) continue;
+    if (HOUR_KEYS.has(rawKey)) {
+      const mins = parseHoursToMinutes(rawVal);
+      if (mins === null) return null;
+      if (!inKnobBounds(knob, mins)) return null;
+      patch[knob] = mins;
+      continue;
+    }
+    const n = parseNonNegInt(rawVal);
+    if (n === null) return null;
+    if (!inKnobBounds(knob, n)) return null;
+    patch[knob] = n;
+  }
+  if (Object.keys(patch).length === 0) return null;
+  return patch;
+}
+
+export function parseChorePatch(body: unknown): LucernaChorePatch | null {
+  if (!isObj(body)) return null;
+  const key = typeof body.key === 'string' ? body.key.trim() : '';
+  if (!key) return null;
+  const patch: LucernaChorePatch = { key };
+  if ('enabled' in body) {
+    if (typeof body.enabled !== 'boolean') return null;
+    patch.enabled = body.enabled;
+  }
+  if ('minIntervalHours' in body) {
+    const n = parseNonNegInt(body.minIntervalHours);
+    if (n === null || n > 8760) return null;
+    patch.minIntervalHours = n;
+  }
+  if (patch.enabled === undefined && patch.minIntervalHours === undefined) return null;
+  return patch;
+}
+
+function budgetsPath(orgRoot: string): string {
+  return join(lucernaCharterDir(orgRoot), 'budgets.json');
+}
+
+function choresPath(orgRoot: string): string {
+  return join(lucernaCharterDir(orgRoot), 'chores.json');
+}
+
+function readBudgetsFile(orgRoot: string): LucernaBudgetsFile {
+  const base: LucernaBudgetsFile = { ...SHIPPED_BUDGET_DEFAULTS };
+  try {
+    const raw: unknown = JSON.parse(readFileSync(budgetsPath(orgRoot), 'utf8'));
+    if (!isObj(raw)) return base;
+    const next = { ...base };
+    for (const knob of Object.keys(BUDGET_WRITE_BOUNDS) as BudgetFileKnob[]) {
+      const n = parseNonNegInt(raw[knob]);
+      if (n !== null) next[knob] = n;
+    }
+    return next;
+  } catch {
+    return base;
+  }
+}
+
+function readChoresFile(orgRoot: string): LucernaChoresFile {
+  try {
+    const raw: unknown = JSON.parse(readFileSync(choresPath(orgRoot), 'utf8'));
+    if (!isObj(raw) || !isObj(raw.chores)) {
+      return { schemaVersion: 1, chores: {} };
+    }
+    const chores: Record<string, LucernaChoreAssignment> = {};
+    for (const [key, entry] of Object.entries(raw.chores)) {
+      if (!key || !isObj(entry)) continue;
+      const row: LucernaChoreAssignment = {};
+      if (typeof entry.enabled === 'boolean') row.enabled = entry.enabled;
+      if (typeof entry.minIntervalHours === 'number' && Number.isInteger(entry.minIntervalHours)) {
+        row.minIntervalHours = entry.minIntervalHours;
+      }
+      for (const [ek, ev] of Object.entries(entry)) {
+        if (ek === 'enabled' || ek === 'minIntervalHours') continue;
+        (row as Record<string, unknown>)[ek] = ev;
+      }
+      chores[key] = row;
+    }
+    return { schemaVersion: 1, chores };
+  } catch {
+    return { schemaVersion: 1, chores: {} };
+  }
+}
+
+function atomicWriteJson(target: string, value: unknown): boolean {
+  const tmp = `${target}.tmp`;
+  try {
+    mkdirSync(dirname(target), { recursive: true });
+    writeFileSync(tmp, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
+    renameSync(tmp, target);
+    return true;
+  } catch {
+    try {
+      if (existsSync(tmp)) writeFileSync(tmp, '');
+    } catch {
+      /* ignore */
+    }
+    return false;
+  }
+}
+
+function appendBudgetCapChanged(
+  orgRoot: string,
+  knob: BudgetFileKnob,
+  from: number,
+  to: number,
+): void {
+  if (!SPEND_BOUNDING.has(knob) || from === to) return;
+  const dir = lucernaDir(orgRoot);
+  const path = join(dir, 'notifications.jsonl');
+  const line = {
+    ts: new Date().toISOString(),
+    level: 'info',
+    kind: 'budget-cap-changed',
+    message: `${knob} ${from} → ${to} (file)`,
+  };
+  try {
+    mkdirSync(dir, { recursive: true });
+    appendFileSync(path, `${JSON.stringify(line)}\n`, 'utf8');
+  } catch {
+    /* write succeeded; notification is best-effort */
+  }
+}
+
+/**
+ * Merge-patch known knobs into `.amore/lucerna/budgets.json` (tmp+rename).
+ * Absent file starts from shipped defaults. Last-write-wins, not CAS.
+ */
+export function writeBudgets(orgRoot: string, body: unknown): LucernaBudgetsWriteWire {
+  if (!isInstalled(orgRoot)) {
+    return { ...NOT_INSTALLED, ok: false };
+  }
+  const patch = parseBudgetPatch(body);
+  if (!patch) return usageWrite<LucernaBudgetsWriteWire>();
+  const current = readBudgetsFile(orgRoot);
+  const next: LucernaBudgetsFile = { ...current, ...patch, schemaVersion: 1 };
+  if (next.dreamsReserveTokens >= next.dailyTokenCeiling && next.dailyTokenCeiling > 0) {
+    return usageWrite<LucernaBudgetsWriteWire>({ budgets: current });
+  }
+  if (!atomicWriteJson(budgetsPath(orgRoot), next)) {
+    return { available: true, ok: false, budgets: current };
+  }
+  for (const knob of Object.keys(patch) as BudgetFileKnob[]) {
+    const to = patch[knob];
+    if (to === undefined) continue;
+    appendBudgetCapChanged(orgRoot, knob, current[knob], to);
+  }
+  return { available: true, ok: true, budgets: next };
+}
+
+/**
+ * Per-entry assignment into `.amore/lucerna/chores.json`. Does not whole-file PUT.
+ * Unknown keys are still written. No spawn fields are invented.
+ */
+export function writeChores(orgRoot: string, body: unknown): LucernaChoresWriteWire {
+  if (!isInstalled(orgRoot)) {
+    return { ...NOT_INSTALLED, ok: false };
+  }
+  const patch = parseChorePatch(body);
+  if (!patch) return usageWrite<LucernaChoresWriteWire>();
+  const current = readChoresFile(orgRoot);
+  const prev = isObj(current.chores[patch.key]) ? { ...current.chores[patch.key] } : {};
+  if (patch.enabled !== undefined) prev.enabled = patch.enabled;
+  if (patch.minIntervalHours !== undefined) prev.minIntervalHours = patch.minIntervalHours;
+  const next: LucernaChoresFile = {
+    schemaVersion: 1,
+    chores: { ...current.chores, [patch.key]: prev },
+  };
+  if (!atomicWriteJson(choresPath(orgRoot), next)) {
+    return { available: true, ok: false, chores: current };
+  }
+  return { available: true, ok: true, chores: next };
 }
 
 // ── notifications (JSONL queue) ───────────────────────────────────────────────
@@ -580,6 +957,9 @@ export interface LucernaPulse {
   phase?: string;
   /** Pending dream manifests/light dreams + proposals awaiting operator review. */
   pendingReview?: { dreams: number; proposals: number; total: number };
+  capability?: LucernaCapabilityWire;
+  tokens?: string;
+  actionsToday?: number;
 }
 
 /** Derive a compact pulse shape from health + optional newest notification. */
@@ -621,6 +1001,28 @@ export function buildLucernaPulse(
   };
 }
 
+function readPulseBudgetFields(orgRoot: string): {
+  capability?: LucernaCapabilityWire;
+  tokens?: string;
+  actionsToday?: number;
+} {
+  try {
+    const raw: unknown = JSON.parse(readFileSync(join(lucernaDir(orgRoot), 'state.json'), 'utf8'));
+    if (!isObj(raw)) return {};
+    const budgets = raw.budgets;
+    const capability = capabilityFromBudgets(budgets);
+    const tokens = tokensFromBudgets(budgets);
+    const actionsToday = actionsTodayFromBudgets(budgets);
+    return {
+      ...(capability ? { capability } : {}),
+      ...(tokens ? { tokens } : {}),
+      ...(actionsToday !== undefined ? { actionsToday } : {}),
+    };
+  } catch {
+    return {};
+  }
+}
+
 export function readPulse(
   orgRoot: string,
   nowMs: number = Date.now(),
@@ -628,7 +1030,12 @@ export function readPulse(
 ): LucernaPulse {
   const health = readHealth(orgRoot, nowMs, deps);
   const notes = readNotifications(orgRoot, 1);
-  return buildLucernaPulse(health, notes.entries[0] ?? null);
+  const pulse = buildLucernaPulse(health, notes.entries[0] ?? null);
+  const extra = readPulseBudgetFields(orgRoot);
+  if (extra.capability) pulse.capability = extra.capability;
+  if (extra.tokens) pulse.tokens = extra.tokens;
+  if (extra.actionsToday !== undefined) pulse.actionsToday = extra.actionsToday;
+  return pulse;
 }
 
 // ── process control (start / stop) ────────────────────────────────────────────

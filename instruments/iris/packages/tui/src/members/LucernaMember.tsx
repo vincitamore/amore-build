@@ -3,18 +3,29 @@ import { useKeyboard } from '@opentui/react';
 import { usePalette } from '../ThemeProvider';
 import { Panel } from '../components/Panel';
 import { Stat } from '../components/Stat';
-import { ConfirmModal } from '../components/Modal';
+import { ConfirmModal, Modal } from '../components/Modal';
 import { useFlash } from '../components/use-flash';
 import { useStableDimensions } from '../use-stable-dimensions';
 import { tickRender } from '../debug';
 import {
+  BUDGETS_EMPTY_NEVER_RAN,
+  BUDGETS_EMPTY_UNAVAILABLE,
+  budgetsPanelKind,
+  choreOverlayItems,
   deriveLucernaUiState,
   emptyDisplayRow,
+  formatBudgetPanelLines,
+  formatChoreOverlayRow,
+  formatChoresOverlayHeader,
   formatLucernaDisplayLine,
   formatLucernaLastActionsLine,
+  formatUnknownChoreRow,
   lucernaActivitySub,
   lucernaActivityValue,
   lucernaBeatAgeSub,
+  parseLucernaBudgets,
+  type LucernaCapabilityView,
+  type LucernaRosterView,
 } from './lucerna-display';
 import {
   LucernaReviewOverlay,
@@ -66,6 +77,7 @@ interface Status {
   activity?: unknown;
   lastActions?: unknown;
   budgets?: unknown;
+  capability?: LucernaCapabilityView;
   enablement?: Enablement;
   phase?: string;
 }
@@ -226,15 +238,6 @@ function uptimeStr(ts?: string): string {
   return `${Math.max(1, m)}m`;
 }
 
-function budgetSummary(budgets: unknown): string {
-  if (!budgets || typeof budgets !== 'object') return '—';
-  const entries = Object.entries(budgets as Record<string, unknown>).slice(0, 4);
-  if (entries.length === 0) return '—';
-  return entries
-    .map(([k, v]) => `${k}:${typeof v === 'number' || typeof v === 'string' ? v : '?'}`)
-    .join(' · ');
-}
-
 function formatNotification(n: Notification): string {
   return `${n.level} ${n.kind}: ${n.message}`;
 }
@@ -245,6 +248,265 @@ const NOTE_LIMIT = 8;
 const NOTE_SLOTS = 5;
 /** Fixed review list slots for opaque clear-on-repaint. */
 const REVIEW_SLOTS = 6;
+
+const BUDGET_EDIT_CHIPS = [
+  { id: 'actions', label: 'actions', knob: 'dailyActionCap' as const, noun: 'actions/day' },
+  { id: 'expensive', label: 'expensive', knob: 'weeklyExpensiveCap' as const, noun: 'expensive/week' },
+  { id: 'tokens', label: 'tokens', knob: 'dailyTokenCeiling' as const, noun: 'tokens/day' },
+] as const;
+
+function parseCapInput(raw: string): number | null {
+  const t = raw.trim();
+  if (!/^\d+$/.test(t)) return null;
+  const n = Number(t);
+  if (!Number.isInteger(n) || n < 0) return null;
+  return n;
+}
+
+function BudgetEditModal({
+  active,
+  current,
+  onRequestConfirm,
+  onCancel,
+}: {
+  active: boolean;
+  current: {
+    dailyActionCap: number;
+    weeklyExpensiveCap: number;
+    dailyTokenCeiling: number;
+  };
+  onRequestConfirm: (
+    knob: (typeof BUDGET_EDIT_CHIPS)[number]['knob'],
+    noun: string,
+    value: number,
+  ) => void;
+  onCancel: () => void;
+}) {
+  const t = usePalette();
+  const [ci, setCi] = useState(0);
+  const [hint, setHint] = useState('←→ cap · type value · ⏎ confirm · esc cancel');
+  const inputRef = useRef<{ value?: string } | null>(null);
+  const chip = BUDGET_EDIT_CHIPS[ci] ?? BUDGET_EDIT_CHIPS[0];
+
+  useEffect(() => {
+    if (!active) return;
+    setCi(0);
+    setHint('←→ cap · type value · ⏎ confirm · esc cancel');
+  }, [active]);
+
+  useEffect(() => {
+    if (!active) return;
+    const c = BUDGET_EDIT_CHIPS[ci] ?? BUDGET_EDIT_CHIPS[0];
+    if (inputRef.current) inputRef.current.value = String(current[c.knob]);
+    // Prefill on open/chip only — do not reset while the operator types.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, ci]);
+
+  useKeyboard((key: { name?: string }) => {
+    if (!active) return;
+    const n = (key.name ?? '').toLowerCase().replace('arrow', '');
+    if (n === 'left' || n === 'up') {
+      setCi((x) => (x + BUDGET_EDIT_CHIPS.length - 1) % BUDGET_EDIT_CHIPS.length);
+      setHint('←→ cap · type value · ⏎ confirm · esc cancel');
+      return;
+    }
+    if (n === 'right' || n === 'down') {
+      setCi((x) => (x + 1) % BUDGET_EDIT_CHIPS.length);
+      setHint('←→ cap · type value · ⏎ confirm · esc cancel');
+      return;
+    }
+    if (n === 'return' || n === 'enter') {
+      const parsed = parseCapInput(inputRef.current?.value ?? '');
+      if (parsed === null) {
+        setHint(`${chip.noun} must be a non-negative integer`);
+        return;
+      }
+      onRequestConfirm(chip.knob, chip.noun, parsed);
+      return;
+    }
+    if (n === 'escape') return onCancel();
+  });
+
+  return (
+    <Modal title="Edit budget cap" width={58} visible={active}>
+      <box flexDirection="row">
+        {BUDGET_EDIT_CHIPS.map((c, idx) => (
+          <box
+            key={c.id}
+            marginRight={1}
+            backgroundColor={idx === ci ? t.selection : t.background}
+            onMouseDown={() => setCi(idx)}
+          >
+            <text fg={idx === ci ? t.primary : t.muted}>{` ${c.label} `}</text>
+          </box>
+        ))}
+      </box>
+      <input
+        ref={inputRef as never}
+        focused={active}
+        placeholder="cap value"
+        backgroundColor={t.background}
+        textColor={t.foreground}
+      />
+      <text fg={t.muted}>{hint}</text>
+    </Modal>
+  );
+}
+
+function pendingFromBudgets(budgets: unknown): Record<string, number> {
+  if (typeof budgets !== 'object' || budgets === null || Array.isArray(budgets)) return {};
+  const charter = (budgets as { charter?: { pending?: unknown } }).charter;
+  if (!charter || typeof charter.pending !== 'object' || charter.pending === null) return {};
+  const out: Record<string, number> = {};
+  for (const [k, v] of Object.entries(charter.pending as Record<string, unknown>)) {
+    if (typeof v === 'number' && Number.isFinite(v)) out[k] = v;
+  }
+  return out;
+}
+
+function visiblePending(
+  local: Record<string, number>,
+  snap: Record<string, number>,
+  effective: Record<string, number>,
+): Record<string, number> {
+  const merged = { ...snap, ...local };
+  const out: Record<string, number> = {};
+  for (const [k, v] of Object.entries(merged)) {
+    if (effective[k] !== v) out[k] = v;
+  }
+  return out;
+}
+
+function withPendingMarkers(
+  lines: { text: string; tone: 'muted' | 'warning' }[],
+  pending: Record<string, number>,
+): { text: string; tone: 'muted' | 'warning' }[] {
+  const map: Array<[string, string]> = [
+    ['actions', 'dailyActionCap'],
+    ['expensive', 'weeklyExpensiveCap'],
+    ['tokens', 'dailyTokenCeiling'],
+  ];
+  return lines.map((ln) => {
+    for (const [prefix, key] of map) {
+      if (ln.text.startsWith(prefix) && pending[key] !== undefined) {
+        return { ...ln, text: `${ln.text} (${pending[key]} pending)`, tone: 'warning' };
+      }
+    }
+    return ln;
+  });
+}
+
+function LucernaChoresOverlay({
+  active,
+  roster,
+  cursor,
+  onClose,
+  onMove,
+  onToggle,
+}: {
+  active: boolean;
+  roster: LucernaRosterView | null;
+  cursor: number;
+  onClose: () => void;
+  onMove: (delta: number) => void;
+  onToggle: () => void;
+}) {
+  const t = usePalette();
+  const dims = useStableDimensions();
+
+  const width = Math.min(dims.width - 4, 110);
+  const left = Math.max(0, Math.floor((dims.width - width) / 2));
+  const height = Math.max(10, dims.height - 4);
+  const top = 1;
+  const innerW = Math.max(8, width - 4);
+  const items = roster ? choreOverlayItems(roster) : [];
+  const slots = Math.max(4, height - 6);
+  const start = Math.max(0, Math.min(cursor, Math.max(0, items.length - slots)));
+  const slice = items.slice(start, start + slots);
+  const header = roster
+    ? formatChoresOverlayHeader(roster)
+    : 'no roster on this snapshot';
+
+  useKeyboard((key: { name?: string }) => {
+    if (!active) return;
+    const n = (key.name ?? '').toLowerCase().replace('arrow', '');
+    if (n === 'escape') return onClose();
+    if (n === 'up') return onMove(-1);
+    if (n === 'down') return onMove(1);
+    if (n === 't') return onToggle();
+  });
+
+  return (
+    <box
+      visible={active}
+      position="absolute"
+      left={left}
+      top={top}
+      width={width}
+      height={height}
+      zIndex={200}
+      border
+      borderStyle="rounded"
+      borderColor={t.borderActive}
+      backgroundColor={t.background}
+      title=" Chores "
+      titleAlignment="center"
+      flexDirection="column"
+      paddingLeft={1}
+      paddingRight={1}
+    >
+      <box height={1} flexShrink={0} overflow="hidden" backgroundColor={t.background}>
+        <text fg={t.muted} wrapMode="none">
+          {formatLucernaDisplayLine(header, innerW)}
+        </text>
+      </box>
+      <box
+        flexDirection="column"
+        flexGrow={1}
+        flexShrink={1}
+        minHeight={0}
+        backgroundColor={t.background}
+      >
+        {Array.from({ length: slots }, (_, i) => {
+          const item = slice[i];
+          if (!item) {
+            return (
+              <FixedClearRow
+                key={`c-${i}`}
+                width={innerW}
+                color={t.muted}
+                text={
+                  i === 0 && items.length === 0
+                    ? formatLucernaDisplayLine('no chores listed', innerW)
+                    : emptyDisplayRow(innerW)
+                }
+              />
+            );
+          }
+          const abs = start + i;
+          const selected = abs === cursor;
+          const text =
+            item.kind === 'entry'
+              ? formatChoreOverlayRow(item.entry, selected)
+              : formatUnknownChoreRow(item.key, selected);
+          return (
+            <FixedClearRow
+              key={`c-${i}`}
+              width={innerW}
+              color={selected ? t.info : item.kind === 'unknown' || (item.kind === 'entry' && !item.entry.enabled) ? t.muted : t.foreground}
+              text={formatLucernaDisplayLine(text, innerW)}
+            />
+          );
+        })}
+      </box>
+      <box height={1} flexShrink={0} overflow="hidden" backgroundColor={t.background}>
+        <text fg={t.muted} wrapMode="none">
+          {formatLucernaDisplayLine('esc close · up/dn · t toggle', innerW)}
+        </text>
+      </box>
+    </box>
+  );
+}
 
 type PanelFocus = 'log' | 'review';
 
@@ -276,20 +538,25 @@ export function LucernaMember({
   const [reviewCursor, setReviewCursor] = useState(0);
   const [panelFocus, setPanelFocus] = useState<PanelFocus>('log');
   const [overlay, setOverlay] = useState<ReviewOverlayModel | null>(null);
+  const [choresOpen, setChoresOpen] = useState(false);
+  const [choreCursor, setChoreCursor] = useState(0);
+  const [budgetEditOpen, setBudgetEditOpen] = useState(false);
+  const [localPending, setLocalPending] = useState<Record<string, number>>({});
   const [scroll, setScroll] = useState(0);
   const [flash, setFlash] = useFlash();
-  const [confirm, setConfirm] = useState<{ msg: string; run: () => void } | null>(null);
+  const [confirm, setConfirm] = useState<{ msg: string; detail?: string[]; run: () => void } | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const overlayOpen = !!overlay;
+  const overlayOpen = !!overlay || choresOpen;
 
   useEffect(() => {
     if (!inputActive && confirm) setConfirm(null);
-  }, [inputActive, confirm]);
+    if (!inputActive && budgetEditOpen) setBudgetEditOpen(false);
+  }, [inputActive, confirm, budgetEditOpen]);
 
   useEffect(() => {
-    onCapture?.(!!confirm || overlayOpen);
-  }, [confirm, overlayOpen, onCapture]);
+    onCapture?.(!!confirm || overlayOpen || budgetEditOpen);
+  }, [confirm, overlayOpen, budgetEditOpen, onCapture]);
   useEffect(() => () => onCapture?.(false), [onCapture]);
 
   const refresh = async (url: string, alive: () => boolean) => {
@@ -375,7 +642,7 @@ export function LucernaMember({
   const pendingReview = reviewRows.filter((r) => r.pending).length;
   const selectedRow = reviewRows[Math.min(reviewCursor, Math.max(0, reviewRows.length - 1))] ?? null;
 
-  const reserve = 20; // status + notifications + review + footer
+  const reserve = 27; // status (taller budgets) + notifications + review + footer
   const visible = Math.max(3, dims.height - reserve);
   // Outer pad (2) + panel border (2) + panel pad (2) = 6. Exact so rows fill the panel.
   const rowW = Math.max(16, dims.width - 6);
@@ -395,6 +662,12 @@ export function LucernaMember({
   useEffect(() => {
     if (reviewCursor >= reviewRows.length) setReviewCursor(Math.max(0, reviewRows.length - 1));
   }, [reviewRows.length, reviewCursor]);
+
+  const roster = parseLucernaBudgets(status?.budgets)?.roster ?? null;
+  const choreCount = roster ? choreOverlayItems(roster).length : 0;
+  useEffect(() => {
+    if (choreCursor >= choreCount) setChoreCursor(Math.max(0, choreCount - 1));
+  }, [choreCount, choreCursor]);
 
   const post = async (path: string, label: string, body?: Record<string, unknown>) => {
     if (!daemonUrl) return setFlash('Iris daemon down — cannot reach Lucerna proxy');
@@ -432,6 +705,11 @@ export function LucernaMember({
           // Force status re-read so TUI always shows file truth after write
           if (daemonUrl) await refresh(daemonUrl, () => true);
         }
+      } else if (path === 'budgets' || path === 'chores') {
+        if (j.ok === false) setFlash(`${label} failed`);
+        else setFlash(label);
+        // Force status re-read so TUI always shows file truth after write
+        if (daemonUrl) await refresh(daemonUrl, () => true);
       } else if (
         path === 'dreams/review' ||
         path === 'proposals/apply' ||
@@ -447,6 +725,8 @@ export function LucernaMember({
       if (
         daemonUrl &&
         path !== 'enable' &&
+        path !== 'budgets' &&
+        path !== 'chores' &&
         path !== 'dreams/review' &&
         path !== 'proposals/apply' &&
         path !== 'proposals/close'
@@ -499,7 +779,7 @@ export function LucernaMember({
 
   useKeyboard((key: { name?: string }) => {
     // Overlay owns keys while open (except confirm modal).
-    if (!inputActive || confirm || busy || overlayOpen) return;
+    if (!inputActive || confirm || busy || overlayOpen || budgetEditOpen) return;
     const n = (key.name ?? '').toLowerCase().replace('arrow', '');
 
     // Escape: leave review focus → log
@@ -560,6 +840,14 @@ export function LucernaMember({
       setPanelFocus((f) => (f === 'review' ? 'log' : 'review'));
       return;
     }
+    if (n === 'c') {
+      setChoresOpen(true);
+      return;
+    }
+    if (n === 'b') {
+      setBudgetEditOpen(true);
+      return;
+    }
     if (n === 'r') return void post('start', 'start');
     if (n === 'k') {
       return setConfirm({
@@ -577,8 +865,20 @@ export function LucernaMember({
     if (n === 's') return void post('sleep', 'sleep sent');
     if (n === 'd') {
       const next = !enablement.dreamsEnabled;
+      const parsed = parseLucernaBudgets(status?.budgets);
+      const actions = parsed?.dailyCap ?? 12;
+      const expensive = parsed?.windows?.weekly?.cap ?? 6;
+      const tokens = parsed?.dailyTokenCeiling ?? 200000;
+      const tokLabel = tokens >= 10_000 ? `${Math.round(tokens / 1000)}K` : String(tokens);
       return setConfirm({
         msg: `Set dreams ${next ? 'ON' : 'OFF'} in lucerna.enable.json?`,
+        detail: next
+          ? [
+              'Dreams make model calls on your configured model + key.',
+              `Bounded by ${actions} actions/day, ${expensive} expensive/week, ${tokLabel}`,
+              'tokens/day. Press b on this tab to change them.',
+            ]
+          : undefined,
         run: () => void post('enable', 'dreams', { dreamsEnabled: next }),
       });
     }
@@ -619,11 +919,44 @@ export function LucernaMember({
       );
     }
 
+    const parsedBudgets = parseLucernaBudgets(status?.budgets);
+    const capability = status?.capability ?? parsedBudgets?.capability ?? null;
+    const refusing = uiState === 'running' && capability?.state === 'refusing';
     const phaseValue = lucernaActivityValue(uiState);
-    const phaseColor = uiState === 'stale' ? t.error : uiState === 'stopped' ? t.muted : t.success;
+    const phaseColor =
+      uiState === 'stale'
+        ? t.error
+        : uiState === 'stopped'
+          ? t.muted
+          : refusing
+            ? t.warning
+            : t.success;
     const beat = formatBeatAge(health?.beatAgeSec);
     const dreamsBadge = enablement.dreamsEnabled ? 'dreams on' : 'dreams off';
     const commitBadge = enablement.autoCommitLive ? 'auto-commit live' : 'auto-commit dry-run';
+    const hasOtherState = status?.activity != null || status?.lastActions != null;
+    const panelKind = budgetsPanelKind(status?.budgets, hasOtherState);
+    const budgetInnerW = Math.max(20, Math.floor(dims.width / 2) - 8);
+    const weeklyCap =
+      parsedBudgets?.windows?.weekly?.cap ??
+      (parsedBudgets?.weekly.match(/\/(\d+)/)?.[1]
+        ? Number(parsedBudgets.weekly.match(/\/(\d+)/)?.[1])
+        : undefined);
+    const pending = visiblePending(localPending, pendingFromBudgets(status?.budgets), {
+      dailyActionCap: parsedBudgets?.dailyCap ?? Number.NaN,
+      weeklyExpensiveCap: weeklyCap ?? Number.NaN,
+      dailyTokenCeiling: parsedBudgets?.dailyTokenCeiling ?? Number.NaN,
+    });
+    const budgetLines =
+      panelKind === 'rows' && parsedBudgets
+        ? withPendingMarkers(formatBudgetPanelLines(parsedBudgets, budgetInnerW), pending)
+        : [
+            {
+              text:
+                panelKind === 'unavailable' ? BUDGETS_EMPTY_UNAVAILABLE : BUDGETS_EMPTY_NEVER_RAN,
+              tone: 'muted' as const,
+            },
+          ];
 
     return (
       <>
@@ -631,7 +964,7 @@ export function LucernaMember({
           <Stat
             value={phaseValue}
             label="Activity"
-            sub={lucernaActivitySub(uiState, status, health)}
+            sub={lucernaActivitySub(uiState, status, health, capability)}
             color={phaseColor}
           />
           <Stat
@@ -665,7 +998,17 @@ export function LucernaMember({
         </box>
         <box flexDirection="row" flexShrink={0} marginTop={1}>
           <Panel title="Budgets" flexGrow={1} marginRight={1}>
-            <text fg={t.muted}>{truncate(budgetSummary(status?.budgets), Math.max(10, Math.floor(dims.width / 2) - 6))}</text>
+            <box flexDirection="column">
+              {budgetLines.map((ln, i) => (
+                <text
+                  key={`b-${i}`}
+                  fg={ln.tone === 'warning' ? t.warning : t.muted}
+                  wrapMode="none"
+                >
+                  {formatLucernaDisplayLine(ln.text, budgetInnerW)}
+                </text>
+              ))}
+            </box>
           </Panel>
           <Panel title="Enablement" flexGrow={1}>
             <text fg={t.foreground}>{`${dreamsBadge} · ${commitBadge}`}</text>
@@ -677,7 +1020,7 @@ export function LucernaMember({
         </box>
       </>
     );
-  }, [uiState, health, status, enablement, dims.width, t, pendingReview]);
+  }, [uiState, health, status, enablement, dims.width, t, pendingReview, localPending]);
 
   const showLog = uiState !== 'not-installed' && uiState !== 'daemon-down';
   // Review panel is reachable whenever the iris daemon is up (forge artifacts live on the house,
@@ -697,10 +1040,10 @@ export function LucernaMember({
   const footerHint = flash
     ? flash
     : panelFocus === 'review'
-      ? 'up/dn · enter open · v review/apply · x close · p log · esc'
+      ? 'up/dn · enter open · v review/apply · x close · p log · c chores · esc'
       : uiState === 'not-installed' || uiState === 'daemon-down'
-        ? 'r start · k stop · h halt · w wake · s sleep · d dreams · a auto-commit · p review'
-        : 'r start · k stop · h halt · w wake · s sleep · d dreams · a auto-commit · p review · up/dn';
+        ? 'r start · k stop · h halt · w wake · s sleep · d dreams · a auto-commit · c chores · p review'
+        : 'r start · k stop · h halt · w wake · s sleep · d dreams · a auto-commit · c chores · p review · up/dn';
 
   return (
     <box flexDirection="column" flexGrow={1} paddingLeft={1} paddingRight={1} paddingTop={1} backgroundColor={t.background}>
@@ -829,8 +1172,66 @@ export function LucernaMember({
         </text>
       </box>
 
+      <LucernaChoresOverlay
+        active={choresOpen && inputActive && !confirm}
+        roster={roster}
+        cursor={choreCursor}
+        onClose={() => setChoresOpen(false)}
+        onMove={(delta) =>
+          setChoreCursor((c) => Math.max(0, Math.min(Math.max(0, choreCount - 1), c + delta)))
+        }
+        onToggle={() => {
+          const items = roster ? choreOverlayItems(roster) : [];
+          const item = items[choreCursor];
+          if (!item) return;
+          const key = item.kind === 'entry' ? item.entry.key : item.key;
+          const enabled = item.kind === 'entry' ? item.entry.enabled : false;
+          const next = !enabled;
+          setConfirm({
+            msg: next
+              ? `Enable chore ${key}? The planner may pick it.`
+              : `Disable chore ${key}? The planner will not pick it.`,
+            run: () =>
+              void post('chores', next ? `chore ${key} on` : `chore ${key} off`, {
+                key,
+                enabled: next,
+              }),
+          });
+        }}
+      />
+
+      <BudgetEditModal
+        active={budgetEditOpen && inputActive && !confirm}
+        current={{
+          dailyActionCap: parseLucernaBudgets(status?.budgets)?.dailyCap ?? 12,
+          weeklyExpensiveCap:
+            parseLucernaBudgets(status?.budgets)?.windows?.weekly?.cap ??
+            (parseLucernaBudgets(status?.budgets)?.weekly.match(/\/(\d+)/)?.[1]
+              ? Number(parseLucernaBudgets(status?.budgets)?.weekly.match(/\/(\d+)/)?.[1])
+              : 6),
+          dailyTokenCeiling: parseLucernaBudgets(status?.budgets)?.dailyTokenCeiling ?? 200000,
+        }}
+        onCancel={() => setBudgetEditOpen(false)}
+        onRequestConfirm={(knob, noun, value) => {
+          const flashNoun =
+            knob === 'dailyActionCap'
+              ? `actions ${value}/day`
+              : knob === 'weeklyExpensiveCap'
+                ? `expensive ${value}/week`
+                : `tokens ${value}/day`;
+          setConfirm({
+            msg: `Set ${noun} to ${value}? Applies at the next cycle.`,
+            run: () => {
+              setLocalPending((p) => ({ ...p, [knob]: value }));
+              setBudgetEditOpen(false);
+              void post('budgets', `budgets: ${flashNoun} · applies next cycle`, { [knob]: value });
+            },
+          });
+        }}
+      />
+
       <LucernaReviewOverlay
-        active={overlayOpen && inputActive && !confirm}
+        active={!!overlay && inputActive && !confirm}
         model={overlay}
         onClose={() => setOverlay(null)}
         onReview={() => {
@@ -865,6 +1266,7 @@ export function LucernaMember({
       <ConfirmModal
         active={!!confirm && inputActive}
         message={confirm?.msg ?? ''}
+        detail={confirm?.detail}
         onConfirm={() => {
           confirm?.run();
           setConfirm(null);

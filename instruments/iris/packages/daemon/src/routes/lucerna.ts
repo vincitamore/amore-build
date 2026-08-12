@@ -3,7 +3,7 @@
 //
 //   GET  /api/lucerna/health | status | log?n= | notifications?n= | pulse
 //   GET  /api/lucerna/dreams?pending= | dream?id= | proposals?pending= | proposal?id=
-//   POST /api/lucerna/halt | wake | sleep | start | stop | enable
+//   POST /api/lucerna/halt | wake | sleep | start | stop | enable | budgets | chores
 //   POST /api/lucerna/dreams/review | proposals/apply | proposals/close
 //
 // Method/path mismatches → 404 empty (daemon convention).
@@ -20,6 +20,8 @@ import {
   writeWake,
   writeSleep,
   writeEnablement,
+  writeBudgets,
+  writeChores,
   startLucerna,
   stopLucerna,
   type LucernaEnablement,
@@ -58,7 +60,41 @@ function truthyParam(v: string | null): boolean {
   return s === '1' || s === 'true' || s === 'yes' || s === 'pending';
 }
 
+function usageResponse(): Response {
+  return jsonStatus({ available: true, ok: false, reason: 'usage' }, 400);
+}
+
+/** `null` and http loopback hosts (any port). Missing Origin is not checked here. */
+function isLoopbackOrigin(origin: string): boolean {
+  if (origin === 'null') return true;
+  try {
+    const u = new URL(origin);
+    const host = u.hostname.toLowerCase();
+    return u.protocol === 'http:' && (host === '127.0.0.1' || host === 'localhost');
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Require application/json so a browser issues a preflight; refuse a
+ * non-loopback Origin. Missing Origin (CLI / curl) is allowed.
+ */
+function rejectIfNotJsonLoopbackPost(req: Request): Response | null {
+  const ct = req.headers.get('content-type');
+  if (ct === null || !ct.trim().toLowerCase().startsWith('application/json')) {
+    return usageResponse();
+  }
+  const origin = req.headers.get('origin');
+  if (origin !== null && !isLoopbackOrigin(origin)) {
+    return usageResponse();
+  }
+  return null;
+}
+
 async function readJsonBody(req: Request): Promise<{ ok: true; body: unknown } | { ok: false; res: Response }> {
+  const blocked = rejectIfNotJsonLoopbackPost(req);
+  if (blocked) return { ok: false, res: blocked };
   try {
     const text = await req.text();
     if (!text.trim()) return { ok: true, body: {} };
@@ -146,6 +182,8 @@ export async function lucernaRoute(config: DaemonConfig, req: Request): Promise<
   }
 
   if (method === 'POST') {
+    const blocked = rejectIfNotJsonLoopbackPost(req);
+    if (blocked) return blocked;
     switch (sub) {
       case '/api/lucerna/halt':
         return json(writeHalt(orgRoot));
@@ -158,14 +196,9 @@ export async function lucernaRoute(config: DaemonConfig, req: Request): Promise<
       case '/api/lucerna/stop':
         return json(await stopLucerna(orgRoot));
       case '/api/lucerna/enable': {
-        let body: unknown = {};
-        try {
-          const text = await req.text();
-          if (text.trim()) body = JSON.parse(text);
-        } catch {
-          return jsonStatus({ available: true, ok: false, reason: 'invalid-json' }, 400);
-        }
-        const patch = parseEnableBody(body);
+        const parsed = await readJsonBody(req);
+        if (!parsed.ok) return parsed.res;
+        const patch = parseEnableBody(parsed.body);
         if (!patch) {
           return jsonStatus(
             {
@@ -178,6 +211,20 @@ export async function lucernaRoute(config: DaemonConfig, req: Request): Promise<
           );
         }
         return json(writeEnablement(orgRoot, patch));
+      }
+      case '/api/lucerna/budgets': {
+        const parsed = await readJsonBody(req);
+        if (!parsed.ok) return parsed.res;
+        const result = writeBudgets(orgRoot, parsed.body);
+        if (result.reason === 'usage') return jsonStatus(result, 400);
+        return json(result);
+      }
+      case '/api/lucerna/chores': {
+        const parsed = await readJsonBody(req);
+        if (!parsed.ok) return parsed.res;
+        const result = writeChores(orgRoot, parsed.body);
+        if (result.reason === 'usage') return jsonStatus(result, 400);
+        return json(result);
       }
       case '/api/lucerna/dreams/review': {
         const parsed = await readJsonBody(req);

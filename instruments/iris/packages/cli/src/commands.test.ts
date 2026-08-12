@@ -1,6 +1,12 @@
 import { test, expect } from 'bun:test';
 import { COMMANDS, resolveCommand, type CommandSpec } from './commands';
-import { lucernaWriteExit } from './lucerna';
+import {
+  lucernaWriteExit,
+  parseBudgetSetArgs,
+  projectLucernaBudgets,
+  projectLucernaChoresList,
+  projectLucernaChoresShow,
+} from './lucerna';
 
 function resolveOk(argv: string[]): CommandSpec {
   const r = resolveCommand(argv);
@@ -145,10 +151,18 @@ test('lucerna verbs resolve to the right spec', () => {
   expect(resolveOk(['lucerna', 'notifications']).name).toBe('lucerna notifications');
   expect(resolveOk(['lucerna', 'dreams']).name).toBe('lucerna dreams');
   expect(resolveOk(['lucerna', 'dreams', 'show', 'x']).name).toBe('lucerna dreams');
-  expect(resolveOk(['lucerna', 'dreams', 'review', 'x']).name).toBe('lucerna dreams');
+  expect(resolveOk(['lucerna', 'dreams', 'list']).name).toBe('lucerna dreams');
+  expect(resolveOk(['lucerna', 'dreams', 'review', 'x']).name).toBe('lucerna dreams review');
   expect(resolveOk(['lucerna', 'proposals']).name).toBe('lucerna proposals');
-  expect(resolveOk(['lucerna', 'proposals', 'apply', 'x']).name).toBe('lucerna proposals');
-  expect(resolveOk(['lucerna', 'proposals', 'close', 'x']).name).toBe('lucerna proposals');
+  expect(resolveOk(['lucerna', 'proposals', 'show', 'x']).name).toBe('lucerna proposals');
+  expect(resolveOk(['lucerna', 'proposals', 'list']).name).toBe('lucerna proposals');
+  expect(resolveOk(['lucerna', 'proposals', 'apply', 'x']).name).toBe('lucerna proposals apply');
+  expect(resolveOk(['lucerna', 'proposals', 'close', 'x']).name).toBe('lucerna proposals close');
+});
+
+test('non-registered three-word sequence falls through to the two-word spec', () => {
+  expect(resolveOk(['lucerna', 'dreams', 'show', 'x']).name).toBe('lucerna dreams');
+  expect(resolveOk(['lucerna', 'proposals', 'show', 'x']).name).toBe('lucerna proposals');
 });
 
 test('lucerna write/read classification', () => {
@@ -158,6 +172,9 @@ test('lucerna write/read classification', () => {
   expect(byName['lucerna notifications'].isWrite).toBe(false);
   expect(byName['lucerna dreams'].isWrite).toBe(false);
   expect(byName['lucerna proposals'].isWrite).toBe(false);
+  expect(byName['lucerna dreams review'].isWrite).toBe(true);
+  expect(byName['lucerna proposals apply'].isWrite).toBe(true);
+  expect(byName['lucerna proposals close'].isWrite).toBe(true);
   expect(byName['lucerna halt'].isWrite).toBe(true);
   expect(byName['lucerna wake'].isWrite).toBe(true);
   expect(byName['lucerna sleep'].isWrite).toBe(true);
@@ -193,23 +210,182 @@ test('lucerna dreams / proposals subcommand usage before daemon call', () => {
   ).rejects.toThrow(/show requires/);
   expect(
     dreams.run({ orgRoot: '/nonexistent', args: { positional: ['review'], flags: {} } }),
-  ).rejects.toThrow(/review requires/);
+  ).rejects.toThrow(/lucerna dreams review/);
   expect(
     dreams.run({ orgRoot: '/nonexistent', args: { positional: ['bogus'], flags: {} } }),
   ).rejects.toThrow(/expects/);
 
-  const props = COMMANDS.find((c) => c.name === 'lucerna proposals')!;
+  const review = COMMANDS.find((c) => c.name === 'lucerna dreams review')!;
   expect(
-    props.run({ orgRoot: '/nonexistent', args: { positional: ['apply'], flags: {} } }),
+    review.run({ orgRoot: '/nonexistent', args: { positional: [], flags: {} } }),
+  ).rejects.toThrow(/review requires/);
+
+  const apply = COMMANDS.find((c) => c.name === 'lucerna proposals apply')!;
+  expect(
+    apply.run({ orgRoot: '/nonexistent', args: { positional: [], flags: {} } }),
   ).rejects.toThrow(/apply requires/);
+
+  const close = COMMANDS.find((c) => c.name === 'lucerna proposals close')!;
   expect(
-    props.run({ orgRoot: '/nonexistent', args: { positional: ['close'], flags: {} } }),
+    close.run({ orgRoot: '/nonexistent', args: { positional: [], flags: {} } }),
   ).rejects.toThrow(/close requires/);
 });
 
 test('lucernaWriteExit maps ok:false to ACTIONABLE', () => {
   expect(lucernaWriteExit({ ok: true })).toBe(0);
   expect(lucernaWriteExit({ ok: false })).toBe(1);
+});
+
+test('lucerna budgets/chores resolve to their own read specs', () => {
+  expect(resolveOk(['lucerna', 'budgets']).name).toBe('lucerna budgets');
+  expect(resolveOk(['lucerna', 'budgets', 'show']).name).toBe('lucerna budgets show');
+  expect(resolveOk(['lucerna', 'chores']).name).toBe('lucerna chores');
+  expect(resolveOk(['lucerna', 'chores', 'list']).name).toBe('lucerna chores list');
+  expect(resolveOk(['lucerna', 'chores', 'show', 'scan']).name).toBe('lucerna chores show');
+  expect(resolveOk(['lucerna', 'budgets', 'set', 'tokens', '1']).name).toBe('lucerna budgets set');
+  expect(resolveOk(['lucerna', 'chores', 'enable', 'scan']).name).toBe('lucerna chores enable');
+  expect(resolveOk(['lucerna', 'chores', 'disable', 'scan']).name).toBe('lucerna chores disable');
+  expect(resolveOk(['lucerna', 'chores', 'interval', 'scan', '24']).name).toBe(
+    'lucerna chores interval',
+  );
+  expect(resolveOk(['lucerna', 'dreams', 'review', 'x']).name).toBe('lucerna dreams review');
+});
+
+test('lucerna write verbs are three-word, isWrite true, flags populated', () => {
+  const byName = Object.fromEntries(COMMANDS.map((c) => [c.name, c]));
+  for (const name of [
+    'lucerna budgets set',
+    'lucerna chores enable',
+    'lucerna chores disable',
+    'lucerna chores interval',
+  ]) {
+    expect(byName[name].isWrite).toBe(true);
+    expect(byName[name].flags).toEqual({});
+    expect(byName[name].exit).toBe(lucernaWriteExit);
+  }
+});
+
+test('parseBudgetSetArgs maps aliases and refuses 1e9 / negatives', () => {
+  expect(parseBudgetSetArgs('tokens', '400000')).toEqual({
+    knob: 'dailyTokenCeiling',
+    n: 400000,
+  });
+  expect(parseBudgetSetArgs('actions', '0')).toEqual({ knob: 'dailyActionCap', n: 0 });
+  expect(parseBudgetSetArgs('cooldown', '2')).toEqual({ knob: 'cycleCooldownMinutes', n: 120 });
+  expect(parseBudgetSetArgs('reserve', '80000')).toEqual({
+    knob: 'dreamsReserveTokens',
+    n: 80000,
+  });
+  expect(() => parseBudgetSetArgs('tokens', '1e9')).toThrow(/non-negative integer/);
+  expect(() => parseBudgetSetArgs('actions', '-1')).toThrow(/non-negative integer/);
+});
+
+test('lucerna budgets/chores reads are isWrite false', () => {
+  const byName = Object.fromEntries(COMMANDS.map((c) => [c.name, c]));
+  expect(byName['lucerna budgets'].isWrite).toBe(false);
+  expect(byName['lucerna budgets show'].isWrite).toBe(false);
+  expect(byName['lucerna chores'].isWrite).toBe(false);
+  expect(byName['lucerna chores list'].isWrite).toBe(false);
+  expect(byName['lucerna chores show'].isWrite).toBe(false);
+  expect(byName['lucerna dreams review'].isWrite).toBe(true);
+});
+
+test('lucerna chores list registers --disabled in the flag table', () => {
+  const list = COMMANDS.find((c) => c.name === 'lucerna chores list')!;
+  expect(list.booleanFlags).toContain('disabled');
+  expect(list.flags.disabled).toBeDefined();
+  const twoWord = COMMANDS.find((c) => c.name === 'lucerna chores')!;
+  expect(twoWord.booleanFlags).toContain('disabled');
+  expect(twoWord.flags.disabled).toBeDefined();
+});
+
+test('lucerna budgets set / chores enable|disable|interval USAGE before daemon call', () => {
+  const budgets = COMMANDS.find((c) => c.name === 'lucerna budgets')!;
+  expect(
+    budgets.run({ orgRoot: '/nonexistent', args: { positional: ['set'], flags: {} } }),
+  ).rejects.toThrow(/lucerna budgets set/);
+
+  const chores = COMMANDS.find((c) => c.name === 'lucerna chores')!;
+  expect(
+    chores.run({ orgRoot: '/nonexistent', args: { positional: ['enable'], flags: {} } }),
+  ).rejects.toThrow(/lucerna chores enable/);
+  expect(
+    chores.run({ orgRoot: '/nonexistent', args: { positional: ['disable'], flags: {} } }),
+  ).rejects.toThrow(/lucerna chores disable/);
+  expect(
+    chores.run({ orgRoot: '/nonexistent', args: { positional: ['interval'], flags: {} } }),
+  ).rejects.toThrow(/lucerna chores interval/);
+
+  const show = COMMANDS.find((c) => c.name === 'lucerna chores show')!;
+  expect(
+    show.run({ orgRoot: '/nonexistent', args: { positional: [], flags: {} } }),
+  ).rejects.toThrow(/show requires/);
+});
+
+test('lucerna budgets/chores project a missing house without throwing', () => {
+  const missing = { available: false, reason: 'not-installed' };
+  expect(projectLucernaBudgets(missing)).toEqual({
+    available: false,
+    budgets: null,
+    capability: null,
+    reason: 'not-installed',
+  });
+  expect(projectLucernaChoresList(missing)).toEqual({
+    available: false,
+    count: 0,
+    entries: [],
+    reason: 'not-installed',
+  });
+  expect(projectLucernaChoresShow(missing, 'scan')).toEqual({
+    available: false,
+    found: false,
+  });
+});
+
+test('lucerna budgets projects capability from status.budgets', () => {
+  const capability = { state: 'ready', reasonCode: 'ok', reason: 'ok' };
+  const budgets = { state: 'ready', capability, roster: { entries: [] } };
+  expect(projectLucernaBudgets({ available: true, budgets })).toEqual({
+    available: true,
+    budgets,
+    capability,
+  });
+});
+
+test('lucerna chores list/show project roster.entries', () => {
+  const entries = [
+    { key: 'scan', class: 'maintenance', tier: 'light', enabled: true, lastRun: null },
+    { key: 'web', class: 'research', tier: 'expensive', enabled: false, lastRun: '2026-01-01' },
+  ];
+  const status = { available: true, budgets: { roster: { entries } } };
+  expect(projectLucernaChoresList(status)).toEqual({ available: true, count: 2, entries });
+  expect(projectLucernaChoresList(status, true)).toEqual({
+    available: true,
+    count: 1,
+    entries: [entries[1]],
+  });
+  expect(projectLucernaChoresShow(status, 'scan')).toEqual({
+    available: true,
+    found: true,
+    ...entries[0],
+  });
+  expect(projectLucernaChoresShow(status, 'missing')).toEqual({
+    available: true,
+    found: false,
+  });
+});
+
+test('lucerna chores show exits 0 when not-installed and 1 when key is missing', () => {
+  const spec = COMMANDS.find((c) => c.name === 'lucerna chores show')!;
+  expect(spec.exit!({ available: false, found: false })).toBe(0);
+  expect(spec.exit!({ available: true, found: false })).toBe(1);
+  expect(spec.exit!({ available: true, found: true })).toBe(0);
+});
+
+test('lucerna write specs exit 1 on ok:false (not-installed)', () => {
+  const set = COMMANDS.find((c) => c.name === 'lucerna budgets set')!;
+  expect(set.exit!({ ok: false, reason: 'not-installed' })).toBe(1);
+  expect(set.exit!({ ok: true })).toBe(0);
 });
 
 test('search rejects a non-positive --n before any daemon call', () => {

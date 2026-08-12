@@ -258,8 +258,8 @@ amore init --refresh    # rewrite files still matching the install manifest
 
 `amore init` **creates a house**: a working tree for long-horizon
 collaboration with the agent: root `AGENTS.md`, folder schemas (`context/`,
-`inbox/`, `tasks/`, `knowledge/`, `reminders/`, `forge/`), a 6-skill
-orchestration pack, session hooks, the iris companion, and
+`inbox/`, `tasks/`, `knowledge/`, `reminders/`, `forge/`), a 9-skill
+orchestration pack (including `somniator`), session hooks, the iris companion, and
 `.amore/house-install.json` recording ownership. **Lattice is default-on**
 (`--no-lattice` opt-out); skills and hooks default-on (`--no-skills` /
 `--no-hooks`); iris default-on (`--no-iris` opts out), and after iris lands
@@ -308,11 +308,15 @@ governed maintenance between sessions: surveying org state, refreshing the
 typed-edge graph and the search index, and writing reports and proposals
 the operator reviews from the iris dash or CLI. The safety posture leads:
 **not installed unless you ask** (`amore init --with-lucerna`), **dreams
-off by default**, auto-commit dry-run by default, default-deny writes with
-a protected-path list, hard action budgets and cooldowns, a wall-clock
-kill on every model spawn, and no network listener; model calls go only
-through your own `amore` configuration. Every autonomous artifact lands as
-a reviewable file, pending until a human flips it. Defaults and governance:
+off by default**, default-deny writes with a protected-path list, action
+budgets and cooldowns, a wall-clock kill on every model spawn, and no
+network listener; model calls go only through your own `amore`
+configuration. **Dreams-off is not spend-off.** Auto-commit *dry-run* is a
+git word: drafts still spend on your key on their own 30-minute schedule
+whether or not dreams are enabled. Turn drafting off with
+`LUCERNA_AUTO_COMMIT=0`. Caps live in house-local `budgets.json`; the
+chore roster in `chores.json`. Every autonomous artifact lands as a
+reviewable file, pending until a human flips it. Defaults and governance:
 [`docs/autonomy.md`](docs/autonomy.md); the review loop and ops surface:
 [`docs/iris-lucerna.md`](docs/iris-lucerna.md); wire receipts:
 [`docs/egress.md`](docs/egress.md).

@@ -84,10 +84,32 @@ Web tools are disabled for maintenance dreams. Wall-timeout tree-kill applies.
 
 ## Enablement
 
-Dreams default **off**. File: `instruments/lucerna/lucerna.enable.json` with
+Dreams default **off**. File: `.amore/lucerna/enable.json` with
 `dreamsEnabled: true` (or an equivalent start-time OR). Absent or malformed
 means false. `--force` on `lucerna dream-cycle` overrides schedule only, never
-enablement.
+enablement, and will not run a roster-disabled chore.
+
+## Reading budgets and the roster
+
+Charter lives under `.amore/lucerna/`. **Read it. Do not edit it.**
+
+| File | What it is |
+|------|------------|
+| `.amore/lucerna/budgets.json` | Spend caps (`dailyActionCap`, `weeklyExpensiveCap`, `cycleCooldownMinutes`, `dailyTokenCeiling`, `dreamsReserveTokens`, `autoCommitCooldownMinutes`). Precedence is argv > env > file > shipped. |
+| `.amore/lucerna/chores.json` | Narrowing chore roster. Fields per key: `enabled`, `minIntervalHours` only. Unlisted keys stay enabled. |
+| `.amore/lucerna/enable.json` | `dreamsEnabled` / `autoCommitLive`. |
+| `instruments/lucerna/state.json` | Live counters and last cycle outcome. Display only. |
+
+Also readable: `iris lucerna budgets` and `iris lucerna chores list|show`.
+
+**You may not edit `budgets.json`, `chores.json`, or `enable.json`.** Those
+files are operator intent. Changing them is the operator's job (`b` / `c` on
+the Lucerna tab, or `iris lucerna budgets set` / `iris lucerna chores
+enable|disable`). A resident that rewrites the roster or the caps is
+authoring the steward's mandate.
+
+Dreams-off is not spend-off: drafting still spends unless the operator set
+`LUCERNA_AUTO_COMMIT=0`.
 
 ## Related
 

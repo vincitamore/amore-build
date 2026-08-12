@@ -6,6 +6,7 @@ import {
   mkdirSync,
   existsSync,
   readFileSync,
+  unlinkSync,
 } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -17,7 +18,13 @@ import {
   DaemonLoop,
   appendLog,
 } from "./daemon.ts";
-import { sentinelPath, healthPath, houseRuntimeDir, RUNTIME_FILES } from "./paths.ts";
+import {
+  sentinelPath,
+  healthPath,
+  houseRuntimeDir,
+  RUNTIME_FILES,
+  enablementPath,
+} from "./paths.ts";
 import type { LucernaConfig } from "./config.ts";
 import { AUTO_COMMIT_WALL_MS } from "./auto-commit.ts";
 import { DEFAULT_AGENTIC_WALL_MS } from "./agentic.ts";
@@ -218,6 +225,12 @@ describe("long-work health + graceful stop", () => {
     const house = mkdtempSync(join(tmpdir(), "lucerna-dream-wip-"));
     try {
       const config = makeConfig(house);
+      mkdirSync(join(house, ".amore", "lucerna"), { recursive: true });
+      writeFileSync(
+        enablementPath(house),
+        JSON.stringify({ dreamsEnabled: true, autoCommitLive: false }),
+        "utf-8",
+      );
       config.dreamsEnabled = true;
       const loop = new DaemonLoop(config);
       loop.getHeartbeat().forceDreaming();
@@ -329,6 +342,68 @@ describe("long-work health + graceful stop", () => {
       expect(health.workInProgress).toBeUndefined();
     } finally {
       rmSync(repo, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("cycle-boundary enablement reload", () => {
+  function writeDreamsOn(house: string): void {
+    mkdirSync(join(house, ".amore", "lucerna"), { recursive: true });
+    writeFileSync(
+      enablementPath(house),
+      JSON.stringify({ dreamsEnabled: true, autoCommitLive: false }),
+      "utf-8",
+    );
+  }
+
+  test("enablement file present allows a cycle; delete is honored on the next cycle", async () => {
+    const house = mkdtempSync(join(tmpdir(), "lucerna-reload-"));
+    try {
+      const config = makeConfig(house);
+      writeDreamsOn(house);
+      config.dreamsEnabled = true;
+      const loop = new DaemonLoop(config);
+      loop.getHeartbeat().forceDreaming();
+      let calls = 0;
+      loop.setDreamCycleRunner(async () => {
+        calls += 1;
+        return { status: "skipped", reason: "stub" };
+      });
+      await loop.cycleOnce();
+      expect(calls).toBe(1);
+      unlinkSync(enablementPath(house));
+      await loop.cycleOnce();
+      expect(calls).toBe(1);
+    } finally {
+      rmSync(house, { recursive: true, force: true });
+    }
+  });
+
+  test("LUCERNA_DREAMS_ENABLED=1 still wins after file delete", async () => {
+    const house = mkdtempSync(join(tmpdir(), "lucerna-reload-env-"));
+    const prev = process.env.LUCERNA_DREAMS_ENABLED;
+    try {
+      process.env.LUCERNA_DREAMS_ENABLED = "1";
+      const config = makeConfig(house);
+      writeDreamsOn(house);
+      const loop = new DaemonLoop(config);
+      if (prev === undefined) delete process.env.LUCERNA_DREAMS_ENABLED;
+      else process.env.LUCERNA_DREAMS_ENABLED = prev;
+      loop.getHeartbeat().forceDreaming();
+      let calls = 0;
+      loop.setDreamCycleRunner(async () => {
+        calls += 1;
+        return { status: "skipped", reason: "stub" };
+      });
+      await loop.cycleOnce();
+      expect(calls).toBe(1);
+      unlinkSync(enablementPath(house));
+      await loop.cycleOnce();
+      expect(calls).toBe(2);
+    } finally {
+      if (prev === undefined) delete process.env.LUCERNA_DREAMS_ENABLED;
+      else process.env.LUCERNA_DREAMS_ENABLED = prev;
+      rmSync(house, { recursive: true, force: true });
     }
   });
 });

@@ -1,14 +1,19 @@
 /**
  * Durable standing enablement for lucerna dreams and live auto-commit.
  *
- * File: <house>/instruments/lucerna/lucerna.enable.json
+ * File: <house>/.amore/lucerna/enable.json
+ * Legacy (read-only): <house>/instruments/lucerna/lucerna.enable.json
  * Schema: { "dreamsEnabled": boolean, "autoCommitLive": boolean }
  * Absent or malformed file → both false (safe defaults).
  */
 
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { RUNTIME_FILES } from "./paths.ts";
+import {
+  RUNTIME_FILES,
+  enablementPath as charterEnablementPath,
+  legacyEnablementPath,
+} from "./paths.ts";
 
 export const ENABLE_FILE_NAME = RUNTIME_FILES.enable;
 
@@ -23,6 +28,13 @@ export const DEFAULT_ENABLEMENT: LucernaEnablement = {
   dreamsEnabled: false,
   autoCommitLive: false,
 };
+
+export interface EnablementRead {
+  enablement: LucernaEnablement;
+  error?: string;
+  /** True when the read used the legacy runtime path. */
+  legacyLocation?: boolean;
+}
 
 /** Parse enablement JSON text. Invalid or empty → safe defaults (both false). */
 export function parseEnablementJson(raw: string): LucernaEnablement {
@@ -39,14 +51,7 @@ export function parseEnablementJson(raw: string): LucernaEnablement {
   return out;
 }
 
-/**
- * Read lucerna.enable.json under runtimeDir.
- * Absent → both false. Parse/IO errors → both false (caller may log).
- */
-export function readEnablementFile(
-  runtimeDir: string,
-): { enablement: LucernaEnablement; error?: string } {
-  const path = resolve(runtimeDir, ENABLE_FILE_NAME);
+function readEnablementAtPath(path: string): EnablementRead {
   if (!existsSync(path)) {
     return { enablement: { ...DEFAULT_ENABLEMENT } };
   }
@@ -67,6 +72,33 @@ export function readEnablementFile(
       error: `enablement read failed: ${e instanceof Error ? e.message : String(e)}`,
     };
   }
+}
+
+/**
+ * Read enablement for a house. New charter path first; if absent and the
+ * legacy runtime file exists, read that and set legacyLocation.
+ * Absent → both false. Parse/IO errors → both false (caller may log).
+ */
+export function readEnablementForHouse(houseRoot: string): EnablementRead {
+  const primary = charterEnablementPath(houseRoot);
+  if (existsSync(primary)) {
+    return readEnablementAtPath(primary);
+  }
+  const legacy = legacyEnablementPath(houseRoot);
+  if (existsSync(legacy)) {
+    return { ...readEnablementAtPath(legacy), legacyLocation: true };
+  }
+  return { enablement: { ...DEFAULT_ENABLEMENT } };
+}
+
+/**
+ * Read enablement given the house runtime dir (`<house>/instruments/lucerna`).
+ * House root is derived as the runtime dir's grandparent so existing callers
+ * keep working. Prefer readEnablementForHouse when the house root is known.
+ */
+export function readEnablementFile(runtimeDir: string): EnablementRead {
+  const houseRoot = resolve(runtimeDir, "..", "..");
+  return readEnablementForHouse(houseRoot);
 }
 
 export interface StartFlagSources {
@@ -105,6 +137,7 @@ export function resolveStartFlags(sources: StartFlagSources = {}): ResolvedStart
   return { dreamsEnabled, autoCommitLive, argvFlags };
 }
 
-export function enablementPath(runtimeDir: string): string {
-  return resolve(runtimeDir, ENABLE_FILE_NAME);
+/** Charter enablement path (new location). */
+export function enablementPath(houseRoot: string): string {
+  return charterEnablementPath(houseRoot);
 }

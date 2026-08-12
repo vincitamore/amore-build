@@ -7,22 +7,28 @@ import {
   existsSync,
   readFileSync,
   readdirSync,
+  unlinkSync,
 } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
   parseDreamPick,
   runDreamCycle,
+  flagsFromEnablementRead,
   DREAM_PICK_SCHEMA,
   DREAM_PICK_ACTIONS,
   gatherHouseSnapshot,
   buildPlannerSystemPrompt,
+  isDegeneratePlannerReason,
   type HeadlessCaller,
 } from "./somniator.ts";
+import { ROSTER_ENTRY_FIELDS } from "./charter.ts";
+import { SHORT_CYCLE_COOLDOWN_MS } from "./budget.ts";
 import type { LucernaConfig } from "./config.ts";
-import { houseRuntimeDir } from "./paths.ts";
+import { houseRuntimeDir, enablementPath } from "./paths.ts";
 import { StateManager } from "./state.ts";
 import { readNotifications } from "./notifications.ts";
+import { sumTokensBySource } from "./budget.ts";
 function syntheticHouse(): string {
   const house = mkdtempSync(join(tmpdir(), "lucerna-dream-house-"));
   mkdirSync(join(house, "tasks"), { recursive: true });
@@ -37,9 +43,20 @@ function syntheticHouse(): string {
   return house;
 }
 
+function writeEnablement(house: string, dreamsEnabled: boolean): void {
+  const path = enablementPath(house);
+  mkdirSync(join(house, ".amore", "lucerna"), { recursive: true });
+  writeFileSync(
+    path,
+    JSON.stringify({ dreamsEnabled, autoCommitLive: false }),
+    "utf-8",
+  );
+}
+
 function makeConfig(house: string, dreamsEnabled: boolean): LucernaConfig {
   const runtimeDir = houseRuntimeDir(house);
   mkdirSync(runtimeDir, { recursive: true });
+  if (dreamsEnabled) writeEnablement(house, true);
   return {
     houseRoot: house,
     runtimeDir,
@@ -161,6 +178,77 @@ describe("runDreamCycle enablement", () => {
     }
   });
 
+  test("deleting the enablement file is honored on the next cycle", async () => {
+    const house = syntheticHouse();
+    try {
+      const config = makeConfig(house, true);
+      const stub = makeStub({ action: "skip", reason: "ok" });
+      const first = await runDreamCycle(config, {
+        headless: stub.caller,
+        force: true,
+      });
+      expect(first.status).toBe("skipped");
+      unlinkSync(enablementPath(house));
+      config.dreamsEnabled = true;
+      const second = await runDreamCycle(config, {
+        headless: stub.caller,
+        force: true,
+      });
+      expect(second.status).toBe("refused");
+      expect(second.reason).toMatch(/disabled/i);
+    } finally {
+      rmSync(house, { recursive: true, force: true });
+    }
+  });
+
+  test("LUCERNA_DREAMS_ENABLED=1 still wins after file delete", async () => {
+    const house = syntheticHouse();
+    const prev = process.env.LUCERNA_DREAMS_ENABLED;
+    try {
+      const config = makeConfig(house, true);
+      unlinkSync(enablementPath(house));
+      config.dreamsEnabled = false;
+      process.env.LUCERNA_DREAMS_ENABLED = "1";
+      const stub = makeStub({ action: "skip", reason: "env" });
+      const result = await runDreamCycle(config, {
+        headless: stub.caller,
+        force: true,
+      });
+      expect(result.status).toBe("skipped");
+      expect(result.reason).toBe("env");
+    } finally {
+      if (prev === undefined) delete process.env.LUCERNA_DREAMS_ENABLED;
+      else process.env.LUCERNA_DREAMS_ENABLED = prev;
+      rmSync(house, { recursive: true, force: true });
+    }
+  });
+
+  test("IO error keeps previous enablement flags", () => {
+    const next = flagsFromEnablementRead(
+      {
+        enablement: { dreamsEnabled: false, autoCommitLive: false },
+        error: "enablement read failed: EACCES: permission denied",
+      },
+      { dreamsEnabled: true, autoCommitLive: true },
+    );
+    expect(next.dreamsEnabled).toBe(true);
+    expect(next.autoCommitLive).toBe(true);
+    expect(next.ioError).toMatch(/EACCES/);
+  });
+
+  test("malformed enablement is both-false unless env/argv keep a knob on", () => {
+    const next = flagsFromEnablementRead(
+      {
+        enablement: { dreamsEnabled: false, autoCommitLive: false },
+        error: "malformed enablement JSON: Unexpected token",
+      },
+      { dreamsEnabled: true, autoCommitLive: true },
+    );
+    expect(next.dreamsEnabled).toBe(false);
+    expect(next.autoCommitLive).toBe(false);
+    expect(next.ioError).toBeUndefined();
+  });
+
   test("--force still refuses when dreams disabled", async () => {
     const house = syntheticHouse();
     try {
@@ -224,10 +312,14 @@ describe("runDreamCycle budget refusals", () => {
         headless: stub.caller,
         stateManager: sm,
         force: true,
+        charterSources: { env: { LUCERNA_DAILY_ACTION_CAP: "2" }, args: [] },
       });
       expect(result.status).toBe("refused");
       expect(result.reason).toMatch(/daily budget exhausted/i);
       expect(stub.getCalls()).toBe(0);
+      const notifs = readNotifications(config.runtimeDir);
+      expect(notifs.filter((n) => n.kind === "budget-daily-exhausted").length).toBe(1);
+      expect(notifs[0]!.level).toBe("info");
     } finally {
       rmSync(house, { recursive: true, force: true });
     }
@@ -251,12 +343,21 @@ describe("runDreamCycle budget refusals", () => {
         headless: stub.caller,
         stateManager: sm,
         force: true,
+        charterSources: { env: { LUCERNA_DAILY_TOKEN_CEILING: "100" }, args: [] },
       });
       expect(result.status).toBe("refused");
       expect(result.reason).toMatch(/token ceiling/i);
       expect(stub.getCalls()).toBe(0);
       const notifs = readNotifications(config.runtimeDir);
       expect(notifs.some((n) => n.kind === "budget-token-ceiling")).toBe(true);
+      await runDreamCycle(config, {
+        headless: stub.caller,
+        stateManager: sm,
+        force: true,
+        charterSources: { env: { LUCERNA_DAILY_TOKEN_CEILING: "100" }, args: [] },
+      });
+      const again = readNotifications(config.runtimeDir);
+      expect(again.filter((n) => n.kind === "budget-token-ceiling").length).toBe(1);
     } finally {
       rmSync(house, { recursive: true, force: true });
     }
@@ -315,6 +416,10 @@ describe("runDreamCycle happy paths", () => {
       expect(result.artifactPath).toBeUndefined();
       expect(stub.getCalls()).toBe(1);
       expect(sm.get().dream.tokensToday).toBe(42);
+      expect(sm.get().dream.tokensToday).toBe(
+        sumTokensBySource(sm.get().dream.tokensTodayBySource),
+      );
+      expect(sm.get().dream.tokensTodayBySource?.planner).toBe(42);
       const dreamsDir = join(house, "forge", "dreams");
       if (existsSync(dreamsDir)) {
         expect(readdirSync(dreamsDir).filter((f) => f.endsWith(".md")).length).toBe(0);
@@ -410,5 +515,132 @@ describe("snapshot + prompt", () => {
     expect(p).toContain("skip");
     expect(p).toContain("Lucerna");
     expect(p).toContain("admitted");
+  });
+});
+
+describe("charter gates", () => {
+  test("ROSTER_ENTRY_FIELDS exact equality", () => {
+    expect([...ROSTER_ENTRY_FIELDS]).toEqual(["enabled", "minIntervalHours"]);
+  });
+
+  test("all-disabled → idle, reasonCode roster-empty, zero recordTokens", async () => {
+    const house = syntheticHouse();
+    try {
+      mkdirSync(join(house, ".amore", "lucerna"), { recursive: true });
+      const chores: Record<string, { enabled: boolean }> = {};
+      for (const k of [
+        "survey-org",
+        "substrate-health",
+        "inbox-age-report",
+        "state-cleanup",
+        "edges-update",
+        "qmd-refresh",
+        "self-orient",
+        "agentic-housekeeping",
+        "edges-densify",
+      ]) {
+        chores[k] = { enabled: false };
+      }
+      writeFileSync(
+        join(house, ".amore", "lucerna", "chores.json"),
+        JSON.stringify({ schemaVersion: 1, chores }),
+        "utf-8",
+      );
+      const config = makeConfig(house, true);
+      const sm = new StateManager(config.runtimeDir, { cooldownMs: 0 });
+      const stub = makeStub({ action: "survey-org", reason: "no" });
+      const result = await runDreamCycle(config, {
+        headless: stub.caller,
+        stateManager: sm,
+        force: true,
+        charterSources: { env: {}, args: [] },
+      });
+      expect(result.status).toBe("idle");
+      expect(result.reason).toMatch(/roster empty/i);
+      expect(stub.getCalls()).toBe(0);
+      expect(sm.get().dream.tokensToday).toBe(0);
+      expect(sm.get().budgets?.reasonCode).toBe("roster-empty");
+      expect(sm.get().dream.lastCycleCooldownMs).toBe(SHORT_CYCLE_COOLDOWN_MS);
+    } finally {
+      rmSync(house, { recursive: true, force: true });
+    }
+  });
+
+  test("cap-0 → idle, reasonCode cap-zero, zero recordTokens", async () => {
+    const house = syntheticHouse();
+    try {
+      const config = makeConfig(house, true);
+      config.dailyActionCap = 0;
+      const sm = new StateManager(config.runtimeDir, {
+        dailyCap: 0,
+        cooldownMs: 0,
+      });
+      const stub = makeStub({ action: "survey-org", reason: "no" });
+      const result = await runDreamCycle(config, {
+        headless: stub.caller,
+        stateManager: sm,
+        force: true,
+        charterSources: { env: { LUCERNA_DAILY_ACTION_CAP: "0" }, args: [] },
+      });
+      expect(result.status).toBe("idle");
+      expect(result.reason).toMatch(/cap is 0/i);
+      expect(stub.getCalls()).toBe(0);
+      expect(sm.get().dream.tokensToday).toBe(0);
+      expect(sm.get().budgets?.reasonCode).toBe("cap-zero");
+    } finally {
+      rmSync(house, { recursive: true, force: true });
+    }
+  });
+
+  test("OP-8: --action on a disabled key refuses", async () => {
+    const house = syntheticHouse();
+    try {
+      mkdirSync(join(house, ".amore", "lucerna"), { recursive: true });
+      writeFileSync(
+        join(house, ".amore", "lucerna", "chores.json"),
+        JSON.stringify({
+          schemaVersion: 1,
+          chores: { "survey-org": { enabled: false } },
+        }),
+        "utf-8",
+      );
+      const config = makeConfig(house, true);
+      const sm = new StateManager(config.runtimeDir, { cooldownMs: 0 });
+      const stub = makeStub({ action: "skip", reason: "n/a" });
+      const result = await runDreamCycle(config, {
+        headless: stub.caller,
+        stateManager: sm,
+        force: true,
+        forceAction: "survey-org",
+        charterSources: { env: {}, args: [] },
+      });
+      expect(result.status).toBe("refused");
+      expect(result.reason).toMatch(/disabled by roster/i);
+      expect(stub.getCalls()).toBe(0);
+    } finally {
+      rmSync(house, { recursive: true, force: true });
+    }
+  });
+
+  test("degenerate reason placeholder notifies, status stays skipped", async () => {
+    const house = syntheticHouse();
+    try {
+      const config = makeConfig(house, true);
+      const sm = new StateManager(config.runtimeDir, { cooldownMs: 0 });
+      const stub = makeStub({ action: "skip", reason: "placeholder" });
+      const result = await runDreamCycle(config, {
+        headless: stub.caller,
+        stateManager: sm,
+        force: true,
+        charterSources: { env: {}, args: [] },
+      });
+      expect(result.status).toBe("skipped");
+      expect(result.reason).toBe("placeholder");
+      expect(isDegeneratePlannerReason("placeholder")).toBe(true);
+      const notifs = readNotifications(config.runtimeDir);
+      expect(notifs.some((n) => n.kind === "dream-planner-degenerate")).toBe(true);
+    } finally {
+      rmSync(house, { recursive: true, force: true });
+    }
   });
 });

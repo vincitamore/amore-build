@@ -71,10 +71,44 @@ function useScrollWindow(i: number, rows: number) {
   return ref;
 }
 
+/**
+ * Confirm box width from the longest line, then clamp to the terminal.
+ * Unclamped `message.length + 6` overflowed past `dims.width` (was Modal.tsx:86).
+ */
+export function confirmModalWidth(
+  message: string,
+  detail: string[] | undefined,
+  termWidth: number,
+): number {
+  let longest = message.length;
+  if (detail) {
+    for (const line of detail) {
+      if (line.length > longest) longest = line.length;
+    }
+  }
+  const desired = Math.max(28, longest + 6);
+  const cap = Math.max(8, termWidth - 4);
+  return Math.min(desired, cap);
+}
+
 /** Yes/no confirmation (destructive actions). y/Enter confirm, n/Esc cancel. Kept MOUNTED; `active`
  *  toggles visibility + owns the keyboard (no mount/unmount → no OpenTUI-0.4.2 teardown crash). */
-export function ConfirmModal({ active = true, message, onConfirm, onCancel }: { active?: boolean; message: string; onConfirm: () => void; onCancel: () => void }) {
+export function ConfirmModal({
+  active = true,
+  message,
+  detail,
+  onConfirm,
+  onCancel,
+}: {
+  active?: boolean;
+  message: string;
+  /** Extra muted lines (spend teaching). Each caller keeps lines ≤ 70. */
+  detail?: string[];
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
   const t = usePalette();
+  const dims = useTerminalDimensions();
   useKeyboard((key: { name?: string; ctrl?: boolean }) => {
     if (!active) return; // mounted-but-hidden
     if (key.ctrl) return; // Ctrl+N/P are shell-nav chords — 'n' with ctrl must not cancel
@@ -83,8 +117,13 @@ export function ConfirmModal({ active = true, message, onConfirm, onCancel }: { 
     if (n === 'n' || n === 'escape') return onCancel();
   });
   return (
-    <Modal title="Confirm" width={Math.max(28, message.length + 6)} visible={active}>
+    <Modal title="Confirm" width={confirmModalWidth(message, detail, dims.width)} visible={active}>
       <text fg={t.foreground}>{message}</text>
+      {detail?.map((line, i) => (
+        <text key={`d-${i}`} fg={t.muted}>
+          {line}
+        </text>
+      ))}
       <text fg={t.muted}>y confirm · n cancel</text>
     </Modal>
   );

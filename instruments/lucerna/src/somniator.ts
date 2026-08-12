@@ -31,12 +31,116 @@ import {
   type AgenticHeadlessCaller,
   type GovernanceBreach,
 } from "./agentic.ts";
-import { formatBudgetForPlanner, type BudgetSnapshot } from "./budget.ts";
+import {
+  formatBudgetForPlanner,
+  isSingleCallSpend,
+  PLANNER_RESERVE,
+  SHORT_CYCLE_COOLDOWN_MS,
+  sumTokenUsage,
+  type BudgetSnapshot,
+} from "./budget.ts";
+import {
+  applyCharterToConfig,
+  budgetsDeletedWhileRunning,
+  choresDeletedWhileRunning,
+  shouldApplyShippedBudgets,
+  dreamPickSchema,
+  isRosterKeyEnabled,
+  PLANNER_SPAWN_OPTIONS,
+  resolveBudgetConfig,
+  type ResolvedCharter,
+} from "./charter.ts";
+import {
+  readEnablementForHouse,
+  resolveStartFlags,
+  type EnablementRead,
+} from "./enablement.ts";
 import { mergeGovernanceLists, loadUserGovernance } from "./governance.ts";
 import { StateManager, type DreamCycleOutcome } from "./state.ts";
 import { appendNotification } from "./notifications.ts";
 import { localFileTimestamp, localTimestamp } from "./time.ts";
 import { logPath } from "./paths.ts";
+
+export interface CycleEnablementFlags {
+  dreamsEnabled: boolean;
+  autoCommitLive: boolean;
+  ioError?: string;
+}
+
+/**
+ * Apply one enablement read. IO error keeps previous flags; absent or
+ * malformed file yields both-false (env/argv may still turn a knob on).
+ */
+export function flagsFromEnablementRead(
+  read: EnablementRead,
+  previous: { dreamsEnabled: boolean; autoCommitLive: boolean },
+  sources: {
+    envDreams?: string;
+    envAutoCommitLive?: string;
+    args?: string[];
+  } = {},
+): CycleEnablementFlags {
+  if (read.error && !/malformed/i.test(read.error)) {
+    return { ...previous, ioError: read.error };
+  }
+  const flags = resolveStartFlags({
+    enablement: read.enablement,
+    envDreams: sources.envDreams,
+    envAutoCommitLive: sources.envAutoCommitLive,
+    args: sources.args,
+  });
+  return {
+    dreamsEnabled: flags.dreamsEnabled,
+    autoCommitLive: flags.autoCommitLive,
+  };
+}
+
+/**
+ * Re-read enablement at a unit boundary. File edit/delete stops the next
+ * cycle; only halt/stop interrupt work already running.
+ */
+export function resolveCycleEnablement(
+  houseRoot: string,
+  previous: { dreamsEnabled: boolean; autoCommitLive: boolean },
+  sources?: {
+    envDreams?: string;
+    envAutoCommitLive?: string;
+    args?: string[];
+  },
+): CycleEnablementFlags {
+  const read = readEnablementForHouse(houseRoot);
+  return flagsFromEnablementRead(read, previous, {
+    envDreams: sources?.envDreams ?? process.env.LUCERNA_DREAMS_ENABLED,
+    envAutoCommitLive:
+      sources?.envAutoCommitLive ?? process.env.LUCERNA_AUTO_COMMIT_LIVE,
+    args: sources?.args ?? process.argv.slice(2),
+  });
+}
+
+function applyCycleEnablement(
+  config: LucernaConfig,
+  sources?: {
+    envDreams?: string;
+    envAutoCommitLive?: string;
+    args?: string[];
+  },
+): CycleEnablementFlags {
+  const previous = {
+    dreamsEnabled: config.dreamsEnabled,
+    autoCommitLive: !config.autoCommitDryRun,
+  };
+  const next = resolveCycleEnablement(config.houseRoot, previous, sources);
+  if (next.ioError) {
+    appendCycleLog(
+      config.runtimeDir,
+      `enablement read error: ${next.ioError} (keeping previous flags)`,
+    );
+    return next;
+  }
+  config.dreamsEnabled = next.dreamsEnabled;
+  config.autoCommitDryRun = !next.autoCommitLive;
+  return next;
+}
 
 function appendCycleLog(runtimeDir: string, line: string): void {
   mkdirSync(runtimeDir, { recursive: true });
@@ -47,25 +151,16 @@ function appendCycleLog(runtimeDir: string, line: string): void {
 export const DREAM_PICK_ACTIONS = [...ADMITTED_ACTION_KEYS, "skip"] as const;
 export type DreamPickAction = (typeof DREAM_PICK_ACTIONS)[number];
 
-export const DREAM_PICK_SCHEMA = {
-  type: "object",
-  properties: {
-    action: {
-      type: "string",
-      enum: [...DREAM_PICK_ACTIONS],
-    },
-    reason: { type: "string" },
-  },
-  required: ["action", "reason"],
-  additionalProperties: false,
-} as const;
+export const DREAM_PICK_SCHEMA = dreamPickSchema(ADMITTED_ACTION_KEYS);
+
+export { dreamPickSchema };
 
 export interface DreamPick {
   action: DreamPickAction;
   reason: string;
 }
 
-export type DreamCycleStatus = "ran" | "skipped" | "refused" | "failed";
+export type DreamCycleStatus = "ran" | "skipped" | "refused" | "failed" | "idle";
 
 export interface DreamCycleResult {
   status: DreamCycleStatus;
@@ -115,11 +210,13 @@ export function gatherHouseSnapshot(
   };
 }
 
-export function buildPlannerSystemPrompt(): string {
+export function buildPlannerSystemPrompt(
+  keys: readonly string[] = ADMITTED_ACTION_KEYS,
+): string {
   return `You are Lucerna, the house steward dream planner.
 
 Admitted actions (pick exactly one key, or skip):
-${ADMITTED_ACTION_KEYS.join("\n")}
+${keys.join("\n")}
 skip
 
 Classes:
@@ -156,9 +253,14 @@ export function buildPlannerUserPrompt(
  * Parse a planner pick from structuredOutput (preferred) or text fallback.
  * Returns null when the payload is missing or malformed.
  */
+export function isDegeneratePlannerReason(reason: string): boolean {
+  return reason.trim().toLowerCase() === "placeholder";
+}
+
 export function parseDreamPick(
   structured: unknown,
   text?: string,
+  allowed: readonly string[] = DREAM_PICK_ACTIONS,
 ): DreamPick | null {
   let obj: { action?: unknown; reason?: unknown } | null = null;
 
@@ -188,8 +290,107 @@ export function parseDreamPick(
   const action = obj.action.trim();
   const reason = obj.reason.replace(/\s+/g, " ").trim();
   if (!reason) return null;
-  if (!(DREAM_PICK_ACTIONS as readonly string[]).includes(action)) return null;
+  if (!(allowed as readonly string[]).includes(action)) return null;
   return { action: action as DreamPickAction, reason: reason.slice(0, 240) };
+}
+
+function applyCycleCharter(
+  config: LucernaConfig,
+  state: StateManager,
+  sources?: { env?: NodeJS.ProcessEnv; args?: string[] },
+): ResolvedCharter {
+  const previous = config.charter;
+  const next = resolveBudgetConfig({
+    houseRoot: config.houseRoot,
+    env: sources?.env ?? process.env,
+    args: sources?.args ?? process.argv.slice(2),
+    previous,
+    recentActions: state.get().dream.recentActions,
+  });
+  if (next.budgets.file.ioError) {
+    appendCycleLog(
+      config.runtimeDir,
+      `budgets.json read error: ${next.budgets.file.ioError} (keeping previous knobs)`,
+    );
+  }
+  if (next.roster.file.ioError) {
+    appendCycleLog(
+      config.runtimeDir,
+      `chores.json read error: ${next.roster.file.ioError} (keeping previous roster)`,
+    );
+  }
+  const presence = state.getCharterPresence();
+  const budgetsDeleted = budgetsDeletedWhileRunning(presence.budgets, next.budgets);
+  applyCharterToConfig(config, next, {
+    applyShipped: shouldApplyShippedBudgets(next.budgets, budgetsDeleted),
+  });
+  config.charter = next;
+
+  if (budgetsDeleted) {
+    appendNotification(config.runtimeDir, {
+      level: "warn",
+      kind: "config-removed",
+      message: "budgets.json removed; applying shipped defaults",
+    });
+  }
+  if (choresDeletedWhileRunning(presence.chores, next.roster)) {
+    appendNotification(config.runtimeDir, {
+      level: "warn",
+      kind: "config-removed",
+      message: "chores.json removed; all admitted chores enabled",
+    });
+  }
+  if (next.budgets.notifyMalformed) {
+    appendNotification(config.runtimeDir, {
+      level: "warn",
+      kind: "charter-malformed",
+      message: next.budgets.warnings.find((w) => /malformed/i.test(w))
+        ?? "budgets.json malformed; using shipped defaults",
+    });
+  }
+  if (state.hasClockSkew()) {
+    appendNotification(config.runtimeDir, {
+      level: "warn",
+      kind: "clock-skew",
+      message: "stored date key is after today; keeping counters",
+    });
+  }
+
+  let reasonOverride: import("./budgets-display.ts").BudgetReasonCode | undefined;
+  if (next.roster.refuse) reasonOverride = "config-invalid";
+  else if (next.budgets.dailyActionCap.value === 0) reasonOverride = "cap-zero";
+  else if (next.roster.effectiveKeys.length === 0) reasonOverride = "roster-empty";
+  state.applyCharter(
+    next,
+    reasonOverride,
+    shouldApplyShippedBudgets(next.budgets, budgetsDeleted),
+  );
+  return next;
+}
+
+function maybeNotifySingleCallSpend(
+  runtimeDir: string,
+  usage: { total_tokens?: number } | undefined | null,
+  dailyTokenCeiling: number,
+): void {
+  const add = sumTokenUsage(usage);
+  if (!isSingleCallSpend(add, dailyTokenCeiling)) return;
+  appendNotification(runtimeDir, {
+    level: "warn",
+    kind: "single-call-spend",
+    message: `single envelope ${add} exceeds 25% of daily ceiling ${dailyTokenCeiling}`,
+  });
+}
+
+function maybeNotifyIdleTransition(
+  state: StateManager,
+  runtimeDir: string,
+  kind: "roster-empty" | "cap-zero",
+  message: string,
+): void {
+  if (state.lastIdleNotify() === kind) return;
+  appendNotification(runtimeDir, { level: "info", kind: `budget-${kind}`, message });
+  state.setLastIdleNotify(kind);
 }
 
 export function lightDreamRelPath(actionKey: string, fileTs?: string): string {
@@ -211,6 +412,17 @@ export interface RunDreamCycleOptions {
   stateManager?: StateManager;
   /** When false, skip writing notifications (rare). Default true. */
   notify?: boolean;
+  /** Env/argv snap for enablement reload (defaults to the process). */
+  enablementSources?: {
+    envDreams?: string;
+    envAutoCommitLive?: string;
+    args?: string[];
+  };
+  /** Env/argv snap for charter reload (defaults to the process). */
+  charterSources?: {
+    env?: NodeJS.ProcessEnv;
+    args?: string[];
+  };
 }
 
 /**
@@ -227,6 +439,8 @@ export async function runDreamCycle(
       weeklyCap: config.weeklyExpensiveCap,
       cooldownMs: config.cycleCooldownMs,
       tokenCeiling: config.dailyTokenCeiling,
+      dreamsReserveTokens: config.dreamsReserveTokens,
+      charter: config.charter,
     });
   const notify = opts.notify !== false;
   const headless: HeadlessCaller = opts.headless ?? callAmoreHeadless;
@@ -234,11 +448,12 @@ export async function runDreamCycle(
   const finish = (
     result: DreamCycleResult,
     cycleMark: "end" | "end-only" | "none" = "end-only",
+    cooldownMs?: number,
   ): DreamCycleResult => {
     if (cycleMark === "end") {
-      state.markDreamCycle(false);
+      state.markDreamCycle(false, cooldownMs);
     } else if (cycleMark === "end-only") {
-      state.markCycleEndedOnly();
+      state.markCycleEndedOnly(cooldownMs);
     }
     const outcome: DreamCycleOutcome = {
       at: localTimestamp(),
@@ -257,7 +472,13 @@ export async function runDreamCycle(
     return result;
   };
 
-  // 1. Enablement  -  never bypassed by --force
+  // 1. Enablement  -  never bypassed by --force.
+  // File edit/delete stops the next cycle; only halt/stop interrupt work already running.
+  applyCycleEnablement(config, opts.enablementSources);
+  const charter = applyCycleCharter(config, state, opts.charterSources);
+  const effectiveKeys = charter.roster.effectiveKeys;
+  const pickAllowed = [...effectiveKeys, "skip"];
+
   if (!config.dreamsEnabled) {
     const r = finish(
       { status: "refused", reason: "dreams disabled (dreamsEnabled is false)" },
@@ -266,16 +487,79 @@ export async function runDreamCycle(
     return r;
   }
 
+  if (charter.roster.refuse) {
+    state.setReasonCodeOverride("config-invalid");
+    return finish(
+      {
+        status: "refused",
+        reason: charter.roster.refuseReason ?? "roster invalid — dreams paused",
+      },
+      "none",
+    );
+  }
+
+  if (config.dailyActionCap === 0) {
+    maybeNotifyIdleTransition(
+      state,
+      config.runtimeDir,
+      "cap-zero",
+      "daily action cap is 0 (disabled)",
+    );
+    state.setReasonCodeOverride("cap-zero");
+    return finish(
+      { status: "idle", reason: "daily action cap is 0 (disabled)" },
+      "end-only",
+      SHORT_CYCLE_COOLDOWN_MS,
+    );
+  }
+
+  if (effectiveKeys.length === 0) {
+    maybeNotifyIdleTransition(
+      state,
+      config.runtimeDir,
+      "roster-empty",
+      "roster empty — no chores enabled",
+    );
+    state.setReasonCodeOverride("roster-empty");
+    return finish(
+      { status: "idle", reason: "roster empty — no chores enabled" },
+      "end-only",
+      SHORT_CYCLE_COOLDOWN_MS,
+    );
+  }
+
+  if (opts.forceAction) {
+    const key = opts.forceAction.trim();
+    if (isAdmittedAction(key) && !isRosterKeyEnabled(charter.roster, key)) {
+      return finish(
+        {
+          status: "refused",
+          reason: `action disabled by roster: ${key}`,
+          action: key,
+        },
+        "none",
+      );
+    }
+  }
+
   // 2. Cycle gate (cooldown / daily budget / token ceiling)
   const gate = state.canStartCycle();
   if (!gate.allowed && !opts.force) {
     const r = finish({ status: "refused", reason: gate.reason }, "none");
-    if (gate.reason.includes("token ceiling") && notify) {
-      appendNotification(config.runtimeDir, {
-        level: "warn",
-        kind: "budget-token-ceiling",
-        message: gate.reason,
-      });
+    if (notify) {
+      if (gate.reason.includes("token ceiling")) {
+        appendNotification(config.runtimeDir, {
+          level: "warn",
+          kind: "budget-token-ceiling",
+          message: gate.reason,
+        });
+      } else if (gate.reason.includes("daily budget exhausted")) {
+        appendNotification(config.runtimeDir, {
+          level: "info",
+          kind: "budget-daily-exhausted",
+          message: gate.reason,
+        });
+      }
     }
     return r;
   }
@@ -296,13 +580,16 @@ export async function runDreamCycle(
       return r;
     }
     if (snap.remainingDaily <= 0) {
-      return finish(
-        {
-          status: "refused",
-          reason: `daily budget exhausted (${snap.actionsToday}/${snap.dailyCap})`,
-        },
-        "none",
-      );
+      const reason = `daily budget exhausted (${snap.actionsToday}/${snap.dailyCap})`;
+      const r = finish({ status: "refused", reason }, "none");
+      if (notify) {
+        appendNotification(config.runtimeDir, {
+          level: "info",
+          kind: "budget-daily-exhausted",
+          message: reason,
+        });
+      }
+      return r;
     }
   }
 
@@ -323,12 +610,26 @@ export async function runDreamCycle(
           action: key,
         },
         "end",
+        SHORT_CYCLE_COOLDOWN_MS,
       );
     }
     pick = { action: key as DreamPickAction, reason: `forced action ${key}` };
   } else {
+    const tokensNow = state.budgetSnapshot().tokensToday;
+    const ceiling = config.dailyTokenCeiling;
+    if (tokensNow + PLANNER_RESERVE > ceiling) {
+      return finish(
+        {
+          status: "refused",
+          reason: `planner reservation: tokensToday ${tokensNow} + ${PLANNER_RESERVE} exceeds ceiling ${ceiling}`,
+        },
+        "end-only",
+        SHORT_CYCLE_COOLDOWN_MS,
+      );
+    }
+
     const snap = gatherHouseSnapshot(config.houseRoot, state);
-    const system = buildPlannerSystemPrompt();
+    const system = buildPlannerSystemPrompt(effectiveKeys);
     const user = buildPlannerUserPrompt(config.houseRoot, snap);
 
     let planResult: AmoreHeadlessResult;
@@ -336,11 +637,8 @@ export async function runDreamCycle(
       planResult = await headless({
         cwd: config.houseRoot,
         prompt: { system, user },
-        mode: "json",
-        jsonSchema: DREAM_PICK_SCHEMA,
-        maxTurns: 1,
-        noSubagents: true,
-        wallMs: 180_000,
+        ...PLANNER_SPAWN_OPTIONS,
+        jsonSchema: dreamPickSchema(effectiveKeys),
         model: config.dreamModel?.trim() || undefined,
         amoreBin: config.amoreBin,
       });
@@ -353,18 +651,29 @@ export async function runDreamCycle(
           message: reason,
         });
       }
-      return finish({ status: "failed", reason }, "end");
+      return finish({ status: "failed", reason }, "end", SHORT_CYCLE_COOLDOWN_MS);
     }
 
     if (planResult.usage) {
-      state.recordTokens(planResult.usage);
+      state.recordTokens(planResult.usage, "planner");
+      if (notify) {
+        maybeNotifySingleCallSpend(
+          config.runtimeDir,
+          planResult.usage,
+          config.dailyTokenCeiling,
+        );
+      }
     }
     planningTokens =
       typeof planResult.usage?.total_tokens === "number"
         ? planResult.usage.total_tokens
         : undefined;
 
-    pick = parseDreamPick(planResult.structuredOutput, planResult.text);
+    pick = parseDreamPick(
+      planResult.structuredOutput,
+      planResult.text,
+      pickAllowed,
+    );
     if (!pick) {
       const reason = "planner returned malformed or empty pick";
       if (notify) {
@@ -377,12 +686,20 @@ export async function runDreamCycle(
       return finish(
         { status: "failed", reason, planningTokens, pick: null },
         "end",
+        SHORT_CYCLE_COOLDOWN_MS,
       );
     }
   }
 
   // 4. skip
   if (pick.action === "skip") {
+    if (notify && isDegeneratePlannerReason(pick.reason)) {
+      appendNotification(config.runtimeDir, {
+        level: "warn",
+        kind: "dream-planner-degenerate",
+        message: `planner reason is degenerate: ${pick.reason}`,
+      });
+    }
     return finish(
       {
         status: "skipped",
@@ -391,6 +708,7 @@ export async function runDreamCycle(
         pick,
       },
       "end",
+      SHORT_CYCLE_COOLDOWN_MS,
     );
   }
 
@@ -404,6 +722,21 @@ export async function runDreamCycle(
         pick,
       },
       "end",
+      SHORT_CYCLE_COOLDOWN_MS,
+    );
+  }
+
+  if (!effectiveKeys.includes(pick.action)) {
+    return finish(
+      {
+        status: "refused",
+        reason: `action disabled by roster: ${pick.action}`,
+        action: pick.action,
+        planningTokens,
+        pick,
+      },
+      "end",
+      SHORT_CYCLE_COOLDOWN_MS,
     );
   }
 
@@ -420,6 +753,7 @@ export async function runDreamCycle(
         pick,
       },
       "end",
+      SHORT_CYCLE_COOLDOWN_MS,
     );
   }
 
@@ -441,7 +775,14 @@ export async function runDreamCycle(
     });
 
     if (agentic.usageTokens) {
-      state.recordTokens({ total_tokens: agentic.usageTokens });
+      state.recordTokens({ total_tokens: agentic.usageTokens }, "agentic");
+      if (notify) {
+        maybeNotifySingleCallSpend(
+          config.runtimeDir,
+          { total_tokens: agentic.usageTokens },
+          config.dailyTokenCeiling,
+        );
+      }
     }
 
     // Pre-spawn failures (ENOENT / missing binary) must not consume cooldown

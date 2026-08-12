@@ -41,6 +41,10 @@ import {
   WEEKLY_EXPENSIVE_BUDGET,
   DEFAULT_DAILY_TOKEN_CEILING,
 } from "./budget.ts";
+import {
+  buildEffectiveBudgetsDisplay,
+  statusBudgetAdditions,
+} from "./budgets-display.ts";
 import { PROTECTED_PATTERNS, WRITABLE_PATTERNS } from "./governance.ts";
 import { DREAM_PICK_SCHEMA } from "./somniator.ts";
 import {
@@ -122,6 +126,7 @@ async function cmdStatus(args: string[]): Promise<number> {
 
   const { enablement } = readEnablementFile(config.runtimeDir);
   let budget: Record<string, unknown> | null = null;
+  let capability: Record<string, unknown> | null = null;
   let dreamScheduling: Record<string, unknown> | null = null;
   let lastCycle: unknown = null;
   if (existsSync(sPath)) {
@@ -133,7 +138,17 @@ async function cmdStatus(args: string[]): Promise<number> {
         tokenCeiling: config.dailyTokenCeiling,
       });
       const snap = sm.budgetSnapshot();
-      budget = snap as unknown as Record<string, unknown>;
+      const display = buildEffectiveBudgetsDisplay({
+        snapshot: snap,
+        counters: sm.asCounters(),
+        cooldownMs: config.cycleCooldownMs,
+        recentActions: sm.get().dream.recentActions,
+      });
+      budget = {
+        ...(snap as unknown as Record<string, unknown>),
+        ...statusBudgetAdditions(display),
+      };
+      capability = display.capability as unknown as Record<string, unknown>;
       const gate = sm.canStartCycle();
       lastCycle = sm.get().dream.lastCycleOutcome ?? null;
       dreamScheduling = {
@@ -149,6 +164,7 @@ async function cmdStatus(args: string[]): Promise<number> {
       };
     } catch {
       budget = null;
+      capability = null;
       dreamScheduling = null;
     }
   } else {
@@ -177,6 +193,7 @@ async function cmdStatus(args: string[]): Promise<number> {
     statePresent: existsSync(sPath),
     enablement,
     budget,
+    capability,
     dreamScheduling,
     lastCycle,
     driver: "amore-headless",

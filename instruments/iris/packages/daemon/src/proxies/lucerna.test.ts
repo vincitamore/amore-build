@@ -14,6 +14,7 @@ import {
   isWorkInProgressOpen,
   parseNotificationLine,
   parseNotificationsJsonl,
+  lucernaCharterDir,
   readEnablement,
   readHealth,
   readLog,
@@ -25,6 +26,8 @@ import {
   resolveStaleBoundSec,
   startLucerna,
   stopLucerna,
+  writeBudgets,
+  writeChores,
   writeEnablement,
   writeHalt,
   writeSleep,
@@ -179,6 +182,22 @@ describe('readEnablement / readStatus', () => {
     expect(readEnablement(org)).toEqual({ dreamsEnabled: true, autoCommitLive: true });
   });
 
+  test('legacy-only enablement still returns flags', () => {
+    wf('lucerna.enable.json', JSON.stringify({ dreamsEnabled: true, autoCommitLive: false }));
+    expect(readEnablement(org)).toEqual({ dreamsEnabled: true, autoCommitLive: false });
+  });
+
+  test('charter enable.json honored over legacy', () => {
+    wf('lucerna.enable.json', JSON.stringify({ dreamsEnabled: false, autoCommitLive: true }));
+    const cdir = lucernaCharterDir(org);
+    mkdirSync(cdir, { recursive: true });
+    writeFileSync(
+      join(cdir, 'enable.json'),
+      JSON.stringify({ dreamsEnabled: true, autoCommitLive: false }),
+    );
+    expect(readEnablement(org)).toEqual({ dreamsEnabled: true, autoCommitLive: false });
+  });
+
   test('status not-installed', () => {
     const s = readStatus(org);
     expect(s.available).toBe(false);
@@ -307,9 +326,117 @@ describe('writeEnablement', () => {
 
     expect(writeEnablement(org, { dreamsEnabled: false, autoCommitLive: false }).ok).toBe(true);
     expect(readEnablement(org)).toEqual({ dreamsEnabled: false, autoCommitLive: false });
-    // File content is valid JSON (write-temp-rename)
-    const raw = JSON.parse(readFileSync(join(ldir, 'lucerna.enable.json'), 'utf8'));
+    // File content is valid JSON (write-temp-rename) at the charter path
+    const charterFile = join(lucernaCharterDir(org), 'enable.json');
+    const raw = JSON.parse(readFileSync(charterFile, 'utf8'));
     expect(raw).toEqual({ dreamsEnabled: false, autoCommitLive: false });
+    expect(existsSync(join(ldir, 'lucerna.enable.json'))).toBe(false);
+  });
+
+  test('writeEnablement creates charter file only', () => {
+    ensureDir();
+    expect(writeEnablement(org, { dreamsEnabled: true }).ok).toBe(true);
+    expect(existsSync(join(lucernaCharterDir(org), 'enable.json'))).toBe(true);
+    expect(existsSync(join(ldir, 'lucerna.enable.json'))).toBe(false);
+  });
+});
+
+describe('writeBudgets', () => {
+  test('not-installed → ok false', () => {
+    const w = writeBudgets(org, { dailyActionCap: 6 });
+    expect(w.ok).toBe(false);
+    expect(w.available).toBe(false);
+    expect(w.reason).toBe('not-installed');
+    expect(existsSync(join(lucernaCharterDir(org), 'budgets.json'))).toBe(false);
+  });
+
+  test('absent file starts from shipped defaults and writes charter only', () => {
+    ensureDir();
+    const w = writeBudgets(org, { dailyActionCap: 6 });
+    expect(w.ok).toBe(true);
+    expect(w.budgets?.dailyActionCap).toBe(6);
+    expect(w.budgets?.dailyTokenCeiling).toBe(200000);
+    expect(w.budgets?.dreamsReserveTokens).toBe(80000);
+    const charter = join(lucernaCharterDir(org), 'budgets.json');
+    expect(JSON.parse(readFileSync(charter, 'utf8')).dailyActionCap).toBe(6);
+    expect(existsSync(join(ldir, 'budgets.json'))).toBe(false);
+  });
+
+  test('file raise tokens 400000 is accepted', () => {
+    ensureDir();
+    const w = writeBudgets(org, { tokens: 400000 });
+    expect(w.ok).toBe(true);
+    expect(w.budgets?.dailyTokenCeiling).toBe(400000);
+  });
+
+  test('negative and 1e9 bodies are refused; file unchanged', () => {
+    ensureDir();
+    expect(writeBudgets(org, { dailyActionCap: 6 }).ok).toBe(true);
+    const before = readFileSync(join(lucernaCharterDir(org), 'budgets.json'), 'utf8');
+    const neg = writeBudgets(org, { dailyActionCap: -1 });
+    expect(neg.ok).toBe(false);
+    expect(neg.reason).toBe('usage');
+    const sci = writeBudgets(org, { dailyTokenCeiling: 1e9 });
+    expect(sci.ok).toBe(false);
+    expect(sci.reason).toBe('usage');
+    const sciStr = writeBudgets(org, { tokens: '1e9' });
+    expect(sciStr.ok).toBe(false);
+    expect(readFileSync(join(lucernaCharterDir(org), 'budgets.json'), 'utf8')).toBe(before);
+  });
+
+  test('spend-bounding write emits budget-cap-changed', () => {
+    ensureDir();
+    expect(writeBudgets(org, { dailyActionCap: 6 }).ok).toBe(true);
+    const notes = readFileSync(join(ldir, 'notifications.jsonl'), 'utf8');
+    expect(notes).toContain('budget-cap-changed');
+    expect(notes).toContain('dailyActionCap 12 → 6 (file)');
+  });
+});
+
+describe('writeChores', () => {
+  test('not-installed → ok false', () => {
+    const w = writeChores(org, { key: 'inbox-age-report', enabled: false });
+    expect(w.ok).toBe(false);
+    expect(w.reason).toBe('not-installed');
+  });
+
+  test('merges one entry and does not clobber siblings', () => {
+    ensureDir();
+    const dir = lucernaCharterDir(org);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, 'chores.json'),
+      `${JSON.stringify({
+        schemaVersion: 1,
+        chores: {
+          'inbox-age-report': { enabled: true },
+          'self-orient': { enabled: true, minIntervalHours: 168 },
+        },
+      }, null, 2)}\n`,
+    );
+    const w = writeChores(org, { key: 'inbox-age-report', enabled: false });
+    expect(w.ok).toBe(true);
+    const raw = JSON.parse(readFileSync(join(dir, 'chores.json'), 'utf8')) as {
+      chores: Record<string, { enabled?: boolean; minIntervalHours?: number }>;
+    };
+    expect(raw.chores['inbox-age-report']).toEqual({ enabled: false });
+    expect(raw.chores['self-orient']).toEqual({ enabled: true, minIntervalHours: 168 });
+    expect(existsSync(join(ldir, 'chores.json'))).toBe(false);
+  });
+
+  test('unknown key is still written; no spawn fields invented', () => {
+    ensureDir();
+    const w = writeChores(org, { key: 'user:custom', enabled: false });
+    expect(w.ok).toBe(true);
+    expect(w.chores?.chores['user:custom']).toEqual({ enabled: false });
+    expect(JSON.stringify(w.chores)).not.toContain('template');
+    expect(JSON.stringify(w.chores)).not.toContain('params');
+  });
+
+  test('roster toggle does not emit budget-cap-changed', () => {
+    ensureDir();
+    expect(writeChores(org, { key: 'inbox-age-report', enabled: false }).ok).toBe(true);
+    expect(existsSync(join(ldir, 'notifications.jsonl'))).toBe(false);
   });
 });
 
@@ -428,6 +555,41 @@ describe('pulse-row data shape', () => {
     expect(live).toHaveProperty('state');
     expect(live).toHaveProperty('beatAgeSec');
     expect(live).toHaveProperty('lastNotification');
+  });
+
+  test('readStatus and readPulse pass through capability and tokens', () => {
+    ensureDir();
+    wf(
+      'state.json',
+      JSON.stringify({
+        budgets: {
+          state: 'refusing',
+          actions: '3/12',
+          weekly: '1/6',
+          tokens: '233K/200K',
+          actionsToday: 3,
+          capability: {
+            state: 'refusing',
+            reasonCode: 'token-ceiling',
+            reason: 'daily token ceiling reached',
+            resumesAt: '2026-08-13T00:00:00-05:00',
+          },
+        },
+      }),
+    );
+    const s = readStatus(org);
+    expect(s.capability).toEqual({
+      state: 'refusing',
+      reasonCode: 'token-ceiling',
+      reason: 'daily token ceiling reached',
+      resumesAt: '2026-08-13T00:00:00-05:00',
+    });
+    expect(s.budgets).toMatchObject({ tokens: '233K/200K' });
+    const pulse = readPulse(org);
+    expect(pulse.capability?.state).toBe('refusing');
+    expect(pulse.capability?.resumesAt).toBe('2026-08-13T00:00:00-05:00');
+    expect(pulse.tokens).toBe('233K/200K');
+    expect(pulse.actionsToday).toBe(3);
   });
 });
 

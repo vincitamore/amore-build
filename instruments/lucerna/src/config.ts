@@ -9,9 +9,9 @@ import { houseRuntimeDir, userConfigDir } from "./paths.ts";
 import {
   DAILY_ACTION_BUDGET,
   WEEKLY_EXPENSIVE_BUDGET,
-  CYCLE_COOLDOWN_MS,
   DEFAULT_DAILY_TOKEN_CEILING,
 } from "./budget.ts";
+import { resolveBudgetConfig, type ResolvedCharter } from "./charter.ts";
 import { resolveAmoreBin } from "./engine/amore-headless.ts";
 // Embed package.json so unstamped compiles and source runs ship a real version.
 import packageJson from "../package.json";
@@ -56,6 +56,10 @@ export interface LucernaConfig {
   weeklyExpensiveCap: number;
   cycleCooldownMs: number;
   dailyTokenCeiling: number;
+  /** Tokens held back from auto-commit. Optional so existing fixtures keep compiling. */
+  dreamsReserveTokens?: number;
+  /** Last resolved charter, held for the unit. */
+  charter?: ResolvedCharter;
   /**
    * Minimum interval between auto-commit draft attempts (model calls).
    * Decoupled from the heartbeat tick; default 30 minutes.
@@ -66,6 +70,31 @@ export interface LucernaConfig {
 function getArg(args: string[], flag: string): string | undefined {
   const idx = args.indexOf(flag);
   return idx >= 0 && idx + 1 < args.length ? args[idx + 1] : undefined;
+}
+
+const STRICT_UINT_RE = /^\d+$/;
+
+/**
+ * Whole-string non-negative integer after trim. Sign, exponent, underscore,
+ * empty, or trailing junk → shipped default (stderr warn).
+ */
+function parseEnvUint(raw: string | undefined, fallback: number, name: string): number {
+  if (raw === undefined) return fallback;
+  const trimmed = raw.trim();
+  if (!STRICT_UINT_RE.test(trimmed)) {
+    console.error(
+      `[lucerna] ${name} is not a non-negative integer; using shipped default ${fallback}`,
+    );
+    return fallback;
+  }
+  const n = Number(trimmed);
+  if (!Number.isFinite(n)) {
+    console.error(
+      `[lucerna] ${name} is not a non-negative integer; using shipped default ${fallback}`,
+    );
+    return fallback;
+  }
+  return n;
 }
 
 /** Walk up from a start path looking for AGENTS.md or .amore/ as house markers. */
@@ -135,25 +164,38 @@ export function loadConfig(args: string[] = process.argv.slice(2)): LucernaConfi
     process.env.LUCERNA_MODEL ??
     "";
 
-  const dailyActionCap = parseInt(
-    process.env.LUCERNA_DAILY_ACTION_CAP ?? String(DAILY_ACTION_BUDGET),
-    10,
+  const charter = resolveBudgetConfig({
+    houseRoot,
+    env: process.env,
+    args,
+  });
+  for (const w of [...charter.budgets.warnings, ...charter.roster.warnings]) {
+    console.error(`[lucerna] ${w}`);
+  }
+
+  // Keep parseEnvUint on the integer envs so 1e9 / 200_000 still warn + shipped.
+  parseEnvUint(
+    process.env.LUCERNA_DAILY_ACTION_CAP,
+    DAILY_ACTION_BUDGET,
+    "LUCERNA_DAILY_ACTION_CAP",
   );
-  const weeklyExpensiveCap = parseInt(
-    process.env.LUCERNA_WEEKLY_EXPENSIVE_CAP ?? String(WEEKLY_EXPENSIVE_BUDGET),
-    10,
+  parseEnvUint(
+    process.env.LUCERNA_WEEKLY_EXPENSIVE_CAP,
+    WEEKLY_EXPENSIVE_BUDGET,
+    "LUCERNA_WEEKLY_EXPENSIVE_CAP",
   );
-  const cycleCooldownHours = parseFloat(
-    process.env.LUCERNA_CYCLE_COOLDOWN_HOURS ?? String(CYCLE_COOLDOWN_MS / 3_600_000),
+  parseEnvUint(
+    process.env.LUCERNA_DAILY_TOKEN_CEILING,
+    DEFAULT_DAILY_TOKEN_CEILING,
+    "LUCERNA_DAILY_TOKEN_CEILING",
   );
-  const dailyTokenCeiling = parseInt(
-    process.env.LUCERNA_DAILY_TOKEN_CEILING ?? String(DEFAULT_DAILY_TOKEN_CEILING),
-    10,
-  );
-  const autoCommitCooldownMin = parseFloat(
-    process.env.LUCERNA_AUTO_COMMIT_COOLDOWN_MINUTES ??
-      String(DEFAULT_AUTO_COMMIT_COOLDOWN_MS / 60_000),
-  );
+
+  const dailyActionCap = charter.budgets.dailyActionCap.value;
+  const weeklyExpensiveCap = charter.budgets.weeklyExpensiveCap.value;
+  const dailyTokenCeiling = charter.budgets.dailyTokenCeiling.value;
+  const dreamsReserveTokens = charter.budgets.dreamsReserveTokens.value;
+  const cycleCooldownMs = charter.budgets.cycleCooldownMs;
+  const autoCommitCooldownMs = charter.budgets.autoCommitCooldownMs;
 
   // Optional user config dir ensure
   const ucd = userConfigDir();
@@ -178,19 +220,13 @@ export function loadConfig(args: string[] = process.argv.slice(2)): LucernaConfi
     version: VERSION,
     autoCommitModel,
     dreamModel,
-    dailyActionCap: Number.isFinite(dailyActionCap) ? dailyActionCap : DAILY_ACTION_BUDGET,
-    weeklyExpensiveCap: Number.isFinite(weeklyExpensiveCap)
-      ? weeklyExpensiveCap
-      : WEEKLY_EXPENSIVE_BUDGET,
-    cycleCooldownMs: Number.isFinite(cycleCooldownHours)
-      ? Math.max(30 * 60 * 1000, cycleCooldownHours * 3_600_000)
-      : CYCLE_COOLDOWN_MS,
-    dailyTokenCeiling: Number.isFinite(dailyTokenCeiling)
-      ? dailyTokenCeiling
-      : DEFAULT_DAILY_TOKEN_CEILING,
-    autoCommitCooldownMs: Number.isFinite(autoCommitCooldownMin)
-      ? Math.max(60_000, autoCommitCooldownMin * 60_000)
-      : DEFAULT_AUTO_COMMIT_COOLDOWN_MS,
+    dailyActionCap,
+    weeklyExpensiveCap,
+    cycleCooldownMs,
+    dailyTokenCeiling,
+    dreamsReserveTokens,
+    autoCommitCooldownMs,
+    charter,
   };
 }
 

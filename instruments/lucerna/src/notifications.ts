@@ -17,6 +17,15 @@ import { join } from "node:path";
 import { localTimestamp } from "./time.ts";
 import { RUNTIME_FILES } from "./paths.ts";
 
+/** Same local YYYY-MM-DD key the token window uses. */
+const DATE_KEY_LEN = 10;
+
+/** Kinds that append at most once per local date. */
+export const ONCE_PER_LOCAL_DATE_KINDS: ReadonlySet<string> = new Set([
+  "budget-token-ceiling",
+  "budget-daily-exhausted",
+]);
+
 export type NotificationLevel = "info" | "warn" | "error";
 
 export interface LucernaNotification {
@@ -35,14 +44,26 @@ export function notificationsPath(runtimeDir: string): string {
   return join(runtimeDir, RUNTIME_FILES.notifications);
 }
 
+function notificationDateKey(ts: string): string {
+  return ts.length >= DATE_KEY_LEN ? ts.slice(0, DATE_KEY_LEN) : ts;
+}
+
 export function appendNotification(
   runtimeDir: string,
   entry: Omit<LucernaNotification, "ts"> & { ts?: string },
 ): void {
   mkdirSync(runtimeDir, { recursive: true });
   const path = notificationsPath(runtimeDir);
+  const ts = entry.ts ?? localTimestamp();
+  if (ONCE_PER_LOCAL_DATE_KINDS.has(entry.kind)) {
+    const day = notificationDateKey(ts);
+    const existing = readNotifications(runtimeDir);
+    if (existing.some((e) => e.kind === entry.kind && notificationDateKey(e.ts) === day)) {
+      return;
+    }
+  }
   const line: LucernaNotification = {
-    ts: entry.ts ?? localTimestamp(),
+    ts,
     level: entry.level,
     kind: entry.kind,
     message: entry.message.replace(/\s+/g, " ").trim(),

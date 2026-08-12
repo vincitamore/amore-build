@@ -25,7 +25,20 @@ import { executeLightAction, isAdmittedAction, actionBudgetTier, actionCooldownC
 import { DEFAULT_AGENTIC_WALL_MS, isFullAgenticKey } from "./agentic.ts";
 import { mergeGovernanceLists, loadUserGovernance } from "./governance.ts";
 import { AUTO_COMMIT_WALL_MS, AutoCommitter, type HeadlessCaller } from "./auto-commit.ts";
-import { runDreamCycle, type DreamCycleResult } from "./somniator.ts";
+import {
+  applyCharterToConfig,
+  budgetsDeletedWhileRunning,
+  choresDeletedWhileRunning,
+  resolveBudgetConfig,
+  shouldApplyShippedBudgets,
+  type ResolvedCharter,
+} from "./charter.ts";
+import { appendNotification } from "./notifications.ts";
+import {
+  runDreamCycle,
+  resolveCycleEnablement,
+  type DreamCycleResult,
+} from "./somniator.ts";
 
 const LOG_MAX_BYTES = 5 * 1024 * 1024;
 
@@ -137,6 +150,11 @@ export class DaemonLoop {
   private lastLiveHealth: Record<string, unknown> | null = null;
   /** Sentinel poll chunk; injectable so halt tests need not wait seconds. */
   private sentinelPollMs = 3000;
+  /** Env/argv as of process start — a file edit must not revoke these. */
+  private readonly startEnvDreams = process.env.LUCERNA_DREAMS_ENABLED;
+  private readonly startEnvAutoCommitLive = process.env.LUCERNA_AUTO_COMMIT_LIVE;
+  private readonly startArgs = process.argv.slice(2);
+  private lastCharter: ResolvedCharter | undefined;
 
   constructor(private config: LucernaConfig) {
     this.stateManager = new StateManager(config.runtimeDir, {
@@ -144,7 +162,10 @@ export class DaemonLoop {
       weeklyCap: config.weeklyExpensiveCap,
       cooldownMs: config.cycleCooldownMs,
       tokenCeiling: config.dailyTokenCeiling,
+      dreamsReserveTokens: config.dreamsReserveTokens,
+      charter: config.charter,
     });
+    this.lastCharter = config.charter;
     this.lists = mergeGovernanceLists(loadUserGovernance(config.houseRoot));
   }
 
@@ -248,6 +269,9 @@ export class DaemonLoop {
       this.heartbeat.bpm,
     );
     this.stateManager.save();
+    // File edit/delete stops the next cycle; only halt/stop interrupt work already running.
+    this.refreshEnablement();
+    this.refreshCharter();
 
     const phase = this.heartbeat.current;
     if (
@@ -477,6 +501,105 @@ export class DaemonLoop {
       clearInterval(this.progressBeatTimer);
       this.progressBeatTimer = null;
     }
+  }
+
+  /**
+   * Re-read enablement at the cycle boundary. Holds the resolved flags
+   * for this cycle; does not re-read mid-agentic-run.
+   */
+  private refreshEnablement(): void {
+    const previous = {
+      dreamsEnabled: this.config.dreamsEnabled,
+      autoCommitLive: !this.config.autoCommitDryRun,
+    };
+    const next = resolveCycleEnablement(this.config.houseRoot, previous, {
+      envDreams: this.startEnvDreams,
+      envAutoCommitLive: this.startEnvAutoCommitLive,
+      args: this.startArgs,
+    });
+    if (next.ioError) {
+      appendLog(
+        this.config.runtimeDir,
+        `enablement read error: ${next.ioError} (keeping previous flags)`,
+      );
+      return;
+    }
+    this.config.dreamsEnabled = next.dreamsEnabled;
+    this.config.autoCommitDryRun = !next.autoCommitLive;
+  }
+
+  /**
+   * Re-read budgets.json + chores.json at the same cycle boundary as
+   * enablement. Holds the snapshot for this cycle.
+   */
+  private refreshCharter(): void {
+    const next = resolveBudgetConfig({
+      houseRoot: this.config.houseRoot,
+      env: process.env,
+      args: this.startArgs,
+      previous: this.lastCharter,
+      recentActions: this.stateManager.get().dream.recentActions,
+    });
+    if (next.budgets.file.ioError) {
+      appendLog(
+        this.config.runtimeDir,
+        `budgets.json read error: ${next.budgets.file.ioError} (keeping previous knobs)`,
+      );
+    }
+    if (next.roster.file.ioError) {
+      appendLog(
+        this.config.runtimeDir,
+        `chores.json read error: ${next.roster.file.ioError} (keeping previous roster)`,
+      );
+    }
+
+    const presence = this.stateManager.getCharterPresence();
+    const budgetsDeleted = budgetsDeletedWhileRunning(presence.budgets, next.budgets);
+    if (budgetsDeleted) {
+      appendNotification(this.config.runtimeDir, {
+        level: "warn",
+        kind: "config-removed",
+        message: "budgets.json removed; applying shipped defaults",
+      });
+    }
+    if (choresDeletedWhileRunning(presence.chores, next.roster)) {
+      appendNotification(this.config.runtimeDir, {
+        level: "warn",
+        kind: "config-removed",
+        message: "chores.json removed; all admitted chores enabled",
+      });
+    }
+    if (next.budgets.notifyMalformed) {
+      appendNotification(this.config.runtimeDir, {
+        level: "warn",
+        kind: "charter-malformed",
+        message:
+          next.budgets.warnings.find((w) => /malformed/i.test(w))
+          ?? "budgets.json malformed; using shipped defaults",
+      });
+    }
+    if (this.stateManager.hasClockSkew()) {
+      appendNotification(this.config.runtimeDir, {
+        level: "warn",
+        kind: "clock-skew",
+        message: "stored date key is after today; keeping counters",
+      });
+    }
+
+    applyCharterToConfig(this.config, next, {
+      applyShipped: shouldApplyShippedBudgets(next.budgets, budgetsDeleted),
+    });
+    this.config.charter = next;
+    let reasonOverride: import("./budgets-display.ts").BudgetReasonCode | undefined;
+    if (next.roster.refuse) reasonOverride = "config-invalid";
+    else if (next.budgets.dailyActionCap.value === 0) reasonOverride = "cap-zero";
+    else if (next.roster.effectiveKeys.length === 0) reasonOverride = "roster-empty";
+    this.stateManager.applyCharter(
+      next,
+      reasonOverride,
+      shouldApplyShippedBudgets(next.budgets, budgetsDeleted),
+    );
+    this.lastCharter = next;
   }
 
   private checkHalt(): boolean {

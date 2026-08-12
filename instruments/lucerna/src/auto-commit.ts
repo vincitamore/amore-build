@@ -14,6 +14,13 @@ import { spawnSync } from "node:child_process";
 import type { LucernaConfig } from "./config.ts";
 import { DEFAULT_AUTO_COMMIT_COOLDOWN_MS } from "./config.ts";
 import {
+  DEFAULT_DREAMS_RESERVE_TOKENS,
+  effectiveCeiling,
+  isSingleCallSpend,
+  isTokenCeilingReached,
+} from "./budget.ts";
+import { appendNotification } from "./notifications.ts";
+import {
   callAmoreHeadless,
   preferStructuredOutput,
   type AmoreHeadlessResult,
@@ -328,8 +335,18 @@ export class AutoCommitter {
       };
     }
 
-    // Token ceiling: same soft halt as dream planner (always honored).
-    if (this.state?.isTokenCeilingReached(now)) {
+    // Auto-commit uses ceiling − dreamsReserve. Dreams still allowed above this.
+    const reserve =
+      this.config.dreamsReserveTokens ?? DEFAULT_DREAMS_RESERVE_TOKENS;
+    const autoCommitCeiling = effectiveCeiling(
+      "autoCommit",
+      this.config.dailyTokenCeiling,
+      reserve,
+    );
+    if (
+      this.state &&
+      isTokenCeilingReached(this.state.asCounters(), now, autoCommitCeiling)
+    ) {
       return {
         committed: false,
         dryRun,
@@ -469,7 +486,20 @@ export class AutoCommitter {
       });
       // Meter tokens like planner calls (planning included in daily ceiling).
       if (this.state && result.usage) {
-        this.state.recordTokens(result.usage);
+        this.state.recordTokens(result.usage, "autoCommit");
+        if (
+          isSingleCallSpend(
+            result.usage.total_tokens
+              ?? ((result.usage.input_tokens ?? 0) + (result.usage.output_tokens ?? 0)),
+            this.config.dailyTokenCeiling,
+          )
+        ) {
+          appendNotification(this.config.runtimeDir, {
+            level: "warn",
+            kind: "single-call-spend",
+            message: `single envelope exceeds 25% of daily ceiling ${this.config.dailyTokenCeiling}`,
+          });
+        }
       }
       const preferred = preferStructuredOutput(
         (result.raw && typeof result.raw === "object"

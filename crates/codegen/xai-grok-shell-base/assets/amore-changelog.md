@@ -15,6 +15,28 @@ work it describes.
 
 ## v1.0.2
 
+- **Lucerna's Budgets panel tells the truth it already promised** — the
+  Running tab now shows live caps, capability (`ready` / `cooling` /
+  `refusing`), and provenance (`source`, `aboveShipped`). This honours a
+  published claim; it is not a new spend surface.
+- **Enablement and other charter edits apply at the next cycle** — deleting
+  or flipping `enable.json`, `budgets.json`, or `chores.json` stops the
+  *next* cycle from starting. The `halt` sentinel and process stop are the
+  only paths that interrupt work already running.
+- **Charter files are no longer daemon-writable** — an autonomous
+  maintenance dream could write the file that enables autonomous
+  maintenance dreams; it now cannot. No exploitation is known — the
+  boundary was simply drawn in the wrong place. Charter lives under
+  `<house>/.amore/lucerna/`; runtime stays under `instruments/lucerna/`.
+- **Operator knobs: `budgets.json` / `chores.json`** — six spend scalars
+  and a narrowing chore roster, house-local, `b` / `c` on the Lucerna tab,
+  `iris lucerna budgets` / `chores` on the CLI. The file may raise a cap
+  above shipped (`aboveShipped` is visible). The roster cannot invent a key
+  or name a spawn flag. Confirm dialogs and the JSON content-type check are
+  not authentication; iris stays loopback-unauthenticated. A planner
+  reservation refuses *starting* a call when remaining room is too small —
+  it does not make overspend impossible. Dreams-off is not spend-off:
+  drafting still spends unless `LUCERNA_AUTO_COMMIT=0`.
 - **Lucerna status tells the truth** — the iris dashboard no longer reports a
   healthy daemon as Hung between adaptive heartbeats. Iris now honors the
   daemon's own `intervalMs` for staleness (bound `max(120s, 2.5×interval)`,

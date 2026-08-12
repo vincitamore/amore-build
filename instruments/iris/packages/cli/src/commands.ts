@@ -966,10 +966,171 @@ export const COMMANDS: CommandSpec[] = [
     },
   },
   {
+    name: 'lucerna budgets',
+    summary:
+      'Show Lucerna spend caps and capability (projection of /api/lucerna/status). Subcommands: [show]',
+    isWrite: false,
+    booleanFlags: [],
+    flags: {},
+    run: async ({ args }) => {
+      const sub = args.positional[0];
+      if (!sub || sub === 'show') {
+        return lucerna.lucernaBudgets();
+      }
+      if (sub === 'set') {
+        throw new regula.RegulaError('USAGE', 'lucerna budgets set <cap> <value>');
+      }
+      throw new regula.RegulaError(
+        'USAGE',
+        "lucerna budgets expects [show] (got '" + sub + "')",
+      );
+    },
+  },
+  {
+    name: 'lucerna budgets show',
+    summary: 'Show Lucerna spend caps and capability (projection of /api/lucerna/status)',
+    isWrite: false,
+    booleanFlags: [],
+    flags: {},
+    run: () => lucerna.lucernaBudgets(),
+  },
+  {
+    name: 'lucerna budgets set',
+    summary:
+      'Write a Lucerna spend cap: iris lucerna budgets set <cap> <value> (actions|expensive|tokens|cooldown|reserve|auto-commit)',
+    isWrite: true,
+    booleanFlags: [],
+    flags: {},
+    run: ({ args }) => {
+      const cap = args.positional[0];
+      const value = args.positional[1];
+      if (!cap || value === undefined) {
+        throw new regula.RegulaError('USAGE', 'lucerna budgets set <cap> <value>');
+      }
+      try {
+        return lucerna.lucernaBudgetsSet(cap, value);
+      } catch (e) {
+        throw new regula.RegulaError('USAGE', e instanceof Error ? e.message : String(e));
+      }
+    },
+    exit: lucerna.lucernaWriteExit,
+  },
+  {
+    name: 'lucerna chores',
+    summary:
+      'List Lucerna chores from the status roster. Subcommands: [list] | show <key>',
+    isWrite: false,
+    booleanFlags: ['disabled'],
+    flags: { disabled: 'only disabled chores' },
+    run: async ({ args }) => {
+      const sub = args.positional[0];
+      if (!sub || sub === 'list') {
+        return lucerna.lucernaChoresList(args.flags.disabled === true);
+      }
+      if (sub === 'show') {
+        const key = args.positional[1];
+        if (!key) {
+          throw new regula.RegulaError('USAGE', 'lucerna chores show requires <key>');
+        }
+        return lucerna.lucernaChoresShow(key);
+      }
+      if (sub === 'enable') {
+        throw new regula.RegulaError('USAGE', 'lucerna chores enable <key>');
+      }
+      if (sub === 'disable') {
+        throw new regula.RegulaError('USAGE', 'lucerna chores disable <key>');
+      }
+      if (sub === 'interval') {
+        throw new regula.RegulaError('USAGE', 'lucerna chores interval <key> <hours>');
+      }
+      throw new regula.RegulaError(
+        'USAGE',
+        "lucerna chores expects [list] | show <key> (got '" + sub + "')",
+      );
+    },
+  },
+  {
+    name: 'lucerna chores list',
+    summary: 'List Lucerna chores from the status roster; --disabled keeps only disabled',
+    isWrite: false,
+    booleanFlags: ['disabled'],
+    flags: { disabled: 'only disabled chores' },
+    run: ({ args }) => lucerna.lucernaChoresList(args.flags.disabled === true),
+  },
+  {
+    name: 'lucerna chores show',
+    summary: 'Show one Lucerna chore by key from the status roster',
+    isWrite: false,
+    booleanFlags: [],
+    flags: {},
+    run: async ({ args }) => {
+      const key = args.positional[0];
+      if (!key) {
+        throw new regula.RegulaError('USAGE', 'lucerna chores show requires <key>');
+      }
+      return lucerna.lucernaChoresShow(key);
+    },
+    exit: (p) => {
+      if (p.available === false) return EXIT.OK;
+      if (p.found === false) return EXIT.ACTIONABLE;
+      return EXIT.OK;
+    },
+  },
+  {
+    name: 'lucerna chores enable',
+    summary: 'Enable a Lucerna chore in chores.json (intent: enabled true)',
+    isWrite: true,
+    booleanFlags: [],
+    flags: {},
+    run: ({ args }) => {
+      const key = args.positional[0];
+      if (!key) {
+        throw new regula.RegulaError('USAGE', 'lucerna chores enable <key>');
+      }
+      return lucerna.lucernaChoresEnable(key);
+    },
+    exit: lucerna.lucernaWriteExit,
+  },
+  {
+    name: 'lucerna chores disable',
+    summary: 'Disable a Lucerna chore in chores.json (intent: enabled false)',
+    isWrite: true,
+    booleanFlags: [],
+    flags: {},
+    run: ({ args }) => {
+      const key = args.positional[0];
+      if (!key) {
+        throw new regula.RegulaError('USAGE', 'lucerna chores disable <key>');
+      }
+      return lucerna.lucernaChoresDisable(key);
+    },
+    exit: lucerna.lucernaWriteExit,
+  },
+  {
+    name: 'lucerna chores interval',
+    summary: 'Set a Lucerna chore min-interval in hours (lengthen-only at load)',
+    isWrite: true,
+    booleanFlags: [],
+    flags: {},
+    run: ({ args }) => {
+      const key = args.positional[0];
+      const hours = args.positional[1];
+      if (!key || hours === undefined) {
+        throw new regula.RegulaError('USAGE', 'lucerna chores interval <key> <hours>');
+      }
+      try {
+        return lucerna.lucernaChoresInterval(key, hours);
+      } catch (e) {
+        throw new regula.RegulaError('USAGE', e instanceof Error ? e.message : String(e));
+      }
+    },
+    exit: lucerna.lucernaWriteExit,
+  },
+  {
     name: 'lucerna dreams',
     summary:
-      'List or review Lucerna dream artifacts (session manifests + light reports). Subcommands: [list] | show <id> | review <id>. Status flip only — never executes content',
-    isWrite: false, // list/show are reads; review is handled via write when subcommand is review
+      'List or show Lucerna dream artifacts (session manifests + light reports). Subcommands: [list] | show <id>',
+    isWrite: false,
     booleanFlags: ['pending'],
     flags: { pending: 'only pending items' },
     run: async ({ args }) => {
@@ -985,29 +1146,36 @@ export const COMMANDS: CommandSpec[] = [
         return lucerna.lucernaDreamShow(id);
       }
       if (sub === 'review') {
-        const id = args.positional[1];
-        if (!id) {
-          throw new regula.RegulaError('USAGE', 'lucerna dreams review requires <id>');
-        }
-        // Status field flip only (pending → reviewed / light pending → acted).
-        return lucerna.lucernaDreamReview(id);
+        throw new regula.RegulaError('USAGE', 'lucerna dreams review <id>');
       }
       throw new regula.RegulaError(
         'USAGE',
-        "lucerna dreams expects [list] | show <id> | review <id> (got '" + sub + "')",
+        "lucerna dreams expects [list] | show <id> (got '" + sub + "')",
       );
     },
     exit: (p) => {
-      // review returns ok; list/show do not use ok:false for empty
-      if (typeof p.ok === 'boolean') return lucerna.lucernaWriteExit(p);
       if (p.found === false) return EXIT.ACTIONABLE;
       return EXIT.OK;
     },
   },
   {
+    name: 'lucerna dreams review',
+    summary: 'Mark a Lucerna dream artifact reviewed (status flip only — never executes content)',
+    isWrite: true,
+    booleanFlags: [],
+    flags: {},
+    run: async ({ args }) => {
+      const id = args.positional[0];
+      if (!id) {
+        throw new regula.RegulaError('USAGE', 'lucerna dreams review requires <id>');
+      }
+      return lucerna.lucernaDreamReview(id);
+    },
+    exit: lucerna.lucernaWriteExit,
+  },
+  {
     name: 'lucerna proposals',
-    summary:
-      'List or resolve Lucerna proposals. Subcommands: [list] | show <id> | apply <id> | close <id>. Flips status only — applying proposal CONTENT is the resident/operator job',
+    summary: 'List or show Lucerna proposals. Subcommands: [list] | show <id>',
     isWrite: false,
     booleanFlags: ['pending'],
     flags: { pending: 'only pending items' },
@@ -1024,38 +1192,59 @@ export const COMMANDS: CommandSpec[] = [
         return lucerna.lucernaProposalShow(id);
       }
       if (sub === 'apply') {
-        const id = args.positional[1];
-        if (!id) {
-          throw new regula.RegulaError('USAGE', 'lucerna proposals apply requires <id>');
-        }
-        // Status flip only. Content is never auto-applied.
-        const result = await lucerna.lucernaProposalApply(id);
-        return {
-          ...result,
-          note: 'status flipped to applied only — applying proposal CONTENT is the resident/operator job',
-        };
+        throw new regula.RegulaError('USAGE', 'lucerna proposals apply <id>');
       }
       if (sub === 'close') {
-        const id = args.positional[1];
-        if (!id) {
-          throw new regula.RegulaError('USAGE', 'lucerna proposals close requires <id>');
-        }
-        const result = await lucerna.lucernaProposalClose(id);
-        return {
-          ...result,
-          note: 'status flipped to closed only — proposal content was not executed',
-        };
+        throw new regula.RegulaError('USAGE', 'lucerna proposals close <id>');
       }
       throw new regula.RegulaError(
         'USAGE',
-        "lucerna proposals expects [list] | show <id> | apply <id> | close <id> (got '" + sub + "')",
+        "lucerna proposals expects [list] | show <id> (got '" + sub + "')",
       );
     },
     exit: (p) => {
-      if (typeof p.ok === 'boolean') return lucerna.lucernaWriteExit(p);
       if (p.found === false) return EXIT.ACTIONABLE;
       return EXIT.OK;
     },
+  },
+  {
+    name: 'lucerna proposals apply',
+    summary:
+      'Mark a Lucerna proposal applied (status flip only — applying proposal CONTENT is the resident/operator job)',
+    isWrite: true,
+    booleanFlags: [],
+    flags: {},
+    run: async ({ args }) => {
+      const id = args.positional[0];
+      if (!id) {
+        throw new regula.RegulaError('USAGE', 'lucerna proposals apply requires <id>');
+      }
+      const result = await lucerna.lucernaProposalApply(id);
+      return {
+        ...result,
+        note: 'status flipped to applied only — applying proposal CONTENT is the resident/operator job',
+      };
+    },
+    exit: lucerna.lucernaWriteExit,
+  },
+  {
+    name: 'lucerna proposals close',
+    summary: 'Mark a Lucerna proposal closed (status flip only — proposal content is not executed)',
+    isWrite: true,
+    booleanFlags: [],
+    flags: {},
+    run: async ({ args }) => {
+      const id = args.positional[0];
+      if (!id) {
+        throw new regula.RegulaError('USAGE', 'lucerna proposals close requires <id>');
+      }
+      const result = await lucerna.lucernaProposalClose(id);
+      return {
+        ...result,
+        note: 'status flipped to closed only — proposal content was not executed',
+      };
+    },
+    exit: lucerna.lucernaWriteExit,
   },
 
   // ── edges (vinculum — structural typed edges into graph/edges.jsonl) ──
@@ -1197,11 +1386,17 @@ export interface ResolvedCommand {
   rest: string[];
 }
 
-/** Resolve a (possibly two-word) command from argv, returning the matched spec + remaining args. */
+/** Resolve a (up to three-word, longest first) command from argv, returning the matched spec + remaining args. */
 export function resolveCommand(argv: string[]): ResolvedCommand | { error: string } {
   if (argv.length === 0) return { error: 'no command given' };
+  const threeWord =
+    argv.length >= 3 && !argv[1].startsWith('--') && !argv[2].startsWith('--')
+      ? `${argv[0]} ${argv[1]} ${argv[2]}`
+      : null;
+  let spec = threeWord ? COMMANDS.find((c) => c.name === threeWord) : undefined;
+  if (spec) return { spec, rest: argv.slice(3) };
   const twoWord = argv.length >= 2 && !argv[1].startsWith('--') ? `${argv[0]} ${argv[1]}` : null;
-  let spec = twoWord ? COMMANDS.find((c) => c.name === twoWord) : undefined;
+  spec = twoWord ? COMMANDS.find((c) => c.name === twoWord) : undefined;
   if (spec) return { spec, rest: argv.slice(2) };
   spec = COMMANDS.find((c) => c.name === argv[0]);
   if (spec) return { spec, rest: argv.slice(1) };

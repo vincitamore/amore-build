@@ -116,4 +116,71 @@ describe("notifications queue", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  test("budget-token-ceiling appends once per local date", () => {
+    const dir = mkdtempSync(join(tmpdir(), "lucerna-notif-ceil-"));
+    try {
+      appendNotification(dir, {
+        ts: "2026-06-09T10:00:00",
+        level: "warn",
+        kind: "budget-token-ceiling",
+        message: "daily token ceiling reached (1/1)",
+      });
+      appendNotification(dir, {
+        ts: "2026-06-09T11:00:00",
+        level: "warn",
+        kind: "budget-token-ceiling",
+        message: "daily token ceiling reached (2/1)",
+      });
+      appendNotification(dir, {
+        ts: "2026-06-10T09:00:00",
+        level: "warn",
+        kind: "budget-token-ceiling",
+        message: "daily token ceiling reached (rolled)",
+      });
+      const entries = readNotifications(dir).filter(
+        (e) => e.kind === "budget-token-ceiling",
+      );
+      expect(entries.length).toBe(2);
+      expect(entries[0]!.ts.startsWith("2026-06-09")).toBe(true);
+      expect(entries[1]!.ts.startsWith("2026-06-10")).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("budget-daily-exhausted appends once per local date; other kinds do not dedup", () => {
+    const dir = mkdtempSync(join(tmpdir(), "lucerna-notif-daily-"));
+    try {
+      appendNotification(dir, {
+        ts: "2026-06-09T10:00:00",
+        level: "info",
+        kind: "budget-daily-exhausted",
+        message: "daily budget exhausted (12/12)",
+      });
+      appendNotification(dir, {
+        ts: "2026-06-09T11:00:00",
+        level: "info",
+        kind: "budget-daily-exhausted",
+        message: "daily budget exhausted (12/12)",
+      });
+      appendNotification(dir, {
+        ts: "2026-06-09T10:00:00",
+        level: "error",
+        kind: "governance-breach",
+        message: "first",
+      });
+      appendNotification(dir, {
+        ts: "2026-06-09T11:00:00",
+        level: "error",
+        kind: "governance-breach",
+        message: "second",
+      });
+      const entries = readNotifications(dir);
+      expect(entries.filter((e) => e.kind === "budget-daily-exhausted").length).toBe(1);
+      expect(entries.filter((e) => e.kind === "governance-breach").length).toBe(2);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

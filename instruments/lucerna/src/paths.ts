@@ -1,8 +1,8 @@
 /**
- * House and config path resolution for lucerna.
+ * House and path resolution for lucerna.
  *
+ * Charter (operator intent) lives under: <house>/.amore/lucerna/
  * Runtime state lives under the house: <house>/instruments/lucerna/
- * Durable instrument config lives under: ~/.amore/instruments/lucerna/
  */
 
 import { homedir } from "node:os";
@@ -10,6 +10,7 @@ import { join, resolve } from "node:path";
 
 export const INSTRUMENT_DIR_NAME = "lucerna";
 
+/** Runtime basenames. enable / governanceUser are legacy names under the runtime dir. */
 export const RUNTIME_FILES = {
   health: "health.json",
   state: "state.json",
@@ -23,12 +24,22 @@ export const RUNTIME_FILES = {
   notifications: "notifications.jsonl",
 } as const;
 
-/** House-local runtime directory for state, health, logs, sentinels, enablement. */
+/** Charter basenames under houseCharterDir. */
+export const CHARTER_FILES = {
+  enable: "enable.json",
+  governanceUser: "governance.user.toml",
+} as const;
+
+/** House-local runtime directory for state, health, logs, sentinels. */
 export function houseRuntimeDir(houseRoot: string): string {
   return resolve(houseRoot, "instruments", INSTRUMENT_DIR_NAME);
 }
 
-/** User-level config directory under ~/.amore/instruments/lucerna/. */
+/** House-local charter directory: what the daemon may do. */
+export function houseCharterDir(houseRoot: string): string {
+  return resolve(houseRoot, ".amore", INSTRUMENT_DIR_NAME);
+}
+
 export function userConfigDir(home: string = homedir()): string {
   return resolve(home, ".amore", "instruments", INSTRUMENT_DIR_NAME);
 }
@@ -52,11 +63,20 @@ export function sentinelPath(
   return join(runtimeDir, RUNTIME_FILES[kind]);
 }
 
-export function enablementPath(runtimeDir: string): string {
-  return join(runtimeDir, RUNTIME_FILES.enable);
+/** Charter enablement path (new location). */
+export function enablementPath(houseRoot: string): string {
+  return join(houseCharterDir(houseRoot), CHARTER_FILES.enable);
 }
 
-/** User governance additions: house-local next to runtime, or under house root. */
+/** Charter user-governance path (new location). */
 export function governanceUserPath(houseRoot: string): string {
+  return join(houseCharterDir(houseRoot), CHARTER_FILES.governanceUser);
+}
+
+export function legacyEnablementPath(houseRoot: string): string {
+  return join(houseRuntimeDir(houseRoot), RUNTIME_FILES.enable);
+}
+
+export function legacyGovernanceUserPath(houseRoot: string): string {
   return join(houseRuntimeDir(houseRoot), RUNTIME_FILES.governanceUser);
 }

@@ -6,12 +6,12 @@ Lucerna is the Amore house steward daemon. It keeps a light heartbeat over a hou
 
 - **Heartbeat daemon** with phase decay (alert → elevated → resting → drowsy → dreaming).
 - **Two-list governance**: protected house identity surfaces are default-deny; only `inbox/captures/`, `forge/`, and lucerna's own runtime state may be written autonomously.
-- **Tiered budgets**: 12 actions per day, 6 expensive actions per week, 2 hour cycle cooldown, per-action cooldowns, and a soft daily token ceiling fed from driver usage envelopes.
-- **Enablement flags** default both off: dreams and live auto-commit require an explicit flip.
+- **Tiered budgets**: 12 actions per day, 6 expensive actions per week, 2 hour cycle cooldown, per-action cooldowns, a soft daily token ceiling of 200_000, and an 80_000-token dreams reserve (auto-commit effective ceiling 120_000). House-local `budgets.json` may raise a cap.
+- **Enablement flags** default both off: dreams and live auto-commit require an explicit flip. Dreams-off is not spend-off.
 - **Light actions** (model-free or thin shell): `survey-org`, `substrate-health`, `inbox-age-report`, `state-cleanup`, `edges-update`, `qmd-refresh`.
 - **Agentic actions** (multi-turn amore, weekly budget): `self-orient`, `agentic-housekeeping`, plus shell densify `edges-densify`.
 - **Dreams** (opt-in planner): when `dreamsEnabled` is true, Lucerna may run one planner call per cycle and execute at most one admitted action (light or agentic).
-- **Auto-commit dry-run**: drafts a commit message via one headless call on its own schedule (default 30 minute cooldown, change-set dedup, token ceiling); never commits unless live mode is enabled (live mode is draft-only in this release).
+- **Auto-commit dry-run**: drafts a commit message via one headless call on its own 30-minute schedule whether or not dreams are enabled (change-set dedup, token ceiling). Dry-run is a git word: it still spends. Turn it off with `LUCERNA_AUTO_COMMIT=0`. Live mode remains draft-only in this release.
 
 ## Install
 
@@ -27,12 +27,22 @@ Optional global-style bin wiring is provided as `lucerna` in `package.json`.
 
 ## Configuration
 
+Charter (what the daemon may do) and runtime (what it has done) are different directories. The daemon cannot write charter files.
+
 | Concern | Location |
 |---------|----------|
-| Runtime state (health, state, log, sentinels, enablement) | `<house>/instruments/lucerna/` |
-| User instrument config home | `~/.amore/instruments/lucerna/` |
+| Charter | `<house>/.amore/lucerna/` (`enable.json`, `budgets.json`, `chores.json`, `governance.user.toml`) |
+| Runtime state (health, state, log, sentinels, notifications) | `<house>/instruments/lucerna/` |
 | Model entries and credentials | `~/.amore/config.toml` (amore harness) |
-| Extra protected paths | `<house>/instruments/lucerna/governance.user.toml` |
+| Extra protected paths | `<house>/.amore/lucerna/governance.user.toml` |
+
+Precedence for every spend knob: **`argv > env > file > shipped`**. A house-local `budgets.json` may raise a cap above shipped (`aboveShipped` is visible). Invalid file fields fall back to shipped (no silent clamp). Malformed `chores.json` refuses the cycle.
+
+| File | Absent | Malformed |
+|------|--------|-----------|
+| `budgets.json` | shipped defaults, no warning | shipped defaults + warning + notice |
+| `chores.json` | all shipped chores admitted | refuse the cycle (do not fall back) |
+| `enable.json` | both knobs false | both knobs false |
 
 Environment overrides (all optional):
 
@@ -42,13 +52,13 @@ Environment overrides (all optional):
 - `LUCERNA_DREAMS_ENABLED=1`  -  enable autonomous dreams (OR with file)
 - `LUCERNA_AUTO_COMMIT_LIVE=1`  -  enable live auto-commit flag (OR with file)
 - `LUCERNA_MODEL` / `LUCERNA_AUTO_COMMIT_MODEL` / `LUCERNA_DREAM_MODEL`  -  model entry names
-- `LUCERNA_DAILY_ACTION_CAP`, `LUCERNA_WEEKLY_EXPENSIVE_CAP`, `LUCERNA_CYCLE_COOLDOWN_HOURS`, `LUCERNA_DAILY_TOKEN_CEILING`
+- `LUCERNA_DAILY_ACTION_CAP`, `LUCERNA_WEEKLY_EXPENSIVE_CAP`, `LUCERNA_CYCLE_COOLDOWN_HOURS`, `LUCERNA_DAILY_TOKEN_CEILING`, `LUCERNA_DREAMS_RESERVE_TOKENS`
 - `LUCERNA_AUTO_COMMIT_COOLDOWN_MINUTES`  -  minimum minutes between auto-commit draft attempts (default 30)
-- `LUCERNA_AUTO_COMMIT=0`  -  disable auto-commit entirely
+- `LUCERNA_AUTO_COMMIT=0`  -  disable auto-commit drafting entirely (dreams-off does not do this)
 
 ## Enablement
 
-File: `<house>/instruments/lucerna/lucerna.enable.json`
+File: `<house>/.amore/lucerna/enable.json`
 
 ```json
 {
@@ -60,17 +70,19 @@ File: `<house>/instruments/lucerna/lucerna.enable.json`
 | Field | Default | Meaning |
 |-------|---------|---------|
 | `dreamsEnabled` | `false` | Autonomous dream scheduling |
-| `autoCommitLive` | `false` | Live git commit (dry-run when false) |
+| `autoCommitLive` | `false` | Live git commit (dry-run — a git word — when false) |
 
-Absent file: both false. Malformed JSON: both false, with a log line. CLI flags and env vars OR with the file for one-shot override. Safe defaults never flip themselves on.
+Absent file: both false. Malformed JSON: both false, with a log line. CLI flags and env vars OR with the file for one-shot override. Safe defaults never flip themselves on. A legacy `instruments/lucerna/lucerna.enable.json` is still *read* when the charter file is absent; it is never written.
+
+Dreams-off is not spend-off. Drafting still spends on your key on its own 30-minute schedule unless `LUCERNA_AUTO_COMMIT=0`.
 
 ## Light dreams
 
-A light dream is one autonomous maintenance cycle: Lucerna gathers a compact house snapshot (org counts, budget counters, recent action history), then makes a single `amore` headless call with a JSON schema that constrains the pick to the admitted action keys or `skip`. At most one action runs per cycle. A `skip` pick writes no report and spends only the planning call.
+A light dream is one autonomous maintenance cycle: Lucerna gathers a compact house snapshot (org counts, budget counters, recent action history), then makes a single `amore` headless call with a JSON schema that constrains the pick to the admitted action keys or `skip`. At most one action runs per cycle. A `skip` pick writes no report. **Skip is not free**: the planner call still spends tokens on your key. The only way to take no planner spend is to leave dreams off or refuse the cycle before the planner (empty roster, `dailyActionCap` 0, or a budget gate).
 
-Dreams stay **off by default**. Autonomous cycles run only when `dreamsEnabled` is true in `lucerna.enable.json` (or an equivalent start-time OR of that file with env/CLI). Absent or malformed enablement keeps dreams off. The `wake` sentinel can request an immediate cycle when dreams are already enabled; `sleep` still forces the dreaming heartbeat phase; `halt` stops the daemon as usual.
+Dreams stay **off by default**. Autonomous cycles run only when `dreamsEnabled` is true in `enable.json` (or an equivalent start-time OR of that file with env/CLI). Absent or malformed enablement keeps dreams off. The `wake` sentinel can request an immediate cycle when dreams are already enabled; `sleep` still forces the dreaming heartbeat phase; `halt` requests a graceful stop. Editing or deleting a charter file stops the **next** cycle from starting; `halt` and process stop are the only paths that interrupt work already running.
 
-Budgets apply end to end: 12 actions per day, 6 expensive actions per week, per-action cooldowns, a 2 hour cycle cooldown, and a soft daily token ceiling that includes the planning call. A refused cycle records its reason in `state.json` and the log. `lucerna dream-cycle --force` may override the cycle schedule, but it never overrides enablement.
+Budgets apply end to end: 12 actions per day, 6 expensive actions per week, per-action cooldowns, a 2 hour cycle cooldown (1 hour after a zero-action cycle), a soft daily token ceiling of 200_000 that includes the planning call, and an 80_000-token dreams reserve so auto-commit drafts stop at 120_000. The ceiling is soft: a reservation refuses *starting* a planner when remaining room is too small; a call already running can still overshoot. A refused cycle records its reason in `state.json` and the log. `lucerna dream-cycle --force` may override the cycle schedule, but it never overrides enablement and will not run a roster-disabled chore.
 
 Executed light actions write dated reports under `<house>/forge/dreams/` with frontmatter that includes `triggered-by: dream`. Outcomes worth operator attention (action executed, token ceiling, repeated planner failures) append to `<house>/instruments/lucerna/notifications.jsonl` for local surfaces to read.
 
@@ -96,7 +108,7 @@ An agentic dream runs a multi-turn `amore` loop so the spawned agent can read th
 
 ### What agentic dreams may and may not touch
 
-**May write:** `forge/` (reports, session manifests, proposals), `inbox/captures/`, and Lucerna runtime residual under `instruments/lucerna/`.
+**May write:** `forge/` (reports, session manifests, proposals), `inbox/captures/`, and Lucerna runtime residual under `instruments/lucerna/` (allow-listed basenames only). Charter under `.amore/lucerna/` is not writable.
 
 **Must not write:** `AGENTS.md`, `CLAUDE.md`, `context/`, `knowledge/`, `tasks/`, `reminders/`, `tags/`, `graph/`, `projects/`, `archive/`, `scripts/`, `.amore/`, `.grok/`, `.claude/`, or instrument package source. The dream prompt states this boundary. After each agentic cycle Lucerna diffs the house (git porcelain when available, else a file inventory of protected roots). On any out-of-bounds write it logs the breach, appends a `governance-breach` notification, and leaves the dream manifest at `review-status: pending` with the breach named in the body. Lucerna does not auto-revert.
 
@@ -127,7 +139,16 @@ lucerna status --house ~/my-house   # agentic keys, wall, web-off posture
 
 ## File-based control surface
 
-Under `<house>/instruments/lucerna/`:
+Charter under `<house>/.amore/lucerna/`:
+
+| File | Role |
+|------|------|
+| `enable.json` | durable enablement knobs |
+| `budgets.json` | spend caps (file may raise; `aboveShipped` is visible) |
+| `chores.json` | narrowing chore roster |
+| `governance.user.toml` | additive protected paths only |
+
+Runtime under `<house>/instruments/lucerna/`:
 
 | File | Role |
 |------|------|
@@ -137,15 +158,13 @@ Under `<house>/instruments/lucerna/`:
 | `halt` | write then delete-on-consume; graceful stop |
 | `wake` | write then delete-on-consume; stimulate heartbeat |
 | `sleep` | write then delete-on-consume; force dreaming phase |
-| `lucerna.enable.json` | durable enablement knobs |
 | `notifications.jsonl` | append-only operator attention queue |
-| `governance.user.toml` | additive protected paths only |
 
 Example:
 
 ```bash
 lucerna start --house ~/my-house
-echo > ~/my-house/instruments/lucerna/halt   # request stop
+echo > ~/my-house/instruments/lucerna/halt   # request stop (does not interrupt a running cycle)
 lucerna status --house ~/my-house
 lucerna dream survey-org --house ~/my-house
 lucerna dream-cycle --house ~/my-house
@@ -158,9 +177,9 @@ lucerna smoke --house /tmp/synthetic-house
 
 Shipped **protected** (relative to house root): `AGENTS.md`, `CLAUDE.md`, `context/`, `knowledge/`, `tasks/`, `reminders/`, `tags/`, `graph/`, `projects/`, `archive/`, `scripts/`, `.amore/`, `.grok/`, `.claude/`, `instruments/`.
 
-Shipped **writable**: `inbox/captures/`, `forge/`, plus residual files under `instruments/lucerna/` (runtime only, not package source).
+Shipped **writable**: `inbox/captures/`, `forge/`, plus residual allow-listed files under `instruments/lucerna/` (runtime only, not package source, not charter).
 
-Users may add protected paths via `governance.user.toml`:
+Users may add protected paths via `.amore/lucerna/governance.user.toml`:
 
 ```toml
 protected_extra = ["secrets/", "private/"]

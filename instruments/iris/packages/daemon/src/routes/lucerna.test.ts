@@ -125,16 +125,167 @@ describe('POST governance', () => {
     };
     expect(b.ok).toBe(true);
     expect(b.enablement).toEqual({ dreamsEnabled: true, autoCommitLive: false });
-    expect(JSON.parse(readFileSync(join(ldir, 'lucerna.enable.json'), 'utf8'))).toEqual({
+    const charterEnable = join(org, '.amore', 'lucerna', 'enable.json');
+    expect(JSON.parse(readFileSync(charterEnable, 'utf8'))).toEqual({
       dreamsEnabled: true,
       autoCommitLive: false,
     });
+    expect(existsSync(join(ldir, 'lucerna.enable.json'))).toBe(false);
   });
 
   test('enable rejects empty body', async () => {
     ensureDir();
     const r = await lucernaRoute(config, post('/api/lucerna/enable', {}));
     expect(r.status).toBe(400);
+  });
+
+  test('enable with text/plain does not write enablement', async () => {
+    ensureDir();
+    const enablePath = join(ldir, 'lucerna.enable.json');
+    const r = await lucernaRoute(
+      config,
+      new Request('http://localhost/api/lucerna/enable', {
+        method: 'POST',
+        headers: { 'content-type': 'text/plain' },
+        body: JSON.stringify({ dreamsEnabled: true, autoCommitLive: false }),
+      }),
+    );
+    expect(r.status).toBe(400);
+    const b = (await r.json()) as { ok: boolean; reason?: string };
+    expect(b.ok).toBe(false);
+    expect(b.reason).toBe('usage');
+    expect(existsSync(enablePath)).toBe(false);
+    expect(existsSync(join(org, '.amore', 'lucerna', 'enable.json'))).toBe(false);
+  });
+
+  test('enable with non-loopback Origin is refused', async () => {
+    ensureDir();
+    const r = await lucernaRoute(
+      config,
+      new Request('http://localhost/api/lucerna/enable', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', origin: 'https://example.com' },
+        body: JSON.stringify({ dreamsEnabled: true, autoCommitLive: false }),
+      }),
+    );
+    expect(r.status).toBe(400);
+    const b = (await r.json()) as { ok: boolean; reason?: string };
+    expect(b.ok).toBe(false);
+    expect(b.reason).toBe('usage');
+    expect(existsSync(join(ldir, 'lucerna.enable.json'))).toBe(false);
+    expect(existsSync(join(org, '.amore', 'lucerna', 'enable.json'))).toBe(false);
+  });
+
+  test('enable with loopback Origin is accepted', async () => {
+    ensureDir();
+    const r = await lucernaRoute(
+      config,
+      new Request('http://localhost/api/lucerna/enable', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', origin: 'http://127.0.0.1:5173' },
+        body: JSON.stringify({ dreamsEnabled: true, autoCommitLive: false }),
+      }),
+    );
+    expect(r.status).toBe(200);
+    const b = (await r.json()) as { ok: boolean };
+    expect(b.ok).toBe(true);
+    const charterEnable = join(org, '.amore', 'lucerna', 'enable.json');
+    expect(JSON.parse(readFileSync(charterEnable, 'utf8'))).toEqual({
+      dreamsEnabled: true,
+      autoCommitLive: false,
+    });
+    expect(existsSync(join(ldir, 'lucerna.enable.json'))).toBe(false);
+  });
+});
+
+describe('POST budgets + chores', () => {
+  test('budgets text/plain still 400 and writes nothing', async () => {
+    ensureDir();
+    const r = await lucernaRoute(
+      config,
+      new Request('http://localhost/api/lucerna/budgets', {
+        method: 'POST',
+        headers: { 'content-type': 'text/plain' },
+        body: JSON.stringify({ dailyActionCap: 6 }),
+      }),
+    );
+    expect(r.status).toBe(400);
+    const b = (await r.json()) as { ok: boolean; reason?: string };
+    expect(b.ok).toBe(false);
+    expect(b.reason).toBe('usage');
+    expect(existsSync(join(org, '.amore', 'lucerna', 'budgets.json'))).toBe(false);
+    expect(existsSync(join(ldir, 'budgets.json'))).toBe(false);
+  });
+
+  test('POST budgets writes charter file, not the runtime dir', async () => {
+    ensureDir();
+    const r = await lucernaRoute(config, post('/api/lucerna/budgets', { dailyActionCap: 6 }));
+    expect(r.status).toBe(200);
+    const b = (await r.json()) as { ok: boolean; budgets?: { dailyActionCap: number } };
+    expect(b.ok).toBe(true);
+    expect(b.budgets?.dailyActionCap).toBe(6);
+    const charter = join(org, '.amore', 'lucerna', 'budgets.json');
+    expect(JSON.parse(readFileSync(charter, 'utf8')).dailyActionCap).toBe(6);
+    expect(existsSync(join(ldir, 'budgets.json'))).toBe(false);
+  });
+
+  test('file raise tokens 400000 is accepted', async () => {
+    ensureDir();
+    const r = await lucernaRoute(config, post('/api/lucerna/budgets', { tokens: 400000 }));
+    expect(r.status).toBe(200);
+    const b = (await r.json()) as { ok: boolean; budgets?: { dailyTokenCeiling: number } };
+    expect(b.ok).toBe(true);
+    expect(b.budgets?.dailyTokenCeiling).toBe(400000);
+  });
+
+  test('negative and 1e9 bodies rejected; file unchanged', async () => {
+    ensureDir();
+    await lucernaRoute(config, post('/api/lucerna/budgets', { dailyActionCap: 6 }));
+    const charter = join(org, '.amore', 'lucerna', 'budgets.json');
+    const before = readFileSync(charter, 'utf8');
+    const neg = await lucernaRoute(config, post('/api/lucerna/budgets', { dailyActionCap: -1 }));
+    expect(neg.status).toBe(400);
+    expect(((await neg.json()) as { ok: boolean; reason?: string }).ok).toBe(false);
+    const sci = await lucernaRoute(config, post('/api/lucerna/budgets', { dailyTokenCeiling: 1e9 }));
+    expect(sci.status).toBe(400);
+    const body = (await sci.json()) as { ok: boolean; reason?: string };
+    expect(body.ok).toBe(false);
+    expect(body.reason).toBe('usage');
+    expect(readFileSync(charter, 'utf8')).toBe(before);
+  });
+
+  test('POST chores merges one entry and does not clobber siblings', async () => {
+    ensureDir();
+    const dir = join(org, '.amore', 'lucerna');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, 'chores.json'),
+      `${JSON.stringify({
+        schemaVersion: 1,
+        chores: {
+          'inbox-age-report': { enabled: true },
+          'self-orient': { enabled: true, minIntervalHours: 168 },
+        },
+      }, null, 2)}\n`,
+    );
+    const r = await lucernaRoute(
+      config,
+      post('/api/lucerna/chores', { key: 'inbox-age-report', enabled: false }),
+    );
+    expect(r.status).toBe(200);
+    const raw = JSON.parse(readFileSync(join(dir, 'chores.json'), 'utf8')) as {
+      chores: Record<string, { enabled?: boolean; minIntervalHours?: number }>;
+    };
+    expect(raw.chores['inbox-age-report']).toEqual({ enabled: false });
+    expect(raw.chores['self-orient']).toEqual({ enabled: true, minIntervalHours: 168 });
+    expect(existsSync(join(ldir, 'chores.json'))).toBe(false);
+  });
+
+  test('not-installed write returns ok:false', async () => {
+    const r = await lucernaRoute(config, post('/api/lucerna/budgets', { dailyActionCap: 6 }));
+    const b = (await r.json()) as { ok: boolean; reason?: string };
+    expect(b.ok).toBe(false);
+    expect(b.reason).toBe('not-installed');
   });
 });
 
@@ -273,6 +424,26 @@ x
     ensureDir();
     const r = await lucernaRoute(config, post('/api/lucerna/dreams/review', {}));
     expect(r.status).toBe(400);
+  });
+
+  test('proposals/apply with text/plain does not apply', async () => {
+    ensureDir();
+    seedProp();
+    const r = await lucernaRoute(
+      config,
+      new Request('http://localhost/api/lucerna/proposals/apply', {
+        method: 'POST',
+        headers: { 'content-type': 'text/plain' },
+        body: JSON.stringify({ id: 'tweak' }),
+      }),
+    );
+    expect(r.status).toBe(400);
+    const b = (await r.json()) as { ok: boolean; reason?: string };
+    expect(b.ok).toBe(false);
+    expect(b.reason).toBe('usage');
+    expect(readFileSync(join(org, 'forge', 'proposals', 'tweak.md'), 'utf8')).toContain(
+      'status: pending',
+    );
   });
 });
 

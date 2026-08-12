@@ -16,7 +16,7 @@ import { join, relative } from "node:path";
 import { spawnSync, type SpawnSyncOptions } from "node:child_process";
 import { localFileTimestamp, localTimestamp } from "./time.ts";
 import type { BudgetTier } from "./budget.ts";
-import { writeGuarded, type GovernanceLists, defaultLists } from "./governance.ts";
+import { writeGuarded, canWrite, type GovernanceLists, defaultLists } from "./governance.ts";
 import { houseRuntimeDir, RUNTIME_FILES } from "./paths.ts";
 
 export type ParityDecision = "admit" | "defer" | "refuse";
@@ -516,6 +516,7 @@ export function runStateCleanup(
       if (now - st.mtimeMs < maxAgeMs && !name.endsWith(".tmp")) continue;
       // tmp files: prune immediately if older than 1h
       if (name.endsWith(".tmp") && now - st.mtimeMs < 60 * 60 * 1000) continue;
+      if (!canWrite(houseRoot, fp, lists)) continue;
       unlinkSync(fp);
       pruned++;
     } catch {
