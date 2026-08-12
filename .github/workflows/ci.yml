@@ -329,7 +329,11 @@ jobs:
             exit 1
           fi
 
+          # Live origin: GitHub 503 / transport drops on ubuntu-latest are
+          # common and not a product failure. Retry with backoff.
           attempt=1
+          max_attempts=5
+          sleep_s=10
           while true; do
             set +e
             "$BIN" update --check --json > out.json
@@ -338,14 +342,16 @@ jobs:
             if [ "$code" -eq 0 ]; then
               break
             fi
-            if [ "$attempt" -ge 2 ]; then
-              echo "::error::update --check failed after one retry (exit ${code})"
-              cat out.json || true
+            echo "update --check exit ${code} attempt ${attempt}/${max_attempts}"
+            cat out.json || true
+            if [ "$attempt" -ge "$max_attempts" ]; then
+              echo "::error::update --check failed after ${max_attempts} attempts (exit ${code})"
               exit "${code}"
             fi
-            echo "update --check exit ${code}; retrying once after 5s"
+            echo "retrying after ${sleep_s}s"
             attempt=$((attempt + 1))
-            sleep 5
+            sleep "${sleep_s}"
+            sleep_s=$((sleep_s * 2))
           done
 
           gh release view --json tagName -q .tagName -R "${{ github.repository }}" > expected.txt
