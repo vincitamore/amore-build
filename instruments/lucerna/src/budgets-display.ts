@@ -103,7 +103,7 @@ export interface BuildEffectiveBudgetsArgs {
   counters?: Pick<
     BudgetCounters,
     "tokensTodayBySource" | "maxCallTokens" | "maxCallTokensAt"
-  >;
+  > | BudgetCounters;
   now?: Date;
   cooldownMs?: number;
   env?: NodeJS.ProcessEnv;

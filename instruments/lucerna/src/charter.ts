@@ -209,7 +209,6 @@ function shippedKnob(value: number, shipped: number): ResolvedKnob {
 function knobOf(
   value: number,
   source: BudgetCapSource,
-  shipped: number,
   looserThanShipped: boolean,
 ): ResolvedKnob {
   return { value, source, aboveShipped: looserThanShipped };
@@ -282,13 +281,13 @@ function pickLayer(
   looser: (v: number) => boolean,
 ): ResolvedKnob {
   if (layers.argv !== undefined) {
-    return knobOf(layers.argv, "argv", shipped, looser(layers.argv));
+    return knobOf(layers.argv, "argv", looser(layers.argv));
   }
   if (layers.env !== undefined) {
-    return knobOf(layers.env, "env", shipped, looser(layers.env));
+    return knobOf(layers.env, "env", looser(layers.env));
   }
   if (layers.file !== undefined) {
-    return knobOf(layers.file, "file", shipped, looser(layers.file));
+    return knobOf(layers.file, "file", looser(layers.file));
   }
   return shippedKnob(shipped, shipped);
 }

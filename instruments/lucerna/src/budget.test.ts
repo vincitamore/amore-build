@@ -63,8 +63,6 @@ describe("daily budget rollover", () => {
       countersHaveClockSkew({
         actionsToday: 7,
         lastActionDate: tomorrow,
-        lastCycleEnded: null,
-        cycleActive: false,
         tokensToday: 40,
         lastTokenDate: tomorrow,
       }, now),
