@@ -616,8 +616,12 @@ def cmd_verify(dry_run: bool) -> int:
         "11d: main.rs wires self_update::check_background", problems)
     _check_file_contains(
         "crates/codegen/xai-grok-pager-bin/src/main.rs",
-        "self_update::check_status",
-        "11d: main.rs wires self_update::check_status", problems)
+        "self_update::run_update",
+        "11d: main.rs wires the update subcommand to self_update::run_update", problems)
+    _check_file_contains(
+        "crates/codegen/xai-grok-pager-bin/src/main.rs",
+        "self_update::run_apply_result",
+        "11d: main.rs wires quit-for-update to self_update::run_apply_result", problems)
     for needle in (
         "x.ai",
         "storage.googleapis.com",
