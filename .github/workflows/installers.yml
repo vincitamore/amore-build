@@ -16,6 +16,11 @@ name: installers
 
 on:
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to download and self-test (empty = latest published)"
+        required: false
+        default: ""
   push:
     branches: [main]
     paths:
@@ -102,3 +107,177 @@ jobs:
           } finally {
             Remove-Item -Recurse -Force $scratch -ErrorAction SilentlyContinue
           }
+
+  # Download each published amore asset for a release tag and prove the shipped
+  # binary's update surface actually runs (present-but-unreachable dispatch is
+  # invisible to unit tests). Fires on the release.yml workflow_dispatch chain
+  # and on manual workflow_dispatch; not on installer-script pushes.
+  post-release-self-test:
+    name: post-release self-test — ${{ matrix.target }}
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'release'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux lanes stay on 22.04 so a glibc-floor regression still fails to
+          # load here (same floor as the release build hosts).
+          - { target: linux-x64,    os: ubuntu-22.04,     asset: amore-linux-x64.tar.gz,    bin: amore,     archive: tar.gz }
+          - { target: linux-arm64,  os: ubuntu-22.04-arm, asset: amore-linux-arm64.tar.gz,  bin: amore,     archive: tar.gz }
+          - { target: windows-x64,  os: windows-latest,   asset: amore-windows-x64.zip,     bin: amore.exe, archive: zip }
+          - { target: darwin-arm64, os: macos-latest,     asset: amore-darwin-arm64.tar.gz, bin: amore,     archive: tar.gz }
+          # macos-13 (legacy Intel label) is retired; current Intel hosted label
+          # is macos-15-intel (matches release.yml's darwin-x64 build lane).
+          - { target: darwin-x64,   os: macos-15-intel,   asset: amore-darwin-x64.tar.gz,   bin: amore,     archive: tar.gz }
+    steps:
+      - name: Resolve release tag
+        id: tag
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+          EVENT_NAME: ${{ github.event_name }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          REF: ${{ github.ref }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          # Precedence: explicit workflow_dispatch input, then release event
+          # tag, then tag ref (release.yml dispatches with --ref <tag> and no
+          # -f), else latest published release.
+          TAG="${INPUT_TAG:-}"
+          if [ -z "$TAG" ] && [ "$EVENT_NAME" = "release" ]; then
+            TAG="${RELEASE_TAG:-}"
+          fi
+          if [ -z "$TAG" ] && [[ "$REF" == refs/tags/* ]]; then
+            TAG="$REF_NAME"
+          fi
+          if [ -z "$TAG" ]; then
+            TAG="$(gh release view -R "${{ github.repository }}" --json tagName -q .tagName)"
+          fi
+          if [ -z "$TAG" ]; then
+            echo "::error::could not resolve a release tag"
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Resolved release tag: $TAG"
+
+      - name: Download asset + checksum
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.tag.outputs.tag }}"
+          ASSET="${{ matrix.asset }}"
+          gh release download "$TAG" -R "${{ github.repository }}" \
+            -p "$ASSET" -p "${ASSET}.sha256"
+          ls -la "$ASSET" "${ASSET}.sha256"
+
+      - name: Verify sha256
+        shell: bash
+        run: |
+          set -euo pipefail
+          ASSET="${{ matrix.asset }}"
+          expected="$(awk '{print $1; exit}' "${ASSET}.sha256" | tr '[:upper:]' '[:lower:]')"
+          if command -v sha256sum >/dev/null 2>&1; then
+            actual="$(sha256sum "$ASSET" | awk '{print $1}' | tr '[:upper:]' '[:lower:]')"
+          elif command -v shasum >/dev/null 2>&1; then
+            actual="$(shasum -a 256 "$ASSET" | awk '{print $1}' | tr '[:upper:]' '[:lower:]')"
+          else
+            actual="$(openssl dgst -sha256 "$ASSET" | awk '{print $NF}' | tr '[:upper:]' '[:lower:]')"
+          fi
+          echo "expected=$expected"
+          echo "actual=$actual"
+          if [ "$expected" != "$actual" ]; then
+            echo "::error::sha256 mismatch for $ASSET"
+            exit 1
+          fi
+
+      - name: Unpack asset
+        shell: bash
+        run: |
+          set -euo pipefail
+          ASSET="${{ matrix.asset }}"
+          mkdir -p unpack
+          case "${{ matrix.archive }}" in
+            tar.gz) tar -xzf "$ASSET" -C unpack ;;
+            zip)    tar -xf "$ASSET" -C unpack ;;
+            *) echo "::error::unknown archive kind ${{ matrix.archive }}"; exit 1 ;;
+          esac
+          BIN="unpack/${{ matrix.bin }}"
+          test -f "$BIN" || { echo "::error::missing $BIN"; find unpack -maxdepth 2 -type f; exit 1; }
+          chmod +x "$BIN" || true
+          ls -la unpack/
+
+      - name: Smoke — --version (exit 0 AND non-empty stdout)
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN="unpack/${{ matrix.bin }}"
+          # Capture to a file first; never pipe live output through head
+          # (loader failures at the glibc floor can exit 0 with empty stdout).
+          "$BIN" --version > version.txt 2>version.err || {
+            echo "::error::--version exited non-zero"
+            cat version.txt version.err || true
+            exit 1
+          }
+          cat version.txt
+          if [ -s version.err ]; then cat version.err; fi
+          if [ ! -s version.txt ]; then
+            echo "::error::--version exited 0 with empty stdout (loader failure at the glibc floor?)"
+            exit 1
+          fi
+
+      - name: Smoke — update --check --json (installer=amore-release)
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN="unpack/${{ matrix.bin }}"
+          set +e
+          "$BIN" update --check --json > update-check.json 2>update-check.err
+          code=$?
+          set -e
+          echo "update --check --json exit=$code"
+          if [ -s update-check.err ]; then
+            echo "stderr:"
+            cat update-check.err
+          fi
+          if [ ! -s update-check.json ]; then
+            echo "::error::update --check --json produced empty stdout"
+            exit 1
+          fi
+          cat update-check.json
+          echo
+          # Parse and assert contract fields. updateCheck must be present and
+          # non-null; installer must identify the fork release path.
+          if command -v python3 >/dev/null 2>&1; then PY=python3
+          elif command -v python >/dev/null 2>&1; then PY=python
+          else
+            echo "::error::python not available for JSON assert"
+            exit 1
+          fi
+          "$PY" - <<'PY'
+          import json, sys
+          with open("update-check.json", encoding="utf-8") as f:
+              raw = f.read().strip()
+          if not raw:
+              print("empty JSON payload", file=sys.stderr)
+              sys.exit(1)
+          # Binary may print a single JSON object (possibly with trailing noise).
+          try:
+              data = json.loads(raw)
+          except json.JSONDecodeError:
+              # Take the first complete JSON value on the first non-empty line.
+              line = next((ln for ln in raw.splitlines() if ln.strip()), "")
+              data = json.loads(line)
+          if "updateCheck" not in data or data["updateCheck"] is None:
+              print(f"updateCheck missing or null: {data!r}", file=sys.stderr)
+              sys.exit(1)
+          installer = data.get("installer")
+          if installer != "amore-release":
+              print(f'installer want "amore-release", got {installer!r}', file=sys.stderr)
+              sys.exit(1)
+          print(f"ok: updateCheck={data['updateCheck']!r} installer={installer!r}")
+          PY
