@@ -73,6 +73,21 @@ egress inventory: [`autonomy.md`](autonomy.md), [`egress.md`](egress.md).
 
 ![Graph tab](assets/iris/graph.png)
 
+**Sessions**, the working record made navigable (requires the speculum
+companion). Probes score the corpus with honest confidence intervals:
+
+![Sessions tab, the probes board](assets/iris/sessions-probes.png)
+
+The map draws sessions on a time axis with the links the index actually
+derived (parentage, shared artifacts), never fabricated affinity:
+
+![Sessions tab, the map](assets/iris/sessions-map.png)
+
+The microscope navigates the full corpus with filters and sort, and
+magnifies down to a single turn's content:
+
+![Sessions tab, the microscope](assets/iris/sessions-microscope.png)
+
 ### Common commands
 
 ```sh

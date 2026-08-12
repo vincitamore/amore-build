@@ -58,7 +58,10 @@ to read before you run.
 **To check for a newer release:** `amore update --check` (add `--json` for
 machine-readable output). Checks are on by default at interactive startup
 (at most once per 24 hours against this repository's GitHub Releases); turn
-them off with `AMORE_UPDATE_CHECK=0` or `cli.update_check = false`.
+them off with `AMORE_UPDATE_CHECK=0` or `cli.update_check = false`. When a
+newer release exists, the welcome screen says so:
+
+![The welcome screen surfacing an available update](docs/assets/update-tip.png)
 
 **To apply an update:** `amore update` (or Ctrl+U in the interactive client,
 which applies then quits). The command runs a fleet transaction: `amore` and
