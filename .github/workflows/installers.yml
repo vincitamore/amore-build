@@ -203,7 +203,10 @@ jobs:
           mkdir -p unpack
           case "${{ matrix.archive }}" in
             tar.gz) tar -xzf "$ASSET" -C unpack ;;
-            zip)    tar -xf "$ASSET" -C unpack ;;
+            # Windows runners resolve GNU tar in Git Bash, which cannot read
+            # zip archives (ubuntu's bsdtar can). Python's zipfile is on every
+            # hosted runner and is archive-correct everywhere.
+            zip)    python -m zipfile -e "$ASSET" unpack/ ;;
             *) echo "::error::unknown archive kind ${{ matrix.archive }}"; exit 1 ;;
           esac
           BIN="unpack/${{ matrix.bin }}"
