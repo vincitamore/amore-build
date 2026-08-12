@@ -176,8 +176,15 @@ else `amore` on `PATH`.
 
 Amore Build publishes release assets on GitHub Releases for this repository.
 The interactive client may check that origin for a newer version (default on;
-kill with `AMORE_UPDATE_CHECK=0` or `AMORE_DISABLE_UPDATES=1`). The following
-risks are accepted residual properties of the design, not temporary omissions.
+kill with `AMORE_UPDATE_CHECK=0` or `AMORE_DISABLE_UPDATES=1`). User-initiated
+apply (`amore update`, or Ctrl+U apply-then-quit) downloads archives and
+sibling `.sha256` sidecars from the same pinned origin, verifies digests
+before unpack, smoke-tests staged binaries, and activates the fleet under
+lock so a failed pre-activation leaves nothing partially installed.
+`amore update --rollback` restores each target's `.prev` binary. The version
+floor in `.amore-install.json` rejects downgrades unless `--allow-downgrade`
+is set. Apply is never unattended. The following risks are accepted residual
+properties of the design, not temporary omissions.
 
 1. **The trust root is GitHub.** An attacker with repository write publishes a
    build with a valid digest; signing binds identity and integrity, never

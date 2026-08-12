@@ -5,7 +5,7 @@ created: 2026-07-30
 
 # knowledge/
 
-Distilled insights worth keeping across sessions. Not a dump of chat — articles
+Distilled insights worth keeping across sessions. Not a dump of chat - articles
 that regenerate doctrine the next session can apply.
 
 ## Frontmatter schema
@@ -22,9 +22,9 @@ tags: []
 ## Organization
 
 - **New folder** at 3+ clustered articles; singletons stay at root.
-- **Search before writing** — avoid duplicates; extend or supersede instead.
+- **Search before writing** - avoid duplicates; extend or supersede instead.
 - **Structure preferred:** Problem / Fix / Related (or equivalent clear spine).
-- **Tag generously** — tags are graph edges across the corpus.
+- **Tag generously** - tags are graph edges across the corpus.
 - **This index** is admitted when scanning gets expensive (~25 articles); until
   then a thin README (this file) is enough. House lint may own drift-checks
   once an index is load-bearing.

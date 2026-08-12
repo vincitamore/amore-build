@@ -131,11 +131,15 @@ detection. Never required to run Amore Build; absence is quiet.
 
 **Upstream update origins stay unreachable.** Compile-time policy in
 `xai-grok-update` (`FORK_AUTO_UPDATE_HARD_OFF`) keeps the inherited upstream
-installer path inert so the fork cannot self-update back into xAI releases.
-The fork's own update path lives under `self_update/` and checks only
-Amore Build GitHub Releases (default-on version check; apply path ships
-separately). Upgrade today by re-running the installer (`amore.prev`
-rollback) or inspecting with `amore update --check`.
+installer path inert: guards and the funnel never reach xAI install
+endpoints, so the fork cannot self-update back into upstream releases.
+Fork updates come only from this repository's own GitHub Releases via the
+pinned origin in `self_update/origin.rs` (`vincitamore/amore-build` on
+`github.com`; group 11 in `scripts/sync_upstream.py --verify`). Default-on
+version check at interactive startup; user-initiated apply via
+`amore update` or Ctrl+U (fleet transaction with `.sha256` verification,
+staging smoke, and `--rollback`). The bootstrap installer remains a valid
+first-install and recovery path.
 
 **Test-suite platform coverage (inherited).** The upstream suite is written
 against unix hosts: a substantial set of tests assert unix path shapes, unix
@@ -180,14 +184,15 @@ the embed + `init` ownership tests, the brand-boundary gate, the
 completions), the doctor-namespace migration pins, the egress pins
 (telemetry mode defaults to `Disabled`; no `GROK_TELEMETRY_BUILD_*`
 reporting token referenced in any workflow), companion/instrument pins,
-and the self-update origin lock (group 11: origin constants, module wiring,
-and lacks-pins that forbid xAI endpoints in `self_update/**`). It then
-builds and smokes `amore` on the host. The egress and origin pins re-verify
-the shipped posture at every sync, so the public egress statement is
-re-checked mechanically rather than trusted to memory. The script is the
-authoritative list; keep this sentence in sync when it grows. The Linux
-pager suite and full crate suite remain CI's job (see §5); `--verify` says
-what it can and cannot run rather than faking a green.
+and the self-update origin lock (group 11: origin constants; check and apply
+wiring for `check_background`, `run_update`, and quit-for-update
+`run_apply_result`; lacks-pins that forbid xAI endpoints in
+`self_update/**`). It then builds and smokes `amore` on the host. The egress
+and origin pins re-verify the shipped posture at every sync, so the public
+egress statement is re-checked mechanically rather than trusted to memory.
+The script is the authoritative list; keep this sentence in sync when it
+grows. The Linux pager suite and full crate suite remain CI's job (see §5);
+`--verify` says what it can and cannot run rather than faking a green.
 
 ### Operators / release maintainers
 

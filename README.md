@@ -60,10 +60,18 @@ machine-readable output). Checks are on by default at interactive startup
 (at most once per 24 hours against this repository's GitHub Releases); turn
 them off with `AMORE_UPDATE_CHECK=0` or `cli.update_check = false`.
 
-**To upgrade today, re-run the same installer**: it fetches and verifies the
-newest release and keeps the previous binary beside it as `amore.prev` for
-rollback. The in-app apply path (`amore update` without `--check`) ships when
-ready; until then the installer remains the install path.
+**To apply an update:** `amore update` (or Ctrl+U in the interactive client,
+which applies then quits). The command runs a fleet transaction: `amore` and
+every installed companion move to the same release tag together, verified
+against published `.sha256` sidecars from this repository's GitHub Releases
+before activation. Useful flags: `--dry-run` (report what would change, no
+download or install), `--yes` (skip the confirmation prompt), `--rollback`
+(restore each fleet target's `.prev` binary), `--allow-downgrade` (override
+the persisted version floor), and `--version <tag>` (pin a specific tag).
+Kill every update path with `AMORE_DISABLE_UPDATES=1` (or legacy
+`GROK_DISABLE_AUTOUPDATER`). Apply is always user-initiated; there is no
+unattended install loop. Re-running the bootstrap installer remains valid
+and keeps `amore.prev` for rollback.
 
 ### First session
 
@@ -339,10 +347,11 @@ home is `~/.amore` and the public binary is `amore`.
 Product env surface: **`AMORE_*` primary** with silent `GROK_*` legacy
 aliases (`AMORE_HOME`, `AMORE_DEFAULT_MODEL`, `AMORE_SYSTEM_PROMPT_LABEL`,
 `AMORE_AUTH_*`, …). Provider keys (`XAI_API_KEY`, other vendor keys) stay
-unaliased. Version checks use this repository's GitHub Releases only (never an
-upstream vendor installer). `amore update --check` reports availability;
-upgrade by re-running the installer (keeps `amore.prev` for rollback) until
-the in-app apply path ships.
+unaliased. Version checks and applies use this repository's GitHub Releases
+only (never an upstream vendor installer). `amore update --check` reports
+availability; `amore update` (or Ctrl+U) applies a fleet transaction;
+`amore update --rollback` restores `.prev` binaries. Kill switches:
+`AMORE_UPDATE_CHECK=0` and `AMORE_DISABLE_UPDATES=1`.
 
 ---
 
@@ -350,8 +359,10 @@ the in-app apply path ships.
 
 On the wire, the shipped binary talks to the endpoints you configure and
 nothing else, plus deliberate disclosed fetches (companion install from this
-repository's GitHub Releases, and the default-on version check against the
-same release origin; kill with `AMORE_UPDATE_CHECK=0`). A configured endpoint
+repository's GitHub Releases, the default-on version check against the same
+release origin, and user-initiated release-asset downloads when applying an
+update; kill checks with `AMORE_UPDATE_CHECK=0`, every update path with
+`AMORE_DISABLE_UPDATES=1`). A configured endpoint
 cannot gate startup; remote-synced policy keys that could block launch are
 refused. The telemetry subsystem inherited from upstream ships inert:
 disabled by default, no client constructed while disabled, no token baked

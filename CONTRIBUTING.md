@@ -27,9 +27,10 @@ not an upstream contribution queue and not an xAI project. See
 3. **Updates come only from this fork's own releases.** A fork must never
    update itself back into upstream. The origin module
    (`self_update/origin.rs`) and verify group 11 pin the release host; the
-   check path never reaches an xAI installer. Users upgrade from Amore Build
-   GitHub Releases (installer today; `amore update --check` reports
-   availability).
+   update path never reaches an xAI installer. Users upgrade from Amore Build
+   GitHub Releases (`amore update` / Ctrl+U apply a fleet transaction;
+   `amore update --check` reports availability; the bootstrap installer
+   remains valid).
 4. **Changelog doctrine.** Any user-visible change updates BOTH
    `crates/codegen/xai-grok-shell-base/assets/amore-changelog.md` and
    `amore-changelog.json` in the same commit: the welcome screen and

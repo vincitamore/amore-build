@@ -17,13 +17,13 @@ validity, not approval.
 
 | File | Role |
 |------|------|
-| `edges.jsonl` | Canonical served edges — one JSON object per line. The iris daemon merges this into `/api/graph?edges=semantic` or `edges=both`. |
+| `edges.jsonl` | Canonical served edges - one JSON object per line. The iris daemon merges this into `/api/graph?edges=semantic` or `edges=both`. |
 | `suppressions.jsonl` | Durable remove records. Each line is a suppressed `(type, source, target)` so re-derive and re-ingest will not re-create that edge. |
 | `overrides.jsonl` | Durable edit records for user-adjustable fields (`note`, `label`). |
 
 ## Populate
 
-### Tier 0 — structural (default, no model)
+### Tier 0 - structural (default, no model)
 
 ```
 iris edges derive
@@ -37,7 +37,7 @@ Reads deterministic facts from the house tree:
 - body self-labels `[[target]] (type)` for the served type set
 - frontmatter `supersedes:` / `superseded-by:`
 
-### Tier 1 — candidate inventory (no model, no land)
+### Tier 1 - candidate inventory (no model, no land)
 
 ```
 iris edges update --tier 1 --json
@@ -46,7 +46,7 @@ iris edges update --tier 1 --json
 Reports co-link, rare-tag, and unlabeled-wikilink candidates that tier 2 would
 judge. Does not write edges.
 
-### Tier 2 — model-assisted (explicit only)
+### Tier 2 - model-assisted (explicit only)
 
 ```
 iris edges update --tier 2

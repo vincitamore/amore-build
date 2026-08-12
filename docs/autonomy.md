@@ -193,6 +193,7 @@ seconds. A timeout is a failed action, not a hang.
 | Model traffic uses operator config only | [egress.md](egress.md); capture scripts below |
 | No daemon-owned provider endpoints | no SDK/keys/model ids in Lucerna sources |
 | Version check is kill-switchable | `AMORE_UPDATE_CHECK=0` or `AMORE_DISABLE_UPDATES=1`; see [egress.md](egress.md) |
+| Version apply is never unattended | Apply requires `amore update` or Ctrl+U; compiled default `cli.auto_update` is false; the inherited upstream hourly install loop is hard-off (`FORK_AUTO_UPDATE_HARD_OFF`); background path is check-only (24h cadence) |
 
 Capture scripts (Linux + strace):
 

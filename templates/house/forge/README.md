@@ -7,7 +7,7 @@ created: 2026-07-30
 
 Agent working directory for pipeline-scale orchestration and directed multi-step
 products. Orchestration skills under `.amore/skills` (especially
-`forge-master` and `auriga`) reference this file — keep contracts stable.
+`forge-master` and `auriga`) reference this file - keep contracts stable.
 
 ## When to use the forge pattern
 
@@ -48,7 +48,7 @@ output conventions. Follow them exactly.*
    classical operations (Quintilian's *Quadripartita Ratio*): **adiectio**
    (adding context), **detractio** (omission), **transmutatio** (reordering),
    **immutatio** (substitution). Name the ones applied. Some content has
-   irreducible texture (voice documents, theological language) — flag
+   irreducible texture (voice documents, theological language) - flag
    `**Irreducible:** <note>` instead of compressing it to death.
 4. **Naming**: `layerN-concern.md`, concern = 2–4 word slug assigned by the
    orchestrator, not the agent's identity.
@@ -71,19 +71,19 @@ output conventions. Follow them exactly.*
 - **Staleness**: a handle from a prior session is suspect until checked.
 - **Manifests**: any pipeline at threshold gets a
   `forge/sessions/*.manifest.md` written incrementally (topology, per-layer
-  status, handle chain, outcome) with `type: forge` frontmatter — pipeline,
+  status, handle chain, outcome) with `type: forge` frontmatter - pipeline,
   recipe, goal, role, layer, triggered-by.
 
 ## Lifecycle
 
 Track forge in git when deliverables are graded artifacts. Keep `handles/` and
-`sessions/` campaign-scoped — prune them when the work they served completes,
+`sessions/` campaign-scoped - prune them when the work they served completes,
 and promote anything worth keeping to `knowledge/` or the task file.
 
 `forge/` is for pipeline products; `type: forge` frontmatter marks pipeline-run
-artifacts. Direct organizational work belongs in `inbox/captures/` — **except**
+artifacts. Direct organizational work belongs in `inbox/captures/` - **except**
 task-assigned deliverables, which live in `output/` deliberately.
 
-Agent output is input, not verdict — verify what bears weight before promoting.
+Agent output is input, not verdict - verify what bears weight before promoting.
 
 Related: [[AGENTS]] · [[knowledge/README]] · [[tasks/README]]

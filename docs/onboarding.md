@@ -207,7 +207,7 @@ registers that directory in `~/.amore/hooks-paths`.
   `~/.amore/state/stop-gate/<sessionId>.json`, keyed by `promptId`, not the
   aggregate `stopHookActive` flag).
 - **Block:** stdout `{"decision":"block","reason":"…"}` with the house checklist
-  (`[HOUSE STOP GATE — native Stop hook]`).
+  (`[HOUSE STOP GATE - native Stop hook]`).
 - **Release (empty stdout, exit 0):**
   - Line-anchored **release phrases** (case-normalized plain lines):
     - `No maintenance needed`

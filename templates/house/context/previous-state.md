@@ -12,7 +12,7 @@ tags:
 
 > Append-only archive of `current-state.md` entries, migrated when dated
 > sections age past the staleness threshold or the file exceeds budget.
-> Newest-first. Conditional surface — read on demand, never at session-start
+> Newest-first. Conditional surface - read on demand, never at session-start
 > orientation. Entries are verbatim as they stood at migration; the durable
 > records they point to (task files, resolved decisions, knowledge articles)
 > remain authoritative.
@@ -25,7 +25,7 @@ tags:
 >    labeled sub-block.
 > 2. **current-state may hold compressed ≤3-line digests of entries whose full
 >    bodies are already archived here.** On migration these are appended
->    verbatim as a labeled digest block rather than fuzzy-matched and dropped —
+>    verbatim as a labeled digest block rather than fuzzy-matched and dropped -
 >    the archive is append-only and lossless.
 >
 > **Migration trigger** is either clause of current-state's entry lifecycle rule

@@ -86,7 +86,8 @@ for a later release.
 |-----------|------------|---------------|---------------|
 | **amore** | Model endpoint (`base_url` per config entry, or native chat proxy after `amore login`) | Explicit prompt / headless session / tool-using turn | `scripts/egress_capture.sh` |
 | **amore** | OAuth / device-auth hosts (`api.x.ai`, `accounts.x.ai`) | Explicit `amore login` on the native rail | Same method on the login process; see Rail 2 notes above |
-| **amore** | Version check (default on) | At interactive startup, at most once per 24 hours: a `HEAD` to `github.com/vincitamore/amore-build/releases/latest` (redirect probe, zero REST quota). User-initiated `amore update --check` may also `GET` `api.github.com` for release metadata (60/hr unauthenticated). Kill switches: `AMORE_UPDATE_CHECK=0` (checks off) and `AMORE_DISABLE_UPDATES=1` / `GROK_DISABLE_AUTOUPDATER` (all update paths). Auto-apply stays off; the upstream installer origin remains compile-time hard-off | `scripts/egress_capture.sh` attributes `github.com` as `release origin` when checks are enabled; a checks-off capture must not see it. Group 11 in `scripts/sync_upstream.py --verify` pins the origin wiring |
+| **amore** | Version check (default on) | At interactive startup, at most once per 24 hours: a `HEAD` to `github.com/vincitamore/amore-build/releases/latest` (redirect probe, zero REST quota). User-initiated `amore update --check` may also `GET` `api.github.com` for release metadata (60/hr unauthenticated). Kill switches: `AMORE_UPDATE_CHECK=0` (checks off) and `AMORE_DISABLE_UPDATES=1` / `GROK_DISABLE_AUTOUPDATER` (all update paths). Auto-apply stays off (compiled default `cli.auto_update = false`); the upstream installer origin remains compile-time hard-off (`FORK_AUTO_UPDATE_HARD_OFF`) | `scripts/egress_capture.sh` attributes `github.com` as `release origin` when checks are enabled; a checks-off capture must not see it. Group 11 in `scripts/sync_upstream.py --verify` pins the origin wiring |
+| **amore** | Update apply (user-initiated) | Explicit `amore update` (or Ctrl+U apply-then-quit). May fetch release metadata, then archives and sibling `.sha256` sidecars from the single-sourced, gate-pinned origin `https://github.com/vincitamore/amore-build/releases/download` (constants in `self_update/origin.rs`). Fleet transaction moves `amore` and every installed companion together: digest verify, staging smoke, activate under lock; `--rollback` restores `.prev` binaries; `--dry-run` plans without download. Never background, never unattended | Group 11 pins origin single-sourcing and forbids xAI hosts in `self_update/**`; install state and fleet coherence surface in `amore doctor` |
 | **amore** | Remote settings / announcements / deployment-config fetch (native proxy path) | Historically a startup-gating input: a live deployment-config response could write `requirements.toml` with `required_*` version keys that blocked launch. In this fork the fetch is off by default (`features.managed_config = false`), and even when re-enabled, remotely-synced `required_*` keys cannot prevent startup. Interactive paths may still prefetch announcements when the fetch is enabled and auth is present | Not part of the BYOK one-shot receipt (Rail 1 showed only the configured host). Treat as native-rail traffic when you use that rail |
 | **amore** | Telemetry | **Inert by default**: mode Disabled, no client while disabled, no reporting token in release builds | `scripts/sync_upstream.py --verify` re-pins |
 | **amore init** | GitHub Releases fetch for companions | Install / `--refresh` when iris (default on) or `--with-lucerna` / `--with-speculum` is requested | Documented URL base `https://github.com/vincitamore/amore-build/releases/download`; sha256-verified. Offline when iris is opted out **and** optional companions are not requested |
@@ -125,10 +126,14 @@ tools; see [autonomy.md](autonomy.md).
   defaults to `Disabled`, no client is constructed while disabled, and no
   release workflow bakes in a reporting token. `scripts/sync_upstream.py
   --verify` re-pins both facts at every upstream sync.
-- **Version check:** default-on, kill-switchable, and disclosed here. It
-  reaches only this repository's release origin on GitHub (and the REST API
-  host for user-initiated checks). It does not reach an upstream vendor
-  installer. Disable with `AMORE_UPDATE_CHECK=0` or `AMORE_DISABLE_UPDATES=1`.
+- **Version check and apply:** the default-on check is kill-switchable and
+  disclosed here. It reaches only this repository's release origin on GitHub
+  (and the REST API host for user-initiated checks). Apply is always
+  user-initiated (`amore update` or Ctrl+U) and may download release
+  metadata, archives, and `.sha256` sidecars from that same pinned origin.
+  Neither path reaches an upstream vendor installer. Disable checks with
+  `AMORE_UPDATE_CHECK=0`; disable every update path with
+  `AMORE_DISABLE_UPDATES=1`.
 - **Lucerna** introduces no provider endpoints. See [autonomy.md](autonomy.md)
   for enablement, governance, budgets, and kill paths.
 

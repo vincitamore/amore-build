@@ -33,7 +33,7 @@ status: active | blocked | review | backlog | incubating | paused | complete
 created: YYYY-MM-DD
 completed: null
 tags: []
-blocked-by: []            # when status: blocked — free-text who/what
+blocked-by: []            # when status: blocked - free-text who/what
 paused: null              # date, when status: paused
 paused-reason: null
 trigger-to-unpause: null  # named falsifiable trigger, when paused
@@ -61,6 +61,6 @@ Moving a file without updating `status` (or the reverse) is a lint failure.
 - On completion: set `status: complete`, `completed:`, move to
   `tasks/completed/` same-breath.
 - On pause: set `paused`, `paused-reason`, and a **falsifiable**
-  `trigger-to-unpause` — not "later."
+  `trigger-to-unpause` - not "later."
 
 Related: [[AGENTS]] · [[inbox/README]] · [[context/current-state]]

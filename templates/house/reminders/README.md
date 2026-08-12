@@ -43,13 +43,13 @@ On arrival (before task work), surface every file with status `pending` or
 `snoozed` whose `remind-at` / `snoozed-until` is ≤ now. List them in the first
 reply, then proceed with orientation work.
 
-The **SessionStart** hook automates the scan and points at due items — a prompt,
+The **SessionStart** hook automates the scan and points at due items - a prompt,
 not a substitute for reading and acting. You still own fulfillment.
 
 ## Lifecycle
 
 - **On completion / dismissal:** flip `status`, set `completed:`, move the file
-  to `reminders/completed/` — same breath as the fulfilling work.
+  to `reminders/completed/` - same breath as the fulfilling work.
 - **Repeating reminders** advance their own `remind-at` on firing (and stay
   `ongoing` / `pending` per house practice until `repeat-until` or dismissal).
 - **Snooze:** set `status: snoozed` and `snoozed-until:`; the due check uses

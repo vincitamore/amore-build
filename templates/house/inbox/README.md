@@ -45,13 +45,13 @@ active folder.
 
 ## Lifecycle
 
-1. **Open** — file sits in `inbox/<type>/` with `status: open` (or no status for
+1. **Open** - file sits in `inbox/<type>/` with `status: open` (or no status for
    captures awaiting triage).
-2. **Resolve** — when work ships: set `status` to `resolved` | `dropped` |
+2. **Resolve** - when work ships: set `status` to `resolved` | `dropped` |
    `superseded`, set `resolved:` (date) and `resolution:` (one line + wikilink),
    **move the file to `inbox/<type>/resolved/` in the same breath as the
    resolving work**. Never defer to a someday-triage.
-3. **Same-breath rule** — resolution fields + move land with the commit (or
+3. **Same-breath rule** - resolution fields + move land with the commit (or
    the same turn) that fulfills the item. A resolved item left in the open
    folder is a defect.
 
@@ -59,8 +59,8 @@ active folder.
 
 - Prefer a decision/investigation/idea over a vague capture when the type is
   clear.
-- `captures/` is a staging area — triage to a typed folder, a task, knowledge,
-  or discard; do not let it accrete.
+- `captures/` is a staging area - triage to a typed folder, a task, knowledge,
+  or discard; do not let it pile up.
 - Every document needs at least one meaningful `[[wikilink]]`.
 
 Related: [[AGENTS]] · [[tasks/README]] · [[knowledge/README]]
