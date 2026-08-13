@@ -20,7 +20,7 @@ import type { LucernaConfig } from "./config.ts";
 import { Heartbeat } from "./heartbeat.ts";
 import { StateManager } from "./state.ts";
 import { localTimestamp } from "./time.ts";
-import { RUNTIME_FILES, healthPath, logPath, sentinelPath } from "./paths.ts";
+import { RUNTIME_FILES, healthPath, houseCharterDir, logPath, sentinelPath } from "./paths.ts";
 import { executeLightAction, isAdmittedAction, actionBudgetTier, actionCooldownClass } from "./actions.ts";
 import { DEFAULT_AGENTIC_WALL_MS, isFullAgenticKey } from "./agentic.ts";
 import { mergeGovernanceLists, loadUserGovernance } from "./governance.ts";
@@ -156,6 +156,8 @@ export class DaemonLoop {
   private readonly startEnvAutoCommitLive = process.env.LUCERNA_AUTO_COMMIT_LIVE;
   private readonly startArgs = process.argv.slice(2);
   private lastCharter: ResolvedCharter | undefined;
+  /** Max mtime of charter files as of the last refreshCharter. */
+  private lastCharterMtime = -1;
 
   constructor(private config: LucernaConfig) {
     this.stateManager = new StateManager(config.runtimeDir, {
@@ -241,6 +243,7 @@ export class DaemonLoop {
         }
         this.checkWake();
         this.checkSleep();
+        this.refreshCharterIfChanged();
         if (this.heartbeat.intervalMs !== targetInterval) break;
       }
       if (this.running) await this.cycle();
@@ -604,6 +607,35 @@ export class DaemonLoop {
       shouldApplyShippedBudgets(next.budgets, budgetsDeleted),
     );
     this.lastCharter = next;
+    this.lastCharterMtime = this.charterMtime();
+  }
+
+  /**
+   * Adopt a charter write during the idle wait, not only at the next
+   * heartbeat. Skip while a long work segment is in flight so an in-progress
+   * dream is not re-capped mid-call.
+   */
+  private charterMtime(): number {
+    let max = 0;
+    const dir = houseCharterDir(this.config.houseRoot);
+    for (const name of ["budgets.json", "chores.json", "enable.json"]) {
+      try {
+        const st = statSync(join(dir, name));
+        if (st.mtimeMs > max) max = st.mtimeMs;
+      } catch {
+        /* absent */
+      }
+    }
+    return max;
+  }
+
+  private refreshCharterIfChanged(): void {
+    if (this.workInProgress) return;
+    const m = this.charterMtime();
+    if (m === this.lastCharterMtime) return;
+    this.refreshEnablement();
+    this.refreshCharter();
+    this.stateManager.save();
   }
 
   private checkHalt(): boolean {

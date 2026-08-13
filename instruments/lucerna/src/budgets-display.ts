@@ -148,9 +148,14 @@ function nextIsoWeekStart(now: Date): Date {
   );
 }
 
-/** Abbreviate counts ≥ 10,000 with K; exact below. */
+/** Abbreviate counts ≥ 10,000 with K, ≥ 1,000,000 with M; exact below. */
 export function formatBudgetTokenCount(n: number): string {
-  if (n >= 10_000 || n <= -10_000) return `${Math.round(n / 1000)}K`;
+  const abs = Math.abs(n);
+  if (abs >= 1_000_000) {
+    const m = Math.round((n / 1_000_000) * 10) / 10;
+    return `${m}M`;
+  }
+  if (abs >= 10_000) return `${Math.round(n / 1000)}K`;
   return String(n);
 }
 

@@ -20,6 +20,7 @@ import {
   readLog,
   readNotifications,
   readPulse,
+  overlayBudgetsFromCharter,
   readStatus,
   resolveHeartbeatIntervalSec,
   resolveLucernaSpawnPlan,
@@ -638,6 +639,48 @@ describe('pulse-row data shape', () => {
     expect(pulse.capability?.resumesAt).toBe('2026-08-13T00:00:00-05:00');
     expect(pulse.tokens).toBe('233K/200K');
     expect(pulse.actionsToday).toBe(3);
+  });
+
+  test('readStatus overlays charter token cap onto a stale snapshot', () => {
+    ensureDir();
+    const cdir = lucernaCharterDir(org);
+    mkdirSync(cdir, { recursive: true });
+    writeFileSync(
+      join(cdir, 'budgets.json'),
+      JSON.stringify({
+        schemaVersion: 1,
+        dailyActionCap: 12,
+        weeklyExpensiveCap: 6,
+        cycleCooldownMinutes: 120,
+        dailyTokenCeiling: 2_000_000,
+        dreamsReserveTokens: 80_000,
+        autoCommitCooldownMinutes: 30,
+      }),
+    );
+    wf(
+      'state.json',
+      JSON.stringify({
+        budgets: {
+          state: 'ready',
+          actions: '2/12',
+          weekly: '1/6',
+          tokens: '198K/500K',
+          actionsToday: 2,
+          dailyCap: 12,
+          tokensToday: 198_116,
+          dailyTokenCeiling: 500_000,
+          windows: {
+            tokens: { used: 198_116, cap: 500_000, remaining: 301_884 },
+          },
+        },
+      }),
+    );
+    const s = readStatus(org);
+    expect(s.budgets).toMatchObject({
+      dailyTokenCeiling: 2_000_000,
+      tokens: '198K/2M',
+    });
+    expect(overlayBudgetsFromCharter(org, { tokens: 7 })).toEqual({ tokens: 7 });
   });
 });
 

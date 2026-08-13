@@ -553,6 +553,7 @@ describe("effective budgets display wire", () => {
     expect(display.tokens).not.toMatch(/100%/);
     expect(formatBudgetTokenCount(9999)).toBe("9999");
     expect(formatBudgetTokenCount(10_000)).toBe("10K");
+    expect(formatBudgetTokenCount(2_000_000)).toBe("2M");
   });
 
   test("capability.state is never a pulse enum and never disabled", () => {

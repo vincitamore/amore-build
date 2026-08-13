@@ -486,6 +486,7 @@ describe('budgets panel display', () => {
     expect(tokenOverPercent(233457, 200000)).toBe('117%');
     expect(tokenOverPercent(200000, 200000)).toBeNull();
     expect(formatBudgetTokenCount(233457)).toBe('233K');
+    expect(formatBudgetTokenCount(2_000_000)).toBe('2M');
     const lines = formatBudgetPanelLines(
       {
         actions: '3/12',

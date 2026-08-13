@@ -110,7 +110,7 @@ An agentic dream runs a multi-turn `amore` loop so the spawned agent can read th
 
 ### What agentic dreams may and may not touch
 
-**May write:** `forge/` (reports, session manifests, proposals), `inbox/captures/`, and Lucerna runtime residual under `instruments/lucerna/` (allow-listed basenames only). Charter under `.amore/lucerna/` is not writable.
+**May write:** `forge/dreams/` (the report and session manifest Lucerna named), `inbox/captures/`, and Lucerna runtime residual under `instruments/lucerna/` (allow-listed basenames only). Do not write `forge/proposals/` — emit `### Proposal:` blocks in the report; Lucerna materializes one pending file per block. Charter under `.amore/lucerna/` is not writable.
 
 **Must not write:** `AGENTS.md`, `CLAUDE.md`, `context/`, `knowledge/`, `tasks/`, `reminders/`, `tags/`, `graph/`, `projects/`, `archive/`, `scripts/`, `.amore/`, `.grok/`, `.claude/`, or instrument package source. The dream prompt states this boundary. After each agentic cycle Lucerna diffs the house (git porcelain when available, else a file inventory of protected roots). On any out-of-bounds write it logs the breach, appends a `governance-breach` notification, and leaves the dream manifest at `review-status: pending` with the breach named in the body. Lucerna does not auto-revert.
 

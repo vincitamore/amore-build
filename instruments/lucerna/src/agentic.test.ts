@@ -201,7 +201,7 @@ describe("proposal contract", () => {
       expect(fm).toContain("status: pending");
       expect(fm).toContain("triggered-by: dream");
       expect(fm).toContain('title: "Refresh current-state heading"');
-      expect(fm).toContain("target: context/current-state.md");
+      expect(fm).toContain('target: "context/current-state.md"');
 
       const mat = materializeProposals(house, sample);
       expect(mat.written.length).toBe(1);
@@ -228,6 +228,43 @@ describe("proposal contract", () => {
       const b = writeProposalFile(house, p);
       expect(a?.skipped).toBeFalsy();
       expect(b?.skipped).toBe(true);
+    } finally {
+      rmSync(house, { recursive: true, force: true });
+    }
+  });
+
+  test("same title under a different slug is skipped", () => {
+    const house = syntheticHouse();
+    try {
+      const dir = join(house, "forge", "proposals");
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(
+        join(dir, "short-slug.md"),
+        [
+          "---",
+          "type: proposal",
+          "status: pending",
+          'title: "Restore or ratify the uncommitted covert-access knowledge deletion"',
+          'target: "knowledge/x.md"',
+          "---",
+          "",
+        ].join("\n"),
+        "utf-8",
+      );
+      const r = writeProposalFile(house, {
+        title: "Restore or ratify the uncommitted covert-access knowledge deletion",
+        target: "knowledge/x.md",
+        rationale: "again",
+      });
+      expect(r?.skipped).toBe(true);
+      expect(
+        existsSync(
+          join(
+            dir,
+            "restore-or-ratify-the-uncommitted-covert-access-knowledge-deletion.md",
+          ),
+        ),
+      ).toBe(false);
     } finally {
       rmSync(house, { recursive: true, force: true });
     }

@@ -1237,11 +1237,11 @@ export function LucernaMember({
                 ? `expensive ${value}/week`
                 : `tokens ${value}/day`;
           setConfirm({
-            msg: `Set ${noun} to ${value}? Applies at the next cycle.`,
+            msg: `Set ${noun} to ${value}? Writes the charter now; Lucerna adopts on the next idle poll.`,
             run: () => {
               setLocalPending((p) => ({ ...p, [knob]: value }));
               setBudgetEditOpen(false);
-              void post('budgets', `budgets: ${flashNoun} · applies next cycle`, { [knob]: value });
+              void post('budgets', `budgets: ${flashNoun}`, { [knob]: value });
             },
           });
         }}

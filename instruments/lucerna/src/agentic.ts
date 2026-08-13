@@ -274,6 +274,62 @@ export function slugifyProposalTitle(title: string): string {
     .slice(0, 72) || "proposal";
 }
 
+/** Collapse a proposal title for identity (slug-independent). */
+export function proposalTitleKey(title: string): string {
+  return title.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function unquoteYamlScalar(raw: string): string {
+  const t = raw.trim();
+  if (t.length >= 2) {
+    const a = t[0];
+    const b = t[t.length - 1];
+    if ((a === '"' && b === '"') || (a === "'" && b === "'")) {
+      return t.slice(1, -1);
+    }
+  }
+  return t;
+}
+
+function titleFromProposalFile(abs: string): string | null {
+  try {
+    const raw = readFileSync(abs, "utf-8");
+    const m = raw.match(/^title:\s*(.+)$/m);
+    return m ? unquoteYamlScalar(m[1] ?? "") : null;
+  } catch {
+    return null;
+  }
+}
+
+function collectProposalMarkdown(dir: string, depth = 0): string[] {
+  if (depth > 4) return [];
+  let entries;
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const out: string[] = [];
+  for (const e of entries) {
+    const p = join(dir, e.name);
+    if (e.isDirectory()) out.push(...collectProposalMarkdown(p, depth + 1));
+    else if (e.name.endsWith(".md")) out.push(p);
+  }
+  return out;
+}
+
+/** True when any proposal file already carries this title (any slug). */
+export function proposalTitleTaken(houseRoot: string, title: string): boolean {
+  const want = proposalTitleKey(title);
+  if (!want) return false;
+  const root = join(houseRoot, "forge", "proposals");
+  for (const abs of collectProposalMarkdown(root)) {
+    const existing = titleFromProposalFile(abs);
+    if (existing && proposalTitleKey(existing) === want) return true;
+  }
+  return false;
+}
+
 function extractField(block: string, name: string): string {
   const re = new RegExp(`\\*\\*${name}\\*\\*:\\s*(.+?)\\s*$`, "im");
   const m = block.match(re);
@@ -331,7 +387,7 @@ export function buildProposalFrontmatter(opts: {
     `created: '${created}'`,
     "triggered-by: dream",
     `title: ${title}`,
-    `target: ${opts.target}`,
+    `target: ${JSON.stringify(opts.target)}`,
     "---",
   ].join("\n");
 }
@@ -352,6 +408,12 @@ export function writeProposalFile(
     join(proposalsDir, "closed", `${slug}.md`),
   ];
   if (candidates.some((p) => existsSync(p))) {
+    return { path: rel, skipped: true };
+  }
+  // The dream agent may also write a file under a shorter slug. Identity is
+  // the title, not the filename — rematerializing the same ### Proposal:
+  // block must not emit a second pending file.
+  if (proposalTitleTaken(houseRoot, proposal.title)) {
     return { path: rel, skipped: true };
   }
 
@@ -599,9 +661,13 @@ Action: ${opts.actionKey}
 
 ## Writable surface (hard boundary)
 You may write under:
-- forge/ (dream reports, sessions manifests, proposals)
+- forge/dreams/ (the report file named below) and forge/dreams/sessions/
 - inbox/captures/
 - instruments/lucerna/ runtime files only (not package source)
+
+Do NOT write files under forge/proposals/. Emit ### Proposal: blocks in the
+report only. Lucerna materializes one pending file per block after you finish.
+Writing both a file and a ### Proposal: block produces duplicates.
 
 You MUST NOT write: AGENTS.md, CLAUDE.md, context/, knowledge/, tasks/, reminders/,
 tags/, graph/, projects/, archive/, scripts/, .amore/, .grok/, .claude/, or any
@@ -627,14 +693,15 @@ triggered-by: dream
 Then a full report with real paths under Evidence. Prefer exhibit over vibe.
 
 ## Proposals
-When a change is warranted that you may not apply, emit blocks:
+When a change is warranted that you may not apply, emit blocks in the report
+(not as separate files):
 
 ### Proposal: <short title>
 - **Target**: <house-relative path>
 - **Rationale**: <one paragraph with evidence>
 Optional: **Section**, **Action**, **Current text** / **Proposed text** fenced blocks.
 
-Proposals are doc-only; lucerna never auto-applies them.
+Proposals are doc-only; lucerna never auto-applies them. One block → one file.
 
 ## Action focus
 ${focus}

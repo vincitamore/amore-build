@@ -406,6 +406,82 @@ function tokensFromBudgets(budgets: unknown): string | undefined {
   return typeof budgets.tokens === 'string' && budgets.tokens ? budgets.tokens : undefined;
 }
 
+/** Display-only: K at 10k, M at 1M. Must match Lucerna's formatBudgetTokenCount. */
+export function formatStatusTokenCount(n: number): string {
+  const abs = Math.abs(n);
+  if (abs >= 1_000_000) {
+    const m = Math.round((n / 1_000_000) * 10) / 10;
+    return `${m}M`;
+  }
+  if (abs >= 10_000) return `${Math.round(n / 1000)}K`;
+  return String(n);
+}
+
+function windowCap(budgets: Record<string, unknown>, key: 'daily' | 'weekly' | 'tokens'): number | undefined {
+  if (!isObj(budgets.windows) || !isObj(budgets.windows[key])) return undefined;
+  return typeof budgets.windows[key].cap === 'number' ? budgets.windows[key].cap : undefined;
+}
+
+function patchWindowCap(
+  budgets: Record<string, unknown>,
+  key: 'daily' | 'weekly' | 'tokens',
+  cap: number,
+): void {
+  if (!isObj(budgets.windows) || !isObj(budgets.windows[key])) return;
+  const w = { ...budgets.windows[key], cap };
+  if (typeof w.used === 'number') w.remaining = Math.max(0, cap - w.used);
+  budgets.windows = { ...budgets.windows, [key]: w };
+}
+
+/**
+ * The Lucerna tab reads state.json. The daemon only rebuilds that snapshot
+ * at cycle boundaries, so a charter write can sit on disk while the gauge
+ * still shows the last-applied cap. Overlay the file when it differs.
+ * Enforcement stays with Lucerna; this is display only.
+ */
+export function overlayBudgetsFromCharter(orgRoot: string, budgets: unknown): unknown {
+  if (!isObj(budgets)) return budgets;
+  if (!existsSync(budgetsPath(orgRoot))) return budgets;
+  const file = readBudgetsFile(orgRoot);
+  const next: Record<string, unknown> = { ...budgets };
+  if (isObj(budgets.windows)) next.windows = { ...budgets.windows };
+  let changed = false;
+
+  const snapTokens =
+    typeof next.dailyTokenCeiling === 'number'
+      ? next.dailyTokenCeiling
+      : windowCap(next, 'tokens');
+  if (snapTokens !== undefined && snapTokens !== file.dailyTokenCeiling) {
+    next.dailyTokenCeiling = file.dailyTokenCeiling;
+    const used = typeof next.tokensToday === 'number' ? next.tokensToday : 0;
+    next.tokens = `${formatStatusTokenCount(used)}/${formatStatusTokenCount(file.dailyTokenCeiling)}`;
+    patchWindowCap(next, 'tokens', file.dailyTokenCeiling);
+    changed = true;
+  }
+
+  const snapDaily = typeof next.dailyCap === 'number' ? next.dailyCap : windowCap(next, 'daily');
+  if (snapDaily !== undefined && snapDaily !== file.dailyActionCap) {
+    next.dailyCap = file.dailyActionCap;
+    const used = typeof next.actionsToday === 'number' ? next.actionsToday : 0;
+    next.actions = `${used}/${file.dailyActionCap}`;
+    patchWindowCap(next, 'daily', file.dailyActionCap);
+    changed = true;
+  }
+
+  const snapWeekly = windowCap(next, 'weekly');
+  if (snapWeekly !== undefined && snapWeekly !== file.weeklyExpensiveCap) {
+    const used =
+      isObj(next.windows) && isObj(next.windows.weekly) && typeof next.windows.weekly.used === 'number'
+        ? next.windows.weekly.used
+        : 0;
+    next.weekly = `${used}/${file.weeklyExpensiveCap}`;
+    patchWindowCap(next, 'weekly', file.weeklyExpensiveCap);
+    changed = true;
+  }
+
+  return changed ? next : budgets;
+}
+
 function actionsTodayFromBudgets(budgets: unknown): number | undefined {
   if (!isObj(budgets)) return undefined;
   return typeof budgets.actionsToday === 'number' && Number.isFinite(budgets.actionsToday)
@@ -433,7 +509,7 @@ export function readStatus(
     if (isObj(raw)) {
       activity = raw.lastActivity ?? raw.activity;
       lastActions = raw.lastActionResults ?? raw.lastActions;
-      budgets = raw.budgets;
+      budgets = overlayBudgetsFromCharter(orgRoot, raw.budgets);
     }
   } catch {
     // state missing or malformed — still available if dir exists

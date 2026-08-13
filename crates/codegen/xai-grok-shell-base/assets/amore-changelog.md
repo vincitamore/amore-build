@@ -12,6 +12,15 @@ work it describes.
   hook that emits a disk-orientation packet (re-read current-state and the
   active task; the summary is forensics). The harness does not yet inject
   that packet into the successor conversation.
+- **Dream proposals no longer double-write** — Lucerna materializes
+  `### Proposal:` blocks after the agent finishes. The agent is told not
+  to write `forge/proposals/` itself, and a second file with the same
+  title (even under a shorter slug) is skipped.
+- **The Lucerna tab shows the charter cap you just wrote** — iris overlays
+  `.amore/lucerna/budgets.json` onto a stale `state.json` snapshot, so
+  raising the token ceiling is visible immediately. A running Lucerna
+  adopts the file on the next idle poll (not mid-dream). Million-scale
+  caps render as `2M`, not `2000K`.
 
 ## v1.0.2
 

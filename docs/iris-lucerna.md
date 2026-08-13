@@ -57,7 +57,7 @@ Hint line: `b edit caps · c chores`.
 | `s` | Sleep sentinel |
 | `d` | Toggle dreams enablement (confirm — UX, not auth) |
 | `a` | Cycle auto-commit dry-run → off → live (confirm) |
-| `b` | Edit a spend cap (actions / expensive / tokens); confirm, then applies at the next cycle |
+| `b` | Edit a spend cap (actions / expensive / tokens); confirm writes the charter file now. The tab shows the file cap immediately. Lucerna adopts it on the next idle poll (not mid-dream). |
 | `c` | Open the chores overlay (roster) |
 | `t` | (chores overlay) toggle the selected chore (confirm) |
 | `p` | Focus the Review panel (dreams + proposals) |
