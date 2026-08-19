@@ -92,33 +92,40 @@ fn version_candidates(
     key: &str,
     managed_only: bool,
 ) -> Vec<String> {
-    // fork: remote-synced layers cannot gate startup
+    let crate::config::ConfigLayers {
+        system_managed,
+        managed,
+        user,
+        env_overlay: _,
+        user_requirements,
+        system_requirements,
+        mdm_requirements,
+        campaigns: _,
+    } = layers;
+    // Remote-synced layers cannot gate startup.
     let refuse_remote_required = matches!(
         key,
         "required_minimum_version" | "required_maximum_version"
     );
     [
-        cli_version_from_toml(&layers.system_managed, key),
+        cli_version_from_toml(system_managed, key),
         (!refuse_remote_required)
-            .then(|| cli_version_from_toml(&layers.managed, key))
+            .then(|| cli_version_from_toml(managed, key))
             .flatten(),
         (!managed_only)
-            .then(|| cli_version_from_toml(&layers.user, key))
+            .then(|| cli_version_from_toml(user, key))
             .flatten(),
         (!refuse_remote_required)
             .then(|| {
-                layers
-                    .user_requirements
+                user_requirements
                     .as_ref()
                     .and_then(|l| cli_version_from_toml(l, key))
             })
             .flatten(),
-        layers
-            .system_requirements
+        system_requirements
             .as_ref()
             .and_then(|l| cli_version_from_toml(l, key)),
-        layers
-            .mdm_requirements
+        mdm_requirements
             .as_ref()
             .and_then(|l| cli_version_from_toml(l, key)),
     ]

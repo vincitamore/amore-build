@@ -319,10 +319,32 @@ def cmd_verify(dry_run: bool) -> int:
     else:
         problems.append("no .amore project-root load site found in agent crates")
 
-    # 2. default home compiled in
+    # 2. default home compiled in (xai-grok-home; paths.rs is a re-export)
     _check_file_contains(
-        "crates/codegen/xai-grok-config/src/paths.rs",
+        "crates/codegen/xai-grok-home/src/lib.rs",
         'join(".amore")', "~/.amore compiled-in default home", problems)
+    _check_file_contains(
+        "crates/codegen/xai-grok-home/src/lib.rs",
+        'xai_grok_env::var_os("GROK_HOME")',
+        "home override reads through xai_grok_env dual-map", problems)
+
+    # 2b. GROK_CONFIG / GROK_CONFIG_PATH dual-map (suffixes + overlay reads)
+    _check_file_contains(
+        "crates/codegen/xai-grok-env/src/identity.rs",
+        '"CONFIG",',
+        "CONFIG suffix dual-mapped AMORE_CONFIG/GROK_CONFIG", problems)
+    _check_file_contains(
+        "crates/codegen/xai-grok-env/src/identity.rs",
+        '"CONFIG_PATH",',
+        "CONFIG_PATH suffix dual-mapped AMORE_CONFIG_PATH/GROK_CONFIG_PATH", problems)
+    _check_file_contains(
+        "crates/codegen/xai-grok-config/src/env_overlay.rs",
+        "xai_grok_env::var_os(GROK_CONFIG_ENV)",
+        "GROK_CONFIG overlay reads through xai_grok_env dual-map", problems)
+    _check_file_contains(
+        "crates/codegen/xai-grok-config/src/env_overlay.rs",
+        "xai_grok_env::var_os(GROK_CONFIG_PATH_ENV)",
+        "GROK_CONFIG_PATH overlay reads through xai_grok_env dual-map", problems)
 
     # 3. binary/identity naming + argv0 aliases
     _check_file_contains(
@@ -349,6 +371,18 @@ def cmd_verify(dry_run: bool) -> int:
         HARD_OFF_FILE,
         "fork guard: run_update stays inert",
         "upstream update origins remain unreachable (constant + enforcement)", problems)
+    _check_file_contains(
+        HARD_OFF_FILE,
+        "fn fork_auto_update_hard_off",
+        "hard-off accessor for integration-test skip-guards", problems)
+    _check_file_contains(
+        "crates/codegen/xai-grok-update/src/auto_update_tests.rs",
+        "fn test_run_install_script_hard_off_blocks_all_installers",
+        "hard-off installer-funnel refusal test survived extraction", problems)
+    _check_file_contains(
+        "crates/codegen/xai-grok-shell/src/agent/config.rs",
+        "pub update_check: Option<bool>",
+        "cli.update_check fork field survived the config merge", problems)
 
     # Installer harness must exercise the shipped repo-root installer, never
     # the vendored upstream pager copy (still points at x.ai/cli).
@@ -400,6 +434,29 @@ def cmd_verify(dry_run: bool) -> int:
     _check_file_contains(
         COMPLETIONS_FILE, "resolved_bin_name()",
         "shell completions name after the invoked binary", problems)
+    _check_file_contains(
+        "crates/codegen/xai-grok-shell/src/extensions/consent.rs",
+        "Run `amore login` to re-authenticate.",
+        "consent record auth error names the product login command", problems)
+    _check_file_contains(
+        "crates/codegen/xai-grok-pager/src/views/welcome/consent_tests.rs",
+        'assert!(!screen.contains("Amore Build"), "{screen}");',
+        "consent pending-quit replaces the Amore Build version badge", problems)
+
+    # 6d. compact-hook consume: PreCompact additionalContext joins summarizer
+    #     user_context; PostCompact additionalContext becomes a system-reminder.
+    _check_file_contains(
+        "crates/codegen/xai-grok-shell/src/session/compaction.rs",
+        "user_context = merge_precompact_user_context(",
+        "PreCompact hook additionalContext joins summarizer user_context", problems)
+    _check_file_contains(
+        "crates/codegen/xai-grok-shell/src/session/compaction.rs",
+        "postcompact_hook_reminders(&post_compact_results)",
+        "PostCompact hook additionalContext is injected as system-reminder", problems)
+    _check_file_contains(
+        "crates/codegen/xai-grok-agent/templates/prompt.md",
+        "~/.amore/docs/user-guide/",
+        "encrypted prompt templates keep the Amore docs path", problems)
 
     # 6c. doctor namespace migration (runtime-coupled, not display-only):
     #     the managed-config namespace is `amore doctor` with grok-doctor
@@ -577,7 +634,7 @@ def cmd_verify(dry_run: bool) -> int:
         "crates/codegen/xai-grok-shell/src/agent/mvp_agent/agent_ops.rs", "detachment lives on the leader",
         "driver/subscriber detach comment points at the real leader home", problems)
     _check_file_contains(
-        "crates/codegen/xai-grok-shell/src/active_sessions.rs", "started_at",
+        "crates/codegen/xai-grok-active-sessions/src/lib.rs", "started_at",
         "active-session start-identity survives so a recycled PID is not the same alive session", problems)
     _check_file_contains(
         "crates/codegen/xai-grok-shell/src/agent/config.rs", "nearest_declared_effort",
@@ -586,7 +643,7 @@ def cmd_verify(dry_run: bool) -> int:
         "crates/codegen/xai-grok-pager/src/actions/mod.rs", "pub fn chord_collisions",
         "action-registry reports chord collisions instead of silently first-winning", problems)
     _check_file_contains(
-        "crates/codegen/xai-grok-pager/src/headless.rs", "// start identity filled in by register()",
+        "crates/codegen/xai-grok-pager/src/headless.rs", "started_at: None",
         "headless ActiveSession literal names the started_at field", problems)
     _check_file_contains(
         "crates/codegen/xai-grok-pager/src/app/effects/mod.rs", "// start identity filled in by register()",
@@ -595,7 +652,7 @@ def cmd_verify(dry_run: bool) -> int:
     # remote startup-gate refusal: server-synced layers cannot set required_* that exit at launch
     _check_file_contains(
         "crates/codegen/xai-grok-shell/src/util/config/resolve/version.rs",
-        "// fork: remote-synced layers cannot gate startup",
+        "let refuse_remote_required = matches!(",
         "remote-synced required_* keys cannot gate startup", problems)
 
     # 11. self-update origin lock.

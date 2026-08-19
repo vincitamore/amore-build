@@ -1,6 +1,31 @@
 [
   {
     "category": "features",
+    "description": "**House compact packet** — after compact, the successor sees the house orientation packet (re-read current-state and the active task; the summary is forensics). The summarizer receives the PreCompact snapshot through `/compact keep`, alongside any keep-line you already passed.",
+    "breaking_change": false
+  },
+  {
+    "category": "features",
+    "description": "**Selection** — drag-copy in scrollback is more reliable, `/session-info` rows copy on drag, and Text selection can be set to `word_select` for double-click word / triple-click paragraph.",
+    "breaking_change": false
+  },
+  {
+    "category": "features",
+    "description": "**Worktree GC** — idle copies under the house worktrees dir are reclaimed when safe, and never when they hold the last copy of the work. `amore worktree gc --max-age 7d` is the manual pass (`--dry-run` first).",
+    "breaking_change": false
+  },
+  {
+    "category": "features",
+    "description": "**Arabic and Persian** — optional RTL reordering in scrollback. Turn on in `/settings`, or `[scrollback.display] rtl_bidi = true`. Off by default.",
+    "breaking_change": false
+  },
+  {
+    "category": "features",
+    "description": "**Hooks can rewrite a tool call** — a `PreToolUse` hook may return `updatedInput` to replace the model's arguments before the tool runs.",
+    "breaking_change": false
+  },
+  {
+    "category": "features",
     "description": "**House compact hook** — `amore init` plants a PreCompact / PostCompact hook that emits a disk-orientation packet (re-read current-state and the active task; the summary is forensics). The harness does not yet inject that packet into the successor conversation.",
     "breaking_change": false
   },

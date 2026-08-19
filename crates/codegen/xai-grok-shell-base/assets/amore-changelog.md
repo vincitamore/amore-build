@@ -6,6 +6,23 @@ monorepo sync commits; everything below is the fork's own delta, newest first.
 This document is compiled into the binary — update it in the same change as the
 work it describes.
 
+## v1.0.5
+
+- **House compact packet** — after compact, the successor sees the house
+  orientation packet (re-read current-state and the active task; the
+  summary is forensics). The summarizer receives the PreCompact snapshot
+  through `/compact keep`, alongside any keep-line you already passed.
+- **Selection** — drag-copy in scrollback is more reliable, `/session-info`
+  rows copy on drag, and Text selection can be set to `word_select` for
+  double-click word / triple-click paragraph.
+- **Worktree GC** — idle copies under the house worktrees dir are
+  reclaimed when safe, and never when they hold the last copy of the work.
+  `amore worktree gc --max-age 7d` is the manual pass (`--dry-run` first).
+- **Arabic and Persian** — optional RTL reordering in scrollback. Turn on
+  in `/settings`, or `[scrollback.display] rtl_bidi = true`. Off by default.
+- **Hooks can rewrite a tool call** — a `PreToolUse` hook may return
+  `updatedInput` to replace the model's arguments before the tool runs.
+
 ## v1.0.3
 
 - **House compact hook** — `amore init` plants a `PreCompact` / `PostCompact`

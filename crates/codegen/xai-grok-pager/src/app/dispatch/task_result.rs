@@ -550,6 +550,24 @@ pub(super) fn dispatch_task_result(result: TaskResult, app: &mut AppView) -> Vec
             tracing::trace!("Cancel notification sent successfully");
             vec![]
         }
+        TaskResult::ConsentPersistFailed { error } => {
+            tracing::warn!(%error, "consent answer not persisted; the notice re-arms next launch");
+            app.show_toast(
+                "\u{2717} Could not save your answer, so this notice returns next launch",
+            );
+            vec![]
+        }
+        TaskResult::ConsentRecorded { notice_id, version } => match app.account_email.clone() {
+            Some(account) => {
+                vec![Effect::PersistConsentAnswer {
+                    account: Some(account),
+                    notice_id,
+                    version,
+                    acked: true,
+                }]
+            }
+            None => vec![],
+        },
         TaskResult::KillSubagentComplete {
             session_id,
             subagent_id,
@@ -887,6 +905,7 @@ pub(super) fn dispatch_task_result(result: TaskResult, app: &mut AppView) -> Vec
             session_id,
             info,
             text,
+            fields,
             nonce,
         } => {
             let minimal = app.screen_mode.is_minimal();
@@ -905,7 +924,7 @@ pub(super) fn dispatch_task_result(result: TaskResult, app: &mut AppView) -> Vec
                 }
                 agent.apply_full_context_info(info.data.context);
                 if let Some(state) = usage_modal_state_mut(agent) {
-                    state.session_text = Some(text);
+                    state.session_fields = Some(fields);
                     state.session_error = None;
                 } else if minimal {
                     push_and_page_flip(

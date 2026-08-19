@@ -126,6 +126,14 @@ impl AgentView {
             return self.handle_history_search_key(key);
         }
 
+        // Tab-family chords drop the prompt highlight no matter which layer
+        // consumes them (dropdown accepts, registry actions, widget decline).
+        let mut dropped_highlight = false;
+        if matches!(key.code, KeyCode::Tab | KeyCode::BackTab) {
+            dropped_highlight = self.prompt.textarea.selection_range().is_some();
+            self.prompt.textarea.clear_selection();
+        }
+
         // ── File search intercept ───────────────────────────────────────
         // When the @-completion dropdown is visible, the widget handles
         // Tab (accept), Enter (accept), Esc (dismiss), and arrow keys
@@ -552,7 +560,7 @@ impl AgentView {
                         && !slash_accepted_send
                         && crate::input::is_apple_terminal_newline_modifier_held()
                     {
-                        self.prompt.textarea.insert_str("\n");
+                        self.prompt.insert_replacing_selection("\n");
                         return InputOutcome::Changed;
                     }
 
@@ -575,7 +583,7 @@ impl AgentView {
                         {
                             return outcome;
                         }
-                        self.prompt.textarea.insert_str("\n");
+                        self.prompt.insert_replacing_selection("\n");
                         return InputOutcome::Changed;
                     }
                     if let Some(text) = self.prompt.try_send() {
@@ -627,27 +635,32 @@ impl AgentView {
                     //    that text as the next prompt.
                     // 2) Empty composer + a visible follow-up in the queue →
                     //    same as bare Enter: send the top row now.
-                    // 3) Idle / nothing to send → no-op (not send-like-Enter).
+                    // 3) Idle / nothing to send: promote to ToggleYolo when that chord
+                    //    matches (Apple Terminal Ctrl+O opens YOLO / free-tier CTA).
                     let text = self.prompt.text().trim().to_string();
                     let turn_running = self.session.state.is_turn_running();
                     if !text.is_empty() {
-                        if !turn_running {
-                            return InputOutcome::Changed;
+                        if turn_running {
+                            // Paste-then-immediate-send: an image probe is still
+                            // off-thread. Stash (draft untouched) and re-issue on
+                            // completion so the not-yet-attached chip isn't dropped.
+                            if self.paste_probe_in_flight > 0 {
+                                self.deferred_send = Some(AgentDeferredSend::Interject);
+                                return InputOutcome::Changed;
+                            }
+                            // Drain images BEFORE set_text("") wipes the chip elements.
+                            let images = self.prompt.drain_images();
+                            self.prompt.set_text("");
+                            return InputOutcome::Action(Action::SendPromptNow { text, images });
                         }
-                        // Paste-then-immediate-send: an image probe is still
-                        // off-thread. Stash (draft untouched) and re-issue on
-                        // completion so the not-yet-attached chip isn't dropped.
-                        if self.paste_probe_in_flight > 0 {
-                            self.deferred_send = Some(AgentDeferredSend::Interject);
-                            return InputOutcome::Changed;
-                        }
-                        // Drain images BEFORE set_text("") wipes the chip elements.
-                        let images = self.prompt.drain_images();
-                        self.prompt.set_text("");
-                        return InputOutcome::Action(Action::SendPromptNow { text, images });
-                    }
-                    if turn_running && let Some(outcome) = self.try_send_now_queued_from_prompt() {
+                    } else if turn_running
+                        && let Some(outcome) = self.try_send_now_queued_from_prompt()
+                    {
                         return outcome;
+                    }
+                    if registry.matches_id(ActionId::ToggleYolo, key) {
+                        return self
+                            .handle_agent_action_with_registry(ActionId::ToggleYolo, registry);
                     }
                     return InputOutcome::Changed;
                 }
@@ -770,6 +783,8 @@ impl AgentView {
             KeyCode::Tab if registry.find(ActionId::FocusScrollback).is_some() => {
                 InputOutcome::Action(Action::FocusScrollback)
             }
+            // A dropped highlight must repaint even when nothing claims the key.
+            _ if dropped_highlight => InputOutcome::Changed,
             _ => InputOutcome::Unchanged,
         }
     }
@@ -1761,6 +1776,33 @@ mod prompt_suggestion_key_tests {
         );
     }
 
+    /// Tab drops the highlight even though the registry consumes the chord.
+    #[test]
+    fn tab_with_selection_clears_highlight_and_focuses_scrollback() {
+        let mut agent = super::test_fixtures::make_agent();
+        agent.prompt.textarea.insert_str("alpha beta");
+        agent.prompt.textarea.set_selection(0, 5);
+
+        let outcome = agent.handle_prompt_key_for_test(&key(KeyCode::Tab));
+        assert!(matches!(
+            outcome,
+            InputOutcome::Action(Action::FocusScrollback)
+        ));
+        assert_eq!(agent.prompt.textarea.selection_range(), None);
+    }
+
+    /// Shift+Tab (CycleMode) drops the highlight on the same press too.
+    #[test]
+    fn shift_tab_with_selection_clears_highlight_and_cycles_mode() {
+        let mut agent = super::test_fixtures::make_agent();
+        agent.prompt.textarea.insert_str("alpha beta");
+        agent.prompt.textarea.set_selection(0, 5);
+
+        let outcome = agent.handle_prompt_key_for_test(&key(KeyCode::BackTab));
+        assert!(!matches!(outcome, InputOutcome::Unchanged));
+        assert_eq!(agent.prompt.textarea.selection_range(), None);
+    }
+
     #[test]
     fn right_arrow_accepts_suggestion() {
         // Right at end-of-text is otherwise a no-op, so it doubles as
@@ -1907,5 +1949,86 @@ mod prompt_suggestion_key_tests {
             "the key event latches the impression before dismissing"
         );
         assert!(!agent.prompt.prompt_suggestion.has_suggestion());
+    }
+}
+
+#[cfg(test)]
+mod apple_terminal_ctrl_o_upgrade_cta_tests {
+    use super::*;
+    use crate::app::agent::AgentState;
+    use crate::app::app_view::InputOutcome;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use xai_grok_telemetry::events::AnnouncementCtaSurface;
+
+    fn ctrl_o() -> KeyEvent {
+        KeyEvent::new(KeyCode::Char('o'), KeyModifiers::CONTROL)
+    }
+
+    #[test]
+    fn apple_terminal_idle_ctrl_o_opens_pinned_upgrade_cta() {
+        let mut agent = super::test_fixtures::make_agent();
+        agent.pinned_upgrade_cta_live = true;
+        let registry = ActionRegistry::apple_terminal_for_test();
+
+        let outcome = agent.handle_prompt_key_with_registry_for_test(&ctrl_o(), &registry);
+        assert!(
+            matches!(
+                outcome,
+                InputOutcome::Action(Action::AnnouncementsOpenCta(
+                    AnnouncementCtaSurface::Keyboard
+                ))
+            ),
+            "idle Apple-Terminal Ctrl+O must open pinned CTA, got {outcome:?}"
+        );
+    }
+
+    #[test]
+    fn apple_terminal_idle_ctrl_o_without_promo_toggles_yolo() {
+        let mut agent = super::test_fixtures::make_agent();
+        agent.pinned_upgrade_cta_live = false;
+        let was_yolo = agent.session.is_yolo();
+        let registry = ActionRegistry::apple_terminal_for_test();
+
+        let outcome = agent.handle_prompt_key_with_registry_for_test(&ctrl_o(), &registry);
+        assert!(
+            matches!(
+                outcome,
+                InputOutcome::Action(Action::SetYoloMode(m)) if m != was_yolo
+            ),
+            "idle Apple-Terminal Ctrl+O without promo must toggle YOLO, got {outcome:?}"
+        );
+    }
+
+    #[test]
+    fn apple_terminal_running_ctrl_o_still_interjects() {
+        let mut agent = super::test_fixtures::make_agent();
+        agent.session.state = AgentState::TurnRunning;
+        agent.prompt.set_text("steer mid-turn");
+        agent.pinned_upgrade_cta_live = true;
+        let registry = ActionRegistry::apple_terminal_for_test();
+
+        let outcome = agent.handle_prompt_key_with_registry_for_test(&ctrl_o(), &registry);
+        assert!(
+            matches!(
+                outcome,
+                InputOutcome::Action(Action::SendPromptNow { ref text, .. })
+                    if text == "steer mid-turn"
+            ),
+            "running + payload: interject must win over CTA, got {outcome:?}"
+        );
+    }
+
+    #[test]
+    fn non_apple_ctrl_enter_idle_stays_noop() {
+        let mut agent = super::test_fixtures::make_agent();
+        agent.pinned_upgrade_cta_live = true;
+        let registry = ActionRegistry::non_vscode_for_test();
+        let ctrl_enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL);
+
+        let outcome = agent.handle_prompt_key_with_registry_for_test(&ctrl_enter, &registry);
+        assert!(
+            matches!(outcome, InputOutcome::Changed),
+            "idle Ctrl+Enter must stay a silent interject no-op, got {outcome:?}"
+        );
     }
 }

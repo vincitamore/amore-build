@@ -53,10 +53,6 @@ impl AgentView {
                     }
                     return InputOutcome::Changed;
                 }
-                if self.hit_queue_badge.contains(mouse.column, mouse.row) {
-                    self.toggle_queue_pane();
-                    return InputOutcome::Changed;
-                }
                 if self.hit_bg_status.contains(mouse.column, mouse.row) {
                     self.tasks.overlay.toggle();
                     self.tasks.on_state_change();
@@ -257,16 +253,6 @@ impl AgentView {
                 if self.hit_cwd.contains(mouse.column, mouse.row) {
                     let path = self.session.cwd.display().to_string();
                     self.copy_to_clipboard(&path);
-                    return InputOutcome::Changed;
-                }
-                if self.hit_badge.contains(mouse.column, mouse.row) {
-                    self.todo.overlay.toggle();
-                    self.todo.on_state_change();
-                    if self.todo.overlay.focused {
-                        self.set_active_pane(AgentPane::Todo, false);
-                    } else if self.active_pane == AgentPane::Todo {
-                        self.set_active_pane(AgentPane::Scrollback, false);
-                    }
                     return InputOutcome::Changed;
                 }
                 if self.hit_follow_indicator.contains(mouse.column, mouse.row) {
@@ -842,7 +828,7 @@ impl AgentView {
                                     }
                                     3 => {
                                         if !self.select_cell_at(&hit) {
-                                            self.select_line_at(&hit);
+                                            self.select_paragraph_at(&hit);
                                         }
                                         true
                                     }
@@ -1055,12 +1041,10 @@ impl AgentView {
                 }
                 changed |= self
                     .set_hovered_follow_up_chip(self.follow_up_chip_at(mouse.column, mouse.row));
-                changed |= self.hit_badge.update_hover(mouse.column, mouse.row);
                 changed |= self.hit_context.update_hover(mouse.column, mouse.row);
                 changed |= self.hit_credits.update_hover(mouse.column, mouse.row);
                 changed |= self.hit_todo_close.update_hover(mouse.column, mouse.row);
                 changed |= self.hit_queue_close.update_hover(mouse.column, mouse.row);
-                changed |= self.hit_queue_badge.update_hover(mouse.column, mouse.row);
                 if matches!(
                     self.pane_areas.hit_test(mouse.column, mouse.row),
                     Some(AgentPane::Queue)
@@ -1617,12 +1601,9 @@ mod tests {
             Some("draft")
         );
     }
-    /// Clicking `[edit]` on a server row still awaiting its enqueue
-    /// confirmation (an optimistic echo) is ignored: the shell has no row to
-    /// hold yet, so the `hold_edit` would no-op and the later-confirmed row
-    /// could be absorbed mid-edit.
+    /// Mouse edit on an optimistic server row toasts and does not emit HoldEdit.
     #[test]
-    fn mouse_edit_click_on_optimistic_server_row_is_ignored() {
+    fn mouse_edit_click_on_optimistic_server_row_toasts() {
         let mut agent = make_running_agent();
         agent.optimistic_queue_ids.insert("p1".into());
         let ids = agent.queue.entry_ids();
@@ -1633,6 +1614,10 @@ mod tests {
             "an unconfirmed echo must not be editable"
         );
         assert_eq!(agent.prompt.text(), "");
+        assert_eq!(
+            agent.toast.as_ref().map(|(message, _)| message.as_str()),
+            Some(crate::app::queue_edit::STILL_QUEUEING_TOAST),
+        );
         assert!(
             agent.pending_effects.is_empty(),
             "no QueueHoldEdit may be emitted for a row the shell doesn't have"

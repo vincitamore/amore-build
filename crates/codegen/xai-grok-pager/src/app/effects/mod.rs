@@ -30,6 +30,7 @@ use actions::{
     ClipboardPasteTarget, Effect, ProbedAttachment, SubagentKillOutcome,
     SwitchModelError, TaskResult,
 };
+use crate::views::usage_modal::SessionInfoField;
 #[cfg(test)]
 use actions::PermissionModePersist;
 #[cfg(test)]
@@ -50,7 +51,7 @@ pub(crate) fn execute(
     match effect {
         Effect::RegisterActiveSession { session_id, cwd } => {
             crate::app::signal_handler::set_current_session_id(Some(session_id.clone()));
-            if let Err(e) = xai_grok_shell::active_sessions::register(xai_grok_shell::active_sessions::ActiveSession {
+            if let Err(e) = xai_grok_active_sessions::register(xai_grok_active_sessions::ActiveSession {
                 session_id,
                 pid: std::process::id(),
                 cwd,
@@ -651,7 +652,7 @@ pub(crate) fn execute(
                     }
                     let summaries = tokio::task::spawn_blocking(move || {
                             let _permit = permit;
-                            xai_grok_workspace::foreign_sessions::scan_foreign_sessions(
+                            xai_grok_foreign_sessions::scan_foreign_sessions(
                                 &cwd,
                                 enabled,
                             )
@@ -704,7 +705,7 @@ pub(crate) fn execute(
                             compat,
                             &grok_home,
                             |enabled| async move {
-                                tokio::task::spawn_blocking(move || xai_grok_workspace::foreign_sessions::most_recent_foreign_session(
+                                tokio::task::spawn_blocking(move || xai_grok_foreign_sessions::most_recent_foreign_session(
                                         &cwd_for_scan,
                                         enabled,
                                         crate::app::foreign_sessions::RESUME_HINT_WINDOW,
@@ -1270,7 +1271,7 @@ pub(crate) fn execute(
             session_id,
             cancel_subagents,
             trigger,
-            rewind_if_no_output,
+            rewind_prompt_id,
         } => {
             let tx = acp_tx.clone();
             let trigger_str = trigger.map(|t| t.as_wire_str());
@@ -1283,18 +1284,20 @@ pub(crate) fn execute(
                             serde_json::json!({
                         "cancel_subagents": cancel_subagents,
                         "trigger": trigger_str,
-                        "rewind_if_no_output": rewind_if_no_output,
+                        "rewind_if_no_output": rewind_prompt_id.is_some(),
+                        "rewind_prompt_id": rewind_prompt_id.as_deref(),
                     }),
                         ),
                     );
                     let send_start = std::time::Instant::now();
                     let mut meta = serde_json::json!({ "cancelSubagents": cancel_subagents });
                     if let Some(t) = trigger_str {
-                        meta["cancelTrigger"] = t.into();
+                        meta[crate::app::turn_completion::CANCEL_TRIGGER_KEY] = t.into();
                     }
-                    if rewind_if_no_output {
+                    if let Some(pid) = rewind_prompt_id {
                         meta["rewindIfNoOutput"] = true.into();
                         meta["rewindIfPristine"] = true.into();
+                        meta["promptId"] = pid.into();
                     }
                     let req = acp::CancelNotification::new(session_id.clone())
                         .meta(meta.as_object().cloned());
@@ -1606,7 +1609,7 @@ pub(crate) fn execute(
                     }
                 });
         }
-        Effect::KillBgTask { session_id, task_id } => {
+        Effect::KillBgTask { session_id, task_id, source } => {
             let tx = acp_tx.clone();
             let sid = session_id.0.to_string();
             tasks
@@ -1614,6 +1617,7 @@ pub(crate) fn execute(
                     let params = xai_grok_shell::extensions::task::KillTaskRequest {
                         session_id: sid.clone(),
                         task_id: task_id.clone(),
+                        source,
                     };
                     let req = acp::ExtRequest::new(
                         "x.ai/task/kill",
@@ -1964,6 +1968,59 @@ pub(crate) fn execute(
                         tracing::warn!(error = %e, "failed to persist privacy_banner_acked");
                     }
                     TaskResult::CancelComplete
+                });
+        }
+        Effect::PersistConsentAnswer { account, notice_id, version, acked } => {
+            tasks
+                .spawn(async move {
+                    match xai_grok_shell::util::config::set_consent_answer(
+                            account,
+                            notice_id,
+                            version,
+                            acked,
+                        )
+                        .await
+                    {
+                        Ok(()) => TaskResult::CancelComplete,
+                        Err(e) if !acked => {
+                            TaskResult::ConsentPersistFailed {
+                                error: e.to_string(),
+                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!(error = %e, "consent ack not persisted");
+                            TaskResult::CancelComplete
+                        }
+                    }
+                });
+        }
+        Effect::RecordConsentUpstream { notice_id, version } => {
+            let tx = acp_tx.clone();
+            tasks
+                .spawn(async move {
+                    let request = acp::ExtRequest::new(
+                        "x.ai/consent/record",
+                        serde_json::value::to_raw_value(
+                                &serde_json::json!({
+                        "noticeId": notice_id,
+                        "version": version,
+                    }),
+                            )
+                            .expect("serialize params")
+                            .into(),
+                    );
+                    match acp_send(request, &tx).await {
+                        Ok(_) => {
+                            TaskResult::ConsentRecorded {
+                                notice_id,
+                                version,
+                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!(error = %e, %notice_id, "consent record not filed");
+                            TaskResult::CancelComplete
+                        }
+                    }
                 });
         }
         Effect::PersistMemoryFullscreen { fullscreen } => {
@@ -3188,7 +3245,8 @@ pub(crate) fn execute(
                 .spawn(async move {
                     match fetch_session_info(&session_id, &tx).await {
                         Ok(info) => {
-                            let title = lookup_session_title(&session_id).await;
+                            let title = lookup_session_title(&session_id, &info.cwd)
+                                .await;
                             let text = format_session_info(
                                 &info,
                                 title.as_deref(),
@@ -3196,11 +3254,17 @@ pub(crate) fn execute(
                                 is_api_key_auth,
                                 api_key_env_set,
                             );
+                            let fields = session_info_fields(
+                                &info,
+                                title.as_deref(),
+                                show_resolved_model,
+                            );
                             TaskResult::SessionInfoComplete {
                                 agent_id,
                                 session_id,
                                 info: Box::new(info),
                                 text,
+                                fields,
                                 nonce,
                             }
                         }
@@ -4518,28 +4582,68 @@ async fn session_rename_rpc(
         Err(e) => Err(sanitize_user_error(&format!("couldn't {verb}: {e}"))),
     }
 }
-/// Look up the session title/summary from local persistence.
-async fn lookup_session_title(session_id: &acp::SessionId) -> Option<String> {
-    let summaries = xai_grok_shell::session::persistence::list_summaries(None)
+/// Session title from local persistence: loads only this session's summary
+/// (`cwd` from the `x.ai/session/info` response), never the all-sessions list.
+async fn lookup_session_title(session_id: &acp::SessionId, cwd: &str) -> Option<String> {
+    lookup_session_title_in(
+            xai_grok_shell::util::grok_home::grok_home(),
+            session_id,
+            cwd,
+        )
         .await
-        .ok()?;
-    summaries
-        .into_iter()
-        .find(|s| s.info.id == *session_id)
+}
+/// [`lookup_session_title`] against an explicit root, for tests.
+async fn lookup_session_title_in(
+    root: std::path::PathBuf,
+    session_id: &acp::SessionId,
+    cwd: &str,
+) -> Option<String> {
+    use xai_grok_shell::session::storage::{JsonlStorageAdapter, StorageAdapter};
+    let info = xai_grok_shell::session::info::Info {
+        id: session_id.clone(),
+        cwd: cwd.to_string(),
+    };
+    JsonlStorageAdapter::with_root(root)
+        .load_summary(&info)
+        .await
+        .ok()
         .and_then(|s| s.display_title_opt())
 }
 /// Format session info into a human-readable string.
 ///
 /// Mirrors the TUI's `render_session_info` for pager display.
-fn format_session_info(
+/// Structured `/session-info` rows — the single source of truth for both the
+/// formatted string ([`format_session_info`]) and the modal, so neither has to
+/// re-parse the other. Auth is not a field here; it is prose the string appends
+/// on its own. `compact` marks the dense model/runtime group the modal renders
+/// as `Label: value` on one line.
+fn session_info_fields(
     info: &SessionInfoResponse,
     title: Option<&str>,
     show_resolved_model: bool,
-    is_api_key_auth: bool,
-    api_key_env_set: bool,
-) -> String {
-    let session_id = &info.session_id;
-    let cwd = &info.cwd;
+) -> Vec<SessionInfoField> {
+    let mut fields = Vec::new();
+    let mut push = |label: &'static str, value: String, compact: bool| {
+        fields
+            .push(SessionInfoField {
+                label,
+                value,
+                compact,
+            });
+    };
+    if let Some(t) = title {
+        push("Title", t.to_string(), false);
+    }
+    push(
+        "Shell version",
+        xai_grok_version::display_version(xai_grok_update::channel_label()),
+        false,
+    );
+    push("Session ID", info.session_id.to_string(), false);
+    if let Some(id) = info.data.conversation_id.as_deref().filter(|id| !id.is_empty()) {
+        push("Conversation ID", id.to_string(), false);
+    }
+    push("Working directory", info.cwd.to_string(), false);
     let model = info.data.model.as_deref().unwrap_or("unknown");
     let model_display = xai_grok_shell::session::model_display_name(
         info.data.model_display_name.as_deref(),
@@ -4547,50 +4651,54 @@ fn format_session_info(
         info.data.resolved_model_id.as_deref(),
         show_resolved_model,
     );
-    let ctx = &info.data.context;
-    let used = ctx.used;
-    let total = ctx.total;
-    let pct = ctx.usage_pct;
-    let title_line = match title {
-        Some(t) => format!("  Title: {t}\n"),
-        None => String::new(),
-    };
-    let model_hash_line = if xai_grok_shell::session::should_show_model_fingerprint(
+    push("Model", model_display.to_string(), true);
+    if xai_grok_shell::session::should_show_model_fingerprint(
         info.data.show_model_fingerprint,
         model,
-    ) {
-        info.data
-            .model_fingerprint
-            .as_deref()
-            .map(|fp| format!("\n  Model Hash: {fp}"))
-            .unwrap_or_default()
-    } else {
-        String::new()
-    };
-    let backend_line = info
-        .data
-        .api_backend
-        .as_deref()
-        .map(|b| format!("\n  API Backend: {b}"))
-        .unwrap_or_default();
-    let sandbox_line = xai_grok_sandbox::profile_name()
-        .map(|profile| format!("\n  Sandbox: {profile}"))
-        .unwrap_or_default();
-    let turn_line = format!("\n  Turn: {}", info.data.turn_index);
-    let conversation_line = info
-        .data
-        .conversation_id
-        .as_deref()
-        .filter(|id| !id.is_empty())
-        .map(|id| format!("\n  Conversation ID: {id}"))
-        .unwrap_or_default();
-    let version_display = xai_grok_version::display_version(
-        xai_grok_update::channel_label(),
+    ) && let Some(fp) = info.data.model_fingerprint.as_deref()
+    {
+        push("Model Hash", fp.to_string(), true);
+    }
+    if let Some(b) = info.data.api_backend.as_deref() {
+        push("API Backend", b.to_string(), true);
+    }
+    if let Some(profile) = xai_grok_sandbox::profile_name() {
+        push("Sandbox", profile.to_string(), true);
+    }
+    push("Turn", info.data.turn_index.to_string(), true);
+    let ctx = &info.data.context;
+    push(
+        "Context",
+        format!("{} / {} tokens ({}%)", ctx.used, ctx.total, ctx.usage_pct),
+        true,
     );
+    fields
+}
+/// The `/session-info` block as a plain string for minimal-mode scrollback.
+/// Built from [`session_info_fields`] (one `  Label: value` line each) with the
+/// auth prose spliced in after the shell version, so it stays a single source
+/// of truth with the modal.
+fn format_session_info(
+    info: &SessionInfoResponse,
+    title: Option<&str>,
+    show_resolved_model: bool,
+    is_api_key_auth: bool,
+    api_key_env_set: bool,
+) -> String {
     let auth_lines = format_auth_lines(is_api_key_auth, api_key_env_set);
-    format!(
-        "{title_line}  Shell version: {version_display}\n{auth_lines}  Session ID: {session_id}{conversation_line}\n  Working directory: {cwd}\n  Model: {model_display}{model_hash_line}{backend_line}{sandbox_line}{turn_line}\n  Context: {used} / {total} tokens ({pct}%)"
-    )
+    let mut out = String::new();
+    for field in session_info_fields(info, title, show_resolved_model) {
+        out.push_str("  ");
+        out.push_str(field.label);
+        out.push_str(": ");
+        out.push_str(&field.value);
+        out.push('\n');
+        if field.label == "Shell version" {
+            out.push_str(&auth_lines);
+        }
+    }
+    out.truncate(out.trim_end_matches('\n').len());
+    out
 }
 /// Auth section for `/session-info` — active login method.
 ///

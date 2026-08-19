@@ -515,9 +515,7 @@ async fn workspace_control(
     json: bool,
     command: ControlCommand,
 ) -> Result<()> {
-    let raw_config = xai_grok_shell::config::load_effective_config_disk_only()
-        .map_err(|e| anyhow::anyhow!("Failed to load config: {e}"))?;
-    let agent_config = AgentConfig::new_from_toml_cfg(&raw_config)
+    let agent_config = xai_grok_shell::config::load_agent_config_disk_only()
         .map_err(|e| anyhow::anyhow!("Failed to create agent config: {e}"))?;
     let client = connect_workspace_control(&agent_config, target).await?;
     ensure_workspace_caps(client.registration())?;
@@ -1168,8 +1166,7 @@ async fn run_agent_command(
         cli_subagents: None,
         cli_web_search_model: None,
         cli_session_summary_model: None,
-        cli_experimental_memory: false,
-        cli_no_memory: false,
+        memory_enabled_override: None,
         disable_web_search,
         todo_gate: false,
         laziness_debug_log: None,
@@ -1792,7 +1789,10 @@ fn install_heap_profile_hooks() {
 fn version_text(channel_label: &str) -> String {
     format!(
         "amore {}\n",
-        xai_grok_version::display_version_with_commit(env!("VERSION_WITH_COMMIT"), channel_label,)
+        xai_grok_version::display_version_with_commit(
+            xai_grok_version::full_version(),
+            channel_label,
+        )
     )
 }
 fn write_version(writer: &mut impl std::io::Write, channel_label: &str) -> std::io::Result<()> {
@@ -1870,6 +1870,7 @@ fn main() {
 }
 
 fn main_body() {
+    xai_grok_version::set_full_version(env!("VERSION_WITH_COMMIT"));
     xai_grok_telemetry::startup::mark_process_start();
     if let Some(code) = xai_grok_pager::app::mermaid_worker::maybe_run_render_subprocess() {
         std::process::exit(code);
@@ -1933,7 +1934,7 @@ fn main_body() {
             );
         }
     }
-    let crashed = xai_grok_shell::active_sessions::collect_crashed().unwrap_or_default();
+    let crashed = xai_grok_active_sessions::collect_crashed().unwrap_or_default();
     if !crashed.is_empty() {
         tracing::info!(
             count = crashed.len(),
@@ -2099,9 +2100,7 @@ async fn async_main(args: PagerArgs) -> Result<()> {
             Command::Models => {
                 init_tracing_simple("cli");
                 let _otel_guard = xai_grok_telemetry::otel_layer::otel_guard();
-                let config = xai_grok_shell::config::load_effective_config_disk_only()
-                    .map_err(|e| anyhow::anyhow!("Failed to load config: {e}"))?;
-                let agent_config = AgentConfig::new_from_toml_cfg(&config)
+                let agent_config = xai_grok_shell::config::load_agent_config_disk_only()
                     .map_err(|e| anyhow::anyhow!("Failed to create agent config: {e}"))?;
                 return xai_grok_pager::models::list_available_models(&agent_config).await;
             }
@@ -2113,9 +2112,7 @@ async fn async_main(args: PagerArgs) -> Result<()> {
             Command::Worktree(worktree_args) => {
                 init_tracing_simple("cli");
                 let _otel_guard = xai_grok_telemetry::otel_layer::otel_guard();
-                let config = xai_grok_shell::config::load_effective_config_disk_only()
-                    .map_err(|e| anyhow::anyhow!("Failed to load config: {e}"))?;
-                let agent_config = AgentConfig::new_from_toml_cfg(&config)
+                let agent_config = xai_grok_shell::config::load_agent_config_disk_only()
                     .map_err(|e| anyhow::anyhow!("Failed to create agent config: {e}"))?;
                 return xai_grok_pager::worktree_cmd::run(worktree_args, &agent_config).await;
             }
@@ -2132,18 +2129,14 @@ async fn async_main(args: PagerArgs) -> Result<()> {
             Command::Sessions(sessions_args) => {
                 init_tracing_simple("cli");
                 let _otel_guard = xai_grok_telemetry::otel_layer::otel_guard();
-                let config = xai_grok_shell::config::load_effective_config_disk_only()
-                    .map_err(|e| anyhow::anyhow!("Failed to load config: {e}"))?;
-                let agent_config = AgentConfig::new_from_toml_cfg(&config)
+                let agent_config = xai_grok_shell::config::load_agent_config_disk_only()
                     .map_err(|e| anyhow::anyhow!("Failed to create agent config: {e}"))?;
                 return xai_grok_pager::sessions_cmd::run(sessions_args, &agent_config).await;
             }
             Command::Share(ref share_args) => {
                 init_tracing_simple("cli");
                 let _otel_guard = xai_grok_telemetry::otel_layer::otel_guard();
-                let config = xai_grok_shell::config::load_effective_config_disk_only()
-                    .map_err(|e| anyhow::anyhow!("Failed to load config: {e}"))?;
-                let agent_config = AgentConfig::new_from_toml_cfg(&config)
+                let agent_config = xai_grok_shell::config::load_agent_config_disk_only()
                     .map_err(|e| anyhow::anyhow!("Failed to create agent config: {e}"))?;
                 return xai_grok_pager::share_cmd::run(share_args, &agent_config).await;
             }
@@ -2154,9 +2147,7 @@ async fn async_main(args: PagerArgs) -> Result<()> {
             Command::Trace(trace_args) => {
                 init_tracing_simple("cli");
                 let _otel_guard = xai_grok_telemetry::otel_layer::otel_guard();
-                let config = xai_grok_shell::config::load_effective_config_disk_only()
-                    .map_err(|e| anyhow::anyhow!("Failed to load config: {e}"))?;
-                let agent_config = AgentConfig::new_from_toml_cfg(&config)
+                let agent_config = xai_grok_shell::config::load_agent_config_disk_only()
                     .map_err(|e| anyhow::anyhow!("Failed to create agent config: {e}"))?;
                 return xai_grok_pager::trace_cmd::run(trace_args, &agent_config).await;
             }
@@ -2202,9 +2193,7 @@ async fn async_main(args: PagerArgs) -> Result<()> {
             } => {
                 init_tracing_simple("cli");
                 let _otel_guard = xai_grok_telemetry::otel_layer::otel_guard();
-                let config = xai_grok_shell::config::load_effective_config_disk_only()
-                    .map_err(|e| anyhow::anyhow!("Failed to load config: {e}"))?;
-                let config = AgentConfig::new_from_toml_cfg(&config)
+                let config = xai_grok_shell::config::load_agent_config_disk_only()
                     .map_err(|e| anyhow::anyhow!("Failed to create agent config: {e}"))?;
                 xai_grok_shell::auth::run_cli_login(&config, oauth, device_auth, devbox).await?;
                 println!();
@@ -2212,9 +2201,7 @@ async fn async_main(args: PagerArgs) -> Result<()> {
             }
             Command::Logout => {
                 init_tracing_simple("cli");
-                let config = xai_grok_shell::config::load_effective_config_disk_only()
-                    .map_err(|e| anyhow::anyhow!("Failed to load config: {e}"))?;
-                let config = AgentConfig::new_from_toml_cfg(&config)
+                let config = xai_grok_shell::config::load_agent_config_disk_only()
                     .map_err(|e| anyhow::anyhow!("Failed to create agent config: {e}"))?;
                 xai_grok_shell::auth::run_cli_logout(&config)?;
                 xai_grok_shell::instrumentation::finalize_and_exit(0);
@@ -2676,6 +2663,7 @@ mod tests {
     }
     #[test]
     fn version_output_writer_preserves_channel_aware_contract() {
+        xai_grok_version::set_full_version(env!("VERSION_WITH_COMMIT"));
         for (label, expected_suffix) in [
             (" [alpha]", " [alpha]\n"),
             (" [stable]", " [stable]\n"),

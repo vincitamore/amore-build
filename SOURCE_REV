@@ -11,4 +11,4 @@
 # merge-base with upstream is 500129c… (the last upstream bundle this tree's
 # history includes). Moved by `scripts/sync_upstream.py --update-pin` after a
 # verified merge.
-be713136d2a69080743a3f6b3c72077057e5948f
+d92c5b0b8582fda358de1f97446aa74af44a464f

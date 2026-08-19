@@ -22,6 +22,8 @@ const EXACT_SUFFIXES: &[&str] = &[
     "DEPLOYMENT_CONFIG_CACHE_TTL_SECS",
     "MANAGED_CONFIG_FAIL_CLOSED",
     "AUTH",
+    "CONFIG",
+    "CONFIG_PATH",
 ];
 
 /// Prefix wildcards (after `AMORE_` / `GROK_`): every `AUTH_*`, `MDM_*`,
@@ -112,6 +114,8 @@ pub fn alias_table_snapshot() -> Vec<(&'static str, &'static str)> {
                     "GROK_MANAGED_CONFIG_FAIL_CLOSED",
                 ),
                 "AUTH" => ("AMORE_AUTH", "GROK_AUTH"),
+                "CONFIG" => ("AMORE_CONFIG", "GROK_CONFIG"),
+                "CONFIG_PATH" => ("AMORE_CONFIG_PATH", "GROK_CONFIG_PATH"),
                 _ => unreachable!("exact suffix not in match: {s}"),
             }
         })
@@ -278,6 +282,74 @@ mod tests {
     }
 
     #[test]
+    fn config_primary_wins_when_both_present() {
+        with_env(
+            &[
+                ("AMORE_CONFIG", Some(r#"{"models":{"default":"from-amore"}}"#)),
+                ("GROK_CONFIG", Some(r#"{"models":{"default":"from-grok"}}"#)),
+            ],
+            || {
+                assert_eq!(
+                    var("GROK_CONFIG").unwrap(),
+                    r#"{"models":{"default":"from-amore"}}"#
+                );
+                assert_eq!(
+                    var("AMORE_CONFIG").unwrap(),
+                    r#"{"models":{"default":"from-amore"}}"#
+                );
+            },
+        );
+    }
+
+    #[test]
+    fn config_legacy_fallback_when_primary_absent() {
+        with_env(
+            &[
+                ("AMORE_CONFIG", None),
+                ("GROK_CONFIG", Some(r#"{"models":{"default":"from-grok"}}"#)),
+            ],
+            || {
+                assert_eq!(
+                    var("GROK_CONFIG").unwrap(),
+                    r#"{"models":{"default":"from-grok"}}"#
+                );
+                assert_eq!(
+                    var("AMORE_CONFIG").unwrap(),
+                    r#"{"models":{"default":"from-grok"}}"#
+                );
+            },
+        );
+    }
+
+    #[test]
+    fn config_path_primary_wins_when_both_present() {
+        with_env(
+            &[
+                ("AMORE_CONFIG_PATH", Some("/amore/overlay.toml")),
+                ("GROK_CONFIG_PATH", Some("/grok/overlay.toml")),
+            ],
+            || {
+                assert_eq!(var("GROK_CONFIG_PATH").unwrap(), "/amore/overlay.toml");
+                assert_eq!(var("AMORE_CONFIG_PATH").unwrap(), "/amore/overlay.toml");
+            },
+        );
+    }
+
+    #[test]
+    fn config_path_legacy_fallback_when_primary_absent() {
+        with_env(
+            &[
+                ("AMORE_CONFIG_PATH", None),
+                ("GROK_CONFIG_PATH", Some("/grok/overlay.toml")),
+            ],
+            || {
+                assert_eq!(var("GROK_CONFIG_PATH").unwrap(), "/grok/overlay.toml");
+                assert_eq!(var("AMORE_CONFIG_PATH").unwrap(), "/grok/overlay.toml");
+            },
+        );
+    }
+
+    #[test]
     fn alias_table_covers_required_surface() {
         let table = alias_table_snapshot();
         let primaries: Vec<_> = table.iter().map(|(p, _)| *p).collect();
@@ -292,6 +364,8 @@ mod tests {
             "AMORE_AUTH",
             "AMORE_AUTH_PATH",
             "AMORE_CLI_CHAT_PROXY_BASE_URL",
+            "AMORE_CONFIG",
+            "AMORE_CONFIG_PATH",
         ] {
             assert!(
                 primaries.contains(&need),

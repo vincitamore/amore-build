@@ -236,13 +236,27 @@ impl SessionActor {
         prompt_id: Option<&str>,
         tool_name: Option<&str>,
     ) {
-        if !self.hook_event_active(event) {
-            return;
+        let _ = self
+            .dispatch_hook_collecting(event, payload, prompt_id, tool_name)
+            .await;
+    }
+
+    /// Same as [`Self::dispatch_hook`], but returns the run results so compact
+    /// can consume `additionalContext`. Empty when no hook listens or no registry.
+    pub(super) async fn dispatch_hook_collecting(
+        &self,
+        event: xai_grok_hooks::event::HookEventName,
+        payload: xai_grok_hooks::event::HookPayload,
+        prompt_id: Option<&str>,
+        tool_name: Option<&str>,
+    ) -> Vec<xai_grok_hooks::result::HookRunResult> {
+        if !self.may_have_hooks_for(event) {
+            return Vec::new();
         }
         // Fires observe-only client hooks before (and independent of) the on-disk registry guard below.
         let envelope = self.fire_hook(event, prompt_id.map(|s| s.to_string()), payload);
         let Some(registry) = self.hook_registry.borrow().clone() else {
-            return;
+            return Vec::new();
         };
         let ctx = self.hook_run_ctx();
         let results =
@@ -252,6 +266,7 @@ impl SessionActor {
             .await;
         self.emit_hook_executed_telemetry(&event.to_string(), tool_name, &results)
             .await;
+        results
     }
 
     pub(super) async fn emit_hook_executed_telemetry(
@@ -379,6 +394,7 @@ mod notification_hook_filter_tests {
                 kind: Default::default(),
                 block_waited: false,
                 explicitly_killed: false,
+                kill_result_delivered: false,
                 owner_session_id: None,
                 description: None,
                 is_backgrounded: false,
