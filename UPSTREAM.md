@@ -139,7 +139,11 @@ pinned origin in `self_update/origin.rs` (`vincitamore/amore-build` on
 version check at interactive startup; user-initiated apply via
 `amore update` or Ctrl+U (fleet transaction with `.sha256` verification,
 staging smoke, and `--rollback`). The bootstrap installer remains a valid
-first-install and recovery path.
+first-install and recovery path. Release tags track the upstream pin
+(`v1.0.6` = upstream `xai-grok-version` 1.0.6 plus the fork's delta); a fix
+cut between two pins is `v<pin>-hotfix.N`, ordered after the pin and before
+the next patch by `self_update/version.rs`, which is the single comparator
+for the update check, `amore update`, and the fleet transaction.
 
 **Test-suite platform coverage (inherited).** The upstream suite is written
 against unix hosts: a substantial set of tests assert unix path shapes, unix

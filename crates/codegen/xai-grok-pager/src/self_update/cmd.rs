@@ -11,6 +11,7 @@ use super::discover;
 use super::fleet::{self, FleetError, TransactionOpts};
 use super::state::{self, FileRecord, InstallState};
 use super::swap::{self, Rollback};
+use super::version::{strip_v, version_cmp, version_key};
 use xai_grok_config::{
     effective_update_channel, updates_disabled_by_env, updates_permitted,
 };
@@ -591,7 +592,7 @@ fn validate_pin_version(version: Option<&str>) -> Result<(), String> {
         return Ok(());
     };
     let bare = strip_v(v);
-    if version_triple(bare).is_none() {
+    if version_key(bare).is_none() {
         return Err(format!(
             "'{v}' is not a valid version. Expected semver like 0.1.150"
         ));
@@ -937,7 +938,7 @@ fn extract_version_token(smoke_out: &str) -> String {
     // Prefer a `vX.Y.Z` or bare semver token from --version output.
     for token in smoke_out.split_whitespace() {
         let bare = strip_v(token.trim_matches(|c: char| !c.is_ascii_alphanumeric() && c != '.' && c != '-'));
-        if version_triple(bare).is_some() {
+        if version_key(bare).is_some() {
             return bare.to_string();
         }
     }
@@ -947,10 +948,6 @@ fn extract_version_token(smoke_out: &str) -> String {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-fn strip_v(s: &str) -> &str {
-    s.strip_prefix('v').unwrap_or(s)
-}
 
 fn normalize_tag(s: &str) -> String {
     let t = s.trim();
@@ -967,28 +964,6 @@ fn short_hash(h: &str) -> String {
     } else {
         format!("{}...", &h[..12])
     }
-}
-
-fn version_cmp(a: &str, b: &str) -> i32 {
-    let ord = match (version_triple(a), version_triple(b)) {
-        (Some(a), Some(b)) => a.cmp(&b),
-        _ => strip_v(a).cmp(strip_v(b)),
-    };
-    match ord {
-        std::cmp::Ordering::Less => -1,
-        std::cmp::Ordering::Equal => 0,
-        std::cmp::Ordering::Greater => 1,
-    }
-}
-
-fn version_triple(s: &str) -> Option<(u64, u64, u64)> {
-    let s = strip_v(s);
-    let core = s.split(['-', '+']).next().unwrap_or(s);
-    let mut parts = core.split('.');
-    let major = parts.next()?.parse().ok()?;
-    let minor = parts.next().unwrap_or("0").parse().ok()?;
-    let patch = parts.next().unwrap_or("0").parse().ok()?;
-    Some((major, minor, patch))
 }
 
 fn rfc3339_now() -> String {

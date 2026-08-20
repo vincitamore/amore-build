@@ -11,6 +11,7 @@ pub mod fleet;
 pub mod origin;
 pub mod state;
 pub mod swap;
+pub mod version;
 
 pub use check::{
     CHECK_CADENCE, CheckConfig, CheckOutcome, DoctorUpdateFacts, INSTALLER_ID, UpdateAvailable,

@@ -13,6 +13,7 @@ use tracing::debug;
 use super::discover::{self, DiscoverError};
 use super::origin::{UPDATE_ORIGIN_HOST, UPDATE_ORIGIN_REPO};
 use super::state::{self, InstallState, StateError};
+use super::version::{is_newer, strip_v, version_cmp};
 use xai_grok_config::{
     UpdateCheckContext, effective_auto_update, effective_update_channel, effective_update_check,
     update_checks_permitted, updates_disabled_by_env, updates_permitted,
@@ -538,10 +539,6 @@ fn try_store(dir: &std::path::Path, state: &InstallState) -> Result<(), StateErr
     state::store_atomic(dir, state)
 }
 
-fn strip_v(s: &str) -> &str {
-    s.strip_prefix('v').unwrap_or(s)
-}
-
 fn normalize_tag(s: &str) -> String {
     let t = s.trim();
     if t.starts_with('v') {
@@ -549,35 +546,6 @@ fn normalize_tag(s: &str) -> String {
     } else {
         format!("v{t}")
     }
-}
-
-fn is_newer(candidate: &str, current: &str) -> bool {
-    version_cmp(candidate, current) > 0
-}
-
-/// Compare dotted numeric versions (optional leading `v`, optional pre-release
-/// suffix ignored for the numeric triple). Returns -1 / 0 / 1.
-fn version_cmp(a: &str, b: &str) -> i32 {
-    let ord = match (version_triple(a), version_triple(b)) {
-        (Some(a), Some(b)) => a.cmp(&b),
-        // Fall back to string compare when unparseable.
-        _ => strip_v(a).cmp(strip_v(b)),
-    };
-    match ord {
-        std::cmp::Ordering::Less => -1,
-        std::cmp::Ordering::Equal => 0,
-        std::cmp::Ordering::Greater => 1,
-    }
-}
-
-fn version_triple(s: &str) -> Option<(u64, u64, u64)> {
-    let s = strip_v(s);
-    let core = s.split(['-', '+']).next().unwrap_or(s);
-    let mut parts = core.split('.');
-    let major = parts.next()?.parse().ok()?;
-    let minor = parts.next().unwrap_or("0").parse().ok()?;
-    let patch = parts.next().unwrap_or("0").parse().ok()?;
-    Some((major, minor, patch))
 }
 
 fn rfc3339(t: SystemTime) -> String {

@@ -30,6 +30,7 @@ use super::discover::{self, Component};
 use super::fetch::{self, StagedArtifact};
 use super::state::{self, FileRecord, InstallState, TargetRecord};
 use super::swap::{self, Rollback};
+use super::version::{strip_v, version_cmp};
 
 /// Transaction marker filename (beside the install-state file).
 pub const MARKER_FILE_NAME: &str = ".update-in-progress.json";
@@ -1239,10 +1240,6 @@ pub fn restart_daemon(id: &str, binary: &Path) -> Result<(), FleetError> {
     }
 }
 
-fn strip_v(s: &str) -> &str {
-    s.strip_prefix('v').unwrap_or(s)
-}
-
 fn normalize_tag(s: &str) -> String {
     let t = s.trim();
     if t.starts_with('v') {
@@ -1250,28 +1247,6 @@ fn normalize_tag(s: &str) -> String {
     } else {
         format!("v{t}")
     }
-}
-
-fn version_cmp(a: &str, b: &str) -> i32 {
-    let ord = match (version_triple(a), version_triple(b)) {
-        (Some(a), Some(b)) => a.cmp(&b),
-        _ => strip_v(a).cmp(strip_v(b)),
-    };
-    match ord {
-        std::cmp::Ordering::Less => -1,
-        std::cmp::Ordering::Equal => 0,
-        std::cmp::Ordering::Greater => 1,
-    }
-}
-
-fn version_triple(s: &str) -> Option<(u64, u64, u64)> {
-    let s = strip_v(s);
-    let core = s.split(['-', '+']).next().unwrap_or(s);
-    let mut parts = core.split('.');
-    let major = parts.next()?.parse().ok()?;
-    let minor = parts.next().unwrap_or("0").parse().ok()?;
-    let patch = parts.next().unwrap_or("0").parse().ok()?;
-    Some((major, minor, patch))
 }
 
 fn rfc3339_now() -> String {

@@ -76,6 +76,11 @@ Kill every update path with `AMORE_DISABLE_UPDATES=1` (or legacy
 unattended install loop. Re-running the bootstrap installer remains valid
 and keeps `amore.prev` for rollback.
 
+**Release tags follow the upstream pin.** `v1.0.6` is upstream grok-build
+1.0.6 plus this fork's delta. A fix shipped between two pins is tagged
+`v1.0.6-hotfix.1`; `amore update` orders it after `v1.0.6` and before
+`v1.0.7`, so a hotfix is offered like any other release.
+
 ### First session
 
 The one-liner installs the `amore` binary only; the house and the iris
