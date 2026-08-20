@@ -1,11 +1,20 @@
 use std::fmt::Write as _;
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use xai_grok_telemetry::startup::{AgentKind, PhaseSnapshot, StartupPhase, format_duration};
 
+use crate::app::connect_timeout::connect_ui_timeout_try_command;
+
 use super::{ConnectAttempt, Context, EarlierAttempt, Reason, StartupFailure};
 
 const WRAP_WIDTH: usize = 76;
+
+/// `<bin> leader kill` for the invoked binary, resolved once per process.
+fn leader_kill_command() -> &'static str {
+    static CMD: OnceLock<String> = OnceLock::new();
+    CMD.get_or_init(|| format!("{} leader kill", crate::app::cli::resolved_bin_name()))
+}
 
 pub(super) fn render(failure: &StartupFailure) -> String {
     let context = &failure.context;
@@ -73,6 +82,18 @@ impl Advice {
             );
         }
         let _ = write!(explanation, " {}", self.next_step.text());
+        // Only where waiting longer can help: a wedged leader never becomes
+        // ready, so pairing this with "stop the leader" would contradict it.
+        if matches!(
+            self.next_step,
+            NextStep::Retry | NextStep::CheckNetworkThenRetry
+        ) {
+            let _ = write!(
+                explanation,
+                " On a slow machine or network filesystem, a larger startup \
+                 budget can help — set it with the command below."
+            );
+        }
         explanation
     }
 }
@@ -150,8 +171,8 @@ impl NextStep {
     /// Kept out of the prose so wrapping can never split it.
     fn command(self) -> Option<&'static str> {
         match self {
-            Self::Retry | Self::CheckNetworkThenRetry => None,
-            Self::RestartSharedLeader => Some("grok leader kill"),
+            Self::Retry | Self::CheckNetworkThenRetry => Some(connect_ui_timeout_try_command()),
+            Self::RestartSharedLeader => Some(leader_kill_command()),
         }
     }
 }

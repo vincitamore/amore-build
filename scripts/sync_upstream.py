@@ -435,6 +435,14 @@ def cmd_verify(dry_run: bool) -> int:
         COMPLETIONS_FILE, "resolved_bin_name()",
         "shell completions name after the invoked binary", problems)
     _check_file_contains(
+        "crates/codegen/xai-grok-pager/src/app/connect_timeout.rs",
+        "resolved_bin_name()",
+        "startup-failure connect-budget Try row names the invoked binary", problems)
+    _check_file_contains(
+        "crates/codegen/xai-grok-pager/src/app/startup_failure/render.rs",
+        "resolved_bin_name()",
+        "startup-failure leader-kill Try row names the invoked binary", problems)
+    _check_file_contains(
         "crates/codegen/xai-grok-shell/src/extensions/consent.rs",
         "Run `amore login` to re-authenticate.",
         "consent record auth error names the product login command", problems)
