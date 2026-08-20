@@ -305,9 +305,12 @@ export function whichOnPath(name: string): string | null {
     }
   }
   try {
+    // The daemon runs without a console of its own; every child it spawns must
+    // be hidden or Windows opens a visible console window for it.
     const r = spawnSync(process.platform === 'win32' ? 'where.exe' : 'which', [name], {
       encoding: 'utf8',
       timeout: 2000,
+      windowsHide: true,
     });
     if (r.status === 0 && r.stdout) {
       const line = r.stdout.split(/\r?\n/).map((s) => s.trim()).find(Boolean);
@@ -334,6 +337,7 @@ export function resolveJsRuntime(
       const r = spawnSync(node, ['-p', 'process.versions.node'], {
         encoding: 'utf8',
         timeout: 2000,
+        windowsHide: true,
       });
       if (r.status === 0) {
         const ver = (r.stdout ?? '').trim();
@@ -384,7 +388,11 @@ export function detectGlobalQmdJs(): string | null {
   try {
     const npm = whichOnPath('npm');
     if (npm) {
-      const r = spawnSync(npm, ['root', '-g'], { encoding: 'utf8', timeout: 8000 });
+      const r = spawnSync(npm, ['root', '-g'], {
+        encoding: 'utf8',
+        timeout: 8000,
+        windowsHide: true,
+      });
       if (r.status === 0 && r.stdout?.trim()) {
         candidates.push(join(r.stdout.trim(), '@tobilu', 'qmd', 'dist', 'cli', 'qmd.js'));
       }
