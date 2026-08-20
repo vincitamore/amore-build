@@ -1212,9 +1212,12 @@ pub fn restart_daemon(id: &str, binary: &Path) -> Result<(), FleetError> {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
+        // A hidden console of its own rather than no console at all: console
+        // children the daemon spawns later inherit it instead of each opening
+        // a visible window on the desktop.
         const CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
-        const DETACHED_PROCESS: u32 = 0x00000008;
-        cmd.creation_flags(CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS);
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        cmd.creation_flags(CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW);
     }
     #[cfg(unix)]
     {
