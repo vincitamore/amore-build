@@ -6,6 +6,30 @@ monorepo sync commits; everything below is the fork's own delta, newest first.
 This document is compiled into the binary — update it in the same change as the
 work it describes.
 
+## v1.0.6
+
+- **No more console windows flashing on Windows** — the iris daemon spawned
+  its qmd runtime probes without a hidden window, so every status check,
+  search and index refresh flashed a `node.exe` console on the desktop. The
+  probes are hidden now, and the fleet updater relaunches daemons with a
+  hidden console of their own instead of none.
+- **Hotfix tags** — release tags track the upstream pin (`v1.0.6` is upstream
+  1.0.6 plus the fork's delta); a fix cut between two pins is
+  `v1.0.6-hotfix.1`, which `amore update` orders after `v1.0.6` and before
+  `v1.0.7`. Fleets on this release or later are offered hotfixes.
+- **Startup-failure advice names your binary** — the "try a larger startup
+  budget" and "stop the shared leader" commands on the startup-failure screen
+  say `amore`, not `grok`.
+- **Status line** — a configurable status line under the prompt: model, cost,
+  context use, session name, and custom command segments that re-run on a
+  timer (`refresh_interval`). See `docs/user-guide/25-status-line.md`.
+- **Permissions** — tool approvals are remembered by default, and "Never
+  allow" is persistent for MCP tools and web-fetch domains.
+- **Also** — compact on a model-family switch, identical tool-call loops are
+  interrupted earlier (two tiers), paused workflows stay visible, e-mail
+  addresses render as `mailto:` links, and `GROK_CONNECT_UI_TIMEOUT_SECS`
+  raises the startup connect budget.
+
 ## v1.0.5
 
 - **House compact packet** — after compact, the successor sees the house
