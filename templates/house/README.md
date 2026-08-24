@@ -41,6 +41,6 @@ Document schemas live in [[AGENTS]] and in each folder's README.
 4. Surface **due reminders** (SessionStart hook assists; you still own the check)
 
 Then work. Before ending: update current-state if reality changed, resolve inbox
-same-breath, commit with a message the next session can orient from.
+same-breath. Commit and push as facts land — not a leave dump.
 
 Related: [[context/README]] · [[forge/README]] · [[reminders/README]]

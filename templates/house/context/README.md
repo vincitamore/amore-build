@@ -20,7 +20,7 @@ always-on briefing. See [[AGENTS]] § Context-surface discipline.
 ## Schema notes
 
 - **current-state** is dynamic state, not doctrine. The session that changes
-  reality updates it before ending. New changes land under
+  reality updates it in the same change. New changes land under
   `## Recent structural changes (DATE)`; the word budget is the lineage ceiling
   (~6,000, matching `iris regula lint`) - raise deliberately, never silently.
 - **previous-state** is the append-only archive. Dated sections migrate here

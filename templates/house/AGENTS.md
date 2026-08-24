@@ -54,13 +54,13 @@ them; keep a local note if you intentionally disable.
 investigations / ideas → `inbox/`; new work → `tasks/`; time-bound →
 `reminders/`; focus shift → `context/current-state.md`; resolved inbox →
 terminal fields + move to `inbox/<type>/resolved/` same-breath; durable work
-not on origin → commit (push per operator policy).
+still uncommitted → commit and push **now**, not at leave.
 
 ## Orientation
 
 1. **This file** - identity, structure, disciplines.
 2. **`context/current-state.md`** - where the last session left off; the session
-   that changes reality updates it before ending.
+   that changes reality updates it in the same change.
 3. **The active task** it points to (under `tasks/`).
 
 At arrival: run this ladder, then surface **due reminders**. The SessionStart
@@ -278,16 +278,17 @@ Path-style, extension omitted (`[[tasks/completed/example-task]]`).
   reminders, then work. SessionStart assists; you still own the read.
 - **Work:** keep the task file current; capture reusable insight to `knowledge/`;
   file open questions and decisions to `inbox/`, resolving same-breath.
+  **Commit and push in the same breath as the fact** — not a leave dump.
 - **Evidence bar:** an absence claim is a claim - enumerate fully (never
   truncate a listing between search and conclusion), filter by predicate and
   count, re-run when the claim goes durable.
-- **Leave:** run `iris regula lint` when the companion is installed (errors
-  fail; warnings are the open data-quality queue), update
-  [[context/current-state]] (standing reality only; keep it short enough to
-  re-read every session - new changes land under
+- **Leave:** a tidy-check, not the moment the house becomes tidy. Run
+  `iris regula lint` when the companion is installed (errors fail; warnings
+  are the open data-quality queue). If [[context/current-state]] still lags
+  standing reality, update it (standing reality only; new changes land under
   `## Recent structural changes (DATE)`; aged sections migrate to
-  `context/previous-state.md`), commit with a message the next session can
-  orient from, push per operator policy.
+  `context/previous-state.md`). A dirty tree at leave is a defect of Work —
+  commit whatever remains, then push.
 - **Honesty over polish:** "I could not do X, here is where I stopped and why"
   beats papering over a gap.
 - Answer mechanical steps directly; spend depth where the problem needs it.
