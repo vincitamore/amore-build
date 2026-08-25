@@ -69,7 +69,65 @@ export function formatPeers(entries: PresenceEntry[]): string {
   return `Peers: ${entries.length} LIVE — ${parts.join(' · ')}`;
 }
 
+export interface CoordMessage {
+  msgid: string;
+  kind: string;
+  ts?: string;
+  from?: { seat?: string; harness?: string; session_id?: string };
+  text?: string;
+}
+
+function coordRoot(): string {
+  const over = process.env.HOUSE_COORD_DIR;
+  if (over && over.length > 0) return join(over, '..');
+  return join(homedir(), '.house', 'coord');
+}
+
+export function readMessages(limit = 20): CoordMessage[] {
+  const dir = join(coordRoot(), 'log');
+  let names: string[] = [];
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return [];
+  }
+  const all: CoordMessage[] = [];
+  for (const name of names) {
+    if (!name.endsWith('.ndjson')) continue;
+    try {
+      const body = readFileSync(join(dir, name), 'utf8');
+      for (const line of body.split('\n')) {
+        if (!line.trim()) continue;
+        try {
+          all.push(JSON.parse(line) as CoordMessage);
+        } catch {
+          // skip bad line
+        }
+      }
+    } catch {
+      // skip unreadable log
+    }
+  }
+  all.sort((a, b) => (a.ts || '').localeCompare(b.ts || ''));
+  return all.slice(-limit);
+}
+
+export function formatMessages(entries: CoordMessage[]): string {
+  if (entries.length === 0) return 'none';
+  const last = entries[entries.length - 1];
+  const ident = last?.from
+    ? `${last.from.seat || '?'}/${last.from.harness || '?'}`
+    : '?';
+  const body = (last?.text || '').slice(0, 48);
+  return `${entries.length} · last ${ident}: ${body}`;
+}
+
 export function coordPresence(): Response {
   const entries = readRoster();
   return json({ entries, line: formatPeers(entries) });
+}
+
+export function coordMessages(): Response {
+  const entries = readMessages();
+  return json({ entries, line: formatMessages(entries) });
 }

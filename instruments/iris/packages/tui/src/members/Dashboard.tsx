@@ -19,7 +19,7 @@ import { type Palette } from '../theme';
 import { useHoverThrottle } from '../use-hover-throttle';
 import { useRefreshOnActive } from '../use-refresh-on-active';
 import { runSpeculum } from '../speculum/speculum-spawn';
-import { formatPeers, readRoster } from '../coord/presence';
+import { formatMessages, formatPeers, readMessages, readRoster } from '../coord/presence';
 import { Panel } from '../components/Panel';
 import { Stat } from '../components/Stat';
 import {
@@ -430,6 +430,11 @@ export function Dashboard({
     } catch {
       setPeersLine('0 LIVE');
     }
+    try {
+      setMessagesLine(formatMessages(readMessages()));
+    } catch {
+      setMessagesLine('none');
+    }
     return () => {
       alive = false;
     };
@@ -462,6 +467,7 @@ export function Dashboard({
   /** Speculum status freshness pulse — once at mount, again on re-activation. */
   const [speculumPulse, setSpeculumPulse] = useState<SpeculumPulseView | null>(null);
   const [peersLine, setPeersLine] = useState('…');
+  const [messagesLine, setMessagesLine] = useState('…');
   const speculumMounted = useRef(true);
   useEffect(() => {
     speculumMounted.current = true;
@@ -658,6 +664,12 @@ export function Dashboard({
         <text fg={t.foreground}> Peers</text>
         <box flexGrow={1} />
         <text fg={t.muted}>{peersLine}</text>
+      </box>
+      <box flexDirection="row">
+        <text fg={messagesLine !== 'none' && messagesLine !== '…' ? t.info : t.muted}>●</text>
+        <text fg={t.foreground}> Mail</text>
+        <box flexGrow={1} />
+        <text fg={t.muted}>{messagesLine}</text>
       </box>
       <box flexDirection="row">
         <text fg={forgeReview > 0 ? t.secondary : t.muted}>●</text>

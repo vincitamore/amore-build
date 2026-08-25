@@ -15,7 +15,7 @@ use std::process::Command;
 
 use serde::{Deserialize, Serialize};
 
-const HARNESS: &str = "amore";
+pub(crate) const HARNESS: &str = "amore";
 
 /// Serializes tests that mutate `HOUSE_COORD_DIR` (process-global).
 #[cfg(test)]
@@ -39,6 +39,28 @@ pub struct Presence {
     pub work_unit: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
+    /// Loopback IPC for wake (`unix:/path` or `tcp:127.0.0.1:port`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub socket: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub socket_token: Option<String>,
+}
+
+pub mod cmd;
+pub mod log;
+pub mod msg;
+pub mod send;
+pub mod socket;
+
+pub use msg::{Disposition, Envelope, wrap_prompt};
+pub use socket::{Inbound, spawn_listener};
+
+/// Parent of the presence directory (`~/.house/coord`).
+pub fn coord_root() -> PathBuf {
+    presence_dir()
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(presence_dir)
 }
 
 /// `~/.house/coord/presence`, or `$HOUSE_COORD_DIR` when set.
@@ -59,7 +81,7 @@ fn dirs_home() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
 }
 
-fn seat() -> String {
+pub(crate) fn seat() -> String {
     std::env::var("HOUSE_SEAT")
         .ok()
         .filter(|s| !s.is_empty())
@@ -83,7 +105,7 @@ fn pname_of_self() -> Option<String> {
         .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
 }
 
-fn entry_path(dir: &Path, harness: &str, pid: u32) -> PathBuf {
+pub(crate) fn entry_path(dir: &Path, harness: &str, pid: u32) -> PathBuf {
     let safe: String = harness
         .chars()
         .map(|c| {
@@ -169,6 +191,8 @@ pub fn start(session_id: Option<&str>, cwd: &str) {
         started: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
         work_unit: None,
         session_id: session_id.map(str::to_string),
+        socket: socket::listen_addr(),
+        socket_token: socket::listen_token(),
     };
     let path = entry_path(&dir, HARNESS, pid);
     let tmp = path.with_extension("tmp");
@@ -279,6 +303,8 @@ fn union_active_sessions(entries: &mut Vec<Presence>) {
             started: s.opened_at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
             work_unit: None,
             session_id: Some(s.session_id.0.to_string()),
+            socket: None,
+            socket_token: None,
         });
     }
 }
@@ -320,6 +346,26 @@ pub fn format_roster(entries: &[Presence], self_pid: Option<u32>) -> String {
 
 pub fn peers_line() -> String {
     format_roster(&roster(), Some(std::process::id()))
+}
+
+/// Stamp this process's presence file with the listen address. Fail-soft.
+pub(crate) fn patch_self_socket(addr: &str, token: &str) {
+    let dir = presence_dir();
+    let path = entry_path(&dir, HARNESS, std::process::id());
+    let Ok(text) = fs::read_to_string(&path) else {
+        return;
+    };
+    let Ok(mut e) = serde_json::from_str::<Presence>(&text) else {
+        return;
+    };
+    e.socket = Some(addr.to_string());
+    e.socket_token = Some(token.to_string());
+    if let Ok(body) = serde_json::to_string_pretty(&e) {
+        let tmp = path.with_extension("tmp");
+        if fs::write(&tmp, body).is_ok() {
+            let _ = fs::rename(&tmp, &path);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -384,6 +430,8 @@ mod tests {
                 started: "2026-01-01T00:00:00Z".into(),
                 work_unit: None,
                 session_id: None,
+                socket: None,
+                socket_token: None,
             };
             fs::write(
                 dir.join("cursor-1.json"),

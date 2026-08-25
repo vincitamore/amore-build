@@ -63,3 +63,46 @@ export function formatPeers(entries: PresenceEntry[]): string {
   });
   return `${entries.length} LIVE — ${parts.join(' · ')}`;
 }
+
+function coordRoot(): string {
+  const over = process.env.HOUSE_COORD_DIR;
+  if (over && over.length > 0) return join(over, '..');
+  return join(homedir(), '.house', 'coord');
+}
+
+export function readMessages(limit = 20): { from?: { seat?: string; harness?: string }; text?: string; ts?: string }[] {
+  const dir = join(coordRoot(), 'log');
+  let names: string[] = [];
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return [];
+  }
+  const all: { from?: { seat?: string; harness?: string }; text?: string; ts?: string }[] = [];
+  for (const name of names) {
+    if (!name.endsWith('.ndjson')) continue;
+    try {
+      for (const line of readFileSync(join(dir, name), 'utf8').split('\n')) {
+        if (!line.trim()) continue;
+        try {
+          all.push(JSON.parse(line));
+        } catch {
+          // skip
+        }
+      }
+    } catch {
+      // skip
+    }
+  }
+  all.sort((a, b) => (a.ts || '').localeCompare(b.ts || ''));
+  return all.slice(-limit);
+}
+
+export function formatMessages(
+  entries: { from?: { seat?: string; harness?: string }; text?: string }[],
+): string {
+  if (entries.length === 0) return 'none';
+  const last = entries[entries.length - 1];
+  const ident = last?.from ? `${last.from.seat || '?'}/${last.from.harness || '?'}` : '?';
+  return `${entries.length} · last ${ident}: ${(last?.text || '').slice(0, 40)}`;
+}

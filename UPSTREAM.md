@@ -123,6 +123,12 @@ seat. New houses stamped by `amore init` emit Peers and Origin at
 session start. The welcome splash and the iris Dashboard Pulse show
 the same live roster.
 
+**Addressed send.** `amore coord send` delivers to a live session over a
+loopback socket (idle starts a turn; busy enqueues). Cross-seat delivery
+uses the same tailnet rails as push notices, with the inbox drop as
+fallback. Claude Code sessions participate when their presence entry
+carries a socket; no vendor transit.
+
 **`amore init`.** Installs the embedded harness into a target repo
 (ownership/refresh policy; offline for the pack itself).
 

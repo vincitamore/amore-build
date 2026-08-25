@@ -29,7 +29,7 @@ import { searchRoute } from './routes/search.ts';
 import { graphRoute } from './routes/graph.ts';
 import { listProjects, projectFile, projectTree } from './routes/projects.ts';
 import { daemonStatus } from './routes/daemon-status.ts';
-import { coordPresence } from './routes/coord.ts';
+import { coordMessages, coordPresence } from './routes/coord.ts';
 import { lucernaRoute } from './routes/lucerna.ts';
 
 const FILES_PREFIX = '/api/files/';
@@ -69,6 +69,8 @@ function handle(deps: DaemonDeps, req: Request): Response | Promise<Response> {
       return daemonStatus(deps.config);
     case '/api/coord/presence':
       return coordPresence();
+    case '/api/coord/messages':
+      return coordMessages();
     case '/api/launch-presets':
       return launchPresets(deps.config);
     case '/api/files':

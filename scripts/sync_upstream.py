@@ -433,6 +433,16 @@ def cmd_verify(dry_run: bool) -> int:
         "crate::coord::stop",
         "process exit removes the seat-roster entry",
         problems)
+    _check_file_contains(
+        "crates/codegen/xai-grok-pager-bin/src/main.rs",
+        "Command::Coord(_)",
+        "process_identity covers the fork-owned Coord command",
+        problems)
+    _check_file_contains(
+        "crates/codegen/xai-grok-pager/src/app/event_loop.rs",
+        "handle_coord_inbound",
+        "event loop consumes the session-socket wake channel",
+        problems)
 
     # 6. fork-owned surface boundary (Phase-2 script, if present)
     if (REPO / BOUNDARY_SCRIPT).exists():

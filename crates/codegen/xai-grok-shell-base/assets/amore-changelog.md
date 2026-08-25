@@ -14,6 +14,12 @@ work it describes.
   session start (the model sees them as a system-reminder). The welcome
   splash and the iris Dashboard Pulse show the same live roster, so two
   sessions on one seat can name each other.
+- **Addressed send that wakes** — `amore coord send <seat|session> <text>`
+  delivers to a live session over a loopback socket (unix domain on POSIX,
+  token-gated TCP 127.0.0.1 on Windows). An idle session starts a turn
+  with the message as a `<cross-session-message>` block; a busy session
+  enqueues and drains at the next turn. Unreachable seats drop to the
+  inbox. iris Pulse shows Mail next to Peers.
 - **Also** — in-process `/minimal` and `/fullscreen`, plugin marketplace
   CTAs, feedback image attachments, MCP elicitation, workflow remote-bundle
   load plus `agent_budget`, Ctrl+S prompt stash, and a concurrent

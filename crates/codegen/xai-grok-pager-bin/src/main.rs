@@ -58,6 +58,7 @@ fn process_identity(command: Option<&Command>, is_interactive: bool) -> Option<P
             Command::Inspect { .. }
             | Command::Doctor(_)
             | Command::Init(_)
+            | Command::Coord(_)
             | Command::Leader(_)
             | Command::Logout
             | Command::Mcp(_)
@@ -1888,6 +1889,16 @@ fn dispatch_init_if_requested(args: &PagerArgs) -> bool {
     }
     true
 }
+fn dispatch_coord_if_requested(args: &PagerArgs) -> bool {
+    let Some(Command::Coord(coord_args)) = &args.command else {
+        return false;
+    };
+    if let Err(error) = xai_grok_pager::coord::cmd::run(coord_args.clone()) {
+        eprintln!("Error: {error:#}");
+        std::process::exit(1);
+    }
+    true
+}
 /// Early-dispatch first-run wizard (`amore setup` without `--managed`/`--json`).
 /// Managed config stays on the async command path.
 fn dispatch_setup_wizard_if_requested(args: &PagerArgs) -> bool {
@@ -1942,6 +1953,7 @@ fn main_body() {
     if dispatch_version_if_requested(&args)
         || dispatch_doctor_if_requested(&args)
         || dispatch_init_if_requested(&args)
+        || dispatch_coord_if_requested(&args)
         || dispatch_setup_wizard_if_requested(&args)
     {
         return;
@@ -2137,6 +2149,9 @@ async fn async_main(args: PagerArgs) -> Result<()> {
             }
             Command::Init(_) => {
                 unreachable!("init was consumed before runtime startup")
+            }
+            Command::Coord(_) => {
+                unreachable!("coord was consumed before runtime startup")
             }
             // Non-managed setup is early-dispatched; managed falls through below.
             Command::Inspect { json } => {

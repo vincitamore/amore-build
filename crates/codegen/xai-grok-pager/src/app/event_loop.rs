@@ -1942,6 +1942,10 @@ pub(crate) async fn run(
     let mut acp_peek: Option<AcpClientMessage> = None;
     let (progress_tx, mut progress_rx) =
         tokio::sync::mpsc::unbounded_channel::<effects::RestoreProgressMsg>();
+    let (coord_tx, mut coord_rx) =
+        tokio::sync::mpsc::unbounded_channel::<crate::coord::Inbound>();
+    crate::coord::spawn_listener(coord_tx.clone());
+    let _coord_keepalive = coord_tx;
 
     // Voice STT pipeline is started lazily on first successful `/voice` (see
     // `VoiceState::ColdStart`), not at launch — avoids background work for users
@@ -2585,6 +2589,14 @@ pub(crate) async fn run(
                 let effs = dispatch::dispatch(Action::Quit, &mut app);
                 let _ = process_effects(effs, &mut tasks, &mut app, &progress_tx);
                 break;
+            }
+
+            inbound = coord_rx.recv() => {
+                if let Some(inbound) = inbound {
+                    let disp = handle_coord_inbound(&mut app, inbound.envelope, &mut tasks, &progress_tx);
+                    let _ = inbound.reply.send(disp);
+                    presenter.request(false);
+                }
             }
 
             writer_event = writer_event_rx.recv() => {
@@ -4502,6 +4514,37 @@ fn dispatch_then_forward(
         effects.extend(dispatch::dispatch(follow_up, app));
     }
     effects
+}
+
+fn handle_coord_inbound(
+    app: &mut AppView,
+    envelope: crate::coord::Envelope,
+    tasks: &mut JoinSet<TaskResult>,
+    progress_tx: &tokio::sync::mpsc::UnboundedSender<effects::RestoreProgressMsg>,
+) -> crate::coord::Disposition {
+    crate::coord::log::append(&envelope, false);
+    if !envelope.is_message() {
+        return crate::coord::Disposition::Deferred;
+    }
+    let ActiveView::Agent(id) = app.active_view else {
+        crate::coord::log::drop_inbox(&envelope);
+        return crate::coord::Disposition::Inbox;
+    };
+    let idle = app
+        .agents
+        .get(&id)
+        .map(|a| a.session.state.is_idle())
+        .unwrap_or(false);
+    let from = envelope.from.ident();
+    app.show_toast(&format!("Message from {from}"));
+    let text = crate::coord::wrap_prompt(&envelope);
+    let effs = dispatch::dispatch(Action::SendPrompt(text), app);
+    let _ = process_effects(effs, tasks, app, progress_tx);
+    if idle {
+        crate::coord::Disposition::Woken
+    } else {
+        crate::coord::Disposition::Enqueued
+    }
 }
 
 /// Spawn effects into the task set. Returns `true` if the app should quit.

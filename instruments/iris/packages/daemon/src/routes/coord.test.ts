@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { formatPeers, readRoster } from './coord.ts';
+import { formatMessages, formatPeers, readRoster } from './coord.ts';
 
 describe('coord presence roster', () => {
   test('empty dir is zero live', () => {
@@ -44,6 +44,19 @@ describe('coord presence roster', () => {
       expect(formatPeers(entries)).toContain('1 LIVE');
       expect(formatPeers(entries)).toContain('amore');
     } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('empty log dir is none', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'iris-coord-log-'));
+    const prev = process.env.HOUSE_COORD_DIR;
+    process.env.HOUSE_COORD_DIR = join(dir, 'presence');
+    try {
+      expect(formatMessages([])).toBe('none');
+    } finally {
+      if (prev === undefined) delete process.env.HOUSE_COORD_DIR;
+      else process.env.HOUSE_COORD_DIR = prev;
       rmSync(dir, { recursive: true, force: true });
     }
   });

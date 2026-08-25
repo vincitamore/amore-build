@@ -6,6 +6,11 @@
   },
   {
     "category": "features",
+    "description": "**Addressed send that wakes** — `amore coord send <seat|session> <text>` delivers to a live session over a loopback socket. An idle session starts a turn with the message; a busy session enqueues and drains at the next turn. Unreachable seats drop to the inbox. iris Pulse shows Mail next to Peers.",
+    "breaking_change": false
+  },
+  {
+    "category": "features",
     "description": "**Also** — in-process `/minimal` and `/fullscreen`, plugin marketplace CTAs, feedback image attachments, MCP elicitation, workflow remote-bundle load plus `agent_budget`, Ctrl+S prompt stash, and a concurrent subagent sampling gate. `xai-grok-version` tracks upstream 1.0.8.",
     "breaking_change": false
   },

@@ -44,7 +44,11 @@ fail-soft fetch, then due reminders if any, then a one-line orientation
 pointer (`AGENTS.md → context/current-state.md → active task`). `0 LIVE`
 is a finding; silence is the failure mode. Silent success (empty stdout,
 exit 0) only when the cwd is not a house. Python stdlib only, <5s budget,
-fail-open. `bin/coord_presence.py` is the roster script.
+fail-open. `bin/coord_presence.py` is the roster script (`start`/`stop`/`roster`/`delta`/`notices`/`send`).
+Addressed `send` posts to a live session socket when the roster carries one,
+otherwise drops `kind: message` into `~/.house/coord/inbox/`. Cross-seat
+delivery is `amore coord send` plus a `~/.house/coord/seats` file
+(`name user@host inbox-path`).
 
 SessionStart `additionalContext` is forwarded into the conversation as a
 system-reminder. The harness also writes and removes the same roster

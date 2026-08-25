@@ -412,7 +412,7 @@ def notices(consume: bool = True) -> list[dict]:
             e = json.loads(f.read_text(encoding="utf-8"))
         except Exception:
             continue  # unreadable: leave for inspection, never delete blind
-        known = e.get("kind") == "push"
+        known = e.get("kind") in ("push", "message")
         e["_known"] = known
         out.append(e)
         if consume and known:
@@ -434,6 +434,12 @@ def format_notices(entries: list[dict]) -> str | None:
             lines.append(f"**Notice**: unhandled kind '{e.get('kind')}' in inbox (left in place)")
             continue
         ts = (e.get("ts") or "")[11:16]
+        if e.get("kind") == "message":
+            src = e.get("from") or {}
+            ident = f"{src.get('seat', '?')}/{src.get('harness', '?')}"
+            body = (e.get("text") or "")[:160]
+            lines.append(f"**Message** from {ident}: {body}")
+            continue
         lines.append(
             f"**Notice**: push {e.get('repo')}/{e.get('branch')} by {e.get('pusher')}"
             f" — {e.get('commits')} commit(s), authors: {e.get('authors')}; dirs: {e.get('dirs')}"
@@ -446,9 +452,64 @@ def format_notices(entries: list[dict]) -> str | None:
 
 # --- CLI -------------------------------------------------------------------
 
+def _post_socket(addr: str, token: str, envelope: dict) -> str:
+    import socket as sk
+    auth = json.dumps({"type": "auth", "token": token}) + "\n"
+    send = json.dumps({"type": "send", "envelope": envelope}) + "\n"
+    payload = (auth + send).encode("utf-8")
+    if addr.startswith("unix:"):
+        s = sk.socket(sk.AF_UNIX, sk.SOCK_STREAM)
+        s.settimeout(4)
+        s.connect(addr[5:])
+    elif addr.startswith("tcp:"):
+        host, port = addr[4:].rsplit(":", 1)
+        s = sk.create_connection((host, int(port)), timeout=4)
+    else:
+        raise ValueError(f"unknown socket addr {addr}")
+    try:
+        s.sendall(payload)
+        return s.recv(4096).decode("utf-8", "replace")
+    finally:
+        s.close()
+
+
+def send(target: str, text: str) -> str:
+    """Addressed send. Live local socket if the roster has one; else inbox drop."""
+    import uuid
+    entries = roster()
+    hit = None
+    t = target.lower()
+    for e in entries:
+        sid = str(e.get("session_id") or "")
+        ident = f"{e.get('seat')}/{e.get('harness')}/{sid}".lower()
+        if sid == target or ident == t or f"{e.get('seat')}/{e.get('harness')}".lower() == t or str(e.get("seat", "")).lower() == t:
+            hit = e
+            break
+    env = {
+        "msgid": str(uuid.uuid4()),
+        "kind": "message",
+        "ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "from": {"seat": os.environ.get("COMPUTERNAME") or os.environ.get("HOSTNAME") or "unknown",
+                 "harness": os.environ.get("HOUSE_HARNESS", "amore")},
+        "to": None,
+        "text": text,
+    }
+    if hit and hit.get("socket") and hit.get("socket_token"):
+        try:
+            raw = _post_socket(hit["socket"], hit["socket_token"], env)
+            return f"sent via socket: {raw.strip()}"
+        except Exception as exc:
+            return f"socket failed ({exc.__class__.__name__}); dropping to inbox"
+    inbox = PRESENCE_DIR.parent / "inbox"
+    inbox.mkdir(parents=True, exist_ok=True)
+    (inbox / f"{env['msgid']}.json").write_text(json.dumps(env, indent=1), encoding="utf-8")
+    return f"dropped to inbox {env['msgid']}"
+
+
 def _cli(argv: list[str]) -> int:
     verb = argv[0] if argv else "roster"
     opts: dict[str, str] = {}
+    rest: list[str] = []
     i = 1
     while i < len(argv):
         if argv[i].startswith("--"):
@@ -457,6 +518,7 @@ def _cli(argv: list[str]) -> int:
             opts[key] = val
             i += 2 if val != "1" or (i + 1 < len(argv) and argv[i + 1] == "1") else 1
         else:
+            rest.append(argv[i])
             i += 1
     pid = int(opts["pid"]) if "pid" in opts else None
 
@@ -486,6 +548,11 @@ def _cli(argv: list[str]) -> int:
         line = format_notices(notices(consume="peek" not in opts))
         if line:
             print(line)
+    elif verb == "send":
+        if not rest:
+            print("usage: coord_presence.py send <target> <message>", file=sys.stderr)
+            return 0
+        print(send(rest[0], " ".join(rest[1:])))
     else:
         print(f"unknown verb: {verb}", file=sys.stderr)
         return 0  # fail-soft

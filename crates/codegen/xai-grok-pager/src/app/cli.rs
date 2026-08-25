@@ -156,6 +156,8 @@ See ~/.amore/README.md for more information.
     /// `GROK_WORKSPACE_COMMAND=1` to enable it locally for testing.
     #[command(hide = true)]
     Workspace(WorkspaceMgmtArgs),
+    /// Seat roster and addressed send (`amore coord roster` / `amore coord send`).
+    Coord(crate::coord::cmd::CoordArgs),
     /// Open the Agent Dashboard view at startup.
     ///
     /// Centralised, agent-native overview of every session (top-level and
