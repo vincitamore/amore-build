@@ -1,5 +1,15 @@
 [
   {
+    "category": "features",
+    "description": "**Seat roster** — Amore sessions register in a house-neutral presence directory (`~/.house/coord/presence/`) at start and drop the entry on exit. New houses stamped by `amore init` emit Peers and Origin at session start (the model sees them as a system-reminder). The welcome splash and the iris Dashboard Pulse show the same live roster, so two sessions on one seat can name each other.",
+    "breaking_change": false
+  },
+  {
+    "category": "features",
+    "description": "**Also** — in-process `/minimal` and `/fullscreen`, plugin marketplace CTAs, feedback image attachments, MCP elicitation, workflow remote-bundle load plus `agent_budget`, Ctrl+S prompt stash, and a concurrent subagent sampling gate. `xai-grok-version` tracks upstream 1.0.8.",
+    "breaking_change": false
+  },
+  {
     "category": "fixes",
     "description": "**No more console windows flashing on Windows** — the iris daemon spawned its qmd runtime probes without a hidden window, so every status check, search and index refresh flashed a `node.exe` console on the desktop. The probes are hidden now, and the fleet updater relaunches daemons with a hidden console of their own instead of none.",
     "breaking_change": false

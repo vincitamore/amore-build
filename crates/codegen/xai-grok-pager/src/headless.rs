@@ -1012,6 +1012,7 @@ pub async fn run_single_turn(
             opened_at: chrono::Utc::now(),
             started_at: None,
         });
+        crate::coord::start(Some(session_id.0.as_ref()), &cwd.display().to_string());
     }
 
     // Seed the reducer's session context BEFORE applying model/effort so a later failure carries it.
@@ -1249,6 +1250,7 @@ pub async fn run_single_turn(
     if track_active {
         // Non-blocking flock so a slow/network ~/.grok can't hang exit.
         let _ = xai_grok_active_sessions::try_unregister(&session_id);
+        crate::coord::stop();
     }
     // A mid-turn ACP close already reaped above; return that error before the normal outcome.
     if connection_closed {

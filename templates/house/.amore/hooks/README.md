@@ -7,7 +7,7 @@ the session, and re-point at disk across a compact boundary.
 | File | Event | Role |
 |------|-------|------|
 | `house-stop-gate.json` + `bin/house_stop_gate.py` | `Stop` | Turn-end maintenance vigilance gate |
-| `house-session-init.json` + `bin/house_session_init.py` | `SessionStart` | Due-reminder surface + orientation pointer |
+| `house-session-init.json` + `bin/house_session_init.py` + `bin/coord_presence.py` | `SessionStart` | Seat roster (Peers + Origin) + due-reminder surface + orientation pointer |
 | `house-compact.json` + `bin/house_compact.py` | `PreCompact` / `PostCompact` | Disk-orientation packet at the compact boundary |
 
 Windows shims (`*.cmd`) sit next to the Python scripts so the hook runner can
@@ -38,10 +38,17 @@ Runs on `SessionStart`. When the workspace is a house and one or more
 {"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"..."}}
 ```
 
-Context lists due reminders and a one-line orientation pointer
-(`AGENTS.md → context/current-state.md → active task`). Silent success
-(empty stdout, exit 0) when nothing is due or the cwd is not a house.
-Python stdlib only, <5s budget, fail-open.
+Context always includes a **Peers** line (seat roster under
+`~/.house/coord/presence/`, PID-probed) and an Origin delta after a
+fail-soft fetch, then due reminders if any, then a one-line orientation
+pointer (`AGENTS.md → context/current-state.md → active task`). `0 LIVE`
+is a finding; silence is the failure mode. Silent success (empty stdout,
+exit 0) only when the cwd is not a house. Python stdlib only, <5s budget,
+fail-open. `bin/coord_presence.py` is the roster script.
+
+SessionStart `additionalContext` is forwarded into the conversation as a
+system-reminder. The harness also writes and removes the same roster
+schema natively at session start/end (the hook pack has no SessionEnd).
 
 Wire format matches the hook vocabulary in the product user guide
 (`10-hooks.md`: SessionStart event, common envelope fields, and the
@@ -51,7 +58,7 @@ Control).
 ## Compact
 
 Runs on `PreCompact` and `PostCompact`. When the workspace is a house,
-always emits (unlike session-init, which is silent when nothing is due):
+always emits:
 
 ```json
 {"hookSpecificOutput":{"hookEventName":"PostCompact","additionalContext":"..."}}
@@ -62,9 +69,9 @@ the orientation packet: re-read `context/current-state.md` → the active
 task → named tips; the summary is forensics, not warrant. Pointers only
 — no body dumps, no tip-write (a hook cannot update the task file).
 
-The harness currently discards compact `additionalContext` (SessionStart
-is the consume pattern). The emit is the contract so a later consume
-path can land without changing this script.
+PostCompact `additionalContext` is forwarded as a system-reminder;
+PreCompact joins the summarizer keep-line. The emit here is that
+payload.
 
 Python stdlib only, <5s budget, fail-open. Silent on non-house cwd or a
 wrong event.

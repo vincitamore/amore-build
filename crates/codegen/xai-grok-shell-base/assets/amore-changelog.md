@@ -6,6 +6,19 @@ monorepo sync commits; everything below is the fork's own delta, newest first.
 This document is compiled into the binary — update it in the same change as the
 work it describes.
 
+## v1.0.8
+
+- **Seat roster** — Amore sessions register in a house-neutral presence
+  directory (`~/.house/coord/presence/`) at start and drop the entry on
+  exit. New houses stamped by `amore init` emit Peers and Origin at
+  session start (the model sees them as a system-reminder). The welcome
+  splash and the iris Dashboard Pulse show the same live roster, so two
+  sessions on one seat can name each other.
+- **Also** — in-process `/minimal` and `/fullscreen`, plugin marketplace
+  CTAs, feedback image attachments, MCP elicitation, workflow remote-bundle
+  load plus `agent_budget`, Ctrl+S prompt stash, and a concurrent
+  subagent sampling gate. `xai-grok-version` tracks upstream 1.0.8.
+
 ## v1.0.6
 
 - **No more console windows flashing on Windows** — the iris daemon spawned

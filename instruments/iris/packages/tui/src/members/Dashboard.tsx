@@ -19,6 +19,7 @@ import { type Palette } from '../theme';
 import { useHoverThrottle } from '../use-hover-throttle';
 import { useRefreshOnActive } from '../use-refresh-on-active';
 import { runSpeculum } from '../speculum/speculum-spawn';
+import { formatPeers, readRoster } from '../coord/presence';
 import { Panel } from '../components/Panel';
 import { Stat } from '../components/Stat';
 import {
@@ -424,6 +425,11 @@ export function Dashboard({
     }
     void fetchGitLog(root).then((g) => alive && g.length && setGit((prev) => (gitLogUnchanged(prev, g) ? prev : g)));
     void fetchGitStatus(root).then((s) => alive && s && setGitStatus((prev) => (gitStatusUnchanged(prev, s) ? prev : s)));
+    try {
+      setPeersLine(formatPeers(readRoster()));
+    } catch {
+      setPeersLine('0 LIVE');
+    }
     return () => {
       alive = false;
     };
@@ -455,6 +461,7 @@ export function Dashboard({
   } | null>(null);
   /** Speculum status freshness pulse — once at mount, again on re-activation. */
   const [speculumPulse, setSpeculumPulse] = useState<SpeculumPulseView | null>(null);
+  const [peersLine, setPeersLine] = useState('…');
   const speculumMounted = useRef(true);
   useEffect(() => {
     speculumMounted.current = true;
@@ -627,7 +634,7 @@ export function Dashboard({
     </Panel>
   );
 
-  // — System Pulse — present-state vitals (Forge / Git / Daemon / Lucerna / Speculum), the fourth
+  // — System Pulse — present-state vitals (Peers / Forge / Git / Daemon / Lucerna / Speculum), the fourth
   //   dashboard zone (counts · what-needs-me · what-happened · live-vitals). Content-height box
   //   below Attention. Pulse lives in the left column (agendaW) when wide, full width when stacked.
   const pulseColW = wide ? agendaW : dims.width - 2;
@@ -646,6 +653,12 @@ export function Dashboard({
   const speculumRightW = Math.max(12, Math.min(48, pulseInnerW - 12));
   const pulsePanel = (
     <Panel title="Pulse" flexShrink={0} marginTop={1}>
+      <box flexDirection="row">
+        <text fg={peersLine !== '0 LIVE' && peersLine !== '…' ? t.info : t.muted}>●</text>
+        <text fg={t.foreground}> Peers</text>
+        <box flexGrow={1} />
+        <text fg={t.muted}>{peersLine}</text>
+      </box>
       <box flexDirection="row">
         <text fg={forgeReview > 0 ? t.secondary : t.muted}>●</text>
         <text fg={t.foreground}> Forge</text>

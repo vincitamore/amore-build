@@ -29,6 +29,7 @@ import { searchRoute } from './routes/search.ts';
 import { graphRoute } from './routes/graph.ts';
 import { listProjects, projectFile, projectTree } from './routes/projects.ts';
 import { daemonStatus } from './routes/daemon-status.ts';
+import { coordPresence } from './routes/coord.ts';
 import { lucernaRoute } from './routes/lucerna.ts';
 
 const FILES_PREFIX = '/api/files/';
@@ -66,6 +67,8 @@ function handle(deps: DaemonDeps, req: Request): Response | Promise<Response> {
       // Daemon-identity handshake for clients' isDaemonUp (not parity-gated —
       // see routes/daemon-status.ts). Registered like legacy's daemon_mgmt nest.
       return daemonStatus(deps.config);
+    case '/api/coord/presence':
+      return coordPresence();
     case '/api/launch-presets':
       return launchPresets(deps.config);
     case '/api/files':

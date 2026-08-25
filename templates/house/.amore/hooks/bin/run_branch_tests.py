@@ -210,6 +210,9 @@ def main() -> int:
         env["GROK_HOME"] = str(home)
         env["ARCUS_HOME"] = str(home)
         env.pop("ARCUS_SESSION_INIT_NOW", None)
+        env.pop("AMORE_SESSION_INIT_NOW", None)
+        coord_dir = Path(tempfile.mkdtemp(prefix="house-coord-"))
+        env["HOUSE_COORD_DIR"] = str(coord_dir)
 
         # --- Stop gate (order matters for fired-state: 01 then 02 same session) ---
         stop_cases = [
@@ -237,27 +240,30 @@ def main() -> int:
 
         # --- Session-init ---
         env_due = dict(env)
-        env_due["ARCUS_SESSION_INIT_NOW"] = "2026-07-30T12:00:00"
+        env_due["AMORE_SESSION_INIT_NOW"] = "2026-07-30T12:00:00"
+
+        def _init_emits(out: str, *needles: str) -> bool:
+            return (
+                "hookSpecificOutput" in out
+                and "additionalContext" in out
+                and "SessionStart" in out
+                and "**Peers**" in out
+                and "Orientation:" in out
+                and all(n in out for n in needles)
+            )
 
         init_cases = [
-            ("01-no-reminders-silent.json", "init: no reminders → silent", env,
-             lambda rc, out: rc == 0 and out == ""),
+            ("01-no-reminders-silent.json", "init: no reminders → Peers + orientation", env,
+             lambda rc, out: rc == 0 and _init_emits(out)),
             ("02-due-reminder-context.json", "init: due reminder → context", env_due,
-             lambda rc, out: (
-                 rc == 0
-                 and "hookSpecificOutput" in out
-                 and "additionalContext" in out
-                 and "SessionStart" in out
-                 and "Renew certs" in out
-                 and "Orientation:" in out
-             )),
+             lambda rc, out: rc == 0 and _init_emits(out, "Renew certs")),
             ("03-malformed-frontmatter-skipped.json",
-             "init: malformed frontmatter → skipped/silent", env_due,
-             lambda rc, out: rc == 0 and out == ""),
+             "init: malformed frontmatter skipped, still emits Peers", env_due,
+             lambda rc, out: rc == 0 and _init_emits(out) and "Due reminders:" not in out),
             ("04-non-house-silent.json", "init: non-house cwd → silent", env_due,
              lambda rc, out: rc == 0 and out == ""),
-            ("05-future-not-due-silent.json", "init: future reminder not due → silent",
-             env_due, lambda rc, out: rc == 0 and out == ""),
+            ("05-future-not-due-silent.json", "init: future reminder not due, still emits Peers",
+             env_due, lambda rc, out: rc == 0 and _init_emits(out) and "Due reminders:" not in out),
         ]
 
         for fname, label, e, pred in init_cases:

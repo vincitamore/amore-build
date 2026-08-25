@@ -328,6 +328,7 @@ fn compose_message(root: &Path, now: DateTime<Utc>) -> String {
     let inbox = open_inbox_summary(root);
 
     let mut sections: Vec<String> = Vec::new();
+    sections.push(crate::coord::peers_line());
     if let Some((count, titles)) = &active
         && *count > 0
     {
@@ -362,16 +363,20 @@ fn compose_message(root: &Path, now: DateTime<Utc>) -> String {
         }
         sections.push(sec);
     }
-    if !sections.is_empty() {
+    if sections.len() > 1 {
         return sections.join("\n\n");
     }
 
     // Nothing active, due, or open — always reflect the house: the
-    // standing-reality opener of `context/current-state.md`.
+    // standing-reality opener of `context/current-state.md`. Peers stays
+    // on top (0 LIVE is a finding).
+    let peers = sections.pop().unwrap_or_else(|| "Peers: 0 LIVE".to_string());
     if let Some(para) = current_state_opening(root) {
-        return para;
+        return format!("{peers}\n\n{para}");
     }
-    format!("No active tasks · no reminders due · no open inbox — {DEFAULT_HOUSE_NAME} stands")
+    format!(
+        "{peers}\n\nNo active tasks · no reminders due · no open inbox — {DEFAULT_HOUSE_NAME} stands"
+    )
 }
 
 /// A compact, local, human-readable form of a reminder's due instant:
@@ -605,12 +610,19 @@ pub(crate) mod test_support {
 
     /// A std-only temp tree (no new dependency) removed on drop. Shapes mirror
     /// the session-init hook's own fixtures.
+    ///
+    /// Holds `COORD_ENV_LOCK` for its lifetime because `HOUSE_COORD_DIR` is
+    /// process-global. Do not construct a second `TempTree` while one is live
+    /// — the mutex is not reentrant.
     pub(crate) struct TempTree {
         pub(crate) path: PathBuf,
+        _coord: std::sync::MutexGuard<'static, ()>,
+        prev_coord: Option<std::ffi::OsString>,
     }
 
     impl TempTree {
         pub(crate) fn new() -> Self {
+            let _coord = crate::coord::COORD_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
             let mut path = std::env::temp_dir();
             let unique = format!(
                 "amore-house-test-{}-{}",
@@ -619,7 +631,15 @@ pub(crate) mod test_support {
             );
             path.push(unique);
             std::fs::create_dir_all(&path).unwrap();
-            Self { path }
+            let coord = path.join("coord-presence");
+            std::fs::create_dir_all(&coord).unwrap();
+            let prev_coord = std::env::var_os("HOUSE_COORD_DIR");
+            unsafe { std::env::set_var("HOUSE_COORD_DIR", &coord) };
+            Self {
+                path,
+                _coord,
+                prev_coord,
+            }
         }
 
         pub(crate) fn write(&self, rel: &str, content: &str) {
@@ -637,6 +657,10 @@ pub(crate) mod test_support {
 
     impl Drop for TempTree {
         fn drop(&mut self) {
+            match &self.prev_coord {
+                Some(v) => unsafe { std::env::set_var("HOUSE_COORD_DIR", v) },
+                None => unsafe { std::env::remove_var("HOUSE_COORD_DIR") },
+            }
             let _ = std::fs::remove_dir_all(&self.path);
         }
     }
@@ -683,15 +707,17 @@ mod tests {
 
     #[test]
     fn is_house_root_requires_marker_and_tasks_dir() {
-        let t = TempTree::new();
-        // neither
-        assert!(!is_house_root(t.root()));
-        // marker only → not a house (mirrors the hook gate)
-        t.write("AGENTS.md", "# Test House\n");
-        assert!(!is_house_root(t.root()));
-        // marker + tasks/ → house
-        t.write("tasks/README.md", "---\ntype: task\n---\n");
-        assert!(is_house_root(t.root()));
+        {
+            let t = TempTree::new();
+            // neither
+            assert!(!is_house_root(t.root()));
+            // marker only → not a house (mirrors the hook gate)
+            t.write("AGENTS.md", "# Test House\n");
+            assert!(!is_house_root(t.root()));
+            // marker + tasks/ → house
+            t.write("tasks/README.md", "---\ntype: task\n---\n");
+            assert!(is_house_root(t.root()));
+        }
         // marker case variants are honored
         let t2 = TempTree::new();
         t2.write("CLAUDE.md", "# Test House\n");
@@ -868,7 +894,7 @@ mod tests {
         assert_eq!(
             ann.message.as_deref(),
             Some(
-                "2 active tasks\n  • Alpha task\n  • Beta task\n\n1 reminder due\n  • Renew certs (due 2026-07-01 09:00)"
+                "Peers: 0 LIVE\n\n2 active tasks\n  • Alpha task\n  • Beta task\n\n1 reminder due\n  • Renew certs (due 2026-07-01 09:00)"
             )
         );
     }
@@ -883,7 +909,7 @@ mod tests {
         assert_eq!(
             ann.message.as_deref(),
             Some(
-                "1 active task\n  • Alpha task\n\n1 reminder due\n  • Renew certs (due 2026-07-01 09:00)"
+                "Peers: 0 LIVE\n\n1 active task\n  • Alpha task\n\n1 reminder due\n  • Renew certs (due 2026-07-01 09:00)"
             )
         );
     }
@@ -896,7 +922,7 @@ mod tests {
         let ann = house_announcement(t.root(), now()).expect("house announcement");
         assert_eq!(
             ann.message.as_deref(),
-            Some("1 reminder due\n  • Renew certs (due 2026-07-01 09:00)")
+            Some("Peers: 0 LIVE\n\n1 reminder due\n  • Renew certs (due 2026-07-01 09:00)")
         );
     }
 
@@ -917,7 +943,7 @@ mod tests {
         assert_eq!(
             ann.message.as_deref(),
             Some(
-                "1 active task\n  • Alpha task\n\n2 inbox items\n  • capture · A quick capture\n  • idea · Idea one"
+                "Peers: 0 LIVE\n\n1 active task\n  • Alpha task\n\n2 inbox items\n  • capture · A quick capture\n  • idea · Idea one"
             )
         );
     }
@@ -929,7 +955,7 @@ mod tests {
         let ann = house_announcement(t.root(), now()).expect("house announcement");
         assert_eq!(
             ann.message.as_deref(),
-            Some("**Founded 2026-07-31.** Standing opener.")
+            Some("Peers: 0 LIVE\n\n**Founded 2026-07-31.** Standing opener.")
         );
     }
 
@@ -941,15 +967,17 @@ mod tests {
         let ann = house_announcement(t.root(), now()).expect("house announcement");
         assert_eq!(
             ann.message.as_deref(),
-            Some("No active tasks · no reminders due · no open inbox — The house stands")
+            Some("Peers: 0 LIVE\n\nNo active tasks · no reminders due · no open inbox — The house stands")
         );
     }
 
     #[test]
     fn house_announcement_is_none_outside_a_house() {
-        let t = TempTree::new();
-        t.write("AGENTS.md", "# Not a house\n"); // no tasks/ dir
-        assert!(house_announcement(t.root(), now()).is_none());
+        {
+            let t = TempTree::new();
+            t.write("AGENTS.md", "# Not a house\n"); // no tasks/ dir
+            assert!(house_announcement(t.root(), now()).is_none());
+        }
         let t2 = TempTree::new();
         t2.write("tasks/README.md", "---\ntype: task\n---\n"); // no marker
         assert!(house_announcement(t2.root(), now()).is_none());

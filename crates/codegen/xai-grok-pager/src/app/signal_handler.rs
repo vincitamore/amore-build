@@ -251,6 +251,7 @@ fn shutdown_with_terminal_restore(exit_code: i32) -> ! {
     if let Some(ref sid) = *CURRENT_SESSION_ID.lock() {
         let _ = xai_grok_active_sessions::try_unregister(sid);
     }
+    crate::coord::stop();
     flush_telemetry_and_exit(exit_code);
 }
 

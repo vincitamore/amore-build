@@ -408,6 +408,31 @@ def cmd_verify(dry_run: bool) -> int:
         "| Command::Init(_)",
         "process_identity covers the fork-owned Init command",
         problems)
+    _check_file_contains(
+        "crates/codegen/xai-grok-pager/src/lib.rs",
+        "pub mod coord;",
+        "pager declares the seat-roster coord module",
+        problems)
+    _check_file_contains(
+        "templates/house/.amore/hooks/bin/coord_presence.py",
+        "HOUSE_COORD_DIR",
+        "house template ships the seat-roster presence script",
+        problems)
+    _check_file_contains(
+        "crates/codegen/xai-grok-shell/src/session/acp_session_impl/run_loop.rs",
+        "HookRunResult::additional_contexts",
+        "SessionStart additionalContext is forwarded into the conversation",
+        problems)
+    _check_file_contains(
+        "crates/codegen/xai-grok-pager/src/app/effects/mod.rs",
+        "crate::coord::start",
+        "RegisterActiveSession writes the seat roster",
+        problems)
+    _check_file_contains(
+        "crates/codegen/xai-grok-pager/src/app/signal_handler.rs",
+        "crate::coord::stop",
+        "process exit removes the seat-roster entry",
+        problems)
 
     # 6. fork-owned surface boundary (Phase-2 script, if present)
     if (REPO / BOUNDARY_SCRIPT).exists():

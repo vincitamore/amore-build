@@ -14,6 +14,7 @@ pub mod announcements;
 pub mod app;
 pub mod client_identity;
 pub mod completions_cmd;
+pub mod coord;
 mod config_toml_edit;
 pub mod diagnostics;
 pub mod iris_companion;

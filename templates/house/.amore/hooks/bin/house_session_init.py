@@ -16,14 +16,17 @@ Wire contract (user-guide 10-hooks.md):
        "additionalContext":"..."
     }}
 
-  Silent success (empty stdout, exit 0) when nothing is due or cwd is not a
-  house repo. Observe runners may currently ignore stdout; the emission shape
-  matches the documented additionalContext vocabulary for forward parity.
+  Silent success (empty stdout, exit 0) when cwd is not a house repo.
+  A house session ALWAYS emits (0 LIVE peers is a finding; silence is the
+  failure mode). SessionStart additionalContext is forwarded into the
+  conversation as a system-reminder.
 
-v1 behavior:
-  (a) enumerate due reminders under reminders/**/*.md — frontmatter with
+Behavior:
+  (a) register this session in the seat roster (~/.house/coord/presence/)
+      and emit Peers + Origin lines;
+  (b) enumerate due reminders under reminders/**/*.md — frontmatter with
       status pending|snoozed and remind-at|snoozed-until <= now;
-  (b) include a one-line orientation pointer in the same context block.
+  (c) include a one-line orientation pointer in the same context block.
 """
 from __future__ import annotations
 
@@ -181,13 +184,41 @@ def collect_due_reminders(root: Path, now: datetime) -> list[tuple[Path, str, st
     return due
 
 
-def build_context(due: list[tuple[Path, str, str]]) -> str:
-    lines = ["[HOUSE SESSION INIT]", "", "Due reminders:"]
-    for rel, title, when_s in due:
-        lines.append(f"- {rel.as_posix()}: {title} (due {when_s})")
-    lines.append("")
+def build_context(due: list[tuple[Path, str, str]],
+                  coord_lines: list[str] | None = None) -> str:
+    lines = ["[HOUSE SESSION INIT]", ""]
+    if coord_lines:
+        lines.extend(coord_lines)
+        lines.append("")
+    if due:
+        lines.append("Due reminders:")
+        for rel, title, when_s in due:
+            lines.append(f"- {rel.as_posix()}: {title} (due {when_s})")
+        lines.append("")
     lines.append(ORIENTATION)
     return "\n".join(lines)
+
+
+def coordination_lines(root: Path) -> list[str]:
+    """Register this session in the seat roster and return Peers + Origin.
+
+    The write is the load-bearing half (other harnesses see this session even
+    if stdout is dropped). Fail-open, never blocks session start.
+    """
+    lines: list[str] = []
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import coord_presence
+        coord_presence.start(harness=os.environ.get("HOUSE_HARNESS", "amore"))
+        entries = coord_presence.roster()
+        self_pid, _ = coord_presence.find_session_pid()
+        lines.append(coord_presence.format_roster(entries, self_pid))
+        delta = coord_presence.origin_delta(str(root), fetch_timeout=3)
+        if delta:
+            lines.append(delta)
+    except Exception as exc:
+        lines.append(f"**Peers**: presence unavailable ({exc.__class__.__name__})")
+    return lines
 
 
 def emit_context(text: str) -> None:
@@ -197,7 +228,9 @@ def emit_context(text: str) -> None:
             "additionalContext": text,
         }
     }
-    sys.stdout.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    # ensure_ascii: a cp1252 Windows stdout raises on em-dash/middle-dot in
+    # the Peers line, and the fail-open then silences the whole emission.
+    sys.stdout.write(json.dumps(payload, ensure_ascii=True) + "\n")
     sys.exit(0)
 
 
@@ -232,10 +265,10 @@ def main() -> None:
                 now = parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
 
         due = collect_due_reminders(root, now)
-        if not due:
-            silent()
-
-        emit_context(build_context(due))
+        coord = coordination_lines(root)
+        # Always emit: the Peers line is printed unconditionally (0 LIVE is a
+        # finding; silence is the failure mode).
+        emit_context(build_context(due, coord))
     except Exception:
         # Hard fail-open: never block session start.
         silent()

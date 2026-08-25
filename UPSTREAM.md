@@ -117,6 +117,12 @@ twin; resolution follows `xai-grok-config` and related crates.
 **embedded at build time** into the binary (`xai-grok-pager` embed machinery)
 for offline install.
 
+**Seat roster.** Amore sessions register in a house-neutral presence
+directory (`~/.house/coord/presence/`) shared across harnesses on one
+seat. New houses stamped by `amore init` emit Peers and Origin at
+session start. The welcome splash and the iris Dashboard Pulse show
+the same live roster.
+
 **`amore init`.** Installs the embedded harness into a target repo
 (ownership/refresh policy; offline for the pack itself).
 

@@ -255,6 +255,19 @@ Discipline (this can thrash):
   and re-dispatch, not steering; a half-redirected agent answers neither charter.
 - **Narrow the claim rather than widening the work.**
 - **Say plainly when the churn was yours.**
+- **Pin every child's id in the manifest at dispatch, not at need.** A late correction
+  addresses its target from the manifest's execution log — record each spawn's child id
+  (the resume handle) with its `started` event. Display labels are not addresses; the
+  id is. Before resuming any agent that dual-writes, commit its landed artifacts first
+  — the handle-first stub rule fires before any "append rather than discard" instruction
+  can be honored.
+- **A correction that invalidates a METHOD must name what to do instead** — an agent
+  left without a replacement re-derives one badly or silently drops the question; pair
+  every retraction with the surviving alternative, or explicit permission to mark the
+  question unresolved. And name the specific artifact to re-examine ("X is at
+  `path:line`, re-derive your verdict against it") — phrased that way a correction
+  lands as a re-investigation that can flip a verdict; phrased "you were wrong about X"
+  it gets absorbed as a footnote while the reasoning that produced the error survives.
 - **Log every cross-route in the manifest execution log.**
 
 Corollary for prompts: tell Layer 0 agents sibling input may arrive mid-flight and
