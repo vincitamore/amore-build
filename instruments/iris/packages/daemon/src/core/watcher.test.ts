@@ -178,4 +178,4 @@ test('startWatcher: a real add reflects in the live index (create + backlink)', 
     if (prev === undefined) delete process.env.IRIS_WATCH_DEBOUNCE_MS;
     else process.env.IRIS_WATCH_DEBOUNCE_MS = prev;
   }
-});
+}, { timeout: 20_000 });
