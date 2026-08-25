@@ -8,18 +8,24 @@ work it describes.
 
 ## v1.0.8
 
+- **Coordination plane** — live sessions on a seat can name each other
+  and be woken by an addressed message. This cut ships the roster, the
+  send-that-wakes path, and the operator surfaces together.
 - **Seat roster** — Amore sessions register in a house-neutral presence
   directory (`~/.house/coord/presence/`) at start and drop the entry on
-  exit. New houses stamped by `amore init` emit Peers and Origin at
-  session start (the model sees them as a system-reminder). The welcome
-  splash and the iris Dashboard Pulse show the same live roster, so two
+  exit. `amore coord roster` lists who is live (`--json` for scripts).
+  New houses stamped by `amore init` emit Peers and Origin at session
+  start (the model sees them as a system-reminder). The welcome splash
+  and the iris Dashboard Pulse show the same live roster, so two
   sessions on one seat can name each other.
 - **Addressed send that wakes** — `amore coord send <seat|session> <text>`
   delivers to a live session over a loopback socket (unix domain on POSIX,
   token-gated TCP 127.0.0.1 on Windows). An idle session starts a turn
   with the message as a `<cross-session-message>` block; a busy session
-  enqueues and drains at the next turn. Unreachable seats drop to the
-  inbox. iris Pulse shows Mail next to Peers.
+  enqueues and drains at the next turn. Other seats go through
+  `~/.house/coord/seats` (`name user@host inbox-path`) then ssh; the
+  socket never leaves the machine. Unreachable seats drop to the inbox.
+  iris Pulse shows Mail next to Peers.
 - **Also** — in-process `/minimal` and `/fullscreen`, plugin marketplace
   CTAs, feedback image attachments, MCP elicitation, workflow remote-bundle
   load plus `agent_budget`, Ctrl+S prompt stash, and a concurrent
