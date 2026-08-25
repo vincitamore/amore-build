@@ -345,6 +345,10 @@ def cmd_verify(dry_run: bool) -> int:
         "crates/codegen/xai-grok-config/src/env_overlay.rs",
         "xai_grok_env::var_os(GROK_CONFIG_PATH_ENV)",
         "GROK_CONFIG_PATH overlay reads through xai_grok_env dual-map", problems)
+    _check_file_contains(
+        "crates/codegen/xai-grok-env/src/lib.rs",
+        "pub(crate) fn env_lock()",
+        "env_lock stays crate-visible for identity.rs dual-map tests", problems)
 
     # 3. binary/identity naming + argv0 aliases
     _check_file_contains(
@@ -395,6 +399,14 @@ def cmd_verify(dry_run: bool) -> int:
     # 5. embed + init ownership tests still target amore
     _check_file_contains(
         INIT_OWNERSHIP_TEST, "amore init", "init ownership tests target `amore init`",
+        problems)
+    # Fork-owned Command::Init must stay in process_identity's exhaustive
+    # match. Upstream added this match in the 1.0.8 bundle without the
+    # variant; a merge that drops the arm compiles on upstream and fails here.
+    _check_file_contains(
+        "crates/codegen/xai-grok-pager-bin/src/main.rs",
+        "| Command::Init(_)",
+        "process_identity covers the fork-owned Init command",
         problems)
 
     # 6. fork-owned surface boundary (Phase-2 script, if present)
