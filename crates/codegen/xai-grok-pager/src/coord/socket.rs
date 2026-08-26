@@ -422,11 +422,23 @@ fn pipe_post(path: &str, token: &str, env: &Envelope) -> Result<Disposition, Str
     s.write_all(payload.as_bytes())
         .map_err(|e| format!("named pipe write: {e}"))?;
     let _ = s.flush();
-    let mut r = BufReader::new(s);
-    let mut line = String::new();
-    r.read_line(&mut line)
-        .map_err(|e| format!("named pipe read: {e}"))?;
-    parse_peer_reply(&line)
+    // Peers using first-line auth often write no reply. Do not block the CLI.
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut r = BufReader::new(s);
+        let mut line = String::new();
+        let res = r
+            .read_line(&mut line)
+            .map(|_| ())
+            .map_err(|e| e.to_string());
+        let _ = tx.send((res, line));
+    });
+    match rx.recv_timeout(std::time::Duration::from_secs(2)) {
+        Ok((Ok(()), line)) if line.trim().is_empty() => Ok(Disposition::Enqueued),
+        Ok((Ok(()), line)) => parse_peer_reply(&line),
+        Ok((Err(e), _)) => Err(format!("named pipe read: {e}")),
+        Err(_) => Ok(Disposition::Enqueued),
+    }
 }
 
 #[cfg(windows)]
