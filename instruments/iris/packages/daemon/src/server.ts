@@ -17,6 +17,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import type { DaemonDeps } from './contract.ts';
+import { startCoordDoor } from './coord-door.ts';
 import { clearPidFile, irisRuntimeDir, writePidFile } from './pidfile.ts';
 import { createQmdModule, startQmdRefreshWatch } from './proxies/qmd.ts';
 import { emptyStatus } from './routes/http.ts';
@@ -122,6 +123,8 @@ export interface StartServerOptions {
   runtimeDir?: string;
   /** Skip managed-qmd freshness watch (same as IRIS_QMD_NO_REFRESH=1). */
   noRefresh?: boolean;
+  /** When true, do not run the seat-door keeper (tests / scratch daemons). */
+  noCoordDoor?: boolean;
   /** Extra cleanup run before server/qmd stop (e.g. index file watcher). */
   beforeStop?: () => void;
   /** When false, do not install SIGTERM/SIGINT handlers (tests). Default true. */
@@ -158,10 +161,22 @@ export function startServer(deps: DaemonDeps, opts?: StartServerOptions): Starte
     fetch: buildFetch(wired),
   });
 
+  // Seat-door keeper (operator ruling 2026-08-26): the daemon holds the
+  // coord door whenever no amore session does, so this seat answers roster
+  // pulls (and routes sends to local sessions) with zero TUIs open. The
+  // HTTP surface above stays loopback-only; the door binds the Tailscale
+  // address only, inside startCoordDoor.
+  const door = opts?.noCoordDoor ? null : startCoordDoor((m) => console.error(`[daemon] ${m}`));
+
   let stopped = false;
   const stop = (): void => {
     if (stopped) return;
     stopped = true;
+    try {
+      door?.stop();
+    } catch {
+      /* best-effort */
+    }
     try {
       opts?.beforeStop?.();
     } catch {

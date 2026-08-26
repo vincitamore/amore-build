@@ -55,7 +55,7 @@ function pidAlive(pid: number): boolean {
   }
 }
 
-function coordRoot(): string {
+export function coordRoot(): string {
   const over = process.env.HOUSE_COORD_DIR;
   if (over && over.length > 0) return join(over, '..');
   return join(homedir(), '.house', 'coord');
