@@ -378,10 +378,16 @@ fn union_active_sessions(entries: &mut Vec<Presence>) {
 }
 
 /// Always-printed Peers line. `0 LIVE` is a finding.
+/// Peer-seat copies are remote reports, not PID-probed LIVE rows.
 pub fn format_roster(entries: &[Presence], self_pid: Option<u32>) -> String {
     if entries.is_empty() {
         return "Peers: 0 LIVE".to_string();
     }
+    let live_n = entries
+        .iter()
+        .filter(|e| !seats::is_peer_seat(&e.seat))
+        .count();
+    let remote_n = entries.len() - live_n;
     let parts: Vec<String> = entries
         .iter()
         .map(|e| {
@@ -401,6 +407,9 @@ pub fn format_roster(entries: &[Presence], self_pid: Option<u32>) -> String {
             if e.started.len() >= 16 {
                 bits.push(format!("since {}Z", &e.started[11..16]));
             }
+            if seats::is_peer_seat(&e.seat) {
+                bits.push("remote".into());
+            }
             let tag = if self_pid == Some(e.pid) {
                 " (this session)"
             } else {
@@ -409,7 +418,12 @@ pub fn format_roster(entries: &[Presence], self_pid: Option<u32>) -> String {
             format!("{ident} ({}){tag}", bits.join(", "))
         })
         .collect();
-    format!("Peers: {} LIVE — {}", entries.len(), parts.join(" · "))
+    let head = if remote_n == 0 {
+        format!("{live_n} LIVE")
+    } else {
+        format!("{live_n} LIVE · {remote_n} remote-reported")
+    };
+    format!("Peers: {head} — {}", parts.join(" · "))
 }
 
 pub fn peers_line() -> String {

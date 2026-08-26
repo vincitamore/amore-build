@@ -34,6 +34,12 @@ work it describes.
 - **Pulse** — Peers shows a count plus a sub-line of `seat/harness`
   identities, refreshed with the Dashboard poll. Duplicate harness rows
   for the same pid are collapsed.
+- **Cross-seat presence copy** — publish dest is `~/.house/coord/presence/`
+  (OpenSSH scp expands a leading tilde; it does not expand `$HOME`).
+  Retract runs `rm` in a remote shell with an expandable `$HOME` path,
+  and the dest directory is created before copy. A closed session's
+  peer copy is removed; a live session's row actually lands on the
+  other seat.
 - **Same-seat named pipe** — a Windows named-pipe stamp from another
   harness is a live hop (first-line token auth, text frame), not a silent
   inbox drop. A failed hop prints `degraded (inbox) after live wake:`,

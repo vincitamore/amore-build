@@ -66,33 +66,45 @@ pub fn publish_file(path: &Path) {
     let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
         return;
     };
+    if !is_safe_filename(name) {
+        return;
+    }
     for row in load() {
         if row.name.eq_ignore_ascii_case(&seat::seat()) {
             continue;
         }
-        let remote = remote_presence_file(&row, name);
-        let _ = scp(path, &row.ssh, &remote);
+        let dir = format!("{}/presence", coord_root_shell(&row));
+        if let Err(e) = ssh_run(&row.ssh, &format!("mkdir -p {}", shell_expandable(&dir))) {
+            tracing::debug!(seat = %row.name, error = %e, "coord: presence mkdir failed");
+            continue;
+        }
+        let remote = remote_presence_scp(&row, name);
+        if let Err(e) = scp(path, &row.ssh, &remote) {
+            tracing::debug!(seat = %row.name, error = %e, "coord: presence publish failed");
+        }
     }
 }
 
 /// Remove `filename` from every other seat's presence dir. Fail-soft.
 pub fn retract_file(filename: &str) {
+    if !is_safe_filename(filename) {
+        return;
+    }
     for row in load() {
         if row.name.eq_ignore_ascii_case(&seat::seat()) {
             continue;
         }
-        let remote = remote_presence_file(&row, filename);
-        let cmd = format!("rm -f '{remote}'");
-        let _ = ssh_run(&row.ssh, &cmd);
+        let remote = remote_presence_shell(&row, filename);
+        let cmd = format!("rm -f {remote}");
+        if let Err(e) = ssh_run(&row.ssh, &cmd) {
+            tracing::debug!(seat = %row.name, error = %e, "coord: presence retract failed");
+        }
     }
 }
 
 pub fn inject_remote(row: &SeatRow, env: &Envelope) -> Result<SendResult, String> {
     let body = serde_json::to_string(env).map_err(|e| e.to_string())?;
-    let coord = row
-        .coord_root
-        .clone()
-        .unwrap_or_else(|| "$HOME/.house/coord".into());
+    let coord = coord_root_shell(row);
     let remote = format!(
         "export PATH=\"$HOME/.local/bin:$HOME/amore/bin:$PATH\"; \
          export HOUSE_COORD_DIR=\"{coord}/presence\"; \
@@ -110,6 +122,7 @@ pub fn inject_remote(row: &SeatRow, env: &Envelope) -> Result<SendResult, String
     child.stdin(Stdio::piped());
     child.stdout(Stdio::piped());
     child.stderr(Stdio::piped());
+    hide_window(&mut child);
     let mut proc = child.spawn().map_err(|e| format!("ssh spawn: {e}"))?;
     use std::io::Write;
     if let Some(mut stdin) = proc.stdin.take() {
@@ -147,54 +160,117 @@ fn parse_inject_stdout(stdout: &str, ssh: &str) -> SendResult {
     SendResult::new(disp, via)
 }
 
-fn remote_presence_file(row: &SeatRow, filename: &str) -> String {
-    let root = row
-        .coord_root
+/// scp dest: OpenSSH expands a leading `~` on the remote side and does
+/// **not** expand `$HOME`. Default must be tilde, never `$HOME`.
+const DEFAULT_COORD_ROOT_SCP: &str = "~/.house/coord";
+/// Remote-shell path: `$HOME` expands inside double quotes; a quoted `~`
+/// does not. Default must be `$HOME`, never a single-quoted string.
+const DEFAULT_COORD_ROOT_SHELL: &str = "$HOME/.house/coord";
+
+fn coord_root_scp(row: &SeatRow) -> String {
+    row.coord_root
         .clone()
-        .unwrap_or_else(|| "$HOME/.house/coord".into());
-    format!("{root}/presence/{filename}")
+        .unwrap_or_else(|| DEFAULT_COORD_ROOT_SCP.into())
+}
+
+fn coord_root_shell(row: &SeatRow) -> String {
+    row.coord_root
+        .clone()
+        .unwrap_or_else(|| DEFAULT_COORD_ROOT_SHELL.into())
+}
+
+fn is_safe_filename(name: &str) -> bool {
+    !name.is_empty()
+        && !name.contains("..")
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
+}
+
+/// Quote a remote path so a POSIX login shell can still expand `~` / `$HOME`.
+fn shell_expandable(path: &str) -> String {
+    if path.starts_with("$HOME") {
+        format!("\"{path}\"")
+    } else if path.starts_with('~') {
+        path.to_string()
+    } else {
+        format!("'{}'", path.replace('\'', "'\\''"))
+    }
+}
+
+fn remote_presence_scp(row: &SeatRow, filename: &str) -> String {
+    format!("{}/presence/{filename}", coord_root_scp(row))
+}
+
+fn remote_presence_shell(row: &SeatRow, filename: &str) -> String {
+    shell_expandable(&format!("{}/presence/{filename}", coord_root_shell(row)))
+}
+
+fn hide_window(cmd: &mut Command) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = cmd;
+    }
 }
 
 fn scp(local: &Path, ssh: &str, remote: &str) -> Result<(), String> {
     let dest = format!("{ssh}:{remote}");
-    let st = Command::new("scp")
-        .args([
-            "-o",
-            "BatchMode=yes",
-            "-o",
-            "ConnectTimeout=5",
-            &local.to_string_lossy(),
-            &dest,
-        ])
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .status()
-        .map_err(|e| e.to_string())?;
-    if st.success() {
+    let mut child = Command::new("scp");
+    child.args([
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ConnectTimeout=5",
+        &local.to_string_lossy(),
+        &dest,
+    ]);
+    child.stdout(Stdio::null());
+    child.stderr(Stdio::piped());
+    hide_window(&mut child);
+    let out = child.output().map_err(|e| e.to_string())?;
+    if out.status.success() {
         Ok(())
     } else {
-        Err("scp failed".into())
+        let err = String::from_utf8_lossy(&out.stderr);
+        Err(err
+            .lines()
+            .last()
+            .unwrap_or("scp failed")
+            .trim()
+            .to_string())
     }
 }
 
 fn ssh_run(ssh: &str, cmd: &str) -> Result<(), String> {
-    let st = Command::new("ssh")
-        .args([
-            "-o",
-            "BatchMode=yes",
-            "-o",
-            "ConnectTimeout=5",
-            ssh,
-            cmd,
-        ])
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .status()
-        .map_err(|e| e.to_string())?;
-    if st.success() {
+    let mut child = Command::new("ssh");
+    child.args([
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ConnectTimeout=5",
+        ssh,
+        cmd,
+    ]);
+    child.stdout(Stdio::null());
+    child.stderr(Stdio::piped());
+    hide_window(&mut child);
+    let out = child.output().map_err(|e| e.to_string())?;
+    if out.status.success() {
         Ok(())
     } else {
-        Err("ssh failed".into())
+        let err = String::from_utf8_lossy(&out.stderr);
+        Err(err
+            .lines()
+            .last()
+            .unwrap_or("ssh failed")
+            .trim()
+            .to_string())
     }
 }
 
@@ -234,16 +310,12 @@ pub fn converge_house_token() {
 }
 
 fn remote_tls_token(row: &SeatRow) -> String {
-    let root = row
-        .coord_root
-        .clone()
-        .unwrap_or_else(|| "$HOME/.house/coord".into());
-    format!("{root}/tls/token")
+    shell_expandable(&format!("{}/tls/token", coord_root_shell(row)))
 }
 
 fn fetch_token(row: &SeatRow) -> Option<String> {
     let path = remote_tls_token(row);
-    let cmd = format!("cat '{path}' 2>/dev/null");
+    let cmd = format!("cat {path} 2>/dev/null");
     let text = ssh_stdout(&row.ssh, &cmd).ok()?;
     let t = text.trim();
     if t.is_empty() {
@@ -255,9 +327,7 @@ fn fetch_token(row: &SeatRow) -> Option<String> {
 
 fn push_token(row: &SeatRow, token: &str) -> Result<(), String> {
     let path = remote_tls_token(row);
-    let script = format!(
-        "mkdir -p \"$(dirname '{path}')\" && cat > '{path}' && chmod 600 '{path}'"
-    );
+    let script = format!("mkdir -p \"$(dirname {path})\" && cat > {path} && chmod 600 {path}");
     let mut child = Command::new("ssh");
     child.args([
         "-o",
@@ -270,12 +340,7 @@ fn push_token(row: &SeatRow, token: &str) -> Result<(), String> {
     child.stdin(Stdio::piped());
     child.stdout(Stdio::null());
     child.stderr(Stdio::piped());
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        child.creation_flags(CREATE_NO_WINDOW);
-    }
+    hide_window(&mut child);
     let mut proc = child.spawn().map_err(|e| format!("ssh spawn: {e}"))?;
     if let Some(mut stdin) = proc.stdin.take() {
         let _ = stdin.write_all(format!("{token}\n").as_bytes());
@@ -300,12 +365,7 @@ fn ssh_stdout(ssh: &str, cmd: &str) -> Result<String, String> {
     ]);
     child.stdout(Stdio::piped());
     child.stderr(Stdio::piped());
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        child.creation_flags(CREATE_NO_WINDOW);
-    }
+    hide_window(&mut child);
     let out = child.output().map_err(|e| e.to_string())?;
     if !out.status.success() {
         return Err("ssh failed".into());
@@ -315,13 +375,13 @@ fn ssh_stdout(ssh: &str, cmd: &str) -> Result<String, String> {
 
 pub fn drop_inbox_remote(row: &SeatRow, env: &Envelope) -> Result<String, String> {
     let body = serde_json::to_string(env).map_err(|e| e.to_string())?;
-    let root = row
-        .coord_root
-        .clone()
-        .unwrap_or_else(|| "$HOME/.house/coord".into());
-    let inbox = format!("{root}/inbox");
+    let inbox = format!("{}/inbox", coord_root_shell(row));
     let remote = format!("{inbox}/{}.json", env.msgid);
-    let script = format!("mkdir -p '{inbox}' && cat > '{remote}'");
+    let script = format!(
+        "mkdir -p {} && cat > {}",
+        shell_expandable(&inbox),
+        shell_expandable(&remote)
+    );
     let mut child = Command::new("ssh");
     child.args([
         "-o",
@@ -334,6 +394,7 @@ pub fn drop_inbox_remote(row: &SeatRow, env: &Envelope) -> Result<String, String
     child.stdin(Stdio::piped());
     child.stdout(Stdio::piped());
     child.stderr(Stdio::piped());
+    hide_window(&mut child);
     let mut proc = child.spawn().map_err(|e| format!("ssh spawn: {e}"))?;
     use std::io::Write;
     if let Some(mut stdin) = proc.stdin.take() {
@@ -377,5 +438,57 @@ mod tests {
         );
         assert_eq!(r.disposition.as_str(), "woken");
         assert!(r.via.contains("unix:"));
+    }
+
+    fn peer() -> SeatRow {
+        SeatRow {
+            name: "peer-one".into(),
+            ssh: "user@peer-one".into(),
+            coord_root: None,
+        }
+    }
+
+    #[test]
+    fn default_scp_dest_uses_tilde_not_home() {
+        let dest = remote_presence_scp(&peer(), "seat-amore-1.json");
+        assert_eq!(dest, "~/.house/coord/presence/seat-amore-1.json");
+        assert!(
+            !dest.contains("$HOME"),
+            "OpenSSH scp does not expand $HOME on dest"
+        );
+    }
+
+    #[test]
+    fn default_shell_path_double_quotes_home() {
+        let path = remote_presence_shell(&peer(), "seat-amore-1.json");
+        assert_eq!(path, "\"$HOME/.house/coord/presence/seat-amore-1.json\"");
+        assert!(
+            !path.contains('\''),
+            "single quotes prevent $HOME expansion on the remote"
+        );
+    }
+
+    #[test]
+    fn explicit_root_is_used_as_is() {
+        let row = SeatRow {
+            name: "peer-two".into(),
+            ssh: "user@peer-two".into(),
+            coord_root: Some("/home/user/.house/coord".into()),
+        };
+        assert_eq!(
+            remote_presence_scp(&row, "f.json"),
+            "/home/user/.house/coord/presence/f.json"
+        );
+        assert_eq!(
+            remote_presence_shell(&row, "f.json"),
+            "'/home/user/.house/coord/presence/f.json'"
+        );
+    }
+
+    #[test]
+    fn unsafe_filename_is_rejected() {
+        assert!(!is_safe_filename("../x.json"));
+        assert!(!is_safe_filename("a;rm -rf /.json"));
+        assert!(is_safe_filename("seat-amore-12.json"));
     }
 }
