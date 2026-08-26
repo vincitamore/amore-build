@@ -447,8 +447,7 @@ def format_native_report(report: dict, self_pid: int | None = None) -> str:
             bits.append(f"since {started}Z")
         if (e.get("seat") or "").lower() != me:
             bits.append("remote")
-        else:
-            live += 1
+        live += 1
         tag = " (this session)" if self_pid and e.get("pid") == self_pid else ""
         parts.append(f"{ident} ({', '.join(bits)}){tag}")
     for p in dark:
@@ -457,10 +456,9 @@ def format_native_report(report: dict, self_pid: int | None = None) -> str:
         if len(when) >= 16:
             cap += f", last answered {when[11:16]}Z"
         parts.append(cap)
-    remote = len(entries) - live
+    # Every entry is LIVE: local rows PID-probed here, remote rows PID-probed
+    # by their own seat's door seconds ago. Dark seats' sessions are absent.
     head = f"{live} LIVE"
-    if remote:
-        head += f" · {remote} remote"
     if dark:
         head += f" · {len(dark)} dark"
     return f"**Peers**: {head} — " + " · ".join(parts)

@@ -573,9 +573,10 @@ fn union_active_sessions(entries: &mut Vec<Presence>) {
 }
 
 /// Always-printed Peers line. `0 LIVE` is a finding.
-/// Peer-seat rows were answered live by that seat's door just now; a
-/// registered seat that did not answer renders dark, with its last answer
-/// when one is cached.
+/// Every entry is LIVE: local rows are PID-probed here, peer-seat rows were
+/// PID-probed by their own seat's door seconds ago (the row keeps a `remote`
+/// bit for provenance). A registered seat that did not answer renders dark,
+/// with its last answer when one is cached — its sessions are not counted.
 pub fn format_roster(report: &RosterReport, self_pid: Option<u32>) -> String {
     let entries = &report.entries;
     let dark: Vec<&PeerStatus> = report.peers.iter().filter(|p| !p.answered).collect();
@@ -583,11 +584,7 @@ pub fn format_roster(report: &RosterReport, self_pid: Option<u32>) -> String {
         return "Peers: 0 LIVE".to_string();
     }
     let me = seat();
-    let live_n = entries
-        .iter()
-        .filter(|e| e.seat.eq_ignore_ascii_case(&me))
-        .count();
-    let remote_n = entries.len() - live_n;
+    let live_n = entries.len();
     let mut parts: Vec<String> = entries
         .iter()
         .map(|e| {
@@ -626,11 +623,7 @@ pub fn format_roster(report: &RosterReport, self_pid: Option<u32>) -> String {
             .unwrap_or_default();
         parts.push(format!("{}: dark{when}", p.seat));
     }
-    let mut head = if remote_n == 0 {
-        format!("{live_n} LIVE")
-    } else {
-        format!("{live_n} LIVE · {remote_n} remote")
-    };
+    let mut head = format!("{live_n} LIVE");
     if !dark.is_empty() {
         head.push_str(&format!(" · {} dark", dark.len()));
     }

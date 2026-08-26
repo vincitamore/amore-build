@@ -142,7 +142,7 @@ describe('coord local roster', () => {
         last_answered: new Date(Date.now() - 2 * 3600 * 1000).toISOString(),
       },
     ];
-    expect(formatPeers(entries, peers)).toBe('1 LIVE · 2 remote · 1 dark');
+    expect(formatPeers(entries, peers)).toBe('3 LIVE · 1 dark');
     const detail = formatPeersDetail(entries, peers);
     expect(detail).toContain('there amore, claude-code');
     expect(detail).toContain('elsewhere: dark (last answered 2h ago)');

@@ -212,13 +212,13 @@ function tagRemote(entries: PresenceEntry[], me: string): PresenceEntry[] {
   }));
 }
 
+// Every entry is LIVE — local rows PID-probed here, remote rows PID-probed
+// by their own seat's door seconds ago. Dark seats' sessions are not counted.
 export function formatPeers(entries: PresenceEntry[], peers: PeerStatus[] = []): string {
-  const live = entries.filter((e) => !e.remote).length;
-  const remote = entries.filter((e) => e.remote).length;
+  const live = entries.length;
   const dark = peers.filter((p) => !p.answered).length;
-  if (live === 0 && remote === 0 && dark === 0) return '0 LIVE';
+  if (live === 0 && dark === 0) return '0 LIVE';
   let head = `${live} LIVE`;
-  if (remote > 0) head += ` · ${remote} remote`;
   if (dark > 0) head += ` · ${dark} dark`;
   return head;
 }

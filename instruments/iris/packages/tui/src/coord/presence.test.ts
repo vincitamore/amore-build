@@ -47,13 +47,13 @@ describe('Pulse presence display', () => {
     expect(formatPeers(entries)).toBe('2 LIVE');
   });
 
-  test('remote rows were answered live; head counts them as remote', () => {
+  test('remote rows were answered live by their door; they count as LIVE', () => {
     const entries = [
       local('here', 'amore'),
       local('here', 'claude-code'),
       remote('there', 'amore'),
     ];
-    expect(formatPeers(entries)).toBe('2 LIVE · 1 remote');
+    expect(formatPeers(entries)).toBe('3 LIVE');
   });
 
   test('dark registered seat shows in the head and as a captioned row', () => {
@@ -98,7 +98,7 @@ describe('Pulse presence display', () => {
       peers: [dark('elsewhere')],
     };
     const p = peersFromPayload(j);
-    expect(p.line).toBe('1 LIVE · 1 remote · 1 dark');
+    expect(p.line).toBe('2 LIVE · 1 dark');
     expect(p.entries).toHaveLength(2);
     expect(p.peers).toHaveLength(1);
   });

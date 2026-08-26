@@ -63,13 +63,14 @@ export function formatAgo(ts: string, now = Date.now()): string {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
+// Every entry is LIVE — local rows PID-probed by the daemon, remote rows
+// PID-probed by their own seat's door seconds ago. Dark seats' sessions are
+// not counted (they answered nothing).
 export function formatPeers(entries: PresenceEntry[], peers: PeerStatus[] = []): string {
-  const live = entries.filter((e) => !entryIsRemote(e)).length;
-  const remote = entries.filter((e) => entryIsRemote(e)).length;
+  const live = entries.length;
   const dark = peers.filter((p) => !p.answered).length;
-  if (live === 0 && remote === 0 && dark === 0) return '0 LIVE';
+  if (live === 0 && dark === 0) return '0 LIVE';
   let head = `${live} LIVE`;
-  if (remote > 0) head += ` · ${remote} remote`;
   if (dark > 0) head += ` · ${dark} dark`;
   return head;
 }

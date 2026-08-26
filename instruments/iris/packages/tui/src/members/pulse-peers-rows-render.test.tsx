@@ -68,7 +68,7 @@ describe('Pulse Peers rows (one row per seat)', () => {
     ];
     const line = formatPeers(entries);
     const seats = peerSeatRows(entries).map(formatPeerSeatRow);
-    expect(line).toBe('2 LIVE · 2 remote');
+    expect(line).toBe('4 LIVE');
     expect(seats.some((s) => s.includes('very-long-seat-delta'))).toBe(true);
 
     const { renderer, renderOnce, captureCharFrame } = await createTestRenderer({
@@ -87,7 +87,7 @@ describe('Pulse Peers rows (one row per seat)', () => {
     const frame = captureCharFrame();
 
     expect(frame).toContain('Peers');
-    expect(frame).toContain('2 LIVE');
+    expect(frame).toContain('4 LIVE');
     expect(frame).toContain('very-long-seat-alpha');
     expect(frame).toContain('very-long-seat-beta');
     expect(frame).toContain('very-long-seat-gamma');
