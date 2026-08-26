@@ -2,7 +2,7 @@
 // holds it (operator ruling 2026-08-26).
 //
 // A seat must be answerable whenever any session on it is live — a machine
-// with four Claude sessions and no TUI is not "0 LIVE". The door is the
+// full of other-harness sessions and no TUI is not "0 LIVE". The door is the
 // tailnet TLS listener on the coord port; amore sessions and this daemon
 // both keep trying to bind it (30s retry), first binder wins, and takeover
 // on the holder's exit is automatic. Both present the SAME persisted leaf
@@ -184,7 +184,7 @@ function forwardSend(
     // {role, content}} (the listener's documented inject contract; a
     // type:"text" frame is silently ignored). Delivery into a session that
     // bypasses permission prompts additionally needs crossSessionInbound:
-    // "accept" in its Claude settings.
+    // "accept" in that harness's settings.
     const amore = (target.harness || '').toLowerCase() === 'amore';
     const auth = JSON.stringify({ type: 'auth', token });
     const body = amore
