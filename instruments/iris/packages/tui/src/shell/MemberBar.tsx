@@ -7,13 +7,16 @@ export const MEMBER_BAR_NARROW_COLS = 100;
 
 /**
  * Chip label for a member slot.
- * Wide: `1 Dashboard` … `9 Graph`, Sessions as `S Sessions` (no digit — letter key only).
- * Narrow: `1`…`9` + `S` — never a second bar row.
+ * Wide: `1 Dashboard` … `9 Graph`; letter-keyed members (no digit) carry their
+ * key letter — Sessions `S Sessions`, Peers `P Peers`.
+ * Narrow: `1`…`9` + the key letters — never a second bar row.
  */
+const LETTER_KEYS: Record<string, string> = { Sessions: 'S', Peers: 'P' };
+
 export function memberChipLabel(index: number, name: string, narrow: boolean): string {
-  const isSessions = name === 'Sessions' || index >= 9;
-  if (narrow) return isSessions ? 'S' : String(index + 1);
-  if (isSessions) return `S ${name}`;
+  const letter = index >= 9 ? LETTER_KEYS[name] ?? name[0]?.toUpperCase() ?? '?' : null;
+  if (narrow) return letter ?? String(index + 1);
+  if (letter) return `${letter} ${name}`;
   return `${index + 1} ${name}`;
 }
 
@@ -65,7 +68,7 @@ export function MemberBar({
       })}
       <box flexGrow={1} flexDirection="row" backgroundColor={t.background} paddingLeft={2} paddingRight={1}>
         {narrow ? null : (
-          <text fg={t.muted}>{'click · 1-9 · S sessions · / search · v select · t themes · q quit'}</text>
+          <text fg={t.muted}>{'click · 1-9 · S sessions · P peers · / search · v select · t themes · q quit'}</text>
         )}
         <box flexGrow={1} />
         {overdue > 0 ? <text fg={t.error}>{`● ${overdue} overdue`}</text> : null}
