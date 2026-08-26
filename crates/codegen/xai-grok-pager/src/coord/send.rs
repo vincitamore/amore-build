@@ -28,7 +28,7 @@ impl SendResult {
     fn degraded_inbox(via: impl Into<String>, reason: impl Into<String>) -> Self {
         let reason = reason.into();
         tracing::warn!(error = %reason, "coord: live wake failed, inbox fallback");
-        eprintln!("coord: degraded (inbox) after tailnet: {reason}");
+        eprintln!("coord: degraded (inbox) after live wake: {reason}");
         Self {
             disposition: Disposition::Inbox,
             via: via.into(),
@@ -40,7 +40,7 @@ impl SendResult {
     pub fn format_line(&self) -> String {
         if let Some(reason) = &self.degrade {
             format!(
-                "degraded ({}) after tailnet: {reason}",
+                "degraded ({}) after live wake: {reason}",
                 self.disposition.as_str()
             )
         } else {
@@ -135,7 +135,11 @@ fn deliver(
                 return Ok(SendResult::new(d, format!("socket {addr}")));
             }
             Err(e) => {
-                tracing::debug!(error = %e, "coord send: local socket failed, falling through");
+                super::log::drop_inbox(&env);
+                return Ok(SendResult::degraded_inbox(
+                    "local inbox",
+                    format!("loopback {addr}: {e}"),
+                ));
             }
         }
     }
@@ -375,7 +379,7 @@ mod tests {
         let line = r.format_line();
         assert_eq!(
             line,
-            "degraded (inbox) after tailnet: tls:100.64.0.2:3856: pin mismatch"
+            "degraded (inbox) after live wake: tls:100.64.0.2:3856: pin mismatch"
         );
         assert!(!line.starts_with("sent "), "{line}");
         assert!(line.contains("pin mismatch"), "{line}");

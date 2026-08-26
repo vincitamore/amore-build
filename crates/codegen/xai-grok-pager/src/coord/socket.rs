@@ -337,8 +337,28 @@ where
     Ok(())
 }
 
+fn named_pipe_path(addr: &str) -> Option<&str> {
+    let a = addr.strip_prefix("uds:").unwrap_or(addr);
+    if a.starts_with(r"\\.\pipe\") || a.starts_with("//./pipe/") {
+        Some(a)
+    } else {
+        a.strip_prefix("pipe:")
+    }
+}
+
 /// Blocking client used by `amore coord send`.
 pub fn post_local(addr: &str, token: &str, env: &Envelope) -> Result<Disposition, String> {
+    if let Some(path) = named_pipe_path(addr) {
+        #[cfg(windows)]
+        {
+            return pipe_post(path, token, env);
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = path;
+            return Err("named pipes are not available on this platform".into());
+        }
+    }
     let auth = serde_json::json!({"type": "auth", "token": token});
     let send = serde_json::json!({"type": "send", "envelope": env});
     let payload = format!("{auth}\n{send}\n");
@@ -377,6 +397,59 @@ fn tcp_post(hostport: &str, payload: &str) -> Result<String, String> {
     let mut line = String::new();
     r.read_line(&mut line).map_err(|e| e.to_string())?;
     Ok(line)
+}
+
+/// Other harnesses on Windows stamp `\\.\pipe\...`. First line is token auth;
+/// the body is a text frame, not the Amore `{type: send, envelope}` pair.
+#[cfg(windows)]
+fn pipe_post(path: &str, token: &str, env: &Envelope) -> Result<Disposition, String> {
+    use std::os::windows::fs::OpenOptionsExt;
+    const FILE_SHARE_READ: u32 = 0x1;
+    const FILE_SHARE_WRITE: u32 = 0x2;
+    let auth = serde_json::json!({"type": "auth", "token": token});
+    let msg = serde_json::json!({
+        "type": "text",
+        "data": super::msg::wrap_prompt(env),
+    });
+    let payload = format!("{auth}\n{msg}\n");
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+        .open(path)
+        .map_err(|e| format!("named pipe {path}: {e}"))?;
+    let mut s = file;
+    s.write_all(payload.as_bytes())
+        .map_err(|e| format!("named pipe write: {e}"))?;
+    let _ = s.flush();
+    let mut r = BufReader::new(s);
+    let mut line = String::new();
+    r.read_line(&mut line)
+        .map_err(|e| format!("named pipe read: {e}"))?;
+    parse_peer_reply(&line)
+}
+
+#[cfg(windows)]
+fn parse_peer_reply(line: &str) -> Result<Disposition, String> {
+    if let Ok(d) = parse_disposition(line) {
+        return Ok(d);
+    }
+    #[derive(Deserialize)]
+    struct Peer {
+        #[serde(rename = "type")]
+        kind: Option<String>,
+        data: Option<String>,
+    }
+    let r: Peer = serde_json::from_str(line.trim()).map_err(|e| {
+        format!("peer reply: {e}: {}", line.trim())
+    })?;
+    match (r.kind.as_deref(), r.data.as_deref()) {
+        (Some("response"), Some("ok")) | (Some("response"), None) => {
+            Ok(Disposition::Enqueued)
+        }
+        (Some("error"), data) => Err(data.unwrap_or("peer error").into()),
+        other => Err(format!("unknown peer reply: {other:?}")),
+    }
 }
 
 pub fn post_tailnet(addr: &str, peer_seat: &str, env: &Envelope) -> Result<Disposition, String> {
@@ -440,7 +513,7 @@ fn classify_local_target<'a>(
 }
 
 fn is_loopback_socket(addr: &str) -> bool {
-    addr.starts_with("unix:") || addr.starts_with("tcp:")
+    addr.starts_with("unix:") || addr.starts_with("tcp:") || named_pipe_path(addr).is_some()
 }
 
 fn route_matched_peer(
@@ -454,12 +527,6 @@ fn route_matched_peer(
     };
     match post(addr, token, env) {
         Ok(d) => RouteOutcome::Forwarded(d),
-        Err(_) if !is_loopback_socket(addr) => {
-            // Named-pipe (and any non unix:/tcp: stamp): cannot hop. Inbox
-            // is the honest remainder — the sender sees inbox, not woken.
-            super::log::drop_inbox(env);
-            RouteOutcome::Forwarded(Disposition::Inbox)
-        }
         Err(e) => RouteOutcome::Failed(format!("forward to {sid} failed: {e}")),
     }
 }
@@ -623,17 +690,16 @@ mod tests {
     }
 
     #[test]
-    fn named_pipe_forward_is_honest_inbox() {
-        with_isolated_coord(|| {
-            let env = env_to(Some("s-b"));
-            let p = peer("s-b", 2, Some(r"\\.\pipe\harness-session"), Some("t"));
-            let out = route_matched_peer(&env, &p, |addr, _, _| {
-                Err(format!("unknown socket addr: {addr}"))
-            });
-            assert_eq!(out, RouteOutcome::Forwarded(Disposition::Inbox));
-            let inbox = crate::coord::coord_root().join("inbox").join("m1.json");
-            assert!(inbox.exists(), "named-pipe miss must land in inbox");
+    fn named_pipe_forward_error_is_failed() {
+        let env = env_to(Some("s-b"));
+        let p = peer("s-b", 2, Some(r"\\.\pipe\harness-session"), Some("t"));
+        let out = route_matched_peer(&env, &p, |addr, _, _| {
+            Err(format!("named pipe {addr}: connection refused"))
         });
+        match out {
+            RouteOutcome::Failed(e) => assert!(e.contains("named pipe")),
+            other => panic!("expected Failed, got {other:?}"),
+        }
     }
 
     #[test]

@@ -17,7 +17,7 @@ work it describes.
   is TLS to the peer's Tailscale IPv4 only (house-issued cert, TOFU pin,
   bind that address, never 0.0.0.0, never LAN). A busy session enqueues;
   it does not interrupt the running turn. ssh inbox is the offline
-  fallback; a failed live wake prints `degraded (inbox) after tailnet:`
+  fallback; a failed live wake prints `degraded (inbox) after live wake:`
   instead of a success-shaped `sent (inbox)`.
 - **Hop from v1.0.8 on Unix** — that cut's updater unpacks `iris-dash-*`
   as a 644 docs member and stage-smokes it, then aborts (`failed to spawn
@@ -30,6 +30,10 @@ work it describes.
 - **Pulse** — Peers shows a count plus a sub-line of `seat/harness`
   identities, refreshed with the Dashboard poll. Duplicate harness rows
   for the same pid are collapsed.
+- **Same-seat named pipe** — a Windows named-pipe stamp from another
+  harness is a live hop (first-line token auth, text frame), not a silent
+  inbox drop. A failed hop prints `degraded (inbox) after live wake:`,
+  never a success-shaped `sent (inbox)`.
 - **Leader comparator** — `1.0.8 < 1.0.8-hotfix.1 < 1.0.9`. Already-running
   v1.0.8 sessions still use raw semver until they exit and can force-kill
   the new leader. Restart live sessions after the hop, or expect a bounded

@@ -82,7 +82,7 @@ mod tests {
             degrade: Some("pin mismatch".into()),
         };
         let line = r.format_line();
-        assert_eq!(line, "degraded (inbox) after tailnet: pin mismatch");
+        assert_eq!(line, "degraded (inbox) after live wake: pin mismatch");
         assert!(!line.contains("sent (inbox)"), "{line}");
     }
 

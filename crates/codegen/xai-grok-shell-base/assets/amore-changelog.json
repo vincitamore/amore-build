@@ -6,7 +6,7 @@
   },
   {
     "category": "features",
-    "description": "**Wake transport** — same-seat sessions stay on loopback (unix domain on POSIX, token-gated TCP 127.0.0.1 on Windows). Cross-seat live wake is TLS to the peer's Tailscale IPv4 only (house-issued cert, TOFU pin, bind that address, never 0.0.0.0, never LAN). A busy session enqueues; it does not interrupt the running turn. ssh inbox is the offline fallback; a failed live wake prints degraded (inbox) after tailnet instead of a success-shaped sent (inbox).",
+    "description": "**Wake transport** — same-seat sessions stay on loopback (unix domain on POSIX, token-gated TCP 127.0.0.1 on Windows). Cross-seat live wake is TLS to the peer's Tailscale IPv4 only (house-issued cert, TOFU pin, bind that address, never 0.0.0.0, never LAN). A busy session enqueues; it does not interrupt the running turn. ssh inbox is the offline fallback; a failed live wake prints degraded (inbox) after live wake instead of a success-shaped sent (inbox).",
     "breaking_change": false
   },
   {
@@ -17,6 +17,11 @@
   {
     "category": "fixes",
     "description": "**Pulse** — Peers shows a count plus a sub-line of seat/harness identities, refreshed with the Dashboard poll. Duplicate harness rows for the same pid are collapsed.",
+    "breaking_change": false
+  },
+  {
+    "category": "fixes",
+    "description": "**Same-seat named pipe** — a Windows named-pipe stamp from another harness is a live hop (first-line token auth, text frame), not a silent inbox drop. A failed hop prints degraded (inbox) after live wake, never a success-shaped sent (inbox).",
     "breaking_change": false
   },
   {
