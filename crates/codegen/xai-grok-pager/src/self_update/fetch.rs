@@ -146,7 +146,7 @@ pub fn fetch_and_stage_at(
     let (binary_path, extra_files) =
         unpack_verified_archive(&archive_bytes, &asset, &expected_binary, staging_dir)?;
 
-    make_executable(&binary_path);
+    mark_staged_executables(&binary_path, &extra_files);
 
     Ok(StagedArtifact {
         component: component.name().to_string(),
@@ -502,6 +502,7 @@ fn unpack_zip_selective(
             continue;
         }
         let name = file_name_only(&enclosed)?;
+        let declared_exec = archive_member_is_executable(entry.unix_mode());
         let mut buf = Vec::new();
         entry.read_to_end(&mut buf).context("inflate zip entry")?;
         stage_member(
@@ -510,6 +511,7 @@ fn unpack_zip_selective(
             expected_binary,
             &name,
             &buf,
+            declared_exec,
             &mut binary_path,
             &mut extra_files,
         )?;
@@ -539,6 +541,7 @@ fn unpack_tar_gz_selective(
             continue;
         }
         let name = file_name_only(&path)?;
+        let declared_exec = archive_member_is_executable(entry.header().mode().ok());
         let mut buf = Vec::new();
         entry.read_to_end(&mut buf).context("read tar payload")?;
         stage_member(
@@ -547,6 +550,7 @@ fn unpack_tar_gz_selective(
             expected_binary,
             &name,
             &buf,
+            declared_exec,
             &mut binary_path,
             &mut extra_files,
         )?;
@@ -575,6 +579,7 @@ fn stage_member(
     expected_binary: &str,
     name: &str,
     buf: &[u8],
+    declared_exec: bool,
     binary_path: &mut Option<PathBuf>,
     extra_files: &mut Vec<PathBuf>,
 ) -> Result<()> {
@@ -590,6 +595,10 @@ fn stage_member(
         let dest = docs_dir.join(name);
         ensure_under(staging_dir, &dest)?;
         fs::write(&dest, buf).with_context(|| format!("write {}", dest.display()))?;
+        // fs::write creates 0644; restore archive-declared +x for the mark step.
+        if declared_exec {
+            make_executable(&dest);
+        }
         extra_files.push(dest);
     }
     Ok(())
@@ -620,6 +629,60 @@ fn ensure_under(root: &Path, candidate: &Path) -> Result<()> {
         bail!("refusing to write outside staging dir");
     }
     Ok(())
+}
+
+pub(crate) fn mark_staged_executables(binary: &Path, extras: &[PathBuf]) {
+    make_executable(binary);
+    for extra in extras {
+        if is_staged_binary_member(extra) {
+            make_executable(extra);
+        }
+    }
+}
+
+/// Archive-declared extra: unix mode has +x, or basename listed in docs/STAGED_EXEC.
+fn is_staged_binary_member(path: &Path) -> bool {
+    extra_has_execute_bit(path) || extra_listed_in_staged_exec_manifest(path)
+}
+
+fn archive_member_is_executable(mode: Option<u32>) -> bool {
+    mode.is_some_and(|m| m & 0o111 != 0)
+}
+
+fn extra_has_execute_bit(path: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        fs::metadata(path)
+            .map(|m| m.permissions().mode() & 0o111 != 0)
+            .unwrap_or(false)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+        false
+    }
+}
+
+/// Optional docs/STAGED_EXEC member: one extra basename per line.
+fn extra_listed_in_staged_exec_manifest(path: &Path) -> bool {
+    let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+        return false;
+    };
+    if name.eq_ignore_ascii_case("STAGED_EXEC") {
+        return false;
+    }
+    let Some(dir) = path.parent() else {
+        return false;
+    };
+    let manifest = dir.join("STAGED_EXEC");
+    let Ok(text) = fs::read_to_string(&manifest) else {
+        return false;
+    };
+    text.lines().any(|line| {
+        let line = line.trim();
+        !line.is_empty() && !line.starts_with('#') && line == name
+    })
 }
 
 #[cfg(unix)]
@@ -982,6 +1045,226 @@ mod tests {
     }
 
     #[test]
+    fn archive_mode_declares_exec_not_names() {
+        assert!(archive_member_is_executable(Some(0o755)));
+        assert!(archive_member_is_executable(Some(0o100755)));
+        assert!(archive_member_is_executable(Some(0o111)));
+        assert!(!archive_member_is_executable(Some(0o644)));
+        assert!(!archive_member_is_executable(Some(0o100644)));
+        assert!(!archive_member_is_executable(Some(0)));
+        assert!(!archive_member_is_executable(None));
+    }
+
+    #[test]
+    fn staged_exec_manifest_lists_basenames() {
+        let dir = tempfile::tempdir().unwrap();
+        let docs = dir.path().join("docs");
+        fs::create_dir_all(&docs).unwrap();
+        fs::write(docs.join("helper-linux-x64"), b"h").unwrap();
+        fs::write(docs.join("LICENSE"), b"L").unwrap();
+        fs::write(docs.join("STAGED_EXEC"), "helper-linux-x64\n# skip\n\n").unwrap();
+        assert!(extra_listed_in_staged_exec_manifest(
+            &docs.join("helper-linux-x64")
+        ));
+        assert!(is_staged_binary_member(&docs.join("helper-linux-x64")));
+        assert!(!extra_listed_in_staged_exec_manifest(&docs.join("LICENSE")));
+        assert!(!extra_listed_in_staged_exec_manifest(
+            &docs.join("STAGED_EXEC")
+        ));
+        assert!(!is_staged_binary_member(&docs.join("LICENSE")));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn iris_dash_extra_becomes_executable() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let staging = dir.path().join("stage");
+        let members = [
+            ("iris-linux-x64", b"iris".as_slice(), 0o755),
+            ("iris-dash-linux-x64", b"dash".as_slice(), 0o755),
+            ("LICENSE", b"L".as_slice(), 0o644),
+        ];
+        let archive = build_tar_gz_with_modes(&members);
+        let (binary, extras) = unpack_verified_archive(
+            &archive,
+            "iris-linux-x64.tar.gz",
+            "iris-linux-x64",
+            &staging,
+        )
+        .unwrap();
+        mark_staged_executables(&binary, &extras);
+        let dash = extras
+            .iter()
+            .find(|p| {
+                p.file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|n| n.starts_with("iris-dash"))
+            })
+            .expect("dash extra");
+        let mode = fs::metadata(dash).unwrap().permissions().mode();
+        assert_ne!(mode & 0o111, 0, "dash must be executable, mode={mode:#o}");
+        let license = extras
+            .iter()
+            .find(|p| p.file_name().and_then(|n| n.to_str()) == Some("LICENSE"))
+            .expect("license extra");
+        let lmode = fs::metadata(license).unwrap().permissions().mode();
+        assert_eq!(lmode & 0o111, 0, "docs must stay non-executable");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn mode_declared_helper_extra_becomes_executable() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let staging = dir.path().join("stage");
+        let members = [
+            ("iris-linux-x64", b"iris".as_slice(), 0o755),
+            ("helper-linux-x64", b"help".as_slice(), 0o755),
+            ("LICENSE", b"L".as_slice(), 0o644),
+        ];
+        let archive = build_tar_gz_with_modes(&members);
+        let (binary, extras) = unpack_verified_archive(
+            &archive,
+            "iris-linux-x64.tar.gz",
+            "iris-linux-x64",
+            &staging,
+        )
+        .unwrap();
+        mark_staged_executables(&binary, &extras);
+        let helper = extras
+            .iter()
+            .find(|p| p.file_name().and_then(|n| n.to_str()) == Some("helper-linux-x64"))
+            .expect("helper extra");
+        let mode = fs::metadata(helper).unwrap().permissions().mode();
+        assert_ne!(
+            mode & 0o111,
+            0,
+            "mode-declared extra must be executable, mode={mode:#o}"
+        );
+        let license = extras
+            .iter()
+            .find(|p| p.file_name().and_then(|n| n.to_str()) == Some("LICENSE"))
+            .expect("license extra");
+        let lmode = fs::metadata(license).unwrap().permissions().mode();
+        assert_eq!(lmode & 0o111, 0, "docs must stay non-executable");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn name_allowlist_does_not_chmod_644_extra() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let staging = dir.path().join("stage");
+        let members = [
+            ("iris-linux-x64", b"iris".as_slice(), 0o755),
+            ("iris-dash-linux-x64", b"dash".as_slice(), 0o644),
+            ("LICENSE", b"L".as_slice(), 0o644),
+        ];
+        let archive = build_tar_gz_with_modes(&members);
+        let (binary, extras) = unpack_verified_archive(
+            &archive,
+            "iris-linux-x64.tar.gz",
+            "iris-linux-x64",
+            &staging,
+        )
+        .unwrap();
+        mark_staged_executables(&binary, &extras);
+        let dash = extras
+            .iter()
+            .find(|p| {
+                p.file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|n| n.starts_with("iris-dash"))
+            })
+            .expect("dash extra");
+        let mode = fs::metadata(dash).unwrap().permissions().mode();
+        assert_eq!(
+            mode & 0o111,
+            0,
+            "644 extra must stay non-exec even with a dash name, mode={mode:#o}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn staged_exec_manifest_declares_extra() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let staging = dir.path().join("stage");
+        let members = [
+            ("iris-linux-x64", b"iris".as_slice(), 0o755),
+            ("helper-linux-x64", b"help".as_slice(), 0o644),
+            ("STAGED_EXEC", b"helper-linux-x64\n".as_slice(), 0o644),
+            ("LICENSE", b"L".as_slice(), 0o644),
+        ];
+        let archive = build_tar_gz_with_modes(&members);
+        let (binary, extras) = unpack_verified_archive(
+            &archive,
+            "iris-linux-x64.tar.gz",
+            "iris-linux-x64",
+            &staging,
+        )
+        .unwrap();
+        mark_staged_executables(&binary, &extras);
+        let helper = extras
+            .iter()
+            .find(|p| p.file_name().and_then(|n| n.to_str()) == Some("helper-linux-x64"))
+            .expect("helper extra");
+        let mode = fs::metadata(helper).unwrap().permissions().mode();
+        assert_ne!(
+            mode & 0o111,
+            0,
+            "manifest-declared extra must be executable, mode={mode:#o}"
+        );
+        let license = extras
+            .iter()
+            .find(|p| p.file_name().and_then(|n| n.to_str()) == Some("LICENSE"))
+            .expect("license extra");
+        let lmode = fs::metadata(license).unwrap().permissions().mode();
+        assert_eq!(lmode & 0o111, 0, "docs must stay non-executable");
+        let manifest = extras
+            .iter()
+            .find(|p| p.file_name().and_then(|n| n.to_str()) == Some("STAGED_EXEC"))
+            .expect("manifest extra");
+        let mmode = fs::metadata(manifest).unwrap().permissions().mode();
+        assert_eq!(mmode & 0o111, 0, "manifest itself stays non-executable");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn zip_unix_mode_declares_extra_exec() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let staging = dir.path().join("stage");
+        let archive = build_zip_with_unix_modes(&[
+            ("iris-windows-x64.exe", b"iris".as_slice(), Some(0o755)),
+            ("helper.exe", b"help".as_slice(), Some(0o755)),
+            ("LICENSE", b"L".as_slice(), Some(0o644)),
+        ]);
+        let (binary, extras) = unpack_verified_archive(
+            &archive,
+            "iris-windows-x64.exe.zip",
+            "iris-windows-x64.exe",
+            &staging,
+        )
+        .unwrap();
+        mark_staged_executables(&binary, &extras);
+        let helper = extras
+            .iter()
+            .find(|p| p.file_name().and_then(|n| n.to_str()) == Some("helper.exe"))
+            .expect("helper extra");
+        let mode = fs::metadata(helper).unwrap().permissions().mode();
+        assert_ne!(mode & 0o111, 0, "zip unix mode 755 extra, mode={mode:#o}");
+        let license = extras
+            .iter()
+            .find(|p| p.file_name().and_then(|n| n.to_str()) == Some("LICENSE"))
+            .expect("license extra");
+        let lmode = fs::metadata(license).unwrap().permissions().mode();
+        assert_eq!(lmode & 0o111, 0, "docs must stay non-executable");
+    }
+
+    #[test]
     fn companion_single_member_zip_stages_only_binary() {
         let dir = tempfile::tempdir().unwrap();
         let staging = dir.path().join("stage");
@@ -1091,14 +1374,26 @@ mod tests {
     // -- archive builders ----------------------------------------------------
 
     fn build_zip(members: &[(&str, &[u8])]) -> Vec<u8> {
+        build_zip_with_unix_modes(
+            &members
+                .iter()
+                .map(|(name, data)| (*name, *data, None))
+                .collect::<Vec<_>>(),
+        )
+    }
+
+    fn build_zip_with_unix_modes(members: &[(&str, &[u8], Option<u32>)]) -> Vec<u8> {
         use std::io::Cursor;
         use zip::write::SimpleFileOptions;
         let mut cursor = Cursor::new(Vec::new());
         {
             let mut writer = zip::ZipWriter::new(&mut cursor);
-            let opts = SimpleFileOptions::default()
-                .compression_method(zip::CompressionMethod::Stored);
-            for (name, data) in members {
+            for (name, data, unix_mode) in members {
+                let mut opts = SimpleFileOptions::default()
+                    .compression_method(zip::CompressionMethod::Stored);
+                if let Some(mode) = unix_mode {
+                    opts = opts.unix_permissions(*mode);
+                }
                 writer.start_file(*name, opts).unwrap();
                 writer.write_all(data).unwrap();
             }
@@ -1125,14 +1420,23 @@ mod tests {
     }
 
     fn build_tar_gz(members: &[(&str, &[u8])]) -> Vec<u8> {
+        build_tar_gz_with_modes(
+            &members
+                .iter()
+                .map(|(name, data)| (*name, *data, 0o644))
+                .collect::<Vec<_>>(),
+        )
+    }
+
+    fn build_tar_gz_with_modes(members: &[(&str, &[u8], u32)]) -> Vec<u8> {
         use flate2::Compression;
         use flate2::write::GzEncoder;
         let encoder = GzEncoder::new(Vec::new(), Compression::default());
         let mut builder = tar::Builder::new(encoder);
-        for (name, data) in members {
+        for (name, data, mode) in members {
             let mut header = tar::Header::new_gnu();
             header.set_size(data.len() as u64);
-            header.set_mode(0o644);
+            header.set_mode(*mode);
             header.set_cksum();
             builder.append_data(&mut header, *name, *data).unwrap();
         }

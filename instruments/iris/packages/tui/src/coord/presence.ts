@@ -1,108 +1,133 @@
-// Seat roster reader for the Dashboard Pulse. Same schema as the house
-// presence files (~/.house/coord/presence/). Filter-only; writers reap.
+// Pulse display for GET /api/coord/presence and /api/coord/messages.
+// Display-only: the daemon is the single roster reader. iris hides, never unlinks.
 
-import { homedir } from 'node:os';
-import { readdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+export const PRESENCE_UNAVAILABLE = 'presence unavailable';
+export const MAIL_UNAVAILABLE = 'mail unavailable';
+
+/** House roster cutoff: a remote older than this stops counting as LIVE. */
+export const REMOTE_STALE_HOURS = 12;
 
 export interface PresenceEntry {
   seat: string;
   harness: string;
   model?: string | null;
-  pid: number;
+  pid?: number;
   tree?: string;
   started?: string;
   work_unit?: string | null;
+  session_id?: string | null;
+  /** Daemon-tagged: this row is another seat (not PID-probed here). */
+  remote?: boolean;
+  stale?: boolean;
+  ageHours?: number;
+  mtime?: number;
+  mtimeMs?: number;
+  _remote?: boolean;
+  _stale?: boolean;
+  _age_hours?: number;
 }
 
-function presenceDir(): string {
-  const over = process.env.HOUSE_COORD_DIR;
-  if (over && over.length > 0) return over;
-  return join(homedir(), '.house', 'coord', 'presence');
+export interface PresencePayload {
+  entries?: PresenceEntry[];
+  line?: string;
+  detail?: string;
 }
 
-function pidAlive(pid: number): boolean {
-  if (!pid) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (e) {
-    return (e as NodeJS.ErrnoException).code === 'EPERM';
+export interface CoordMessage {
+  msgid?: string;
+  kind?: string;
+  ts?: string;
+  from?: { seat?: string; harness?: string; session_id?: string };
+  text?: string;
+}
+
+export function entryIsRemote(e: PresenceEntry): boolean {
+  return e.remote === true || e._remote === true;
+}
+
+export function entryAgeHours(e: PresenceEntry, now = Date.now()): number {
+  if (typeof e.ageHours === 'number' && Number.isFinite(e.ageHours)) {
+    return Math.max(0, e.ageHours);
   }
-}
-
-export function readRoster(): PresenceEntry[] {
-  let names: string[] = [];
-  try {
-    names = readdirSync(presenceDir());
-  } catch {
-    return [];
+  if (typeof e._age_hours === 'number' && Number.isFinite(e._age_hours)) {
+    return Math.max(0, e._age_hours);
   }
-  const entries: PresenceEntry[] = [];
-  for (const name of names) {
-    if (!name.endsWith('.json')) continue;
-    try {
-      const e = JSON.parse(readFileSync(join(presenceDir(), name), 'utf8')) as PresenceEntry;
-      if (typeof e.pid === 'number' && pidAlive(e.pid)) entries.push(e);
-    } catch {
-      // leave unreadable files for the writer-side reaper
-    }
+  const mt = e.mtimeMs ?? e.mtime;
+  if (typeof mt === 'number' && Number.isFinite(mt) && mt > 0) {
+    return Math.max(0, (now - mt) / 3_600_000);
   }
-  entries.sort((a, b) => (a.started || '').localeCompare(b.started || ''));
-  return entries;
+  return 0;
 }
 
-export function formatPeers(entries: PresenceEntry[]): string {
-  if (entries.length === 0) return '0 LIVE';
-  const parts = entries.map((e) => {
-    const ident = `${e.model || e.harness}@${e.seat || '?'}/${e.harness}`;
-    const bits = [`pid ${e.pid}`];
-    if (e.tree) bits.push(e.tree);
-    if (e.work_unit) bits.push(`unit ${e.work_unit}`);
-    return `${ident} (${bits.join(', ')})`;
-  });
-  return `${entries.length} LIVE — ${parts.join(' · ')}`;
+export function entryIsStale(e: PresenceEntry, now = Date.now()): boolean {
+  if (e.stale === true || e._stale === true) return true;
+  if (!entryIsRemote(e)) return false;
+  return entryAgeHours(e, now) > REMOTE_STALE_HOURS;
 }
 
-function coordRoot(): string {
-  const over = process.env.HOUSE_COORD_DIR;
-  if (over && over.length > 0) return join(over, '..');
-  return join(homedir(), '.house', 'coord');
+/** Coarsen hours to glanceable `Xm ago` / `Xh ago` / `Xd ago`. */
+export function formatRemoteAge(ageHours: number): string {
+  let h = ageHours;
+  if (!Number.isFinite(h) || h < 0) h = 0;
+  const minutes = Math.floor(h * 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
 }
 
-export function readMessages(limit = 20): { from?: { seat?: string; harness?: string }; text?: string; ts?: string }[] {
-  const dir = join(coordRoot(), 'log');
-  let names: string[] = [];
-  try {
-    names = readdirSync(dir);
-  } catch {
-    return [];
+/** House roster vocabulary: `remote, seen …` past cutoff, else `remote, as of …`. */
+export function formatRemoteCaption(e: PresenceEntry, now = Date.now()): string | null {
+  if (!entryIsRemote(e)) return null;
+  const age = formatRemoteAge(entryAgeHours(e, now));
+  return entryIsStale(e, now) ? `remote, seen ${age}` : `remote, as of ${age}`;
+}
+
+export function formatPeers(entries: PresenceEntry[], now = Date.now()): string {
+  const live = entries.filter((e) => !entryIsRemote(e) && !entryIsStale(e, now)).length;
+  const remote = entries.filter((e) => entryIsRemote(e)).length;
+  if (live === 0 && remote === 0) return '0 LIVE';
+  if (remote === 0) return `${live} LIVE`;
+  return `${live} LIVE · ${remote} remote-reported`;
+}
+
+export function formatPeersDetail(entries: PresenceEntry[], now = Date.now()): string {
+  if (entries.length === 0) return '';
+  return entries
+    .map((e) => {
+      const ident = `${e.seat || '?'}/${e.harness || '?'}`;
+      const cap = formatRemoteCaption(e, now);
+      return cap ? `${ident} (${cap})` : ident;
+    })
+    .join(' · ');
+}
+
+export function peersFromPayload(j: unknown, now = Date.now()): { line: string; detail: string } {
+  if (!j || typeof j !== 'object') return { line: '0 LIVE', detail: '' };
+  const o = j as PresencePayload;
+  if (Array.isArray(o.entries)) {
+    return { line: formatPeers(o.entries, now), detail: formatPeersDetail(o.entries, now) };
   }
-  const all: { from?: { seat?: string; harness?: string }; text?: string; ts?: string }[] = [];
-  for (const name of names) {
-    if (!name.endsWith('.ndjson')) continue;
-    try {
-      for (const line of readFileSync(join(dir, name), 'utf8').split('\n')) {
-        if (!line.trim()) continue;
-        try {
-          all.push(JSON.parse(line));
-        } catch {
-          // skip
-        }
-      }
-    } catch {
-      // skip
-    }
-  }
-  all.sort((a, b) => (a.ts || '').localeCompare(b.ts || ''));
-  return all.slice(-limit);
+  return {
+    line: typeof o.line === 'string' && o.line.length > 0 ? o.line : '0 LIVE',
+    detail: typeof o.detail === 'string' ? o.detail : '',
+  };
 }
 
-export function formatMessages(
-  entries: { from?: { seat?: string; harness?: string }; text?: string }[],
-): string {
+export function formatMessages(entries: CoordMessage[]): string {
   if (entries.length === 0) return 'none';
   const last = entries[entries.length - 1];
-  const ident = last?.from ? `${last.from.seat || '?'}/${last.from.harness || '?'}` : '?';
-  return `${entries.length} · last ${ident}: ${(last?.text || '').slice(0, 40)}`;
+  const ident = last?.from
+    ? `${last.from.seat || '?'}/${last.from.harness || '?'}`
+    : '?';
+  const body = (last?.text || '').slice(0, 48);
+  return `${entries.length} · last ${ident}: ${body}`;
+}
+
+export function messagesFromPayload(j: unknown): string {
+  if (!j || typeof j !== 'object') return 'none';
+  const o = j as { line?: string; entries?: CoordMessage[] };
+  if (typeof o.line === 'string' && o.line.length > 0) return o.line;
+  if (Array.isArray(o.entries)) return formatMessages(o.entries);
+  return 'none';
 }

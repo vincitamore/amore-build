@@ -2941,6 +2941,111 @@ fn palette_dispatch_preserves_prompt_draft() {
 }
 
 #[test]
+fn coord_inject_preserves_draft_history_and_is_literal() {
+    let mut app = test_app_with_agent();
+    let id = AgentId(0);
+    app.agents
+        .get_mut(&id)
+        .unwrap()
+        .prompt
+        .set_text("user draft");
+    let hist = app.agents[&id].session.prompt_history.len();
+
+    let effects = dispatch_coord_inject(&mut app, "/compact".into());
+
+    assert!(
+        !effects.iter().any(|e| matches!(e, Effect::Compact { .. })),
+        "coord text must not resolve as a slash command"
+    );
+    assert!(
+        effects.iter().any(|e| matches!(
+            e,
+            Effect::SendPrompt { text, .. } if text == "/compact"
+        )),
+        "idle inject should drain the literal coord text; effects = {effects:?}"
+    );
+    assert_eq!(app.agents[&id].prompt.text(), "user draft");
+    assert_eq!(app.agents[&id].session.prompt_history.len(), hist);
+}
+
+#[test]
+fn coord_inject_skips_paste_defer_and_keeps_composer() {
+    let mut app = test_app_with_agent();
+    let id = AgentId(0);
+    {
+        let agent = app.agents.get_mut(&id).unwrap();
+        agent.prompt.set_text("user draft");
+        agent.paste_probe_in_flight = 1;
+    }
+
+    let effects = dispatch_coord_inject(&mut app, "coord body".into());
+
+    assert!(
+        app.agents[&id].deferred_send.is_none(),
+        "coord inject must not stash a textless SendPrompt defer"
+    );
+    assert_eq!(app.agents[&id].prompt.text(), "user draft");
+    assert_eq!(app.agents[&id].paste_probe_in_flight, 1);
+    assert!(
+        effects.iter().any(|e| matches!(
+            e,
+            Effect::SendPrompt { text, .. } if text == "coord body"
+        )),
+        "coord text must send, not the composer draft; effects = {effects:?}"
+    );
+}
+
+#[test]
+fn coord_inject_enqueues_across_reconnect_instead_of_dropping() {
+    let mut app = test_app_with_agent();
+    let id = AgentId(0);
+    app.reconnect_pending = true;
+    app.agents
+        .get_mut(&id)
+        .unwrap()
+        .prompt
+        .set_text("user draft");
+
+    let effects = dispatch_coord_inject(&mut app, "coord body".into());
+
+    assert!(effects.is_empty(), "reconnect must not emit SendPrompt");
+    let queued: Vec<&str> = app.agents[&id]
+        .session
+        .pending_prompts
+        .iter()
+        .map(|p| p.text.as_str())
+        .collect();
+    assert_eq!(queued, vec!["coord body"]);
+    assert_eq!(app.agents[&id].prompt.text(), "user draft");
+    assert!(app.agents[&id].session.state.is_idle());
+}
+
+#[test]
+fn coord_inject_leaves_voice_interim_in_place() {
+    let mut app = test_app_with_agent();
+    let id = AgentId(0);
+    app.voice_state = VoiceState::Recording {
+        hold: false,
+        target: VoiceTarget::Agent(id),
+        interim: Some("spoken draft".into()),
+    };
+    app.agents
+        .get_mut(&id)
+        .unwrap()
+        .prompt
+        .set_text("typed draft");
+
+    let _ = dispatch_coord_inject(&mut app, "coord body".into());
+
+    assert!(
+        app.voice_listening(),
+        "coord inject must not stop dictation"
+    );
+    assert_eq!(app.voice_interim(), Some("spoken draft"));
+    assert_eq!(app.agents[&id].prompt.text(), "typed draft");
+}
+
+#[test]
 fn slash_compact_with_context_enqueues_command() {
     let mut app = test_app_with_agent();
     let effects = dispatch(

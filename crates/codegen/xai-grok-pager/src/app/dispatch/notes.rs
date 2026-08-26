@@ -287,7 +287,7 @@ pub(super) fn dispatch_send_feedback(
         return vec![];
     };
 
-let Some(send) = commit_feedback(
+    let Some(send) = commit_feedback(
         agent,
         coding_data_retention_opt_out,
         id,

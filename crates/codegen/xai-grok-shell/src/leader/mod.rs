@@ -92,16 +92,12 @@ const EVICT_WAIT_TIMEOUT: Duration = Duration::from_secs(8);
 /// How long the SAME live grok flock-holder may stay unconnectable before
 /// `connect_or_spawn` treats it as a "zombie leader" and evicts it.
 const ZOMBIE_EVICT_DEADLINE: Duration = Duration::from_secs(30);
-/// Whether `leader_version` is a strictly-older parseable semver than `baseline`.
-/// Unparseable versions (e.g. dev `"unknown"`) return `false` — leave them alone.
+/// Whether `leader_version` is a strictly-older parseable release than `baseline`.
+/// Ordering is `(major, minor, patch, hotfix)` so `1.0.8-hotfix.1` is newer than
+/// `1.0.8` and older than `1.0.9`. Unparseable versions (e.g. dev `"unknown"`)
+/// return `false` — leave them alone.
 pub fn leader_is_older_than(leader_version: &str, baseline: &str) -> bool {
-    match (
-        semver::Version::parse(leader_version),
-        semver::Version::parse(baseline),
-    ) {
-        (Ok(leader), Ok(baseline)) => leader < baseline,
-        _ => false,
-    }
+    xai_grok_version::is_older(leader_version, baseline)
 }
 /// Evict a discovered leader only if it runs a strictly-older parseable version
 /// than this client — newer client replaces older leader, never the reverse
@@ -1999,13 +1995,18 @@ mod tests {
     fn leader_is_older_than_directional() {
         assert!(leader_is_older_than("0.1.0", "0.2.0"));
         assert!(leader_is_older_than("0.1.219", "0.1.220"));
-        assert!(leader_is_older_than("0.1.220-alpha.1", "0.1.220"));
+        assert!(!leader_is_older_than("0.1.220-alpha.1", "0.1.220"));
         assert!(leader_is_older_than("0.1.9", "0.1.10"));
         assert!(!leader_is_older_than("0.1.10", "0.1.9"));
         assert!(!leader_is_older_than("0.2.0", "0.1.0"));
         assert!(!leader_is_older_than("0.2.0", "0.2.0"));
         assert!(!leader_is_older_than("unknown", "0.2.0"));
         assert!(!leader_is_older_than("0.1.0", "not-a-version"));
+        assert!(leader_is_older_than("1.0.8", "1.0.8-hotfix.1"));
+        assert!(leader_is_older_than("1.0.8-hotfix.1", "1.0.9"));
+        assert!(!leader_is_older_than("1.0.8-hotfix.1", "1.0.8"));
+        assert!(!leader_is_older_than("1.0.9", "1.0.8-hotfix.1"));
+        assert!(!leader_is_older_than("1.0.8-hotfix.1", "1.0.8-hotfix.1"));
     }
     /// Evicted only when strictly older than the client (anti-thrash).
     #[test]
@@ -2019,6 +2020,9 @@ mod tests {
         assert!(!should_evict(Some("0.1.219"), "0.1.218"));
         assert!(should_evict(Some("0.1.218"), "0.1.219"));
         assert!(!should_evict(Some("unknown"), client));
+        assert!(should_evict(Some("1.0.8"), "1.0.8-hotfix.1"));
+        assert!(!should_evict(Some("1.0.8-hotfix.1"), "1.0.8"));
+        assert!(should_evict(Some("1.0.8-hotfix.1"), "1.0.9"));
     }
     /// Under-lock eviction decision for the concurrent-clients race: against one
     /// stale leader, only clients strictly newer than it evict; same-or-older

@@ -4516,6 +4516,39 @@ fn dispatch_then_forward(
     effects
 }
 
+fn coord_addressee_is_self(app: &AppView, env: &crate::coord::Envelope) -> bool {
+    let Some(to) = env.to.as_ref() else {
+        return true;
+    };
+    if !to.seat.is_empty() && !to.seat.eq_ignore_ascii_case(&crate::coord::seat()) {
+        return false;
+    }
+    if !to.harness.is_empty() && !to.harness.eq_ignore_ascii_case(crate::coord::HARNESS) {
+        return false;
+    }
+    let Some(want) = to.session_id.as_deref().filter(|s| !s.is_empty()) else {
+        return true;
+    };
+    if let ActiveView::Agent(id) = app.active_view
+        && let Some(sid) = app
+            .agents
+            .get(&id)
+            .and_then(|a| a.session.session_id.as_ref())
+    {
+        return sid.0.as_ref() == want;
+    }
+    crate::coord::this_session_id().as_deref() == Some(want)
+}
+
+fn coord_prompt_queued(app: &AppView, text: &str) -> bool {
+    let ActiveView::Agent(id) = app.active_view else {
+        return false;
+    };
+    app.agents
+        .get(&id)
+        .is_some_and(|a| a.session.pending_prompts.iter().any(|p| p.text == text))
+}
+
 fn handle_coord_inbound(
     app: &mut AppView,
     envelope: crate::coord::Envelope,
@@ -4525,6 +4558,10 @@ fn handle_coord_inbound(
     crate::coord::log::append(&envelope, false);
     if !envelope.is_message() {
         return crate::coord::Disposition::Deferred;
+    }
+    if !coord_addressee_is_self(app, &envelope) {
+        crate::coord::log::drop_inbox(&envelope);
+        return crate::coord::Disposition::Inbox;
     }
     let ActiveView::Agent(id) = app.active_view else {
         crate::coord::log::drop_inbox(&envelope);
@@ -4538,12 +4575,25 @@ fn handle_coord_inbound(
     let from = envelope.from.ident();
     app.show_toast(&format!("Message from {from}"));
     let text = crate::coord::wrap_prompt(&envelope);
-    let effs = dispatch::dispatch(Action::SendPrompt(text), app);
-    let _ = process_effects(effs, tasks, app, progress_tx);
     if idle {
-        crate::coord::Disposition::Woken
-    } else {
+        let effs = dispatch::dispatch_coord_inject(app, text.clone());
+        let queued = coord_prompt_queued(app, &text);
+        if !effs.is_empty() {
+            let _ = process_effects(effs, tasks, app, progress_tx);
+            crate::coord::Disposition::Woken
+        } else if queued {
+            crate::coord::Disposition::Enqueued
+        } else {
+            crate::coord::log::drop_inbox(&envelope);
+            crate::coord::Disposition::Inbox
+        }
+    } else if let Some(agent) = app.agents.get_mut(&id) {
+        // Enqueue only — do not SendPromptNow / Interject on the busy path.
+        agent.session.enqueue_prompt(text);
         crate::coord::Disposition::Enqueued
+    } else {
+        crate::coord::log::drop_inbox(&envelope);
+        crate::coord::Disposition::Inbox
     }
 }
 
@@ -6501,5 +6551,249 @@ mod tests {
             plugin_cta_marketplace_from(&blank.effective_config_base()),
             None
         );
+    }
+
+    struct CoordEnvRestore {
+        prev_coord: Option<std::ffi::OsString>,
+        prev_seat: Option<std::ffi::OsString>,
+        root: std::path::PathBuf,
+    }
+
+    impl Drop for CoordEnvRestore {
+        fn drop(&mut self) {
+            match &self.prev_coord {
+                Some(v) => unsafe { std::env::set_var("HOUSE_COORD_DIR", v) },
+                None => unsafe { std::env::remove_var("HOUSE_COORD_DIR") },
+            }
+            match &self.prev_seat {
+                Some(v) => unsafe { std::env::set_var("HOUSE_SEAT", v) },
+                None => unsafe { std::env::remove_var("HOUSE_SEAT") },
+            }
+            let _ = std::fs::remove_dir_all(&self.root);
+        }
+    }
+
+    fn with_isolated_coord<R>(f: impl FnOnce(&std::path::Path) -> R) -> R {
+        let _g = crate::coord::COORD_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let root = std::env::temp_dir().join(format!(
+            "amore-coord-recv-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let presence = root.join("presence");
+        std::fs::create_dir_all(&presence).unwrap();
+        let restore = CoordEnvRestore {
+            prev_coord: std::env::var_os("HOUSE_COORD_DIR"),
+            prev_seat: std::env::var_os("HOUSE_SEAT"),
+            root: root.clone(),
+        };
+        unsafe {
+            std::env::set_var("HOUSE_COORD_DIR", &presence);
+            std::env::set_var("HOUSE_SEAT", "test-seat");
+        }
+        let result = f(&root);
+        drop(restore);
+        result
+    }
+
+    fn inbound_envelope(
+        to_session: Option<&str>,
+        to_seat: &str,
+        text: &str,
+    ) -> crate::coord::Envelope {
+        crate::coord::Envelope {
+            msgid: uuid::Uuid::now_v7().to_string(),
+            kind: "message".into(),
+            ts: "2026-08-25T00:00:00Z".into(),
+            from: crate::coord::msg::Party {
+                seat: "peer-seat".into(),
+                harness: "amore".into(),
+                model: None,
+                session_id: Some("peer-sess".into()),
+            },
+            to: Some(crate::coord::msg::Party {
+                seat: to_seat.into(),
+                harness: "amore".into(),
+                model: None,
+                session_id: to_session.map(str::to_string),
+            }),
+            text: text.into(),
+            in_reply_to: None,
+        }
+    }
+
+    fn run_inbound(
+        app: &mut AppView,
+        envelope: crate::coord::Envelope,
+    ) -> crate::coord::Disposition {
+        let mut tasks = JoinSet::new();
+        let (progress_tx, _progress_rx) = tokio::sync::mpsc::unbounded_channel();
+        handle_coord_inbound(app, envelope, &mut tasks, &progress_tx)
+    }
+
+    #[tokio::test]
+    async fn handle_coord_inbound_mismatch_inboxes_and_does_not_self_wake() {
+        with_isolated_coord(|root| {
+            let mut app = crate::app::app_view::tests::test_app_with_agent();
+            let id = crate::app::agent::AgentId(0);
+            app.agents
+                .get_mut(&id)
+                .unwrap()
+                .prompt
+                .set_text("user draft");
+            let env = inbound_envelope(Some("other-session"), "test-seat", "ping");
+            let msgid = env.msgid.clone();
+            let disp = run_inbound(&mut app, env);
+            assert_eq!(disp, crate::coord::Disposition::Inbox);
+            assert!(
+                app.agents[&id].session.pending_prompts.is_empty(),
+                "mismatch must not enqueue into this session"
+            );
+            assert!(app.agents[&id].session.state.is_idle());
+            assert_eq!(app.agents[&id].prompt.text(), "user draft");
+            assert!(
+                root.join("inbox").join(format!("{msgid}.json")).exists(),
+                "mismatch must land in inbox, not silently drop"
+            );
+        });
+    }
+
+    #[tokio::test]
+    async fn handle_coord_inbound_wrong_seat_inboxes_even_if_session_id_matches() {
+        with_isolated_coord(|_| {
+            let mut app = crate::app::app_view::tests::test_app_with_agent();
+            let id = crate::app::agent::AgentId(0);
+            let env = inbound_envelope(Some("test-session"), "other-seat", "ping");
+            let disp = run_inbound(&mut app, env);
+            assert_eq!(disp, crate::coord::Disposition::Inbox);
+            assert!(app.agents[&id].session.pending_prompts.is_empty());
+        });
+    }
+
+    #[tokio::test]
+    async fn handle_coord_inbound_idle_woken_only_when_effects_produced() {
+        with_isolated_coord(|_| {
+            let mut app = crate::app::app_view::tests::test_app_with_agent();
+            let id = crate::app::agent::AgentId(0);
+            app.agents
+                .get_mut(&id)
+                .unwrap()
+                .prompt
+                .set_text("user draft");
+            let hist = app.agents[&id].session.prompt_history.len();
+            let env = inbound_envelope(Some("test-session"), "test-seat", "ping from peer");
+            let wrapped = crate::coord::wrap_prompt(&env);
+            let disp = run_inbound(&mut app, env);
+            assert_eq!(disp, crate::coord::Disposition::Woken);
+            assert_eq!(app.agents[&id].prompt.text(), "user draft");
+            assert_eq!(app.agents[&id].session.prompt_history.len(), hist);
+            assert!(
+                !app.agents[&id]
+                    .session
+                    .pending_prompts
+                    .iter()
+                    .any(|p| p.text == wrapped),
+                "successful wake drains the coord text"
+            );
+        });
+    }
+
+    #[tokio::test]
+    async fn handle_coord_inbound_reconnect_is_enqueued_not_woken() {
+        with_isolated_coord(|_| {
+            let mut app = crate::app::app_view::tests::test_app_with_agent();
+            let id = crate::app::agent::AgentId(0);
+            app.reconnect_pending = true;
+            app.agents
+                .get_mut(&id)
+                .unwrap()
+                .prompt
+                .set_text("user draft");
+            let env = inbound_envelope(Some("test-session"), "test-seat", "keep me");
+            let wrapped = crate::coord::wrap_prompt(&env);
+            let disp = run_inbound(&mut app, env);
+            assert_eq!(disp, crate::coord::Disposition::Enqueued);
+            assert_eq!(
+                app.agents[&id]
+                    .session
+                    .pending_prompts
+                    .iter()
+                    .map(|p| p.text.as_str())
+                    .collect::<Vec<_>>(),
+                vec![wrapped.as_str()]
+            );
+            assert_eq!(app.agents[&id].prompt.text(), "user draft");
+            assert!(app.agents[&id].session.state.is_idle());
+        });
+    }
+
+    #[tokio::test]
+    async fn handle_coord_inbound_busy_enqueues_and_does_not_send_prompt_now() {
+        with_isolated_coord(|_| {
+            let mut app = crate::app::app_view::tests::test_app_with_agent();
+            let id = crate::app::agent::AgentId(0);
+            {
+                let agent = app.agents.get_mut(&id).unwrap();
+                agent.session.state = crate::app::agent::AgentState::TurnRunning;
+                agent.prompt.set_text("user draft");
+            }
+            let env = inbound_envelope(Some("test-session"), "test-seat", "queue me");
+            let wrapped = crate::coord::wrap_prompt(&env);
+            let disp = run_inbound(&mut app, env);
+            assert_eq!(disp, crate::coord::Disposition::Enqueued);
+            let agent = &app.agents[&id];
+            assert!(
+                matches!(
+                    agent.session.state,
+                    crate::app::agent::AgentState::TurnRunning
+                ),
+                "busy inbound must not cancel/send-now"
+            );
+            assert_eq!(
+                agent
+                    .session
+                    .pending_prompts
+                    .iter()
+                    .map(|p| p.text.as_str())
+                    .collect::<Vec<_>>(),
+                vec![wrapped.as_str()]
+            );
+            assert_eq!(agent.prompt.text(), "user draft");
+            assert!(
+                !app.pending_effects
+                    .iter()
+                    .any(|e| matches!(e, Effect::SendPromptNow { .. } | Effect::SendPrompt { .. })),
+                "busy inbound is enqueue-only"
+            );
+        });
+    }
+
+    #[tokio::test]
+    async fn handle_coord_inbound_unaddressed_still_delivers() {
+        with_isolated_coord(|_| {
+            let mut app = crate::app::app_view::tests::test_app_with_agent();
+            let mut env = inbound_envelope(None, "test-seat", "seat-level");
+            env.to = None;
+            let disp = run_inbound(&mut app, env);
+            assert_eq!(disp, crate::coord::Disposition::Woken);
+        });
+    }
+
+    #[tokio::test]
+    async fn handle_coord_inbound_unknown_kind_is_deferred() {
+        with_isolated_coord(|_| {
+            let mut app = crate::app::app_view::tests::test_app_with_agent();
+            let mut env = inbound_envelope(Some("test-session"), "test-seat", "notice");
+            env.kind = "notice".into();
+            let disp = run_inbound(&mut app, env);
+            assert_eq!(disp, crate::coord::Disposition::Deferred);
+            let id = crate::app::agent::AgentId(0);
+            assert!(app.agents[&id].session.pending_prompts.is_empty());
+        });
     }
 }

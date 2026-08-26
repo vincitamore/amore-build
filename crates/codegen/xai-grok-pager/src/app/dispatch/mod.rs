@@ -46,6 +46,7 @@ pub(crate) use notes::FEEDBACK_QUESTION_LABEL;
 pub(crate) use notes::FEEDBACK_TRACE_UPLOAD_TIMEOUT_MS;
 pub(crate) use notes::{recap_unavailable_toast, scrollback_has_user_messages};
 pub(crate) use permissions::resolve_permission_queue_transition;
+pub(crate) use prompt::dispatch_coord_inject;
 pub(crate) use prompt::dispatch_initial_prompt;
 pub(in crate::app) use prompt::{show_small_screen_tip, show_ssh_wrap_tip};
 pub(super) use queue::{

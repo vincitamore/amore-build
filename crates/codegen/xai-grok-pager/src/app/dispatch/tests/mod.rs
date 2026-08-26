@@ -45,7 +45,9 @@ use super::modes::{
     downgrade_displayed_auto_if_gated, permission_mode_toast,
 };
 use super::permissions::drain_permission_queue;
-use super::prompt::{dispatch_doctor, dispatch_send_prompt, dispatch_send_prompt_inner};
+use super::prompt::{
+    dispatch_coord_inject, dispatch_doctor, dispatch_send_prompt, dispatch_send_prompt_inner,
+};
 use super::session::fork::build_child_fork_marker;
 use super::session::lifecycle::{dispatch_new_session_inner, drain_startup_actions, finish_trust};
 use super::session::load::{dispatch_load_session_with_restore, reanchor_grouped_selection};

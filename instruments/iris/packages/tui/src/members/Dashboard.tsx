@@ -19,10 +19,16 @@ import { type Palette } from '../theme';
 import { useHoverThrottle } from '../use-hover-throttle';
 import { useRefreshOnActive } from '../use-refresh-on-active';
 import { runSpeculum } from '../speculum/speculum-spawn';
-import { formatMessages, formatPeers, readMessages, readRoster } from '../coord/presence';
+import {
+  MAIL_UNAVAILABLE,
+  PRESENCE_UNAVAILABLE,
+  messagesFromPayload,
+  peersFromPayload,
+} from '../coord/presence';
 import { Panel } from '../components/Panel';
 import { Stat } from '../components/Stat';
 import {
+  emptyDisplayRow,
   formatLucernaDisplayLine,
   formatLucernaPulseStatus,
   formatPulseRefusingSubLine,
@@ -425,16 +431,6 @@ export function Dashboard({
     }
     void fetchGitLog(root).then((g) => alive && g.length && setGit((prev) => (gitLogUnchanged(prev, g) ? prev : g)));
     void fetchGitStatus(root).then((s) => alive && s && setGitStatus((prev) => (gitStatusUnchanged(prev, s) ? prev : s)));
-    try {
-      setPeersLine(formatPeers(readRoster()));
-    } catch {
-      setPeersLine('0 LIVE');
-    }
-    try {
-      setMessagesLine(formatMessages(readMessages()));
-    } catch {
-      setMessagesLine('none');
-    }
     return () => {
       alive = false;
     };
@@ -466,8 +462,9 @@ export function Dashboard({
   } | null>(null);
   /** Speculum status freshness pulse — once at mount, again on re-activation. */
   const [speculumPulse, setSpeculumPulse] = useState<SpeculumPulseView | null>(null);
-  const [peersLine, setPeersLine] = useState('…');
-  const [messagesLine, setMessagesLine] = useState('…');
+  const [peersLine, setPeersLine] = useState(() => (daemonUrl ? '…' : PRESENCE_UNAVAILABLE));
+  const [peersDetail, setPeersDetail] = useState('');
+  const [messagesLine, setMessagesLine] = useState(() => (daemonUrl ? '…' : MAIL_UNAVAILABLE));
   const speculumMounted = useRef(true);
   useEffect(() => {
     speculumMounted.current = true;
@@ -501,10 +498,16 @@ export function Dashboard({
   }, [refreshSpeculum]);
   useRefreshOnActive(active, refreshSpeculum);
 
-  // LIVE poll while active — /api/status (docs/uptime) + lucerna pulse. Every 3s while the
-  // Dashboard is shown; paused when hidden (no work behind other screens).
+  // LIVE poll while active — /api/status + coord presence/messages + lucerna pulse.
+  // Every 3s while shown; paused when hidden. Coord miss is loud (never a frozen last roster).
   useEffect(() => {
-    if (!daemonUrl || !active) return;
+    if (!active) return;
+    if (!daemonUrl) {
+      setPeersLine(PRESENCE_UNAVAILABLE);
+      setPeersDetail('');
+      setMessagesLine(MAIL_UNAVAILABLE);
+      return;
+    }
     let alive = true;
     const poll = async () => {
       try {
@@ -512,6 +515,33 @@ export function Dashboard({
         if (r.ok && alive) setStatus((await r.json()) as ServerStatus);
       } catch {
         // index still building
+      }
+      try {
+        const r = await fetch(`${daemonUrl}/api/coord/presence`);
+        if (alive) {
+          if (r.ok) {
+            const peers = peersFromPayload(await r.json());
+            setPeersLine(peers.line);
+            setPeersDetail(peers.detail);
+          } else {
+            setPeersLine(PRESENCE_UNAVAILABLE);
+            setPeersDetail('');
+          }
+        }
+      } catch {
+        if (alive) {
+          setPeersLine(PRESENCE_UNAVAILABLE);
+          setPeersDetail('');
+        }
+      }
+      try {
+        const r = await fetch(`${daemonUrl}/api/coord/messages`);
+        if (alive) {
+          if (r.ok) setMessagesLine(messagesFromPayload(await r.json()));
+          else setMessagesLine(MAIL_UNAVAILABLE);
+        }
+      } catch {
+        if (alive) setMessagesLine(MAIL_UNAVAILABLE);
       }
       try {
         const r = await fetch(`${daemonUrl}/api/lucerna/pulse`);
@@ -657,19 +687,66 @@ export function Dashboard({
       ? t.muted
       : t.info;
   const speculumRightW = Math.max(12, Math.min(48, pulseInnerW - 12));
+  const peersRightW = Math.max(12, Math.min(32, pulseInnerW - 12));
+  const mailRightW = Math.max(12, Math.min(48, pulseInnerW - 10));
+  const peersUnavailable = peersLine === PRESENCE_UNAVAILABLE;
+  const mailUnavailable = messagesLine === MAIL_UNAVAILABLE;
+  const peersLive = !peersUnavailable && peersLine !== '…' && !peersLine.startsWith('0 LIVE');
+  const mailLive = !mailUnavailable && messagesLine !== 'none' && messagesLine !== '…';
+  const peersDotFg = peersUnavailable ? t.error : peersLive ? t.info : t.muted;
+  const mailDotFg = mailUnavailable ? t.error : mailLive ? t.info : t.muted;
+  const peersSub = peersDetail
+    ? formatLucernaDisplayLine(`   ${peersDetail}`, pulseInnerW)
+    : emptyDisplayRow(pulseInnerW);
   const pulsePanel = (
     <Panel title="Pulse" flexShrink={0} marginTop={1}>
-      <box flexDirection="row">
-        <text fg={peersLine !== '0 LIVE' && peersLine !== '…' ? t.info : t.muted}>●</text>
-        <text fg={t.foreground}> Peers</text>
-        <box flexGrow={1} />
-        <text fg={t.muted}>{peersLine}</text>
+      {/* Peers: count on the label row, identities on a fixed-height sub-line. */}
+      <box
+        flexDirection="row"
+        height={1}
+        flexShrink={0}
+        overflow="hidden"
+        backgroundColor={t.background}
+      >
+        <text fg={peersDotFg} wrapMode="none">
+          ●
+        </text>
+        <text fg={t.foreground} wrapMode="none">
+          {' Peers'}
+        </text>
+        <box flexGrow={1} backgroundColor={t.background} />
+        <text fg={peersUnavailable ? t.error : t.muted} wrapMode="none">
+          {formatLucernaDisplayLine(peersLine, peersRightW)}
+        </text>
       </box>
-      <box flexDirection="row">
-        <text fg={messagesLine !== 'none' && messagesLine !== '…' ? t.info : t.muted}>●</text>
-        <text fg={t.foreground}> Mail</text>
-        <box flexGrow={1} />
-        <text fg={t.muted}>{messagesLine}</text>
+      <box
+        height={1}
+        width={pulseInnerW}
+        flexShrink={0}
+        overflow="hidden"
+        backgroundColor={t.background}
+      >
+        <text fg={t.muted} wrapMode="none">
+          {peersSub}
+        </text>
+      </box>
+      <box
+        flexDirection="row"
+        height={1}
+        flexShrink={0}
+        overflow="hidden"
+        backgroundColor={t.background}
+      >
+        <text fg={mailDotFg} wrapMode="none">
+          ●
+        </text>
+        <text fg={t.foreground} wrapMode="none">
+          {' Mail'}
+        </text>
+        <box flexGrow={1} backgroundColor={t.background} />
+        <text fg={mailUnavailable ? t.error : t.muted} wrapMode="none">
+          {formatLucernaDisplayLine(messagesLine, mailRightW)}
+        </text>
       </box>
       <box flexDirection="row">
         <text fg={forgeReview > 0 ? t.secondary : t.muted}>●</text>

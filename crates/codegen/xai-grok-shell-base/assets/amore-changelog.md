@@ -1,10 +1,42 @@
 # Amore Build — fork changelog
 
 Amore Build is a permanent engineered fork of xAI's open-source grok-build
-harness (Apache-2.0), by way of Selene Build. Upstream syncs land as periodic
+harness (Apache-2.0). Upstream syncs land as periodic
 monorepo sync commits; everything below is the fork's own delta, newest first.
 This document is compiled into the binary — update it in the same change as the
 work it describes.
+
+## v1.0.8-hotfix.1
+
+- **Seat identity is the Tailscale node** — MagicDNS first label, not the
+  OS hostname or NetBIOS name, and not `unknown` when `HOSTNAME` is
+  unset. `HOUSE_SEAT` wins; the hostname fallback is never written into
+  the shared seat file.
+- **Wake transport** — same-seat sessions stay on loopback (unix domain
+  on POSIX, token-gated TCP 127.0.0.1 on Windows). Cross-seat live wake
+  is TLS to the peer's Tailscale IPv4 only (house-issued cert, TOFU pin,
+  bind that address, never 0.0.0.0, never LAN). A busy session enqueues;
+  it does not interrupt the running turn. ssh inbox is the offline
+  fallback; a failed live wake prints `degraded (inbox) after tailnet:`
+  instead of a success-shaped `sent (inbox)`.
+- **Hop from v1.0.8 on Unix** — that cut's updater unpacks `iris-dash-*`
+  as a 644 docs member and stage-smokes it, then aborts (`failed to spawn
+  smoke command`). Hide the dash sibling in the install directory (rename
+  it away from `iris-dash-*` / `iris-dash`) so the 1.0.8 updater does not
+  adopt it, run `amore update`, then un-hide the sibling: a hidden dash
+  is never re-adopted, and `iris dash` re-execs only a sibling it can
+  see. Later hops use this cut's updater, which marks the dash executable
+  before smoke.
+- **Pulse** — Peers shows a count plus a sub-line of `seat/harness`
+  identities, refreshed with the Dashboard poll. Duplicate harness rows
+  for the same pid are collapsed.
+- **Leader comparator** — `1.0.8 < 1.0.8-hotfix.1 < 1.0.9`. Already-running
+  v1.0.8 sessions still use raw semver until they exit and can force-kill
+  the new leader. Restart live sessions after the hop, or expect a bounded
+  thrash window.
+- **`amore update` on Unix (this cut onward)** — the iris dash sibling in
+  the archive is marked executable before smoke, so a 644 docs member no
+  longer fails the fleet transaction.
 
 ## v1.0.8
 

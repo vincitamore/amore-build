@@ -2,20 +2,26 @@
 """coord-presence — the house presence roster.
 
 One JSON file per live session under a house-neutral directory
-(~/.house/coord/presence/, overridable via HOUSE_COORD_DIR). Shared across
-every harness on a seat. Liveness is proven by PID probe plus process-name
-match, never TTL alone: a durable presence record lies after a crash, and a
-TTL cannot serve both a long-idle session and a crashed one. Dead entries
-are reaped on every roster read.
+(~/.house/coord/presence/). HOUSE_COORD_DIR, when set, is the coord root
+(presence lives at `$HOUSE_COORD_DIR/presence`). Shared across every harness
+on a seat. Liveness is proven by PID probe plus process-name match, never
+TTL alone: a durable presence record lies after a crash, and a TTL cannot
+serve both a long-idle session and a crashed one. Dead local entries are
+reaped on every roster read. Rows from another seat are never PID-probed.
 
 Identity is fields, not signatures: seat/harness/model plus optional
 work-unit `<pipeline>/<concern>`.
 
+Seat resolution (one algorithm, shared with native and iris):
+  HOUSE_SEAT > $coord/seat file > tailscale MagicDNS first label > hostname first label
+The resolved name is persisted to the seat file only when it came from
+HOUSE_SEAT or tailscale — never from the hostname fallback.
+
 Callers:
-  - Amore Build session-init hook (this pack) writes presence and emits the
-    Peers line. The harness also writes and removes the same schema natively
-    at session start/end; the two share `{harness}-{pid}.json` so they do
-    not double-count.
+  - Amore Build session-init hook (this pack) reads the roster and emits the
+    Peers line. Native Amore writes and removes the same schema at session
+    start/end; the hook does not write a second row. Filenames are
+    `{seat}-{harness}-{pid}.json`.
   - Other harness adapters import or invoke the same verbs (HOUSE_HARNESS
     in env). Headless units that never run hooks are wrapper-written with
     an explicit --pid.
@@ -27,6 +33,8 @@ CLI:
   coord_presence.py roster [--json]
   coord_presence.py set    --work-unit W [--pid N]
   coord_presence.py delta  [--cwd DIR]
+  coord_presence.py notices [--peek]
+  coord_presence.py send   <target> <message>
 
 Every verb is fail-soft for hook use: errors print to stderr, exit 0.
 """
@@ -169,8 +177,66 @@ def _alive(pid: int, pname: str | None, table: dict[int, tuple[int, str]]) -> bo
 
 # --- entry helpers ---------------------------------------------------------
 
+_SEAT_CACHE: list[str] = []
+
+
+def _tailscale_seat() -> str | None:
+    """First label of this node's MagicDNS name. Returns None on any
+    failure and does not cache the failure — a transient tailscaled blip
+    must not pin the hostname fallback for the rest of the process."""
+    try:
+        out = subprocess.run(["tailscale", "status", "--json"],
+                             capture_output=True, text=True, timeout=4)
+        if out.returncode != 0:
+            return None
+        dns = (json.loads(out.stdout).get("Self") or {}).get("DNSName") or ""
+        label = dns.strip(".").split(".")[0].strip().lower()
+        return label or None
+    except Exception:
+        return None
+
+
 def _seat() -> str:
-    return os.environ.get("HOUSE_SEAT") or platform.node().lower()
+    """The house seat name — one algorithm, shared with native and iris:
+
+        HOUSE_SEAT > $coord/seat file > tailscale MagicDNS first label > hostname
+
+    `$coord` is `~/.house/coord`, or `$HOUSE_COORD_DIR` when that env is set
+    (Python treats HOUSE_COORD_DIR as the coord root; presence is
+    `$coord/presence`). Persist only from HOUSE_SEAT or tailscale — never
+    from the hostname fallback, so a degraded resolution cannot poison the
+    file every other resolver trusts."""
+    if _SEAT_CACHE:
+        return _SEAT_CACHE[0]
+
+    seat = (os.environ.get("HOUSE_SEAT") or "").strip().lower()
+    persist = bool(seat)
+
+    if not seat:
+        try:
+            seat = (PRESENCE_DIR.parent / "seat").read_text(encoding="utf-8").strip().lower()
+        except Exception:
+            seat = ""
+
+    if not seat:
+        seat = _tailscale_seat() or ""
+        persist = bool(seat)
+
+    if not seat:
+        # Strip any domain suffix — a FQDN hostname must reduce to the same
+        # first label the MagicDNS leg would have produced.
+        seat = (platform.node() or "").split(".")[0].strip().lower() or "unknown"
+        persist = False
+
+    if persist:
+        try:
+            (PRESENCE_DIR.parent).mkdir(parents=True, exist_ok=True)
+            (PRESENCE_DIR.parent / "seat").write_text(seat, encoding="utf-8")
+        except Exception:
+            pass
+
+    _SEAT_CACHE.append(seat)
+    return seat
 
 
 def _tree(cwd: str) -> str:
@@ -186,9 +252,15 @@ def _tree(cwd: str) -> str:
     return os.path.basename(os.path.normpath(cwd)) or cwd
 
 
-def _entry_path(harness: str, pid: int) -> Path:
-    safe = "".join(c if c.isalnum() or c in "-_" else "-" for c in harness)
-    return PRESENCE_DIR / f"{safe}-{pid}.json"
+def _safe(s: str) -> str:
+    return "".join(c if c.isalnum() or c in "-_" else "-" for c in s)
+
+
+def _entry_path(harness: str, pid: int, seat: str | None = None) -> Path:
+    """`{seat}-{harness}-{pid}.json` — seat-prefixed to match the native writer.
+    A pid number is not unique across machines, so once rows from other seats
+    are published into this directory an unprefixed name collides silently."""
+    return PRESENCE_DIR / f"{_safe(seat or _seat())}-{_safe(harness)}-{pid}.json"
 
 
 # --- verbs -----------------------------------------------------------------
@@ -214,6 +286,15 @@ def start(harness: str = "amore", model: str | None = None,
         "work_unit": work_unit,
         "session_id": session_id,
     }
+    # Wake surface: stamp the harness messaging socket so a seat-local
+    # sender can wake this session. Claude-compatible harnesses expose a
+    # named pipe + token via env; loopback-only by construction.
+    sock = os.environ.get("CLAUDE_CODE_MESSAGING_SOCKET")
+    if sock and harness in ("claude-code", "cursor"):
+        entry["socket"] = sock
+        tok = os.environ.get("CLAUDE_CODE_MESSAGING_TOKEN")
+        if tok:
+            entry["socket_token"] = tok
     PRESENCE_DIR.mkdir(parents=True, exist_ok=True)
     path = _entry_path(harness, pid)
     tmp = path.with_suffix(".tmp")
@@ -222,16 +303,32 @@ def start(harness: str = "amore", model: str | None = None,
     return entry
 
 
+def _is_remote(entry: dict, me: str | None = None) -> bool:
+    """True when this row belongs to another seat. Remote rows are published
+    here by their owner and are not ours to probe or delete — the local
+    process table says nothing about a pid on another machine, and pid
+    numbers collide across machines freely."""
+    seat = (entry.get("seat") or "").strip().lower()
+    return bool(seat) and seat != (me if me is not None else _seat())
+
+
 def stop(pid: int | None = None, harness: str | None = None) -> int:
-    """Remove the entry for this session (or an explicit pid). Returns count."""
+    """Remove THIS SEAT's entry for a session (or an explicit pid).
+
+    Seat-guarded: a bare pid number is not an identity across machines, so a
+    remote row whose owner happens to share an ending local pid must survive.
+    """
     if pid is None:
         pid, _ = find_session_pid()
+    me = _seat()
     removed = 0
     if PRESENCE_DIR.is_dir():
         for f in PRESENCE_DIR.glob("*.json"):
             try:
                 e = json.loads(f.read_text(encoding="utf-8"))
             except Exception:
+                continue
+            if _is_remote(e, me):
                 continue
             if e.get("pid") == pid and (harness is None or e.get("harness") == harness):
                 f.unlink(missing_ok=True)
@@ -256,11 +353,23 @@ def set_work_unit(work_unit: str, pid: int | None = None) -> int:
     return changed
 
 
+REMOTE_STALE_HOURS = 12
+
+
 def roster(reap: bool = True) -> list[dict]:
-    """All live entries, oldest first. Reaps dead entries by PID probe."""
+    """All live entries, oldest first.
+
+    LOCAL rows are proven by PID probe and reaped on miss. REMOTE rows
+    (another seat's, published here by their owner) are never probed or
+    deleted — the local process table cannot speak for another machine.
+    They are aged by file mtime and marked `_stale` past REMOTE_STALE_HOURS
+    so a crashed peer stops rendering as LIVE forever; the caller decides
+    how to caption them."""
     if not PRESENCE_DIR.is_dir():
         return []
     table = process_table()
+    me = _seat()
+    now = datetime.now(timezone.utc).timestamp()
     entries = []
     for f in sorted(PRESENCE_DIR.glob("*.json")):
         try:
@@ -268,6 +377,16 @@ def roster(reap: bool = True) -> list[dict]:
         except Exception:
             if reap:
                 f.unlink(missing_ok=True)
+            continue
+        if _is_remote(e, me):
+            try:
+                age_h = (now - f.stat().st_mtime) / 3600.0
+            except Exception:
+                age_h = 0.0
+            e["_remote"] = True
+            e["_age_hours"] = round(age_h, 1)
+            e["_stale"] = age_h > REMOTE_STALE_HOURS
+            entries.append(e)
             continue
         if _alive(int(e.get("pid", -1)), e.get("pname"), table):
             entries.append(e)
@@ -283,6 +402,7 @@ def format_roster(entries: list[dict], self_pid: int | None = None) -> str:
     if not entries:
         return "**Peers**: 0 LIVE"
     parts = []
+    live = 0
     for e in entries:
         ident = f"{e.get('model') or e.get('harness', '?')}@{e.get('seat', '?')}/{e.get('harness', '?')}"
         bits = [f"pid {e.get('pid')}"]
@@ -293,9 +413,19 @@ def format_roster(entries: list[dict], self_pid: int | None = None) -> str:
         started = (e.get("started") or "")[11:16]
         if started:
             bits.append(f"since {started}Z")
+        # Honest captions: a remote row is another seat's report, not a probe.
+        # Never render an unprobed remote row as plain LIVE.
+        if e.get("_remote"):
+            age = e.get("_age_hours")
+            bits.append(f"remote, seen {age}h ago" if e.get("_stale")
+                        else f"remote, as of {age}h ago")
+        else:
+            live += 1
         tag = " (this session)" if self_pid and e.get("pid") == self_pid else ""
         parts.append(f"{ident} ({', '.join(bits)}){tag}")
-    return f"**Peers**: {len(entries)} LIVE — " + " · ".join(parts)
+    remote = len(entries) - live
+    head = f"{live} LIVE" + (f" · {remote} remote-reported" if remote else "")
+    return f"**Peers**: {head} — " + " · ".join(parts)
 
 
 # --- origin delta (phase 2 — notification) ---------------------------------
@@ -398,10 +528,8 @@ def origin_delta(org_dir: str, fetch_timeout: int = 4,
 # --- notices (phase 2 — cross-machine push, consume-on-read) ---------------
 
 def notices(consume: bool = True) -> list[dict]:
-    """Read the seat's notice drop (~/.house/coord/inbox/), delivered by the
-    forge's post-receive hook over the tailnet. Consume-on-read: the ack is
-    the deletion (composition law — pointers are consume-on-read; git itself
-    is the durable record). Unknown `kind`s are surfaced but NOT consumed
+    """Read the seat's notice drop (`$coord/inbox/`). Consume-on-read: the
+    ack is the deletion. Unknown `kind`s are surfaced but not consumed
     (accept-and-defer)."""
     inbox = PRESENCE_DIR.parent / "inbox"
     if not inbox.is_dir():
@@ -416,11 +544,33 @@ def notices(consume: bool = True) -> list[dict]:
         e["_known"] = known
         out.append(e)
         if consume and known:
+            if e.get("kind") == "message":
+                _log_message(e)  # persist clause: consumed ≠ discarded
             try:
                 f.unlink()
             except Exception:
                 pass
     return out
+
+
+def _msg_from(e: dict) -> str:
+    fr = e.get("from")
+    if isinstance(fr, dict):
+        return f"{fr.get('seat', '?')}/{fr.get('harness', '?')}/{fr.get('session_id') or '-'}"
+    return str(fr or "?")
+
+
+def _log_message(e: dict) -> None:
+    """Append a consumed message to the per-peer NDJSON log (per-writer file
+    keyed by sender — never a shared append)."""
+    try:
+        log_dir = PRESENCE_DIR.parent / "log"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        peer = "".join(c if c.isalnum() or c in "-_." else "-" for c in _msg_from(e))
+        with open(log_dir / f"{peer}.ndjson", "a", encoding="utf-8", newline="\n") as fh:
+            fh.write(json.dumps(e, ensure_ascii=True) + "\n")
+    except Exception:
+        pass
 
 
 def format_notices(entries: list[dict]) -> str | None:
@@ -435,10 +585,11 @@ def format_notices(entries: list[dict]) -> str | None:
             continue
         ts = (e.get("ts") or "")[11:16]
         if e.get("kind") == "message":
-            src = e.get("from") or {}
-            ident = f"{src.get('seat', '?')}/{src.get('harness', '?')}"
-            body = (e.get("text") or "")[:160]
-            lines.append(f"**Message** from {ident}: {body}")
+            body = e.get("body") or e.get("text") or e.get("message") or "(empty body)"
+            lines.append(
+                f"**Message** from {_msg_from(e)}"
+                f"{' at ' + ts + 'Z' if ts else ''} (msgid {e.get('msgid', '?')}):\n{body}"
+            )
             continue
         lines.append(
             f"**Notice**: push {e.get('repo')}/{e.get('branch')} by {e.get('pusher')}"
@@ -455,8 +606,8 @@ def format_notices(entries: list[dict]) -> str | None:
 def _post_socket(addr: str, token: str, envelope: dict) -> str:
     import socket as sk
     auth = json.dumps({"type": "auth", "token": token}) + "\n"
-    send = json.dumps({"type": "send", "envelope": envelope}) + "\n"
-    payload = (auth + send).encode("utf-8")
+    send_line = json.dumps({"type": "send", "envelope": envelope}) + "\n"
+    payload = (auth + send_line).encode("utf-8")
     if addr.startswith("unix:"):
         s = sk.socket(sk.AF_UNIX, sk.SOCK_STREAM)
         s.settimeout(4)
@@ -489,7 +640,7 @@ def send(target: str, text: str) -> str:
         "msgid": str(uuid.uuid4()),
         "kind": "message",
         "ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "from": {"seat": os.environ.get("COMPUTERNAME") or os.environ.get("HOSTNAME") or "unknown",
+        "from": {"seat": _seat(),
                  "harness": os.environ.get("HOUSE_HARNESS", "amore")},
         "to": None,
         "text": text,

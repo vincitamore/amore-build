@@ -12,6 +12,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 #[cfg(unix)]
 use std::process::Command;
+use std::sync::OnceLock;
 
 use serde::{Deserialize, Serialize};
 
@@ -42,6 +43,10 @@ pub struct Presence {
     /// Loopback IPC for wake (`unix:/path` or `tcp:127.0.0.1:port`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub socket: Option<String>,
+    /// Tailnet TLS listener (`tls:100.x.x.x:port`). Bound on the Tailscale
+    /// address only — never 0.0.0.0, never LAN.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub socket_tailnet: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub socket_token: Option<String>,
 }
@@ -49,8 +54,11 @@ pub struct Presence {
 pub mod cmd;
 pub mod log;
 pub mod msg;
+pub mod seat;
+pub mod seats;
 pub mod send;
 pub mod socket;
+pub mod tls;
 
 pub use msg::{Disposition, Envelope, wrap_prompt};
 pub use socket::{Inbound, spawn_listener};
@@ -82,13 +90,13 @@ fn dirs_home() -> PathBuf {
 }
 
 pub(crate) fn seat() -> String {
-    std::env::var("HOUSE_SEAT")
-        .ok()
-        .filter(|s| !s.is_empty())
-        .or_else(|| std::env::var("COMPUTERNAME").ok())
-        .or_else(|| std::env::var("HOSTNAME").ok())
-        .unwrap_or_else(|| "unknown".into())
-        .to_lowercase()
+    seat::seat()
+}
+
+static THIS_SESSION_ID: OnceLock<String> = OnceLock::new();
+
+pub(crate) fn this_session_id() -> Option<String> {
+    THIS_SESSION_ID.get().cloned()
 }
 
 fn tree_of(cwd: &str) -> String {
@@ -105,9 +113,8 @@ fn pname_of_self() -> Option<String> {
         .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
 }
 
-pub(crate) fn entry_path(dir: &Path, harness: &str, pid: u32) -> PathBuf {
-    let safe: String = harness
-        .chars()
+pub(crate) fn safe_ident(s: &str) -> String {
+    s.chars()
         .map(|c| {
             if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
                 c
@@ -115,8 +122,24 @@ pub(crate) fn entry_path(dir: &Path, harness: &str, pid: u32) -> PathBuf {
                 '-'
             }
         })
-        .collect();
-    dir.join(format!("{safe}-{pid}.json"))
+        .collect()
+}
+
+pub(crate) fn entry_path(dir: &Path, harness: &str, pid: u32) -> PathBuf {
+    entry_path_on(dir, &seat(), harness, pid)
+}
+
+pub(crate) fn entry_path_on(dir: &Path, seat_name: &str, harness: &str, pid: u32) -> PathBuf {
+    dir.join(format!(
+        "{}-{}-{}.json",
+        safe_ident(seat_name),
+        safe_ident(harness),
+        pid
+    ))
+}
+
+fn legacy_entry_path(dir: &Path, harness: &str, pid: u32) -> PathBuf {
+    dir.join(format!("{}-{}.json", safe_ident(harness), pid))
 }
 
 fn is_pid_alive(pid: u32) -> bool {
@@ -192,8 +215,13 @@ pub fn start(session_id: Option<&str>, cwd: &str) {
         work_unit: None,
         session_id: session_id.map(str::to_string),
         socket: socket::listen_addr(),
+        socket_tailnet: socket::listen_tailnet(),
         socket_token: socket::listen_token(),
     };
+    if let Some(sid) = session_id.filter(|s| !s.is_empty()) {
+        let _ = THIS_SESSION_ID.set(sid.to_string());
+    }
+    seat::persist_authoritative();
     let path = entry_path(&dir, HARNESS, pid);
     let tmp = path.with_extension("tmp");
     match serde_json::to_string_pretty(&entry) {
@@ -205,6 +233,10 @@ pub fn start(session_id: Option<&str>, cwd: &str) {
             if let Err(e) = fs::rename(&tmp, &path) {
                 let _ = fs::remove_file(&tmp);
                 tracing::debug!(error = %e, "coord presence: rename failed");
+            } else {
+                let _ = fs::remove_file(legacy_entry_path(&dir, HARNESS, pid));
+                let publish = path.clone();
+                std::thread::spawn(move || seats::publish_file(&publish));
             }
         }
         Err(e) => tracing::debug!(error = %e, "coord presence: serialize failed"),
@@ -219,7 +251,12 @@ pub fn stop() {
 pub fn stop_pid(pid: u32) {
     let dir = presence_dir();
     let path = entry_path(&dir, HARNESS, pid);
-    let _ = fs::remove_file(path);
+    let legacy = legacy_entry_path(&dir, HARNESS, pid);
+    if let Some(name) = path.file_name().and_then(|n| n.to_str()).map(str::to_string) {
+        std::thread::spawn(move || seats::retract_file(&name));
+    }
+    let _ = fs::remove_file(&path);
+    let _ = fs::remove_file(&legacy);
     if let Ok(rd) = fs::read_dir(&dir) {
         for ent in rd.flatten() {
             let p = ent.path();
@@ -230,6 +267,7 @@ pub fn stop_pid(pid: u32) {
                 && let Ok(e) = serde_json::from_str::<Presence>(&text)
                 && e.pid == pid
                 && e.harness == HARNESS
+                && e.seat.eq_ignore_ascii_case(&seat())
             {
                 let _ = fs::remove_file(p);
             }
@@ -266,13 +304,40 @@ fn roster_from_files() -> Vec<Presence> {
             let _ = fs::remove_file(&p);
             continue;
         };
-        if is_pid_alive(e.pid) {
-            entries.push(e);
+        if live_on_this_machine(&e) {
+            if is_pid_alive(e.pid) {
+                entries.push(e);
+            } else {
+                let _ = fs::remove_file(&p);
+            }
         } else {
-            let _ = fs::remove_file(&p);
+            entries.push(e);
         }
     }
-    entries
+    dedup_by_seat_pid(entries)
+}
+
+fn live_on_this_machine(e: &Presence) -> bool {
+    !seats::is_peer_seat(&e.seat)
+}
+
+fn dedup_by_seat_pid(entries: Vec<Presence>) -> Vec<Presence> {
+    let mut best: Vec<Presence> = Vec::new();
+    for e in entries {
+        if let Some(idx) = best
+            .iter()
+            .position(|b| b.pid == e.pid && b.seat.eq_ignore_ascii_case(&e.seat))
+        {
+            let prefer_new = e.socket.is_some() && best[idx].socket.is_none()
+                || (e.harness == HARNESS && best[idx].harness != HARNESS);
+            if prefer_new {
+                best[idx] = e;
+            }
+        } else {
+            best.push(e);
+        }
+    }
+    best
 }
 
 fn union_active_sessions(entries: &mut Vec<Presence>) {
@@ -304,6 +369,7 @@ fn union_active_sessions(entries: &mut Vec<Presence>) {
             work_unit: None,
             session_id: Some(s.session_id.0.to_string()),
             socket: None,
+            socket_tailnet: None,
             socket_token: None,
         });
     }
@@ -364,6 +430,32 @@ pub(crate) fn patch_self_socket(addr: &str, token: &str) {
         let tmp = path.with_extension("tmp");
         if fs::write(&tmp, body).is_ok() {
             let _ = fs::rename(&tmp, &path);
+        }
+    }
+}
+
+/// Stamp the tailnet TLS address, then publish. Fail-soft.
+/// `start()` scp's the row before the listener binds; without a republish,
+/// peers keep `socket_tailnet: null`.
+pub(crate) fn patch_self_tailnet(addr: &str) {
+    let dir = presence_dir();
+    let path = entry_path(&dir, HARNESS, std::process::id());
+    let Ok(text) = fs::read_to_string(&path) else {
+        return;
+    };
+    let Ok(mut e) = serde_json::from_str::<Presence>(&text) else {
+        return;
+    };
+    e.socket_tailnet = Some(addr.to_string());
+    if let Ok(body) = serde_json::to_string_pretty(&e) {
+        let tmp = path.with_extension("tmp");
+        if fs::write(&tmp, body).is_ok() {
+            if fs::rename(&tmp, &path).is_ok() {
+                let publish = path;
+                std::thread::spawn(move || seats::publish_file(&publish));
+            } else {
+                let _ = fs::remove_file(&tmp);
+            }
         }
     }
 }
@@ -431,6 +523,7 @@ mod tests {
                 work_unit: None,
                 session_id: None,
                 socket: None,
+                socket_tailnet: None,
                 socket_token: None,
             };
             fs::write(
@@ -441,6 +534,22 @@ mod tests {
             let r = roster_from_files();
             assert!(r.iter().all(|e| e.pid != 1), "dead pid must be reaped");
             assert!(!dir.join("cursor-1.json").exists());
+        });
+    }
+
+    #[test]
+    fn patch_self_tailnet_stamps_before_return() {
+        with_dir(|dir| {
+            start(Some("sess-tailnet"), "/tmp/house");
+            let path = entry_path(dir, HARNESS, std::process::id());
+            patch_self_tailnet("tls:100.64.0.1:41234");
+            let after: Presence =
+                serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+            assert_eq!(
+                after.socket_tailnet.as_deref(),
+                Some("tls:100.64.0.1:41234")
+            );
+            stop();
         });
     }
 }

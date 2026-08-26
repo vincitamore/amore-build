@@ -185,6 +185,33 @@ pub(super) fn dispatch_send_prompt(app: &mut AppView, text: String) -> Vec<Effec
     )
 }
 
+/// Cross-session inject: literal text, never consumes the composer.
+///
+/// Reconnect enqueues instead of dropping. Voice interim, draft, and prompt
+/// history stay untouched. Paste-defer is skipped because this path never
+/// clears the textarea (resume re-derives from the composer).
+pub(crate) fn dispatch_coord_inject(app: &mut AppView, text: String) -> Vec<Effect> {
+    let ActiveView::Agent(id) = app.active_view else {
+        return vec![];
+    };
+    let reconnect_pending = app.reconnect_pending;
+    let Some(agent) = app.agents.get_mut(&id) else {
+        return vec![];
+    };
+    agent.session.enqueue_prompt(text);
+    if reconnect_pending {
+        return vec![];
+    }
+    let drain = maybe_drain_queue(agent);
+    let mut effects = drain.effects;
+    let page_flip = drain.page_flip_entry;
+    note_peek_page_flip(app, id, page_flip);
+    effects.extend(super::queue::maybe_release_queued_prompt_into_turn(
+        app, None,
+    ));
+    effects
+}
+
 /// Clear the active prompt into the stash (Esc Esc).
 ///
 /// The draft goes to the stash, not the recall list. `Ctrl+S` is how it comes back.

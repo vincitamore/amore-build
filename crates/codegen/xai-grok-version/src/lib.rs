@@ -4,6 +4,9 @@ use std::sync::OnceLock;
 
 use semver::Version;
 
+mod order;
+pub use order::{is_newer, is_older, strip_v, version_cmp, version_key};
+
 pub const TEST_VERSION_ENV: &str = "GROK_TEST_VERSION";
 
 pub const VERSION: &str = match option_env!("GROK_VERSION") {

@@ -22,8 +22,8 @@ Wire contract (user-guide 10-hooks.md):
   conversation as a system-reminder.
 
 Behavior:
-  (a) register this session in the seat roster (~/.house/coord/presence/)
-      and emit Peers + Origin lines;
+  (a) emit Peers + Origin + inbox notices (native Amore writes the presence
+      row; this hook only reads, so it does not double-write);
   (b) enumerate due reminders under reminders/**/*.md — frontmatter with
       status pending|snoozed and remind-at|snoozed-until <= now;
   (c) include a one-line orientation pointer in the same context block.
@@ -200,22 +200,25 @@ def build_context(due: list[tuple[Path, str, str]],
 
 
 def coordination_lines(root: Path) -> list[str]:
-    """Register this session in the seat roster and return Peers + Origin.
+    """Read the seat roster and return Peers + Origin + inbox notices.
 
-    The write is the load-bearing half (other harnesses see this session even
-    if stdout is dropped). Fail-open, never blocks session start.
+    Native Amore writes presence; this hook only reads so it does not
+    double-write a row. Fail-open, never blocks session start.
     """
     lines: list[str] = []
     try:
         sys.path.insert(0, str(Path(__file__).resolve().parent))
         import coord_presence
-        coord_presence.start(harness=os.environ.get("HOUSE_HARNESS", "amore"))
+        # Native Amore writes presence; do not call start() here.
         entries = coord_presence.roster()
         self_pid, _ = coord_presence.find_session_pid()
         lines.append(coord_presence.format_roster(entries, self_pid))
         delta = coord_presence.origin_delta(str(root), fetch_timeout=3)
         if delta:
             lines.append(delta)
+        nl = coord_presence.format_notices(coord_presence.notices())
+        if nl:
+            lines.append(nl)
     except Exception as exc:
         lines.append(f"**Peers**: presence unavailable ({exc.__class__.__name__})")
     return lines

@@ -71,7 +71,7 @@ impl Envelope {
                 seat: super::seat(),
                 harness: super::HARNESS.into(),
                 model: std::env::var("HOUSE_MODEL").ok().filter(|s| !s.is_empty()),
-                session_id: None,
+                session_id: super::this_session_id(),
             },
             to,
             text: text.into(),
@@ -104,7 +104,7 @@ mod tests {
             kind: "message".into(),
             ts: "2026-08-25T00:00:00Z".into(),
             from: Party {
-                seat: "admin-pc".into(),
+                seat: "peer-one".into(),
                 harness: "amore".into(),
                 model: None,
                 session_id: Some("abc".into()),
@@ -114,7 +114,7 @@ mod tests {
             in_reply_to: None,
         };
         let w = wrap_prompt(&env);
-        assert!(w.contains("admin-pc/amore/abc"));
+        assert!(w.contains("peer-one/amore/abc"));
         assert!(w.contains("pull before writing"));
         assert!(w.starts_with("<cross-session-message"));
     }

@@ -1,6 +1,36 @@
 [
   {
     "category": "features",
+    "description": "**Seat identity is the Tailscale node** — MagicDNS first label, not the OS hostname or NetBIOS name, and not `unknown` when `HOSTNAME` is unset. `HOUSE_SEAT` wins; the hostname fallback is never written into the shared seat file.",
+    "breaking_change": false
+  },
+  {
+    "category": "features",
+    "description": "**Wake transport** — same-seat sessions stay on loopback (unix domain on POSIX, token-gated TCP 127.0.0.1 on Windows). Cross-seat live wake is TLS to the peer's Tailscale IPv4 only (house-issued cert, TOFU pin, bind that address, never 0.0.0.0, never LAN). A busy session enqueues; it does not interrupt the running turn. ssh inbox is the offline fallback; a failed live wake prints degraded (inbox) after tailnet instead of a success-shaped sent (inbox).",
+    "breaking_change": false
+  },
+  {
+    "category": "fixes",
+    "description": "**Hop from v1.0.8 on Unix** — that cut's updater unpacks iris-dash-* as a 644 docs member and stage-smokes it, then aborts. Hide the dash sibling in the install directory (rename it away from iris-dash-* / iris-dash) so the 1.0.8 updater does not adopt it, run amore update, then un-hide the sibling: a hidden dash is never re-adopted, and iris dash re-execs only a sibling it can see. Later hops use this cut's updater, which marks the dash executable before smoke.",
+    "breaking_change": false
+  },
+  {
+    "category": "fixes",
+    "description": "**Pulse** — Peers shows a count plus a sub-line of seat/harness identities, refreshed with the Dashboard poll. Duplicate harness rows for the same pid are collapsed.",
+    "breaking_change": false
+  },
+  {
+    "category": "fixes",
+    "description": "**Leader comparator** — 1.0.8 < 1.0.8-hotfix.1 < 1.0.9. Already-running v1.0.8 sessions still use raw semver until they exit and can force-kill the new leader. Restart live sessions after the hop, or expect a bounded thrash window.",
+    "breaking_change": false
+  },
+  {
+    "category": "fixes",
+    "description": "**amore update on Unix (this cut onward)** — the iris dash sibling in the archive is marked executable before smoke, so a 644 docs member no longer fails the fleet transaction.",
+    "breaking_change": false
+  },
+  {
+    "category": "features",
     "description": "**Coordination plane** — live sessions on a seat can name each other and be woken by an addressed message. This cut ships the roster, the send-that-wakes path, and the operator surfaces together.",
     "breaking_change": false
   },
