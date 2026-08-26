@@ -22,17 +22,16 @@ import { runSpeculum } from '../speculum/speculum-spawn';
 import {
   MAIL_UNAVAILABLE,
   PRESENCE_UNAVAILABLE,
-  messagesFromPayload,
+  mailFromPayload,
+  peerSeatRows,
+  formatPeerSeatRow,
   peersFromPayload,
+  type PresenceEntry,
 } from '../coord/presence';
 import { Panel } from '../components/Panel';
 import { Stat } from '../components/Stat';
 import {
-  emptyDisplayRow,
-  formatLucernaDisplayLine,
   formatLucernaPulseStatus,
-  formatPulseRefusingSubLine,
-  formatPulseSubLine,
   pulsePanelInnerWidth,
 } from './lucerna-display';
 
@@ -77,17 +76,31 @@ export function formatIngestAge(lastIngestedAt: string | null | undefined, now =
  * member strip (query-service), not this CLI-only pulse.
  */
 export function formatPulseLine(status: SpeculumStatusJson, now = Date.now()): string {
+  const parts = formatPulseParts(status, now);
+  return parts.detail ? `${parts.status} · ${parts.detail}` : parts.status;
+}
+
+/** Split Speculum pulse so the Dashboard can put status on the label and details below. */
+export function formatPulseParts(
+  status: SpeculumStatusJson,
+  now = Date.now(),
+): { status: string; detail: string } {
   const sessions = status.counts?.sessions ?? 0;
   if (sessions === 0) {
-    return `installed · 0 session dirs · run 'speculum ingest'`;
+    return { status: 'installed', detail: "0 session dirs · run 'speculum ingest'" };
   }
   const age = formatIngestAge(status.ingest?.lastIngestedAt, now);
-  const staleBit = status.staleness?.stale ? ' · stale' : '';
-  return `installed · ${sessions} session dirs · last ingest ${age}${staleBit}`;
+  const stale = Boolean(status.staleness?.stale);
+  return {
+    status: stale ? 'stale' : 'installed',
+    detail: `${sessions} session dirs · last ingest ${age}`,
+  };
 }
 
 interface SpeculumPulseView {
   line: string;
+  status?: string;
+  detail?: string;
   stale: boolean;
   /** Tooltip-ish prose for non-install failures (shown muted under the pulse). */
   errorHint?: string;
@@ -119,6 +132,46 @@ function truncate(s: string, n: number): string {
 }
 
 /** Word-wrap a plain string to `width` columns (hard-breaking any single word longer than width). */
+function PulseVital({
+  label,
+  value,
+  subLines,
+  dotFg,
+  t,
+  innerW,
+}: {
+  label: string;
+  value: string;
+  subLines: string[];
+  dotFg: RGBA;
+  t: Palette;
+  innerW: number;
+}) {
+  const indent = '  ';
+  const width = Math.max(8, innerW - indent.length);
+  const wrapped = subLines.flatMap((s) => wrapText(s, width).map((ln, i) => (i === 0 ? `${indent}${ln}` : `${indent}${ln}`)));
+  return (
+    <box flexDirection="column" flexShrink={0} backgroundColor={t.background}>
+      <box flexDirection="row" flexShrink={0} backgroundColor={t.background}>
+        <text fg={dotFg} wrapMode="none">
+          ●
+        </text>
+        <text fg={t.foreground} wrapMode="none">
+          {` ${label} `}
+        </text>
+        <text fg={t.muted} wrapMode="word">
+          {value}
+        </text>
+      </box>
+      {wrapped.map((ln, i) => (
+        <text key={i} fg={t.muted} wrapMode="none">
+          {ln}
+        </text>
+      ))}
+    </box>
+  );
+}
+
 function wrapText(s: string, width: number): string[] {
   if (width < 4) return [s];
   const lines: string[] = [];
@@ -463,7 +516,10 @@ export function Dashboard({
   /** Speculum status freshness pulse — once at mount, again on re-activation. */
   const [speculumPulse, setSpeculumPulse] = useState<SpeculumPulseView | null>(null);
   const [peersLine, setPeersLine] = useState(() => (daemonUrl ? '…' : PRESENCE_UNAVAILABLE));
-  const [peersDetail, setPeersDetail] = useState('');
+  const [peersEntries, setPeersEntries] = useState<PresenceEntry[]>([]);
+  const [mailCount, setMailCount] = useState<number | null>(daemonUrl ? null : 0);
+  const [mailFrom, setMailFrom] = useState('');
+  const [mailText, setMailText] = useState('');
   const [messagesLine, setMessagesLine] = useState(() => (daemonUrl ? '…' : MAIL_UNAVAILABLE));
   const speculumMounted = useRef(true);
   useEffect(() => {
@@ -476,8 +532,11 @@ export function Dashboard({
     void runSpeculum<SpeculumStatusJson>('status', ['--json']).then((r) => {
       if (!speculumMounted.current) return;
       if (r.ok) {
+        const parts = formatPulseParts(r.json);
         setSpeculumPulse({
           line: formatPulseLine(r.json),
+          status: parts.status,
+          detail: parts.detail,
           stale: Boolean(r.json.staleness?.stale),
         });
         return;
@@ -504,8 +563,11 @@ export function Dashboard({
     if (!active) return;
     if (!daemonUrl) {
       setPeersLine(PRESENCE_UNAVAILABLE);
-      setPeersDetail('');
+      setPeersEntries([]);
       setMessagesLine(MAIL_UNAVAILABLE);
+      setMailCount(0);
+      setMailFrom('');
+      setMailText('');
       return;
     }
     let alive = true;
@@ -520,28 +582,46 @@ export function Dashboard({
         const r = await fetch(`${daemonUrl}/api/coord/presence`);
         if (alive) {
           if (r.ok) {
-            const peers = peersFromPayload(await r.json());
+            const body = await r.json();
+            const peers = peersFromPayload(body);
             setPeersLine(peers.line);
-            setPeersDetail(peers.detail);
+            const o = body as { entries?: PresenceEntry[] };
+            setPeersEntries(Array.isArray(o.entries) ? o.entries : []);
           } else {
             setPeersLine(PRESENCE_UNAVAILABLE);
-            setPeersDetail('');
+            setPeersEntries([]);
           }
         }
       } catch {
         if (alive) {
           setPeersLine(PRESENCE_UNAVAILABLE);
-          setPeersDetail('');
+          setPeersEntries([]);
         }
       }
       try {
         const r = await fetch(`${daemonUrl}/api/coord/messages`);
         if (alive) {
-          if (r.ok) setMessagesLine(messagesFromPayload(await r.json()));
-          else setMessagesLine(MAIL_UNAVAILABLE);
+          if (r.ok) {
+            const body = await r.json();
+            const mail = mailFromPayload(body);
+            setMailCount(mail.count);
+            setMailFrom(mail.lastFrom);
+            setMailText(mail.lastText);
+            setMessagesLine(mail.count > 0 ? String(mail.count) : 'none');
+          } else {
+            setMessagesLine(MAIL_UNAVAILABLE);
+            setMailCount(0);
+            setMailFrom('');
+            setMailText('');
+          }
         }
       } catch {
-        if (alive) setMessagesLine(MAIL_UNAVAILABLE);
+        if (alive) {
+          setMessagesLine(MAIL_UNAVAILABLE);
+          setMailCount(0);
+          setMailFrom('');
+          setMailText('');
+        }
       }
       try {
         const r = await fetch(`${daemonUrl}/api/lucerna/pulse`);
@@ -675,187 +755,132 @@ export function Dashboard({
   //   below Attention. Pulse lives in the left column (agendaW) when wide, full width when stacked.
   const pulseColW = wide ? agendaW : dims.width - 2;
   const pulseInnerW = pulsePanelInnerWidth(pulseColW);
-  const lucernaStatusW = Math.max(12, Math.min(28, Math.floor(dims.width / 4)));
   const speculumLine = speculumPulse?.line ?? '…';
   const speculumHi = hover === 'speculum-pulse';
   const speculumNotInstalled = speculumLine === SPECULUM_NOT_INSTALLED_LINE;
   const speculumFailed = speculumLine === '—';
-  const speculumLineFg = speculumPulse?.stale ? t.warning : t.muted;
   const speculumDotFg = speculumPulse?.stale
     ? t.error
     : speculumNotInstalled || speculumFailed || !speculumPulse
       ? t.muted
       : t.info;
-  const speculumRightW = Math.max(12, Math.min(48, pulseInnerW - 12));
-  const peersRightW = Math.max(12, Math.min(32, pulseInnerW - 12));
-  const mailRightW = Math.max(12, Math.min(48, pulseInnerW - 10));
   const peersUnavailable = peersLine === PRESENCE_UNAVAILABLE;
   const mailUnavailable = messagesLine === MAIL_UNAVAILABLE;
   const peersLive = !peersUnavailable && peersLine !== '…' && !peersLine.startsWith('0 LIVE');
   const mailLive = !mailUnavailable && messagesLine !== 'none' && messagesLine !== '…';
   const peersDotFg = peersUnavailable ? t.error : peersLive ? t.info : t.muted;
   const mailDotFg = mailUnavailable ? t.error : mailLive ? t.info : t.muted;
-  const peersSub = peersDetail
-    ? formatLucernaDisplayLine(`   ${peersDetail}`, pulseInnerW)
-    : emptyDisplayRow(pulseInnerW);
+  const lucernaDotFg =
+    lucernaPulse?.state === 'running' && lucernaPulse.capability?.state === 'refusing'
+      ? t.warning
+      : lucernaPulse?.state === 'running'
+        ? t.success
+        : lucernaPulse?.state === 'stale'
+          ? t.error
+          : t.muted;
+  const seatRows = peerSeatRows(peersEntries);
+  const peerSubs = peersUnavailable
+    ? []
+    : seatRows.length > 0
+      ? seatRows.map(formatPeerSeatRow)
+      : peersLine === '…'
+        ? []
+        : [];
+  const mailSubs: string[] = [];
+  if (!mailUnavailable && mailCount && mailCount > 0) {
+    if (mailFrom) mailSubs.push(`last ${mailFrom}`);
+    if (mailText) mailSubs.push(mailText);
+  }
+  const lucernaSubs: string[] = [];
+  if (lucernaPulse?.state === 'running' && lucernaPulse.capability?.state === 'refusing') {
+    const tok = lucernaPulse.tokens?.trim();
+    if (tok) lucernaSubs.push(`token ceiling ${tok}`);
+    if (lucernaPulse.actionsToday === 0) lucernaSubs.push('0 chores today');
+  } else if (lucernaPulse?.lastNotification?.message) {
+    lucernaSubs.push(lucernaPulse.lastNotification.message);
+  }
+  const speculumStatus = speculumNotInstalled
+    ? 'not installed'
+    : speculumFailed
+      ? '—'
+      : (speculumPulse?.status ?? speculumLine);
+  const speculumSubs = speculumPulse?.detail
+    ? [speculumPulse.detail]
+    : speculumPulse?.errorHint
+      ? [speculumPulse.errorHint]
+      : speculumNotInstalled
+        ? ["run 'amore init --with-speculum'"]
+        : [];
   const pulsePanel = (
     <Panel title="Pulse" flexShrink={0} marginTop={1}>
-      {/* Peers: count on the label row, identities on a fixed-height sub-line. */}
-      <box
-        flexDirection="row"
-        height={1}
-        flexShrink={0}
-        overflow="hidden"
-        backgroundColor={t.background}
-      >
-        <text fg={peersDotFg} wrapMode="none">
-          ●
-        </text>
-        <text fg={t.foreground} wrapMode="none">
-          {' Peers'}
-        </text>
-        <box flexGrow={1} backgroundColor={t.background} />
-        <text fg={peersUnavailable ? t.error : t.muted} wrapMode="none">
-          {formatLucernaDisplayLine(peersLine, peersRightW)}
-        </text>
-      </box>
-      <box
-        height={1}
-        width={pulseInnerW}
-        flexShrink={0}
-        overflow="hidden"
-        backgroundColor={t.background}
-      >
-        <text fg={t.muted} wrapMode="none">
-          {peersSub}
-        </text>
-      </box>
-      <box
-        flexDirection="row"
-        height={1}
-        flexShrink={0}
-        overflow="hidden"
-        backgroundColor={t.background}
-      >
-        <text fg={mailDotFg} wrapMode="none">
-          ●
-        </text>
-        <text fg={t.foreground} wrapMode="none">
-          {' Mail'}
-        </text>
-        <box flexGrow={1} backgroundColor={t.background} />
-        <text fg={mailUnavailable ? t.error : t.muted} wrapMode="none">
-          {formatLucernaDisplayLine(messagesLine, mailRightW)}
-        </text>
-      </box>
-      <box flexDirection="row">
-        <text fg={forgeReview > 0 ? t.secondary : t.muted}>●</text>
-        <text fg={t.foreground}> Forge</text>
-        <box flexGrow={1} />
-        <text fg={t.muted}>{forgeReview > 0 ? `${forgeReview} pending review` : 'queue clear'}</text>
-      </box>
-      <text fg={forgeCounts.dreams > 0 ? t.secondary : t.muted}>{`   ${forgeCounts.dreams} dream${forgeCounts.dreams === 1 ? '' : 's'} to review · ${forgeCounts.proposals} proposal${forgeCounts.proposals === 1 ? '' : 's'}`}</text>
-      <box flexDirection="row">
-        <text fg={gitStatus ? (gitStatus.dirty > 0 ? t.warning : t.success) : t.muted}>●</text>
-        <text fg={t.foreground}> Git</text>
-        <box flexGrow={1} />
-        <text fg={t.muted}>
-          {gitStatus
+      <PulseVital
+        label="Peers"
+        value={peersUnavailable ? PRESENCE_UNAVAILABLE : peersLine}
+        subLines={peerSubs}
+        dotFg={peersDotFg}
+        t={t}
+        innerW={pulseInnerW}
+      />
+      <PulseVital
+        label="Mail"
+        value={mailUnavailable ? MAIL_UNAVAILABLE : mailCount == null ? '…' : mailCount === 0 ? 'none' : String(mailCount)}
+        subLines={mailSubs}
+        dotFg={mailDotFg}
+        t={t}
+        innerW={pulseInnerW}
+      />
+      <PulseVital
+        label="Forge"
+        value={forgeReview > 0 ? `${forgeReview} pending review` : 'queue clear'}
+        subLines={[
+          `${forgeCounts.dreams} dream${forgeCounts.dreams === 1 ? '' : 's'} to review · ${forgeCounts.proposals} proposal${forgeCounts.proposals === 1 ? '' : 's'}`,
+        ]}
+        dotFg={forgeReview > 0 ? t.secondary : t.muted}
+        t={t}
+        innerW={pulseInnerW}
+      />
+      <PulseVital
+        label="Git"
+        value={
+          gitStatus
             ? `${gitStatus.branch} · ${gitStatus.dirty > 0 ? `${gitStatus.dirty} uncommitted` : 'clean'}${gitStatus.ahead ? ` ↑${gitStatus.ahead}` : ''}`
-            : '…'}
-        </text>
-      </box>
-      <text fg={t.muted}>{`   last commit ${git[0]?.when ?? '—'}`}</text>
-      <box flexDirection="row">
-        <text fg={status ? t.info : t.muted}>●</text>
-        <text fg={t.foreground}> Daemon</text>
-        <box flexGrow={1} />
-        <text fg={t.muted}>{status ? `up ${fmtUptime(status.server.uptime)} · ${status.documents.total} docs` : 'starting…'}</text>
-      </box>
-      {/* Lucerna pulse: fixed-height opaque rows so a shorter beat/notice fully clears the prior paint. */}
+            : '…'
+        }
+        subLines={[`last commit ${git[0]?.when ?? '—'}`]}
+        dotFg={gitStatus ? (gitStatus.dirty > 0 ? t.warning : t.success) : t.muted}
+        t={t}
+        innerW={pulseInnerW}
+      />
+      <PulseVital
+        label="Daemon"
+        value={status ? `up ${fmtUptime(status.server.uptime)} · ${status.documents.total} docs` : 'starting…'}
+        subLines={[]}
+        dotFg={status ? t.info : t.muted}
+        t={t}
+        innerW={pulseInnerW}
+      />
+      <PulseVital
+        label="Lucerna"
+        value={formatLucernaPulseStatus(lucernaPulse, Math.max(20, pulseInnerW - 10))}
+        subLines={lucernaSubs}
+        dotFg={lucernaDotFg}
+        t={t}
+        innerW={pulseInnerW}
+      />
       <box
-        flexDirection="row"
-        height={1}
-        flexShrink={0}
-        overflow="hidden"
-        backgroundColor={t.background}
-      >
-        <text
-          fg={
-            lucernaPulse?.state === 'running' && lucernaPulse.capability?.state === 'refusing'
-              ? t.warning
-              : lucernaPulse?.state === 'running'
-                ? t.success
-                : lucernaPulse?.state === 'stale'
-                  ? t.error
-                  : t.muted
-          }
-          wrapMode="none"
-        >
-          ●
-        </text>
-        <text fg={t.foreground} wrapMode="none">
-          {' Lucerna'}
-        </text>
-        <box flexGrow={1} backgroundColor={t.background} />
-        <text fg={t.muted} wrapMode="none">
-          {formatLucernaDisplayLine(
-            formatLucernaPulseStatus(lucernaPulse, lucernaStatusW),
-            lucernaStatusW,
-          )}
-        </text>
-      </box>
-      <box
-        height={1}
-        width={pulseInnerW}
-        flexShrink={0}
-        overflow="hidden"
-        backgroundColor={t.background}
-      >
-        <text fg={t.muted} wrapMode="none">
-          {lucernaPulse?.state === 'running' && lucernaPulse.capability?.state === 'refusing'
-            ? formatPulseRefusingSubLine(
-                lucernaPulse.tokens,
-                lucernaPulse.actionsToday,
-                pulseInnerW,
-              )
-            : formatPulseSubLine(lucernaPulse?.lastNotification?.message, pulseInnerW)}
-        </text>
-      </box>
-      {/* Speculum pulse — one status line; click opens Sessions. No analytics here. */}
-      <box
-        flexDirection="row"
-        height={1}
-        flexShrink={0}
-        overflow="hidden"
         backgroundColor={speculumHi ? t.selection : t.background}
         onMouseOver={() => hoverTo('speculum-pulse')}
         onMouseDown={onNavigate ? () => onNavigate('Sessions') : undefined}
       >
-        <text fg={speculumDotFg} wrapMode="none">
-          ●
-        </text>
-        <text fg={t.foreground} wrapMode="none">
-          {' Speculum'}
-        </text>
-        <box flexGrow={1} backgroundColor={speculumHi ? t.selection : t.background} />
-        <text fg={speculumLineFg} wrapMode="none">
-          {formatLucernaDisplayLine(speculumLine, speculumRightW)}
-        </text>
+        <PulseVital
+          label="Speculum"
+          value={speculumStatus}
+          subLines={speculumSubs}
+          dotFg={speculumDotFg}
+          t={t}
+          innerW={pulseInnerW}
+        />
       </box>
-      {speculumPulse?.errorHint ? (
-        <box
-          height={1}
-          width={pulseInnerW}
-          flexShrink={0}
-          overflow="hidden"
-          backgroundColor={t.background}
-        >
-          <text fg={t.muted} wrapMode="none">
-            {formatPulseSubLine(speculumPulse.errorHint, pulseInnerW)}
-          </text>
-        </box>
-      ) : null}
     </Panel>
   );
 

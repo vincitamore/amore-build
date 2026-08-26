@@ -6,11 +6,13 @@ import {
   REMOTE_STALE_HOURS,
   entryIsStale,
   formatMessages,
+  formatPeerSeatRow,
   formatPeers,
   formatPeersDetail,
   formatRemoteAge,
   formatRemoteCaption,
   messagesFromPayload,
+  peerSeatRows,
   peersFromPayload,
   type PresenceEntry,
 } from './presence';
@@ -157,19 +159,39 @@ describe('formatRemoteAge', () => {
 });
 
 describe('messagesFromPayload', () => {
-  test('uses line when present', () => {
+  test('uses line when entries missing', () => {
     expect(messagesFromPayload({ line: '2 · last here/amore: hi' })).toBe(
       '2 · last here/amore: hi',
     );
   });
 
-  test('formats entries when line missing; slice matches daemon (48)', () => {
+  test('formats entries in full (no 48-char slice)', () => {
     const text = 'x'.repeat(60);
     expect(
       messagesFromPayload({
+        line: 'ignored',
         entries: [{ from: { seat: 'here', harness: 'amore' }, text, ts: 't' }],
       }),
-    ).toBe(`1 · last here/amore: ${'x'.repeat(48)}`);
+    ).toBe(`1 · last here/amore: ${text}`);
     expect(formatMessages([])).toBe('none');
+  });
+});
+
+describe('peerSeatRows', () => {
+  test('locals first, harnesses grouped, remotes captioned', () => {
+    const rows = peerSeatRows(
+      [
+        local('admin-pc', 'amore'),
+        local('admin-pc', 'claude-code'),
+        remote('amore-dev-laptop', 'amore', 0.2),
+      ],
+      NOW,
+    );
+    expect(rows.map((r) => r.seat)).toEqual(['admin-pc', 'amore-dev-laptop']);
+    expect(rows[0]?.harnesses).toEqual(['amore', 'claude-code']);
+    expect(rows[0]?.remote).toBe(false);
+    expect(formatPeerSeatRow(rows[0]!)).toBe('admin-pc  amore, claude-code');
+    expect(formatPeerSeatRow(rows[1]!)).toContain('amore-dev-laptop');
+    expect(formatPeerSeatRow(rows[1]!)).toContain('as of 12m ago');
   });
 });

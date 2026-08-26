@@ -125,6 +125,59 @@ export function formatPeersDetail(entries: PresenceEntry[], now = Date.now()): s
   );
 }
 
+/** One Pulse identity row per seat — locals first. Never a jammed one-liner. */
+export interface PeerSeatRow {
+  seat: string;
+  harnesses: string[];
+  remote: boolean;
+  caption: string | null;
+}
+
+export function peerSeatRows(entries: PresenceEntry[], now = Date.now()): PeerSeatRow[] {
+  const collect = (list: PresenceEntry[], remote: boolean): PeerSeatRow[] => {
+    const order: string[] = [];
+    const harnesses = new Map<string, string[]>();
+    const cap = new Map<string, string | null>();
+    for (const e of list) {
+      const seat = (e.seat || '?').trim() || '?';
+      if (!harnesses.has(seat)) {
+        order.push(seat);
+        harnesses.set(seat, []);
+        if (remote) {
+          const raw = formatRemoteCaption(e, now);
+          cap.set(seat, raw ? raw.replace(/^remote, /, '') : null);
+        } else {
+          cap.set(seat, null);
+        }
+      }
+      const h = (e.harness || '?').trim() || '?';
+      const hs = harnesses.get(seat)!;
+      if (!hs.includes(h)) hs.push(h);
+    }
+    return order.map((seat) => ({
+      seat,
+      harnesses: harnesses.get(seat) || [],
+      remote,
+      caption: cap.get(seat) ?? null,
+    }));
+  };
+  return [
+    ...collect(
+      entries.filter((e) => !entryIsRemote(e)),
+      false,
+    ),
+    ...collect(
+      entries.filter((e) => entryIsRemote(e)),
+      true,
+    ),
+  ];
+}
+
+export function formatPeerSeatRow(row: PeerSeatRow): string {
+  const ids = row.harnesses.join(', ');
+  return row.caption ? `${row.seat}  ${ids}  ${row.caption}` : `${row.seat}  ${ids}`;
+}
+
 export function peersFromPayload(j: unknown, now = Date.now()): { line: string; detail: string } {
   if (!j || typeof j !== 'object') return { line: '0 LIVE', detail: '' };
   const o = j as PresencePayload;
@@ -143,14 +196,35 @@ export function formatMessages(entries: CoordMessage[]): string {
   const ident = last?.from
     ? `${last.from.seat || '?'}/${last.from.harness || '?'}`
     : '?';
-  const body = (last?.text || '').slice(0, 48);
+  const body = last?.text || '';
   return `${entries.length} · last ${ident}: ${body}`;
 }
 
 export function messagesFromPayload(j: unknown): string {
   if (!j || typeof j !== 'object') return 'none';
   const o = j as { line?: string; entries?: CoordMessage[] };
-  if (typeof o.line === 'string' && o.line.length > 0) return o.line;
   if (Array.isArray(o.entries)) return formatMessages(o.entries);
+  if (typeof o.line === 'string' && o.line.length > 0) return o.line;
   return 'none';
+}
+
+export function mailFromPayload(j: unknown): {
+  count: number;
+  lastFrom: string;
+  lastText: string;
+} {
+  if (!j || typeof j !== 'object') return { count: 0, lastFrom: '', lastText: '' };
+  const o = j as { entries?: CoordMessage[] };
+  if (!Array.isArray(o.entries) || o.entries.length === 0) {
+    return { count: 0, lastFrom: '', lastText: '' };
+  }
+  const last = o.entries[o.entries.length - 1];
+  const ident = last?.from
+    ? `${last.from.seat || '?'}/${last.from.harness || '?'}`
+    : '';
+  return {
+    count: o.entries.length,
+    lastFrom: ident,
+    lastText: last?.text || '',
+  };
 }
