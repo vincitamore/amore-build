@@ -580,7 +580,7 @@ fn union_active_sessions(entries: &mut Vec<Presence>) {
 pub fn format_roster(report: &RosterReport, self_pid: Option<u32>) -> String {
     let entries = &report.entries;
     let dark: Vec<&PeerStatus> = report.peers.iter().filter(|p| !p.answered).collect();
-    if entries.is_empty() && dark.is_empty() {
+    if entries.is_empty() && report.peers.is_empty() {
         return "Peers: 0 LIVE".to_string();
     }
     let me = seat();
@@ -615,6 +615,12 @@ pub fn format_roster(report: &RosterReport, self_pid: Option<u32>) -> String {
             format!("{ident} ({}){tag}", bits.join(", "))
         })
         .collect();
+    for p in &report.peers {
+        // A seat that answered with zero sessions is up, not invisible.
+        if p.answered && p.sessions == 0 {
+            parts.push(format!("{}: up, no sessions", p.seat));
+        }
+    }
     for p in &dark {
         let when = p
             .last_answered

@@ -121,7 +121,13 @@ export function peerSeatRows(
     ),
   ];
   for (const p of peers) {
-    if (p.answered) continue;
+    if (p.answered) {
+      // A seat that answered with zero sessions is up, not invisible.
+      if (p.sessions === 0) {
+        rows.push({ seat: p.seat, harnesses: [], remote: true, caption: 'up · no sessions' });
+      }
+      continue;
+    }
     const when = p.last_answered ? ` · last answered ${formatAgo(p.last_answered, now)}` : '';
     rows.push({
       seat: p.seat,

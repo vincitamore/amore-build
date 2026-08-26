@@ -269,7 +269,13 @@ function buildSeatBlocks(entries: PresenceEntry[], peers: PeerStatus[]): SeatBlo
     });
   }
   for (const p of peers) {
-    if (p.answered) continue;
+    if (p.answered) {
+      // A seat that answered with zero sessions is up, not invisible.
+      if (p.sessions === 0) {
+        blocks.push({ seat: p.seat, remote: true, dark: false, tagline: 'up · no sessions', rows: [] });
+      }
+      continue;
+    }
     blocks.push({
       seat: p.seat,
       remote: true,

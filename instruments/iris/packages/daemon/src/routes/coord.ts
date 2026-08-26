@@ -254,7 +254,10 @@ export function formatPeersDetail(entries: PresenceEntry[], peers: PeerStatus[] 
   const remotes = entries.filter((e) => e.remote);
   const parts = [...groupSeatIdents(locals), ...groupSeatIdents(remotes)];
   for (const p of peers) {
-    if (p.answered) continue;
+    if (p.answered) {
+      if (p.sessions === 0) parts.push(`${p.seat}: up, no sessions`);
+      continue;
+    }
     const when = p.last_answered ? ` (last answered ${shortWhen(p.last_answered)})` : '';
     parts.push(`${p.seat}: dark${when}`);
   }

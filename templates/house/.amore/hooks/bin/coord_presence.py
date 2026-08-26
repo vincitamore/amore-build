@@ -431,7 +431,7 @@ def format_native_report(report: dict, self_pid: int | None = None) -> str:
     entries = report.get("entries") or []
     peers = report.get("peers") or []
     dark = [p for p in peers if isinstance(p, dict) and not p.get("answered")]
-    if not entries and not dark:
+    if not entries and not peers:
         return "**Peers**: 0 LIVE"
     parts = []
     live = 0
@@ -450,6 +450,10 @@ def format_native_report(report: dict, self_pid: int | None = None) -> str:
         live += 1
         tag = " (this session)" if self_pid and e.get("pid") == self_pid else ""
         parts.append(f"{ident} ({', '.join(bits)}){tag}")
+    for p in peers:
+        # A seat that answered with zero sessions is up, not invisible.
+        if isinstance(p, dict) and p.get("answered") and not p.get("sessions"):
+            parts.append(f"{p.get('seat', '?')}: up, no sessions")
     for p in dark:
         when = p.get("last_answered") or ""
         cap = f"{p.get('seat', '?')}: dark"

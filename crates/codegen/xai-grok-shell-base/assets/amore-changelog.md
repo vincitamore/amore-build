@@ -43,7 +43,11 @@ work it describes.
   answer renders **dark** with its last successful answer. If a session
   shows up at all, it is running right now — so every surface counts it
   **LIVE**, wherever it lives; rows name the seat, and a dark seat's
-  sessions are never counted. Presence files
+  sessions are never counted. The iris daemon holds the door whenever no
+  amore session does (same persisted certificate, so peers' pins hold) —
+  a seat answers as long as anything on it is alive, TUI open or not, and
+  a seat that answers with nothing running shows as `up, no sessions`
+  rather than disappearing. Presence files
   are local-only: the scp presence copy, its retract-at-exit race, and
   remote ghost files are gone (pushed-era foreign-seat files are reaped on
   read), and per-session ephemeral tailnet listeners no longer exist — one
