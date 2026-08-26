@@ -34,10 +34,12 @@ work it describes.
 - **Pulse** — Peers shows a count plus a sub-line of `seat/harness`
   identities, refreshed with the Dashboard poll. Duplicate harness rows
   for the same pid are collapsed.
-- **Cross-seat presence copy** — publish dest is `~/.house/coord/presence/`
-  (OpenSSH scp expands a leading tilde; it does not expand `$HOME`).
-  Retract runs `rm` in a remote shell with an expandable `$HOME` path,
-  and the dest directory is created before copy. A closed session's
+- **Cross-seat presence copy** — dest is discovered, not assumed POSIX.
+  ssh `echo $HOME` (bash and pwsh both have `$HOME`), then scp to the
+  absolute `{home}/.house/coord/presence/` (Windows OpenSSH does not
+  expand `~` on dest). Each seat links every local SSH-login home's
+  `.house/coord` to the house coord so the SSH user and the house user
+  share one directory. mkdir/rm try POSIX then pwsh. A closed session's
   peer copy is removed; a live session's row actually lands on the
   other seat.
 - **Same-seat named pipe** — a Windows named-pipe stamp from another

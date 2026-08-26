@@ -1,7 +1,12 @@
 //! `~/.house/coord/seats` — one row per other machine.
 //!
 //! `<name> <user@host> [coord-root]`
-//! coord-root defaults to the remote `~/.house/coord`.
+//! coord-root is an optional override. The default is discovered: ssh
+//! `echo $HOME` (bash and pwsh both have `$HOME`), then
+//! `{home}/.house/coord`. scp uses that absolute path (Windows OpenSSH
+//! does not expand `~` on dest). Local `start` links every SSH-login
+//! home's `.house/coord` to this process's coord so the SSH user and
+//! the house user share one directory.
 
 use std::fs;
 use std::io::Write;
@@ -73,12 +78,9 @@ pub fn publish_file(path: &Path) {
         if row.name.eq_ignore_ascii_case(&seat::seat()) {
             continue;
         }
-        let dir = format!("{}/presence", coord_root_shell(&row));
-        if let Err(e) = ssh_run(&row.ssh, &format!("mkdir -p {}", shell_expandable(&dir))) {
-            tracing::debug!(seat = %row.name, error = %e, "coord: presence mkdir failed");
-            continue;
-        }
-        let remote = remote_presence_scp(&row, name);
+        let root = discovered_coord_root(&row);
+        ensure_remote_dir(&row.ssh, &format!("{root}/presence"));
+        let remote = format!("{root}/presence/{name}");
         if let Err(e) = scp(path, &row.ssh, &remote) {
             tracing::debug!(seat = %row.name, error = %e, "coord: presence publish failed");
         }
@@ -94,17 +96,14 @@ pub fn retract_file(filename: &str) {
         if row.name.eq_ignore_ascii_case(&seat::seat()) {
             continue;
         }
-        let remote = remote_presence_shell(&row, filename);
-        let cmd = format!("rm -f {remote}");
-        if let Err(e) = ssh_run(&row.ssh, &cmd) {
-            tracing::debug!(seat = %row.name, error = %e, "coord: presence retract failed");
-        }
+        let root = discovered_coord_root(&row);
+        remove_remote_file(&row.ssh, &format!("{root}/presence/{filename}"));
     }
 }
 
 pub fn inject_remote(row: &SeatRow, env: &Envelope) -> Result<SendResult, String> {
     let body = serde_json::to_string(env).map_err(|e| e.to_string())?;
-    let coord = coord_root_shell(row);
+    let coord = discovered_coord_root(row);
     let remote = format!(
         "export PATH=\"$HOME/.local/bin:$HOME/amore/bin:$PATH\"; \
          export HOUSE_COORD_DIR=\"{coord}/presence\"; \
@@ -160,23 +159,44 @@ fn parse_inject_stdout(stdout: &str, ssh: &str) -> SendResult {
     SendResult::new(disp, via)
 }
 
-/// scp dest: OpenSSH expands a leading `~` on the remote side and does
-/// **not** expand `$HOME`. Default must be tilde, never `$HOME`.
-const DEFAULT_COORD_ROOT_SCP: &str = "~/.house/coord";
-/// Remote-shell path: `$HOME` expands inside double quotes; a quoted `~`
-/// does not. Default must be `$HOME`, never a single-quoted string.
-const DEFAULT_COORD_ROOT_SHELL: &str = "$HOME/.house/coord";
-
-fn coord_root_scp(row: &SeatRow) -> String {
-    row.coord_root
-        .clone()
-        .unwrap_or_else(|| DEFAULT_COORD_ROOT_SCP.into())
+/// Ask the remote who it is, then write to *that* home's `.house/coord`.
+///
+/// scp dest is not a remote shell: OpenSSH does not expand `$HOME` there,
+/// and Windows OpenSSH turns `~` into a relative `.house/...` off the
+/// sshd cwd. So we expand `$HOME` over ssh (a variable in both bash and
+/// pwsh), then scp to the absolute path.
+///
+/// The SSH login user may not be the house user. `ensure_ssh_visible_coord`
+/// junctions/symlinks every local `authorized_keys` home's `.house/coord`
+/// to this process's coord, so `$HOME/.house/coord` on the SSH account
+/// *is* the house coord. No machine or account names in code. The seats
+/// third column remains an explicit override, not a required pin.
+fn discovered_coord_root(row: &SeatRow) -> String {
+    if let Some(explicit) = &row.coord_root {
+        return scp_slash(explicit);
+    }
+    match probe_remote_home(&row.ssh) {
+        Some(home) => format!("{home}/.house/coord"),
+        None => "~/.house/coord".into(),
+    }
 }
 
-fn coord_root_shell(row: &SeatRow) -> String {
-    row.coord_root
-        .clone()
-        .unwrap_or_else(|| DEFAULT_COORD_ROOT_SHELL.into())
+fn probe_remote_home(ssh: &str) -> Option<String> {
+    let text = ssh_stdout(ssh, "echo $HOME").ok()?;
+    let home = text
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty() && *l != "None")?;
+    let home = scp_slash(home);
+    if home.is_empty() || home.contains('\0') {
+        None
+    } else {
+        Some(home)
+    }
+}
+
+fn scp_slash(path: &str) -> String {
+    path.trim().replace('\\', "/").trim_end_matches('/').to_string()
 }
 
 fn is_safe_filename(name: &str) -> bool {
@@ -187,7 +207,7 @@ fn is_safe_filename(name: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
 }
 
-/// Quote a remote path so a POSIX login shell can still expand `~` / `$HOME`.
+/// Quote an already-absolute remote path for a POSIX *or* pwsh remote.
 fn shell_expandable(path: &str) -> String {
     if path.starts_with("$HOME") {
         format!("\"{path}\"")
@@ -198,12 +218,131 @@ fn shell_expandable(path: &str) -> String {
     }
 }
 
-fn remote_presence_scp(row: &SeatRow, filename: &str) -> String {
-    format!("{}/presence/{filename}", coord_root_scp(row))
+fn ensure_remote_dir(ssh: &str, dir: &str) {
+    let q = shell_expandable(dir);
+    if ssh_run(ssh, &format!("mkdir -p {q}")).is_ok() {
+        return;
+    }
+    // pwsh: `mkdir -p` is New-Item -Path and errors if the dir exists.
+    // New-Item -Force is the idempotent form.
+    let win = dir.replace('/', "\\");
+    let quoted = win.replace('\'', "''");
+    if let Err(e) = ssh_run(
+        ssh,
+        &format!("New-Item -ItemType Directory -Force -Path '{quoted}'"),
+    ) {
+        tracing::debug!(error = %e, "coord: presence mkdir failed");
+    }
 }
 
-fn remote_presence_shell(row: &SeatRow, filename: &str) -> String {
-    shell_expandable(&format!("{}/presence/{filename}", coord_root_shell(row)))
+fn remove_remote_file(ssh: &str, path: &str) {
+    let q = shell_expandable(path);
+    if ssh_run(ssh, &format!("rm -f {q}")).is_ok() {
+        return;
+    }
+    let win = path.replace('/', "\\");
+    let quoted = win.replace('\'', "''");
+    if let Err(e) = ssh_run(
+        ssh,
+        &format!("Remove-Item -Force -ErrorAction SilentlyContinue -Path '{quoted}'"),
+    ) {
+        tracing::debug!(error = %e, "coord: presence retract failed");
+    }
+}
+
+/// Point every local SSH-login home at this process's coord directory.
+pub fn ensure_ssh_visible_coord() {
+    let real = super::coord_root();
+    let Ok(real_abs) = fs::canonicalize(&real) else {
+        return;
+    };
+    for home in local_login_homes() {
+        let keys = home.join(".ssh").join("authorized_keys");
+        if !keys.is_file() {
+            continue;
+        }
+        let visible = home.join(".house").join("coord");
+        if let Ok(v) = fs::canonicalize(&visible)
+            && v == real_abs
+        {
+            continue;
+        }
+        if let Some(parent) = visible.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        if visible.exists() || visible.symlink_metadata().is_ok() {
+            let bak = unique_bak(&visible);
+            if fs::rename(&visible, &bak).is_err() {
+                tracing::debug!(path = %visible.display(), "coord: could not move aside ssh-home coord");
+                continue;
+            }
+        }
+        if let Err(e) = link_dir(&real_abs, &visible) {
+            tracing::debug!(error = %e, "coord: ssh-visible coord link failed");
+        }
+    }
+}
+
+fn local_login_homes() -> Vec<std::path::PathBuf> {
+    let mut homes = Vec::new();
+    let seed = std::env::var_os("USERPROFILE")
+        .or_else(|| std::env::var_os("HOME"))
+        .map(std::path::PathBuf::from);
+    let Some(mine) = seed else {
+        return homes;
+    };
+    let Some(parent) = mine.parent() else {
+        return homes;
+    };
+    if let Ok(rd) = fs::read_dir(parent) {
+        for e in rd.flatten() {
+            if e.path().is_dir() {
+                homes.push(e.path());
+            }
+        }
+    }
+    homes
+}
+
+fn unique_bak(path: &Path) -> std::path::PathBuf {
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    path.with_file_name(format!(
+        "{}.bak-ssh-visible-{ts}",
+        path.file_name().and_then(|n| n.to_str()).unwrap_or("coord")
+    ))
+}
+
+fn link_dir(src: &Path, dest: &Path) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        let mut child = Command::new("cmd");
+        child.args([
+            "/C",
+            "mklink",
+            "/J",
+            &dest.to_string_lossy(),
+            &src.to_string_lossy(),
+        ]);
+        hide_window(&mut child);
+        let out = child.output().map_err(|e| e.to_string())?;
+        if out.status.success() {
+            Ok(())
+        } else {
+            Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
+        }
+    }
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(src, dest).map_err(|e| e.to_string())
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = (src, dest);
+        Err("coord link unsupported on this os".into())
+    }
 }
 
 fn hide_window(cmd: &mut Command) {
@@ -310,13 +449,21 @@ pub fn converge_house_token() {
 }
 
 fn remote_tls_token(row: &SeatRow) -> String {
-    shell_expandable(&format!("{}/tls/token", coord_root_shell(row)))
+    format!("{}/tls/token", discovered_coord_root(row))
 }
 
 fn fetch_token(row: &SeatRow) -> Option<String> {
     let path = remote_tls_token(row);
-    let cmd = format!("cat {path} 2>/dev/null");
-    let text = ssh_stdout(&row.ssh, &cmd).ok()?;
+    let q = shell_expandable(&path);
+    let text = ssh_stdout(&row.ssh, &format!("cat {q} 2>/dev/null"))
+        .or_else(|_| {
+            let win = path.replace('/', "\\").replace('\'', "''");
+            ssh_stdout(
+                &row.ssh,
+                &format!("Get-Content -Raw -ErrorAction SilentlyContinue -Path '{win}'"),
+            )
+        })
+        .ok()?;
     let t = text.trim();
     if t.is_empty() {
         None
@@ -327,7 +474,9 @@ fn fetch_token(row: &SeatRow) -> Option<String> {
 
 fn push_token(row: &SeatRow, token: &str) -> Result<(), String> {
     let path = remote_tls_token(row);
-    let script = format!("mkdir -p \"$(dirname {path})\" && cat > {path} && chmod 600 {path}");
+    ensure_remote_dir(&row.ssh, &path.rsplit_once('/').map(|(d, _)| d).unwrap_or(&path).to_string());
+    let q = shell_expandable(&path);
+    let script = format!("cat > {q}");
     let mut child = Command::new("ssh");
     child.args([
         "-o",
@@ -375,7 +524,7 @@ fn ssh_stdout(ssh: &str, cmd: &str) -> Result<String, String> {
 
 pub fn drop_inbox_remote(row: &SeatRow, env: &Envelope) -> Result<String, String> {
     let body = serde_json::to_string(env).map_err(|e| e.to_string())?;
-    let inbox = format!("{}/inbox", coord_root_shell(row));
+    let inbox = format!("{}/inbox", discovered_coord_root(row));
     let remote = format!("{inbox}/{}.json", env.msgid);
     let script = format!(
         "mkdir -p {} && cat > {}",
@@ -449,40 +598,25 @@ mod tests {
     }
 
     #[test]
-    fn default_scp_dest_uses_tilde_not_home() {
-        let dest = remote_presence_scp(&peer(), "seat-amore-1.json");
-        assert_eq!(dest, "~/.house/coord/presence/seat-amore-1.json");
-        assert!(
-            !dest.contains("$HOME"),
-            "OpenSSH scp does not expand $HOME on dest"
-        );
+    fn scp_slash_normalizes_windows_home() {
+        assert_eq!(scp_slash(r"C:\Users\sshuser\"), "C:/Users/sshuser");
+        assert_eq!(scp_slash("/home/me/"), "/home/me");
     }
 
     #[test]
-    fn default_shell_path_double_quotes_home() {
-        let path = remote_presence_shell(&peer(), "seat-amore-1.json");
-        assert_eq!(path, "\"$HOME/.house/coord/presence/seat-amore-1.json\"");
-        assert!(
-            !path.contains('\''),
-            "single quotes prevent $HOME expansion on the remote"
-        );
-    }
-
-    #[test]
-    fn explicit_root_is_used_as_is() {
+    fn explicit_root_wins_without_a_probe() {
         let row = SeatRow {
             name: "peer-two".into(),
             ssh: "user@peer-two".into(),
-            coord_root: Some("/home/user/.house/coord".into()),
+            coord_root: Some(r"C:\Users\me\.house\coord".into()),
         };
-        assert_eq!(
-            remote_presence_scp(&row, "f.json"),
-            "/home/user/.house/coord/presence/f.json"
-        );
-        assert_eq!(
-            remote_presence_shell(&row, "f.json"),
-            "'/home/user/.house/coord/presence/f.json'"
-        );
+        assert_eq!(discovered_coord_root(&row), "C:/Users/me/.house/coord");
+    }
+
+    #[test]
+    fn probe_miss_falls_back_to_tilde() {
+        // user@peer-one is not a live ssh target in unit tests.
+        assert_eq!(discovered_coord_root(&peer()), "~/.house/coord");
     }
 
     #[test]

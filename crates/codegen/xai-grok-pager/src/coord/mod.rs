@@ -222,6 +222,11 @@ pub fn start(session_id: Option<&str>, cwd: &str) {
         let _ = THIS_SESSION_ID.set(sid.to_string());
     }
     seat::persist_authoritative();
+    // Isolated rosters (tests, overlays) must not retarget the machine's
+    // SSH-visible coord at a temp dir.
+    if std::env::var_os("HOUSE_COORD_DIR").is_none() {
+        seats::ensure_ssh_visible_coord();
+    }
     std::thread::spawn(|| seats::converge_house_token());
     let path = entry_path(&dir, HARNESS, pid);
     let tmp = path.with_extension("tmp");
