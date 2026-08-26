@@ -108,7 +108,9 @@ pub fn send(target: &str, text: &str) -> Result<SendResult, String> {
 /// Post an already-built envelope to a local socket. Does not rewrite `from`.
 pub fn inject(env: Envelope) -> Result<SendResult, String> {
     super::log::append(&env, false);
-    let roster = super::roster();
+    // Local delivery: inject runs on the receiving seat and must not dial
+    // the network to resolve its target.
+    let roster = super::local_roster();
     let hit = env
         .to
         .as_ref()

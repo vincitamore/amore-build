@@ -6,7 +6,7 @@ use std::io::Read;
 
 use super::msg::Envelope;
 use super::send::{inject as coord_inject, send as coord_send, SendResult};
-use super::{format_roster, roster};
+use super::{format_roster, roster_report};
 
 #[derive(Debug, Clone, Args)]
 pub struct CoordArgs {
@@ -35,11 +35,11 @@ pub enum CoordCommand {
 pub fn run(args: CoordArgs) -> anyhow::Result<()> {
     match args.command {
         CoordCommand::Roster { json } => {
-            let entries = roster();
+            let report = roster_report();
             if json {
-                println!("{}", serde_json::to_string_pretty(&entries)?);
+                println!("{}", serde_json::to_string_pretty(&report)?);
             } else {
-                println!("{}", format_roster(&entries, Some(std::process::id())));
+                println!("{}", format_roster(&report, Some(std::process::id())));
             }
         }
         CoordCommand::Send { target, message } => {

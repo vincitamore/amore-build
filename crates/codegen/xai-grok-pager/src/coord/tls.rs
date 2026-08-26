@@ -335,6 +335,16 @@ impl ServerCertVerifier for TofuVerifier {
 }
 
 pub fn tls_post(hostport: &str, seat: &str, payload: &str) -> Result<String, String> {
+    tls_post_with(hostport, seat, payload, CONNECT_TIMEOUT, IO_TIMEOUT)
+}
+
+pub fn tls_post_with(
+    hostport: &str,
+    seat: &str,
+    payload: &str,
+    connect_timeout: Duration,
+    io_timeout: Duration,
+) -> Result<String, String> {
     let provider = rustls::crypto::aws_lc_rs::default_provider();
     let verifier = Arc::new(TofuVerifier {
         seat: seat.to_string(),
@@ -351,22 +361,22 @@ pub fn tls_post(hostport: &str, seat: &str, payload: &str) -> Result<String, Str
         .map_err(|e| e.to_string())?;
     let conn = rustls::ClientConnection::new(Arc::new(cfg), name).map_err(|e| e.to_string())?;
     let addr = resolve_hostport(hostport)?;
-    let sock = match TcpStream::connect_timeout(&addr, CONNECT_TIMEOUT) {
+    let sock = match TcpStream::connect_timeout(&addr, connect_timeout) {
         Ok(s) => s,
-        Err(e) => return Err(map_timeout(e, "connect", hostport, CONNECT_TIMEOUT)),
+        Err(e) => return Err(map_timeout(e, "connect", hostport, connect_timeout)),
     };
-    sock.set_read_timeout(Some(IO_TIMEOUT))
+    sock.set_read_timeout(Some(io_timeout))
         .map_err(|e| e.to_string())?;
-    sock.set_write_timeout(Some(IO_TIMEOUT))
+    sock.set_write_timeout(Some(io_timeout))
         .map_err(|e| e.to_string())?;
     let mut tls = rustls::StreamOwned::new(conn, sock);
     tls.write_all(payload.as_bytes())
-        .map_err(|e| map_timeout(e, "write", hostport, IO_TIMEOUT))?;
+        .map_err(|e| map_timeout(e, "write", hostport, io_timeout))?;
     let _ = tls.flush();
     let mut line = String::new();
     BufReader::new(&mut tls)
         .read_line(&mut line)
-        .map_err(|e| map_timeout(e, "read", hostport, IO_TIMEOUT))?;
+        .map_err(|e| map_timeout(e, "read", hostport, io_timeout))?;
     Ok(line)
 }
 
@@ -384,8 +394,8 @@ fn resolve_hostport(hostport: &str) -> Result<std::net::SocketAddr, String> {
 fn map_timeout(err: std::io::Error, op: &str, hostport: &str, budget: Duration) -> String {
     if err.kind() == ErrorKind::TimedOut || err.kind() == ErrorKind::WouldBlock {
         format!(
-            "coord tls: {op} timed out after {}s to {hostport}",
-            budget.as_secs()
+            "coord tls: {op} timed out after {}ms to {hostport}",
+            budget.as_millis()
         )
     } else {
         err.to_string()

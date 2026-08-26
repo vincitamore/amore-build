@@ -5,8 +5,15 @@
 //! is the native emit/consume path so a clean exit removes the entry (the
 //! hook pack has no SessionEnd) and the welcome splash / iris can read it.
 //!
-//! Liveness is a PID probe, never a TTL. Fail-soft: IO errors never block
-//! session start or quit.
+//! Presence files are LOCAL-ONLY. Cross-seat presence is pulled live: each
+//! seat's door (the tailnet TLS listener on the coord port) answers an
+//! authed `roster` request from its own PID-probed presence dir, and
+//! consumers dial the registered seats in parallel under a deadline. A seat
+//! that does not answer is reported dark — there is no pushed remote state,
+//! so there is nothing to retract and nothing to go stale.
+//!
+//! Liveness is a PID probe at the answering seat, never a TTL. Fail-soft:
+//! IO errors never block session start or quit.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -242,8 +249,6 @@ pub fn start(session_id: Option<&str>, cwd: &str) {
             } else {
                 let _ = fs::remove_file(legacy_entry_path(&dir, HARNESS, pid));
                 let _ = fs::remove_file(entry_path(&dir, "claude-code", pid));
-                let publish = path.clone();
-                std::thread::spawn(move || seats::publish_file(&publish));
             }
         }
         Err(e) => tracing::debug!(error = %e, "coord presence: serialize failed"),
@@ -259,9 +264,6 @@ pub fn stop_pid(pid: u32) {
     let dir = presence_dir();
     let path = entry_path(&dir, HARNESS, pid);
     let legacy = legacy_entry_path(&dir, HARNESS, pid);
-    if let Some(name) = path.file_name().and_then(|n| n.to_str()).map(str::to_string) {
-        std::thread::spawn(move || seats::retract_file(&name));
-    }
     let _ = fs::remove_file(&path);
     let _ = fs::remove_file(&legacy);
     if let Ok(rd) = fs::read_dir(&dir) {
@@ -282,14 +284,204 @@ pub fn stop_pid(pid: u32) {
     }
 }
 
-/// Live roster, oldest first. Reaps dead PID files. Unions
+/// Per-seat outcome of a roster pull.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PeerStatus {
+    pub seat: String,
+    /// The seat's door answered this pull.
+    pub answered: bool,
+    /// Live sessions the door reported (0 when dark).
+    pub sessions: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    /// RFC3339 of the last successful answer (this pull, or cached).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_answered: Option<String>,
+}
+
+/// A pulled roster: local sessions plus what each registered seat answered.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RosterReport {
+    pub entries: Vec<Presence>,
+    pub peers: Vec<PeerStatus>,
+}
+
+/// Live LOCAL roster, oldest first. Reaps dead PID files. Unions
 /// `active_sessions.json` so a session that registered there but missed a
-/// presence write still appears.
-pub fn roster() -> Vec<Presence> {
+/// presence write still appears. Never dials the network — this is what the
+/// seat door answers with.
+pub fn local_roster() -> Vec<Presence> {
     let mut entries = roster_from_files();
     union_active_sessions(&mut entries);
     entries.sort_by(|a, b| a.started.cmp(&b.started));
     entries
+}
+
+/// Local roster with per-session secrets stripped — the door's answer to a
+/// peer's `roster` request. Loopback tokens never leave the seat.
+pub fn roster_answer() -> Vec<Presence> {
+    let mut entries = local_roster();
+    for e in &mut entries {
+        e.socket_token = None;
+    }
+    entries
+}
+
+/// Full roster: local sessions plus a live pull of every registered seat.
+pub fn roster() -> Vec<Presence> {
+    roster_report().entries
+}
+
+/// Full roster with per-seat pull outcomes. Registered seats are dialed in
+/// parallel under a deadline; a seat that does not answer is reported dark.
+pub fn roster_report() -> RosterReport {
+    roster_report_with(PULL_DEADLINE_MS)
+}
+
+pub fn roster_report_with(deadline_ms: u64) -> RosterReport {
+    let entries = local_roster();
+    let me = seat();
+    let rows: Vec<seats::SeatRow> = seats::load()
+        .into_iter()
+        .filter(|r| !r.name.eq_ignore_ascii_case(&me))
+        .collect();
+    pull_peers(entries, &me, rows, deadline_ms)
+}
+
+const PULL_DEADLINE_MS: u64 = 2_500;
+
+/// Startup surfaces (the welcome splash) trade a peer answer for paint time.
+const SPLASH_PULL_DEADLINE_MS: u64 = 1_200;
+
+fn pull_peers(
+    mut entries: Vec<Presence>,
+    me: &str,
+    rows: Vec<seats::SeatRow>,
+    deadline_ms: u64,
+) -> RosterReport {
+    if rows.is_empty() {
+        return RosterReport {
+            entries,
+            peers: Vec::new(),
+        };
+    }
+    let (tx, rx) = std::sync::mpsc::channel::<(String, Result<Vec<Presence>, String>)>();
+    for row in &rows {
+        let tx = tx.clone();
+        let name = row.name.clone();
+        std::thread::spawn(move || {
+            let result = pull_one_peer(&name);
+            let _ = tx.send((name, result));
+        });
+    }
+    drop(tx);
+    let deadline = std::time::Instant::now()
+        + std::time::Duration::from_millis(deadline_ms);
+    let mut answers: std::collections::HashMap<String, Result<Vec<Presence>, String>> =
+        std::collections::HashMap::new();
+    while answers.len() < rows.len() {
+        let left = deadline.saturating_duration_since(std::time::Instant::now());
+        if left.is_zero() {
+            break;
+        }
+        match rx.recv_timeout(left) {
+            Ok((name, result)) => {
+                answers.insert(name, result);
+            }
+            Err(_) => break,
+        }
+    }
+    let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    let mut cache = read_pull_cache();
+    let mut peers = Vec::new();
+    for row in rows {
+        let key = row.name.to_lowercase();
+        match answers.remove(&row.name) {
+            Some(Ok(remote)) => {
+                let remote: Vec<Presence> = remote
+                    .into_iter()
+                    .filter(|e| {
+                        e.seat.eq_ignore_ascii_case(&row.name)
+                            && !e.seat.eq_ignore_ascii_case(me)
+                    })
+                    .collect();
+                peers.push(PeerStatus {
+                    seat: row.name.clone(),
+                    answered: true,
+                    sessions: remote.len(),
+                    error: None,
+                    last_answered: Some(now.clone()),
+                });
+                cache.insert(
+                    key,
+                    PullCacheEntry {
+                        ts: now.clone(),
+                        sessions: remote.len(),
+                    },
+                );
+                entries.extend(remote);
+            }
+            Some(Err(e)) => peers.push(dark_status(&row.name, e, &cache)),
+            None => peers.push(dark_status(
+                &row.name,
+                format!("no answer within {deadline_ms}ms"),
+                &cache,
+            )),
+        }
+    }
+    write_pull_cache(&cache);
+    entries.sort_by(|a, b| a.started.cmp(&b.started));
+    RosterReport { entries, peers }
+}
+
+fn dark_status(
+    seat_name: &str,
+    error: String,
+    cache: &std::collections::HashMap<String, PullCacheEntry>,
+) -> PeerStatus {
+    let cached = cache.get(&seat_name.to_lowercase());
+    PeerStatus {
+        seat: seat_name.to_string(),
+        answered: false,
+        sessions: 0,
+        error: Some(error),
+        last_answered: cached.map(|c| c.ts.clone()),
+    }
+}
+
+fn pull_one_peer(name: &str) -> Result<Vec<Presence>, String> {
+    let Some(ip) = seat::tailscale_peer_ip(name) else {
+        return Err("not a tailnet peer".into());
+    };
+    let addr = format!("{ip}:{}", tls::COORD_PORT);
+    socket::fetch_roster_tailnet(&addr, name)
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PullCacheEntry {
+    ts: String,
+    sessions: usize,
+}
+
+fn pull_cache_path() -> PathBuf {
+    coord_root().join("roster-cache.json")
+}
+
+fn read_pull_cache() -> std::collections::HashMap<String, PullCacheEntry> {
+    fs::read_to_string(pull_cache_path())
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .unwrap_or_default()
+}
+
+fn write_pull_cache(cache: &std::collections::HashMap<String, PullCacheEntry>) {
+    let path = pull_cache_path();
+    if let Ok(body) = serde_json::to_string_pretty(cache) {
+        let tmp = path.with_extension("tmp");
+        if fs::write(&tmp, body).is_ok() && fs::rename(&tmp, &path).is_err() {
+            let _ = fs::remove_file(&tmp);
+        }
+    }
 }
 
 fn roster_from_files() -> Vec<Presence> {
@@ -311,21 +503,19 @@ fn roster_from_files() -> Vec<Presence> {
             let _ = fs::remove_file(&p);
             continue;
         };
-        if live_on_this_machine(&e) {
-            if is_pid_alive(e.pid) {
-                entries.push(e);
-            } else {
-                let _ = fs::remove_file(&p);
-            }
-        } else {
+        if seats::is_peer_seat(&e.seat) {
+            // Pushed-era artifact from another seat. Presence files are
+            // local-only now; remote state is pulled live. Reap it.
+            let _ = fs::remove_file(&p);
+            continue;
+        }
+        if is_pid_alive(e.pid) {
             entries.push(e);
+        } else {
+            let _ = fs::remove_file(&p);
         }
     }
     dedup_by_seat_pid(entries)
-}
-
-fn live_on_this_machine(e: &Presence) -> bool {
-    !seats::is_peer_seat(&e.seat)
 }
 
 fn dedup_by_seat_pid(entries: Vec<Presence>) -> Vec<Presence> {
@@ -383,17 +573,22 @@ fn union_active_sessions(entries: &mut Vec<Presence>) {
 }
 
 /// Always-printed Peers line. `0 LIVE` is a finding.
-/// Peer-seat copies are remote reports, not PID-probed LIVE rows.
-pub fn format_roster(entries: &[Presence], self_pid: Option<u32>) -> String {
-    if entries.is_empty() {
+/// Peer-seat rows were answered live by that seat's door just now; a
+/// registered seat that did not answer renders dark, with its last answer
+/// when one is cached.
+pub fn format_roster(report: &RosterReport, self_pid: Option<u32>) -> String {
+    let entries = &report.entries;
+    let dark: Vec<&PeerStatus> = report.peers.iter().filter(|p| !p.answered).collect();
+    if entries.is_empty() && dark.is_empty() {
         return "Peers: 0 LIVE".to_string();
     }
+    let me = seat();
     let live_n = entries
         .iter()
-        .filter(|e| !seats::is_peer_seat(&e.seat))
+        .filter(|e| e.seat.eq_ignore_ascii_case(&me))
         .count();
     let remote_n = entries.len() - live_n;
-    let parts: Vec<String> = entries
+    let mut parts: Vec<String> = entries
         .iter()
         .map(|e| {
             let ident = format!(
@@ -412,7 +607,7 @@ pub fn format_roster(entries: &[Presence], self_pid: Option<u32>) -> String {
             if e.started.len() >= 16 {
                 bits.push(format!("since {}Z", &e.started[11..16]));
             }
-            if seats::is_peer_seat(&e.seat) {
+            if !e.seat.eq_ignore_ascii_case(&me) {
                 bits.push("remote".into());
             }
             let tag = if self_pid == Some(e.pid) {
@@ -423,16 +618,38 @@ pub fn format_roster(entries: &[Presence], self_pid: Option<u32>) -> String {
             format!("{ident} ({}){tag}", bits.join(", "))
         })
         .collect();
-    let head = if remote_n == 0 {
+    for p in &dark {
+        let when = p
+            .last_answered
+            .as_deref()
+            .map(|ts| format!(", last answered {}", short_ts(ts)))
+            .unwrap_or_default();
+        parts.push(format!("{}: dark{when}", p.seat));
+    }
+    let mut head = if remote_n == 0 {
         format!("{live_n} LIVE")
     } else {
-        format!("{live_n} LIVE · {remote_n} remote-reported")
+        format!("{live_n} LIVE · {remote_n} remote")
     };
+    if !dark.is_empty() {
+        head.push_str(&format!(" · {} dark", dark.len()));
+    }
     format!("Peers: {head} — {}", parts.join(" · "))
 }
 
+fn short_ts(ts: &str) -> String {
+    if ts.len() >= 16 {
+        format!("{}Z", &ts[11..16])
+    } else {
+        ts.to_string()
+    }
+}
+
 pub fn peers_line() -> String {
-    format_roster(&roster(), Some(std::process::id()))
+    format_roster(
+        &roster_report_with(SPLASH_PULL_DEADLINE_MS),
+        Some(std::process::id()),
+    )
 }
 
 /// Stamp this process's presence file with the listen address. Fail-soft.
@@ -455,10 +672,9 @@ pub(crate) fn patch_self_socket(addr: &str, token: &str) {
     }
 }
 
-/// Stamp the tailnet TLS address, then publish. Fail-soft.
-/// `start()` scp's the row before the listener binds; without a republish,
-/// peers keep `socket_tailnet: null`.
-pub(crate) fn patch_self_tailnet(addr: &str) {
+/// Stamp (or clear) the tailnet door address on this session's local row.
+/// Fail-soft. Peers learn it from a live `roster` pull, never from a push.
+pub(crate) fn patch_self_tailnet(addr: Option<&str>) {
     let dir = presence_dir();
     let path = entry_path(&dir, HARNESS, std::process::id());
     let Ok(text) = fs::read_to_string(&path) else {
@@ -467,16 +683,11 @@ pub(crate) fn patch_self_tailnet(addr: &str) {
     let Ok(mut e) = serde_json::from_str::<Presence>(&text) else {
         return;
     };
-    e.socket_tailnet = Some(addr.to_string());
+    e.socket_tailnet = addr.map(str::to_string);
     if let Ok(body) = serde_json::to_string_pretty(&e) {
         let tmp = path.with_extension("tmp");
-        if fs::write(&tmp, body).is_ok() {
-            if fs::rename(&tmp, &path).is_ok() {
-                let publish = path;
-                std::thread::spawn(move || seats::publish_file(&publish));
-            } else {
-                let _ = fs::remove_file(&tmp);
-            }
+        if fs::write(&tmp, body).is_ok() && fs::rename(&tmp, &path).is_err() {
+            let _ = fs::remove_file(&tmp);
         }
     }
 }
@@ -516,7 +727,11 @@ mod tests {
             assert_eq!(r[0].harness, "amore");
             assert_eq!(r[0].pid, std::process::id());
             assert_eq!(r[0].session_id.as_deref(), Some("sess-1"));
-            assert!(format_roster(&r, Some(std::process::id())).contains("this session"));
+            let report = RosterReport {
+                entries: r,
+                peers: Vec::new(),
+            };
+            assert!(format_roster(&report, Some(std::process::id())).contains("this session"));
             stop();
             assert!(roster_from_files().is_empty());
         });
@@ -525,7 +740,42 @@ mod tests {
     #[test]
     fn empty_roster_is_zero_live() {
         with_dir(|_| {
-            assert_eq!(format_roster(&[], None), "Peers: 0 LIVE");
+            let report = RosterReport {
+                entries: Vec::new(),
+                peers: Vec::new(),
+            };
+            assert_eq!(format_roster(&report, None), "Peers: 0 LIVE");
+        });
+    }
+
+    #[test]
+    fn dark_peer_renders_dark_with_cached_answer() {
+        with_dir(|_| {
+            let report = RosterReport {
+                entries: Vec::new(),
+                peers: vec![PeerStatus {
+                    seat: "peer-one".into(),
+                    answered: false,
+                    sessions: 0,
+                    error: Some("connect timed out".into()),
+                    last_answered: Some("2026-08-26T14:02:11Z".into()),
+                }],
+            };
+            let line = format_roster(&report, None);
+            assert!(line.contains("1 dark"), "{line}");
+            assert!(line.contains("peer-one: dark, last answered 14:02Z"), "{line}");
+        });
+    }
+
+    #[test]
+    fn roster_answer_strips_loopback_tokens() {
+        with_dir(|_| {
+            start(Some("sess-tok"), "/tmp/house");
+            patch_self_socket("tcp:127.0.0.1:9", "secret-token");
+            let answer = roster_answer();
+            assert!(!answer.is_empty());
+            assert!(answer.iter().all(|e| e.socket_token.is_none()));
+            stop();
         });
     }
 
@@ -563,13 +813,17 @@ mod tests {
         with_dir(|dir| {
             start(Some("sess-tailnet"), "/tmp/house");
             let path = entry_path(dir, HARNESS, std::process::id());
-            patch_self_tailnet("tls:100.64.0.1:41234");
+            patch_self_tailnet(Some("tls:100.64.0.1:41234"));
             let after: Presence =
                 serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
             assert_eq!(
                 after.socket_tailnet.as_deref(),
                 Some("tls:100.64.0.1:41234")
             );
+            patch_self_tailnet(None);
+            let cleared: Presence =
+                serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+            assert!(cleared.socket_tailnet.is_none());
             stop();
         });
     }

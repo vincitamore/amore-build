@@ -1,12 +1,15 @@
 //! `~/.house/coord/seats` — one row per other machine.
 //!
 //! `<name> <user@host> [coord-root]`
-//! coord-root is an optional override. The default is discovered: ssh
-//! `echo $HOME` (bash and pwsh both have `$HOME`), then
-//! `{home}/.house/coord`. scp uses that absolute path (Windows OpenSSH
-//! does not expand `~` on dest). Local `start` links every SSH-login
-//! home's `.house/coord` to this process's coord so the SSH user and
-//! the house user share one directory.
+//! coord-root is an optional override. The register serves two planes:
+//! the tailnet pull plane (a row's name resolves to its Tailscale node,
+//! whose door answers live `roster` pulls and `send`s) and the ssh mail
+//! fallback (offline inbox drops, token convergence). The ssh dest is
+//! discovered: `echo $HOME` over ssh (bash and pwsh both have `$HOME`),
+//! then `{home}/.house/coord` as an absolute path (Windows OpenSSH does
+//! not expand `~` on dest). Local `start` links every SSH-login home's
+//! `.house/coord` to this process's coord so an inbox drop to the SSH
+//! user's home lands in the house coord.
 
 use std::fs;
 use std::io::Write;
@@ -64,41 +67,6 @@ pub fn is_peer_seat(name: &str) -> bool {
         return false;
     }
     load().iter().any(|r| r.name.eq_ignore_ascii_case(name))
-}
-
-/// Copy `path` into every other seat's presence dir. Fail-soft.
-pub fn publish_file(path: &Path) {
-    let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
-        return;
-    };
-    if !is_safe_filename(name) {
-        return;
-    }
-    for row in load() {
-        if row.name.eq_ignore_ascii_case(&seat::seat()) {
-            continue;
-        }
-        let root = discovered_coord_root(&row);
-        ensure_remote_dir(&row.ssh, &format!("{root}/presence"));
-        let remote = format!("{root}/presence/{name}");
-        if let Err(e) = scp(path, &row.ssh, &remote) {
-            tracing::debug!(seat = %row.name, error = %e, "coord: presence publish failed");
-        }
-    }
-}
-
-/// Remove `filename` from every other seat's presence dir. Fail-soft.
-pub fn retract_file(filename: &str) {
-    if !is_safe_filename(filename) {
-        return;
-    }
-    for row in load() {
-        if row.name.eq_ignore_ascii_case(&seat::seat()) {
-            continue;
-        }
-        let root = discovered_coord_root(&row);
-        remove_remote_file(&row.ssh, &format!("{root}/presence/{filename}"));
-    }
 }
 
 pub fn inject_remote(row: &SeatRow, env: &Envelope) -> Result<SendResult, String> {
@@ -199,14 +167,6 @@ fn scp_slash(path: &str) -> String {
     path.trim().replace('\\', "/").trim_end_matches('/').to_string()
 }
 
-fn is_safe_filename(name: &str) -> bool {
-    !name.is_empty()
-        && !name.contains("..")
-        && name
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
-}
-
 /// Quote an already-absolute remote path for a POSIX *or* pwsh remote.
 fn shell_expandable(path: &str) -> String {
     if path.starts_with("$HOME") {
@@ -232,21 +192,6 @@ fn ensure_remote_dir(ssh: &str, dir: &str) {
         &format!("New-Item -ItemType Directory -Force -Path '{quoted}'"),
     ) {
         tracing::debug!(error = %e, "coord: presence mkdir failed");
-    }
-}
-
-fn remove_remote_file(ssh: &str, path: &str) {
-    let q = shell_expandable(path);
-    if ssh_run(ssh, &format!("rm -f {q}")).is_ok() {
-        return;
-    }
-    let win = path.replace('/', "\\");
-    let quoted = win.replace('\'', "''");
-    if let Err(e) = ssh_run(
-        ssh,
-        &format!("Remove-Item -Force -ErrorAction SilentlyContinue -Path '{quoted}'"),
-    ) {
-        tracing::debug!(error = %e, "coord: presence retract failed");
     }
 }
 
@@ -355,34 +300,6 @@ fn hide_window(cmd: &mut Command) {
     #[cfg(not(windows))]
     {
         let _ = cmd;
-    }
-}
-
-fn scp(local: &Path, ssh: &str, remote: &str) -> Result<(), String> {
-    let dest = format!("{ssh}:{remote}");
-    let mut child = Command::new("scp");
-    child.args([
-        "-o",
-        "BatchMode=yes",
-        "-o",
-        "ConnectTimeout=5",
-        &local.to_string_lossy(),
-        &dest,
-    ]);
-    child.stdout(Stdio::null());
-    child.stderr(Stdio::piped());
-    hide_window(&mut child);
-    let out = child.output().map_err(|e| e.to_string())?;
-    if out.status.success() {
-        Ok(())
-    } else {
-        let err = String::from_utf8_lossy(&out.stderr);
-        Err(err
-            .lines()
-            .last()
-            .unwrap_or("scp failed")
-            .trim()
-            .to_string())
     }
 }
 
@@ -619,10 +536,4 @@ mod tests {
         assert_eq!(discovered_coord_root(&peer()), "~/.house/coord");
     }
 
-    #[test]
-    fn unsafe_filename_is_rejected() {
-        assert!(!is_safe_filename("../x.json"));
-        assert!(!is_safe_filename("a;rm -rf /.json"));
-        assert!(is_safe_filename("seat-amore-12.json"));
-    }
 }

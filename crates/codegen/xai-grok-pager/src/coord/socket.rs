@@ -68,6 +68,19 @@ struct WireOut {
     disposition: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    roster: Option<Vec<super::Presence>>,
+}
+
+impl WireOut {
+    fn error(msg: impl Into<String>) -> Self {
+        Self {
+            ok: false,
+            disposition: None,
+            error: Some(msg.into()),
+            roster: None,
+        }
+    }
 }
 
 /// Bind and serve. Fail-soft: IO errors log and return.
@@ -146,41 +159,62 @@ async fn serve_tcp(tx: mpsc::UnboundedSender<Inbound>, token: String) -> std::io
     }
 }
 
+/// Seat-door keeper. Exactly one session per seat holds the tailnet TLS
+/// listener on the coord port; it answers for the whole seat (routing sends
+/// to local sessions over loopback, answering `roster` pulls from the local
+/// presence dir). Sessions that do not hold the door keep retrying, so the
+/// door survives its owner's exit within one retry interval — and a seat
+/// where Tailscale comes up late still acquires it.
+const DOOR_RETRY_SECS: u64 = 30;
+
 async fn serve_tailnet(tx: mpsc::UnboundedSender<Inbound>) -> std::io::Result<()> {
+    loop {
+        if let Err(reason) = serve_door_once(&tx).await {
+            tracing::debug!(reason = %reason, "coord door: not held");
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(DOOR_RETRY_SECS)).await;
+    }
+}
+
+async fn serve_door_once(tx: &mpsc::UnboundedSender<Inbound>) -> Result<(), String> {
     let Some(ip) = super::seat::tailscale_ip() else {
-        return Ok(());
+        return Err("no tailscale address".into());
     };
     if ip.is_loopback() || ip.is_unspecified() {
-        return Ok(());
+        return Err("tailscale address unusable".into());
     }
     let seat = super::seat();
-    let tls = match super::tls::server_config(ip, &seat) {
-        Ok(t) => t,
-        Err(e) => {
-            tracing::debug!(error = %e, "coord tls: server cert");
-            return Ok(());
-        }
-    };
-    if let Err(e) = super::tls::house_token() {
-        tracing::debug!(error = %e, "coord tls: house token");
-        return Ok(());
-    }
+    let tls = super::tls::server_config(ip, &seat).map_err(|e| format!("server cert: {e}"))?;
+    super::tls::house_token().map_err(|e| format!("house token: {e}"))?;
     let bind = std::net::SocketAddr::new(ip, super::tls::COORD_PORT);
-    let listener = match tokio::net::TcpListener::bind(bind).await {
-        Ok(l) => l,
-        Err(_) => tokio::net::TcpListener::bind(std::net::SocketAddr::new(ip, 0)).await?,
-    };
-    let port = listener.local_addr()?.port();
+    let listener = tokio::net::TcpListener::bind(bind)
+        .await
+        .map_err(|e| format!("door busy or unbindable ({e})"))?;
+    let port = listener.local_addr().map_err(|e| e.to_string())?.port();
     let addr = format!("tls:{ip}:{port}");
     if let Ok(mut g) = tailnet_cell().lock() {
         *g = Some(addr.clone());
     }
-    super::patch_self_tailnet(&addr);
+    super::patch_self_tailnet(Some(&addr));
+    tracing::debug!(addr = %addr, "coord door: held");
+    let result = door_accept_loop(&listener, tx, ip, tls.acceptor).await;
+    if let Ok(mut g) = tailnet_cell().lock() {
+        *g = None;
+    }
+    super::patch_self_tailnet(None);
+    result.map_err(|e| format!("door lost: {e}"))
+}
+
+async fn door_accept_loop(
+    listener: &tokio::net::TcpListener,
+    tx: &mpsc::UnboundedSender<Inbound>,
+    self_ip: IpAddr,
+    acceptor: tokio_rustls::TlsAcceptor,
+) -> Result<(), String> {
     loop {
-        let (stream, peer) = listener.accept().await?;
+        let (stream, peer) = listener.accept().await.map_err(|e| e.to_string())?;
         let tx = tx.clone();
-        let acceptor = tls.acceptor.clone();
-        let self_ip = ip;
+        let acceptor = acceptor.clone();
         tokio::spawn(async move {
             let Ok(mut tls_stream) = acceptor.accept(stream).await else {
                 return;
@@ -232,12 +266,7 @@ async fn write_wire_error<S>(stream: &mut S, error: &str) -> std::io::Result<()>
 where
     S: tokio::io::AsyncWrite + Unpin,
 {
-    let resp = serde_json::to_string(&WireOut {
-        ok: false,
-        disposition: None,
-        error: Some(error.into()),
-    })
-    .unwrap_or_default();
+    let resp = serde_json::to_string(&WireOut::error(error)).unwrap_or_default();
     stream.write_all(format!("{resp}\n").as_bytes()).await?;
     stream.flush().await
 }
@@ -278,16 +307,25 @@ where
             authed = parsed.token.as_deref() == Some(token.as_str());
             continue;
         }
-        if parsed.kind != "send" {
+        if parsed.kind != "send" && parsed.kind != "roster" {
             continue;
         }
         if !authed {
-            let resp = serde_json::to_string(&WireOut {
-                ok: false,
+            let resp = serde_json::to_string(&WireOut::error("auth required")).unwrap_or_default();
+            reader
+                .get_mut()
+                .write_all(format!("{resp}\n").as_bytes())
+                .await?;
+            break;
+        }
+        if parsed.kind == "roster" {
+            let wire = WireOut {
+                ok: true,
                 disposition: None,
-                error: Some("auth required".into()),
-            })
-            .unwrap_or_default();
+                error: None,
+                roster: Some(super::roster_answer()),
+            };
+            let resp = serde_json::to_string(&wire).unwrap_or_default();
             reader
                 .get_mut()
                 .write_all(format!("{resp}\n").as_bytes())
@@ -302,12 +340,9 @@ where
                 ok: true,
                 disposition: Some(disp.as_str().into()),
                 error: None,
+                roster: None,
             },
-            RouteOutcome::Failed(error) => WireOut {
-                ok: false,
-                disposition: None,
-                error: Some(error),
-            },
+            RouteOutcome::Failed(error) => WireOut::error(error),
             RouteOutcome::NotForPeer => {
                 let (reply_tx, reply_rx) = oneshot::channel();
                 if tx
@@ -324,6 +359,7 @@ where
                     ok: true,
                     disposition: Some(disp.as_str().into()),
                     error: None,
+                    roster: None,
                 }
             }
         };
@@ -474,6 +510,40 @@ pub fn post_tailnet(addr: &str, peer_seat: &str, env: &Envelope) -> Result<Dispo
     parse_disposition(&reply)
 }
 
+/// Pull a peer seat's live roster from its door. Short timeouts: this runs
+/// in a fan-out under a deadline and a dark seat must not stall it.
+pub fn fetch_roster_tailnet(hostport: &str, peer_seat: &str) -> Result<Vec<super::Presence>, String> {
+    let hostport = hostport.strip_prefix("tls:").unwrap_or(hostport);
+    let token = super::tls::house_token()?;
+    let auth = serde_json::json!({"type": "auth", "token": token});
+    let req = serde_json::json!({"type": "roster"});
+    let payload = format!("{auth}\n{req}\n");
+    let reply = super::tls::tls_post_with(
+        hostport,
+        peer_seat,
+        &payload,
+        std::time::Duration::from_millis(1_200),
+        std::time::Duration::from_millis(1_500),
+    )?;
+    parse_roster_reply(&reply)
+}
+
+fn parse_roster_reply(line: &str) -> Result<Vec<super::Presence>, String> {
+    #[derive(Deserialize)]
+    struct Resp {
+        ok: bool,
+        #[serde(default)]
+        roster: Option<Vec<super::Presence>>,
+        #[serde(default)]
+        error: Option<String>,
+    }
+    let r: Resp = serde_json::from_str(line.trim()).map_err(|e| e.to_string())?;
+    if !r.ok {
+        return Err(r.error.unwrap_or_else(|| "roster refused".into()));
+    }
+    r.roster.ok_or_else(|| "no roster in answer".into())
+}
+
 #[derive(Debug, PartialEq, Eq)]
 enum RouteOutcome {
     /// Not addressed to another local session. Caller may self-handle.
@@ -495,7 +565,8 @@ struct RoutePeer<'a> {
 fn route_other_session(env: &Envelope) -> RouteOutcome {
     let me = std::process::id();
     let my_seat = super::seat();
-    let roster = super::roster();
+    // Local only: the door must answer from its own seat, never dial out.
+    let roster = super::local_roster();
     let peers: Vec<RoutePeer<'_>> = roster
         .iter()
         .map(|p| RoutePeer {
