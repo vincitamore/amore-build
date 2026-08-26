@@ -40,10 +40,10 @@ work it describes.
   Tailscale bring-up. The door answers an authed `roster` request from its
   own PID-probed presence dir (loopback tokens stripped), and consumers dial
   every registered seat in parallel under a deadline — a seat that does not
-  answer renders **dark** with its last successful answer. Every answered
-  session counts **LIVE** on every surface — it was PID-probed by its own
-  seat seconds ago; rows keep the seat name and a `remote` provenance bit,
-  and a dark seat's sessions are never counted. Presence files
+  answer renders **dark** with its last successful answer. If a session
+  shows up at all, it is running right now — so every surface counts it
+  **LIVE**, wherever it lives; rows name the seat, and a dark seat's
+  sessions are never counted. Presence files
   are local-only: the scp presence copy, its retract-at-exit race, and
   remote ghost files are gone (pushed-era foreign-seat files are reaped on
   read), and per-session ephemeral tailnet listeners no longer exist — one
