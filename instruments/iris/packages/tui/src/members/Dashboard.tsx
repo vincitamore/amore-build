@@ -26,8 +26,12 @@ import {
   peerSeatRows,
   formatPeerSeatRow,
   peersFromPayload,
+  unreadCount,
+  formatAgo,
+  type PeerStatus,
   type PresenceEntry,
 } from '../coord/presence';
+import { readConfig } from '../config';
 import { Panel } from '../components/Panel';
 import { Stat } from '../components/Stat';
 import {
@@ -517,9 +521,12 @@ export function Dashboard({
   const [speculumPulse, setSpeculumPulse] = useState<SpeculumPulseView | null>(null);
   const [peersLine, setPeersLine] = useState(() => (daemonUrl ? '…' : PRESENCE_UNAVAILABLE));
   const [peersEntries, setPeersEntries] = useState<PresenceEntry[]>([]);
+  const [peersStatus, setPeersStatus] = useState<PeerStatus[]>([]);
   const [mailCount, setMailCount] = useState<number | null>(daemonUrl ? null : 0);
+  const [mailUnread, setMailUnread] = useState(0);
   const [mailFrom, setMailFrom] = useState('');
   const [mailText, setMailText] = useState('');
+  const [mailAgo, setMailAgo] = useState('');
   const [messagesLine, setMessagesLine] = useState(() => (daemonUrl ? '…' : MAIL_UNAVAILABLE));
   const speculumMounted = useRef(true);
   useEffect(() => {
@@ -585,17 +592,19 @@ export function Dashboard({
             const body = await r.json();
             const peers = peersFromPayload(body);
             setPeersLine(peers.line);
-            const o = body as { entries?: PresenceEntry[] };
-            setPeersEntries(Array.isArray(o.entries) ? o.entries : []);
+            setPeersEntries(peers.entries);
+            setPeersStatus(peers.peers);
           } else {
             setPeersLine(PRESENCE_UNAVAILABLE);
             setPeersEntries([]);
+            setPeersStatus([]);
           }
         }
       } catch {
         if (alive) {
           setPeersLine(PRESENCE_UNAVAILABLE);
           setPeersEntries([]);
+          setPeersStatus([]);
         }
       }
       try {
@@ -605,22 +614,28 @@ export function Dashboard({
             const body = await r.json();
             const mail = mailFromPayload(body);
             setMailCount(mail.count);
+            setMailUnread(unreadCount(mail.entries, readConfig().coordReadTs));
             setMailFrom(mail.lastFrom);
             setMailText(mail.lastText);
+            setMailAgo(mail.lastTs ? formatAgo(mail.lastTs) : '');
             setMessagesLine(mail.count > 0 ? String(mail.count) : 'none');
           } else {
             setMessagesLine(MAIL_UNAVAILABLE);
             setMailCount(0);
+            setMailUnread(0);
             setMailFrom('');
             setMailText('');
+            setMailAgo('');
           }
         }
       } catch {
         if (alive) {
           setMessagesLine(MAIL_UNAVAILABLE);
           setMailCount(0);
+          setMailUnread(0);
           setMailFrom('');
           setMailText('');
+          setMailAgo('');
         }
       }
       try {
@@ -769,7 +784,7 @@ export function Dashboard({
   const peersLive = !peersUnavailable && peersLine !== '…' && !peersLine.startsWith('0 LIVE');
   const mailLive = !mailUnavailable && messagesLine !== 'none' && messagesLine !== '…';
   const peersDotFg = peersUnavailable ? t.error : peersLive ? t.info : t.muted;
-  const mailDotFg = mailUnavailable ? t.error : mailLive ? t.info : t.muted;
+  const mailDotFg = mailUnavailable ? t.error : mailUnread > 0 ? t.warning : mailLive ? t.info : t.muted;
   const lucernaDotFg =
     lucernaPulse?.state === 'running' && lucernaPulse.capability?.state === 'refusing'
       ? t.warning
@@ -778,7 +793,7 @@ export function Dashboard({
         : lucernaPulse?.state === 'stale'
           ? t.error
           : t.muted;
-  const seatRows = peerSeatRows(peersEntries);
+  const seatRows = peerSeatRows(peersEntries, peersStatus);
   const peerSubs = peersUnavailable
     ? []
     : seatRows.length > 0
@@ -788,7 +803,7 @@ export function Dashboard({
         : [];
   const mailSubs: string[] = [];
   if (!mailUnavailable && mailCount && mailCount > 0) {
-    if (mailFrom) mailSubs.push(`last ${mailFrom}`);
+    if (mailFrom) mailSubs.push(`last ${mailFrom}${mailAgo ? `, ${mailAgo}` : ''}`);
     if (mailText) mailSubs.push(mailText);
   }
   const lucernaSubs: string[] = [];
@@ -811,24 +826,47 @@ export function Dashboard({
       : speculumNotInstalled
         ? ["run 'amore init --with-speculum'"]
         : [];
+  const peersHi = hover === 'peers-pulse';
+  const mailHi = hover === 'mail-pulse';
+  const mailValue = mailUnavailable
+    ? MAIL_UNAVAILABLE
+    : mailCount == null
+      ? '…'
+      : mailCount === 0
+        ? 'none'
+        : mailUnread > 0
+          ? `${mailUnread} unread`
+          : `none unread · ${mailCount} in log`;
   const pulsePanel = (
     <Panel title="Pulse" flexShrink={0} marginTop={1}>
-      <PulseVital
-        label="Peers"
-        value={peersUnavailable ? PRESENCE_UNAVAILABLE : peersLine}
-        subLines={peerSubs}
-        dotFg={peersDotFg}
-        t={t}
-        innerW={pulseInnerW}
-      />
-      <PulseVital
-        label="Mail"
-        value={mailUnavailable ? MAIL_UNAVAILABLE : mailCount == null ? '…' : mailCount === 0 ? 'none' : String(mailCount)}
-        subLines={mailSubs}
-        dotFg={mailDotFg}
-        t={t}
-        innerW={pulseInnerW}
-      />
+      <box
+        backgroundColor={peersHi ? t.selection : t.background}
+        onMouseOver={() => hoverTo('peers-pulse')}
+        onMouseDown={onNavigate ? () => onNavigate('Peers') : undefined}
+      >
+        <PulseVital
+          label="Peers"
+          value={peersUnavailable ? PRESENCE_UNAVAILABLE : peersLine}
+          subLines={peerSubs}
+          dotFg={peersDotFg}
+          t={t}
+          innerW={pulseInnerW}
+        />
+      </box>
+      <box
+        backgroundColor={mailHi ? t.selection : t.background}
+        onMouseOver={() => hoverTo('mail-pulse')}
+        onMouseDown={onNavigate ? () => onNavigate('Peers') : undefined}
+      >
+        <PulseVital
+          label="Mail"
+          value={mailValue}
+          subLines={mailSubs}
+          dotFg={mailDotFg}
+          t={t}
+          innerW={pulseInnerW}
+        />
+      </box>
       <PulseVital
         label="Forge"
         value={forgeReview > 0 ? `${forgeReview} pending review` : 'queue clear'}

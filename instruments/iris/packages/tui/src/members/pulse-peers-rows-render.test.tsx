@@ -63,12 +63,12 @@ describe('Pulse Peers rows (one row per seat)', () => {
     const entries: PresenceEntry[] = [
       { seat: 'very-long-seat-alpha', harness: 'claude-code' },
       { seat: 'very-long-seat-beta', harness: 'cursor-agent' },
-      { seat: 'very-long-seat-gamma', harness: 'amore-session', remote: true, ageHours: 0.2 },
-      { seat: 'very-long-seat-delta', harness: 'claude-code', remote: true, ageHours: 14, stale: true },
+      { seat: 'very-long-seat-gamma', harness: 'amore-session', remote: true },
+      { seat: 'very-long-seat-delta', harness: 'claude-code', remote: true },
     ];
     const line = formatPeers(entries);
     const seats = peerSeatRows(entries).map(formatPeerSeatRow);
-    expect(line).toBe('2 LIVE · 2 remote-reported');
+    expect(line).toBe('2 LIVE · 2 remote');
     expect(seats.some((s) => s.includes('very-long-seat-delta'))).toBe(true);
 
     const { renderer, renderOnce, captureCharFrame } = await createTestRenderer({

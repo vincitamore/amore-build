@@ -3,17 +3,15 @@ import { formatLucernaDisplayLine } from '../members/lucerna-display';
 import {
   MAIL_UNAVAILABLE,
   PRESENCE_UNAVAILABLE,
-  REMOTE_STALE_HOURS,
-  entryIsStale,
-  formatMessages,
+  formatAgo,
   formatPeerSeatRow,
   formatPeers,
-  formatPeersDetail,
-  formatRemoteAge,
-  formatRemoteCaption,
-  messagesFromPayload,
+  latestMessageTs,
+  mailFromPayload,
   peerSeatRows,
   peersFromPayload,
+  unreadCount,
+  type PeerStatus,
   type PresenceEntry,
 } from './presence';
 
@@ -23,124 +21,93 @@ function local(seat: string, harness: string): PresenceEntry {
   return { seat, harness, pid: 1 };
 }
 
-function remote(
-  seat: string,
-  harness: string,
-  hours: number,
-  extra: Partial<PresenceEntry> = {},
-): PresenceEntry {
+function remote(seat: string, harness: string, extra: Partial<PresenceEntry> = {}): PresenceEntry {
+  return { seat, harness, pid: 9, remote: true, ...extra };
+}
+
+function dark(seat: string, lastAnsweredMsAgo?: number): PeerStatus {
   return {
     seat,
-    harness,
-    pid: 9,
-    remote: true,
-    ageHours: hours,
-    stale: hours > REMOTE_STALE_HOURS,
-    ...extra,
+    answered: false,
+    sessions: 0,
+    error: 'connect timed out',
+    last_answered:
+      lastAnsweredMsAgo === undefined ? null : new Date(NOW - lastAnsweredMsAgo).toISOString(),
   };
 }
 
 describe('Pulse presence display', () => {
-  test('empty roster is 0 LIVE with blank identities', () => {
+  test('empty roster is 0 LIVE', () => {
     expect(formatPeers([])).toBe('0 LIVE');
-    expect(formatPeersDetail([])).toBe('');
+    expect(peerSeatRows([])).toEqual([]);
   });
 
-  test('untagged entries count as LIVE (legacy daemon payload)', () => {
+  test('untagged entries count as LIVE (files-mode payload)', () => {
     const entries = [local('here', 'amore'), local('here', 'claude-code')];
     expect(formatPeers(entries)).toBe('2 LIVE');
-    expect(formatPeersDetail(entries)).toBe('here amore, claude-code');
   });
 
-  test('count on the label; identities on the detail line', () => {
+  test('remote rows were answered live; head counts them as remote', () => {
     const entries = [
       local('here', 'amore'),
       local('here', 'claude-code'),
-      remote('there', 'amore', 0.25),
+      remote('there', 'amore'),
     ];
-    expect(formatPeers(entries, NOW)).toBe('2 LIVE · 1 remote-reported');
-    expect(formatPeersDetail(entries, NOW)).toBe(
-      'here amore, claude-code · there amore (as of 15m ago)',
-    );
+    expect(formatPeers(entries)).toBe('2 LIVE · 1 remote');
   });
 
-  test('stale remote is remote-reported, never LIVE, captioned seen', () => {
-    const entries = [remote('there', 'amore', 13)];
-    expect(formatPeers(entries, NOW)).toBe('0 LIVE · 1 remote-reported');
-    expect(formatRemoteCaption(entries[0]!, NOW)).toBe('remote, seen 13h ago');
-    expect(formatPeersDetail(entries, NOW)).toContain('seen 13h ago');
-    expect(formatPeersDetail(entries, NOW)).not.toMatch(/^\d+ LIVE/);
+  test('dark registered seat shows in the head and as a captioned row', () => {
+    const entries = [local('here', 'amore')];
+    const peers = [dark('elsewhere', 2 * 3600 * 1000)];
+    expect(formatPeers(entries, peers)).toBe('1 LIVE · 1 dark');
+    const rows = peerSeatRows(entries, peers, NOW);
+    const darkRow = rows.find((r) => r.seat === 'elsewhere');
+    expect(darkRow?.caption).toBe('dark · last answered 2h ago');
+    expect(formatPeerSeatRow(darkRow!)).toBe('elsewhere  dark · last answered 2h ago');
   });
 
-  test('fresh remote uses as of, not seen', () => {
-    const e = remote('there', 'cursor', 0.5);
-    expect(formatRemoteCaption(e, NOW)).toBe('remote, as of 30m ago');
-    expect(entryIsStale(e, NOW)).toBe(false);
+  test('dark seat with no cached answer still renders', () => {
+    const rows = peerSeatRows([], [dark('elsewhere')], NOW);
+    expect(rows[0]?.caption).toBe('dark');
   });
 
-  test('ageHours past cutoff implies stale without an explicit flag', () => {
-    const e: PresenceEntry = { seat: 'there', harness: 'amore', remote: true, ageHours: 12.1 };
-    expect(entryIsStale(e, NOW)).toBe(true);
-    expect(formatRemoteCaption(e, NOW)).toBe('remote, seen 12h ago');
-  });
-
-  test('mtimeMs ages a remote when ageHours is absent', () => {
-    const e: PresenceEntry = {
-      seat: 'there',
-      harness: 'amore',
-      remote: true,
-      mtimeMs: NOW - 45 * 60_000,
-    };
-    expect(formatRemoteCaption(e, NOW)).toBe('remote, as of 45m ago');
-  });
-
-  test('house-shaped _remote/_stale/_age_hours aliases', () => {
-    const e: PresenceEntry = {
-      seat: 'there',
-      harness: 'amore',
-      _remote: true,
-      _stale: true,
-      _age_hours: 20,
-    };
-    expect(formatPeers([e], NOW)).toBe('0 LIVE · 1 remote-reported');
-    expect(formatRemoteCaption(e, NOW)).toBe('remote, seen 20h ago');
-  });
-
-  test('N=4 long identities truncate to panel inner width with ellipsis', () => {
+  test('N=4 long identities: one row per seat, truncated per row', () => {
     const entries = [
       local('very-long-seat-alpha', 'claude-code'),
       local('very-long-seat-beta', 'cursor-agent'),
-      remote('very-long-seat-gamma', 'amore-session', 0.2),
-      remote('very-long-seat-delta', 'claude-code', 14),
+      remote('very-long-seat-gamma', 'amore-session'),
+      remote('very-long-seat-delta', 'claude-code'),
     ];
-    const detail = formatPeersDetail(entries, NOW);
-    expect(detail.split(' · ')).toHaveLength(4);
-    expect(detail).not.toContain('\n');
+    const rows = peerSeatRows(entries, []);
+    expect(rows).toHaveLength(4);
     const inner = 44;
-    const cell = formatLucernaDisplayLine(`   ${detail}`, inner, '/tmp');
+    const cell = formatLucernaDisplayLine(
+      `   ${formatPeerSeatRow(rows[0]!)}${'x'.repeat(60)}`,
+      inner,
+      '/tmp',
+    );
     expect(cell.length).toBe(inner);
-    expect(cell.endsWith('\u2026')).toBe(true);
-    expect(cell).not.toContain('very-long-seat-delta');
+    expect(cell.endsWith('…')).toBe(true);
   });
 
-  test('peersFromPayload prefers entries when present', () => {
+  test('peersFromPayload recomputes the line from entries + peers', () => {
     const j = {
       line: '9 LIVE',
-      detail: 'ignored',
-      entries: [local('here', 'amore'), remote('there', 'amore', 13)],
+      detail: 'kept',
+      entries: [local('here', 'amore'), remote('there', 'amore')],
+      peers: [dark('elsewhere')],
     };
-    expect(peersFromPayload(j, NOW)).toEqual({
-      line: '1 LIVE · 1 remote-reported',
-      detail: 'here amore · there amore (seen 13h ago)',
-    });
+    const p = peersFromPayload(j);
+    expect(p.line).toBe('1 LIVE · 1 remote · 1 dark');
+    expect(p.entries).toHaveLength(2);
+    expect(p.peers).toHaveLength(1);
   });
 
   test('peersFromPayload falls back to line/detail without entries', () => {
-    expect(peersFromPayload({ line: '3 LIVE', detail: 'a/b · c/d' })).toEqual({
-      line: '3 LIVE',
-      detail: 'a/b · c/d',
-    });
-    expect(peersFromPayload(null)).toEqual({ line: '0 LIVE', detail: '' });
+    const p = peersFromPayload({ line: '3 LIVE', detail: 'a/b · c/d' });
+    expect(p.line).toBe('3 LIVE');
+    expect(p.detail).toBe('a/b · c/d');
+    expect(peersFromPayload(null).line).toBe('0 LIVE');
   });
 
   test('unavailable tokens are the loud daemon-down copy', () => {
@@ -149,49 +116,34 @@ describe('Pulse presence display', () => {
   });
 });
 
-describe('formatRemoteAge', () => {
+describe('formatAgo', () => {
   test('coarsens to m/h/d', () => {
-    expect(formatRemoteAge(0)).toBe('0m ago');
-    expect(formatRemoteAge(0.5)).toBe('30m ago');
-    expect(formatRemoteAge(1.5)).toBe('1h ago');
-    expect(formatRemoteAge(25)).toBe('1d ago');
+    expect(formatAgo(new Date(NOW).toISOString(), NOW)).toBe('0m ago');
+    expect(formatAgo(new Date(NOW - 30 * 60_000).toISOString(), NOW)).toBe('30m ago');
+    expect(formatAgo(new Date(NOW - 90 * 60_000).toISOString(), NOW)).toBe('1h ago');
+    expect(formatAgo(new Date(NOW - 25 * 3600_000).toISOString(), NOW)).toBe('1d ago');
   });
 });
 
-describe('messagesFromPayload', () => {
-  test('uses line when entries missing', () => {
-    expect(messagesFromPayload({ line: '2 · last here/amore: hi' })).toBe(
-      '2 · last here/amore: hi',
-    );
+describe('mail payload + unread cursor', () => {
+  const entries = [
+    { msgid: 'a', ts: '2026-08-25T10:00:00Z', from: { seat: 'x', harness: 'amore' }, text: 'one' },
+    { msgid: 'b', ts: '2026-08-25T11:00:00Z', from: { seat: 'y', harness: 'amore' }, text: 'two' },
+  ];
+
+  test('mailFromPayload carries full entries and last-message fields', () => {
+    const m = mailFromPayload({ entries });
+    expect(m.count).toBe(2);
+    expect(m.lastFrom).toBe('y/amore');
+    expect(m.lastText).toBe('two');
+    expect(m.lastTs).toBe('2026-08-25T11:00:00Z');
+    expect(m.entries).toHaveLength(2);
   });
 
-  test('formats entries in full (no 48-char slice)', () => {
-    const text = 'x'.repeat(60);
-    expect(
-      messagesFromPayload({
-        line: 'ignored',
-        entries: [{ from: { seat: 'here', harness: 'amore' }, text, ts: 't' }],
-      }),
-    ).toBe(`1 · last here/amore: ${text}`);
-    expect(formatMessages([])).toBe('none');
-  });
-});
-
-describe('peerSeatRows', () => {
-  test('locals first, harnesses grouped, remotes captioned', () => {
-    const rows = peerSeatRows(
-      [
-        local('admin-pc', 'amore'),
-        local('admin-pc', 'claude-code'),
-        remote('amore-dev-laptop', 'amore', 0.2),
-      ],
-      NOW,
-    );
-    expect(rows.map((r) => r.seat)).toEqual(['admin-pc', 'amore-dev-laptop']);
-    expect(rows[0]?.harnesses).toEqual(['amore', 'claude-code']);
-    expect(rows[0]?.remote).toBe(false);
-    expect(formatPeerSeatRow(rows[0]!)).toBe('admin-pc  amore, claude-code');
-    expect(formatPeerSeatRow(rows[1]!)).toContain('amore-dev-laptop');
-    expect(formatPeerSeatRow(rows[1]!)).toContain('as of 12m ago');
+  test('unreadCount is cursor-relative; unset cursor means all unread', () => {
+    expect(unreadCount(entries, null)).toBe(2);
+    expect(unreadCount(entries, '2026-08-25T10:00:00Z')).toBe(1);
+    expect(unreadCount(entries, '2026-08-25T11:00:00Z')).toBe(0);
+    expect(latestMessageTs(entries)).toBe('2026-08-25T11:00:00Z');
   });
 });

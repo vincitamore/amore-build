@@ -1,15 +1,18 @@
-// GET /api/coord/presence — seat roster under ~/.house/coord/presence/.
-// House-neutral JSON files, one per live session, shared across harnesses
-// on the seat. PID-probe local rows only; keep remote (hide, never unlink).
-// Read-only: writers reap. Fail-soft empty list.
+// GET /api/coord/presence — live seat roster.
+//
+// Presence is pulled, never pushed: the native binary dials each registered
+// seat's door (tailnet TLS, pinned + house token) and answers for the whole
+// mesh, so the daemon spawns `amore coord roster --json` (one protocol
+// implementation) behind a short cache. When the binary is unavailable the
+// route degrades to reading the local presence dir (PID-probed local rows
+// only — remote state never lives on disk here). A registered seat that did
+// not answer is reported dark with its last successful answer.
 
 import { spawnSync } from 'node:child_process';
 import { homedir, hostname } from 'node:os';
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { json } from './http.ts';
-
-export const REMOTE_STALE_HOURS = 12;
 
 export interface PresenceEntry {
   seat: string;
@@ -22,10 +25,18 @@ export interface PresenceEntry {
   started?: string;
   work_unit?: string | null;
   session_id?: string | null;
+  socket?: string | null;
+  socket_tailnet?: string | null;
+  /** Tagged here: this row was answered live by another seat's door. */
   remote?: boolean;
-  stale?: boolean;
-  ageHours?: number;
-  mtimeMs?: number;
+}
+
+export interface PeerStatus {
+  seat: string;
+  answered: boolean;
+  sessions: number;
+  error?: string | null;
+  last_answered?: string | null;
 }
 
 function presenceDir(): string {
@@ -119,33 +130,6 @@ function loadPeerSeats(): Set<string> {
   return names;
 }
 
-function isRemote(e: PresenceEntry, me: string, peers: Set<string>): boolean {
-  const seat = (e.seat || '').trim().toLowerCase();
-  if (!seat || seat === me) return false;
-  return peers.has(seat);
-}
-
-function formatRemoteAge(ageHours: number): string {
-  let h = ageHours;
-  if (!Number.isFinite(h) || h < 0) h = 0;
-  const minutes = Math.floor(h * 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  return `${Math.floor(hours / 24)}d ago`;
-}
-
-function ageRemote(path: string, now: number): { ageHours: number; stale: boolean; mtimeMs: number } {
-  let mtimeMs = now;
-  try {
-    mtimeMs = statSync(path).mtimeMs;
-  } catch {
-    // unstatable: treat as now
-  }
-  const ageHours = Math.round(Math.max(0, (now - mtimeMs) / 3_600_000) * 10) / 10;
-  return { ageHours, stale: ageHours > REMOTE_STALE_HOURS, mtimeMs };
-}
-
 function dedup(entries: PresenceEntry[]): PresenceEntry[] {
   const best = new Map<string, PresenceEntry>();
   for (const e of entries) {
@@ -158,7 +142,9 @@ function dedup(entries: PresenceEntry[]): PresenceEntry[] {
   return [...best.values()];
 }
 
-export function readRoster(dir = presenceDir()): PresenceEntry[] {
+/** Local presence files only: PID-probed; registered-peer-seat rows are
+ * pushed-era artifacts and are skipped (the native reader reaps them). */
+export function readLocalRoster(dir = presenceDir()): PresenceEntry[] {
   let names: string[] = [];
   try {
     names = readdirSync(dir);
@@ -166,24 +152,15 @@ export function readRoster(dir = presenceDir()): PresenceEntry[] {
     return [];
   }
   const entries: PresenceEntry[] = [];
-  const me = localSeat();
   const peers = loadPeerSeats();
-  const now = Date.now();
   for (const name of names) {
     if (!name.endsWith('.json')) continue;
     const path = join(dir, name);
     try {
       const e = JSON.parse(readFileSync(path, 'utf8')) as PresenceEntry;
       if (typeof e.pid !== 'number') continue;
-      if (isRemote(e, me, peers)) {
-        const age = ageRemote(path, now);
-        e.remote = true;
-        e.ageHours = age.ageHours;
-        e.stale = age.stale;
-        e.mtimeMs = age.mtimeMs;
-        entries.push(e);
-        continue;
-      }
+      const seat = (e.seat || '').trim().toLowerCase();
+      if (seat && peers.has(seat)) continue;
       if (pidAlive(e.pid)) entries.push(e);
     } catch {
       // unreadable: leave for the writer-side reaper
@@ -193,18 +170,72 @@ export function readRoster(dir = presenceDir()): PresenceEntry[] {
   return dedup(entries);
 }
 
-export function formatPeers(entries: PresenceEntry[]): string {
-  const live = entries.filter((e) => !e.remote && !e.stale).length;
-  const remote = entries.filter((e) => e.remote).length;
-  if (live === 0 && remote === 0) return '0 LIVE';
-  if (remote === 0) return `${live} LIVE`;
-  return `${live} LIVE · ${remote} remote-reported`;
+interface RosterReport {
+  entries: PresenceEntry[];
+  peers: PeerStatus[];
 }
 
-function groupSeatIdents(entries: PresenceEntry[], remote: boolean): string[] {
+const PULL_CACHE_MS = 10_000;
+let pullCache: { ts: number; report: RosterReport } | null = null;
+
+/** Live mesh pull via the native binary. Null when unavailable. */
+function pullRoster(): RosterReport | null {
+  // An explicit HOUSE_COORD_DIR is an isolated roster (tests, overlays):
+  // never dial the real mesh from it.
+  if (process.env.HOUSE_COORD_DIR) return null;
+  const now = Date.now();
+  if (pullCache && now - pullCache.ts < PULL_CACHE_MS) return pullCache.report;
+  try {
+    const r = spawnSync('amore', ['coord', 'roster', '--json'], {
+      encoding: 'utf8',
+      timeout: 8000,
+      windowsHide: true,
+    });
+    if (r.error || r.status !== 0 || !r.stdout) return null;
+    const v = JSON.parse(r.stdout) as Partial<RosterReport>;
+    if (!Array.isArray(v.entries)) return null;
+    const report: RosterReport = {
+      entries: v.entries,
+      peers: Array.isArray(v.peers) ? v.peers : [],
+    };
+    pullCache = { ts: now, report };
+    return report;
+  } catch {
+    return null;
+  }
+}
+
+function tagRemote(entries: PresenceEntry[], me: string): PresenceEntry[] {
+  return entries.map((e) => ({
+    ...e,
+    remote: (e.seat || '').trim().toLowerCase() !== me,
+  }));
+}
+
+export function formatPeers(entries: PresenceEntry[], peers: PeerStatus[] = []): string {
+  const live = entries.filter((e) => !e.remote).length;
+  const remote = entries.filter((e) => e.remote).length;
+  const dark = peers.filter((p) => !p.answered).length;
+  if (live === 0 && remote === 0 && dark === 0) return '0 LIVE';
+  let head = `${live} LIVE`;
+  if (remote > 0) head += ` · ${remote} remote`;
+  if (dark > 0) head += ` · ${dark} dark`;
+  return head;
+}
+
+function shortWhen(ts: string): string {
+  const ms = Date.parse(ts);
+  if (!Number.isFinite(ms)) return ts;
+  const mins = Math.max(0, Math.floor((Date.now() - ms) / 60_000));
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
+
+function groupSeatIdents(entries: PresenceEntry[]): string[] {
   const order: string[] = [];
   const harnesses = new Map<string, string[]>();
-  const cap = new Map<string, string>();
   for (const e of entries) {
     const seat = (e.seat || '?').trim() || '?';
     if (!harnesses.has(seat)) {
@@ -214,23 +245,20 @@ function groupSeatIdents(entries: PresenceEntry[], remote: boolean): string[] {
     const h = (e.harness || '?').trim() || '?';
     const list = harnesses.get(seat)!;
     if (!list.includes(h)) list.push(h);
-    if (remote) {
-      const age = formatRemoteAge(e.ageHours ?? 0);
-      cap.set(seat, e.stale ? `seen ${age}` : `as of ${age}`);
-    }
   }
-  return order.map((seat) => {
-    const ids = (harnesses.get(seat) || []).join(', ');
-    const c = cap.get(seat);
-    return c ? `${seat} ${ids} (${c})` : `${seat} ${ids}`;
-  });
+  return order.map((seat) => `${seat} ${(harnesses.get(seat) || []).join(', ')}`);
 }
 
-export function formatPeersDetail(entries: PresenceEntry[]): string {
-  if (entries.length === 0) return '';
+export function formatPeersDetail(entries: PresenceEntry[], peers: PeerStatus[] = []): string {
   const locals = entries.filter((e) => !e.remote);
   const remotes = entries.filter((e) => e.remote);
-  return [...groupSeatIdents(locals, false), ...groupSeatIdents(remotes, true)].join(' · ');
+  const parts = [...groupSeatIdents(locals), ...groupSeatIdents(remotes)];
+  for (const p of peers) {
+    if (p.answered) continue;
+    const when = p.last_answered ? ` (last answered ${shortWhen(p.last_answered)})` : '';
+    parts.push(`${p.seat}: dark${when}`);
+  }
+  return parts.join(' · ');
 }
 
 export interface CoordMessage {
@@ -238,10 +266,11 @@ export interface CoordMessage {
   kind: string;
   ts?: string;
   from?: { seat?: string; harness?: string; session_id?: string };
+  to?: { seat?: string; harness?: string; session_id?: string };
   text?: string;
 }
 
-export function readMessages(limit = 20): CoordMessage[] {
+export function readMessages(limit = 100): CoordMessage[] {
   const dir = join(coordRoot(), 'log');
   let names: string[] = [];
   try {
@@ -281,11 +310,25 @@ export function formatMessages(entries: CoordMessage[]): string {
 }
 
 export function coordPresence(): Response {
-  const entries = readRoster();
+  const me = localSeat();
+  const pulled = pullRoster();
+  if (pulled) {
+    const entries = tagRemote(pulled.entries, me);
+    return json({
+      entries,
+      peers: pulled.peers,
+      line: formatPeers(entries, pulled.peers),
+      detail: formatPeersDetail(entries, pulled.peers),
+      source: 'pull',
+    });
+  }
+  const entries = tagRemote(readLocalRoster(), me);
   return json({
     entries,
+    peers: [],
     line: formatPeers(entries),
     detail: formatPeersDetail(entries),
+    source: 'files',
   });
 }
 

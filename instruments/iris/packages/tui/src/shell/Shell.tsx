@@ -17,6 +17,7 @@ import { FilesMember } from '../members/FilesMember';
 import { ForgeMember } from '../members/ForgeMember';
 import { LucernaMember } from '../members/LucernaMember';
 import { SessionsMember } from '../members/SessionsMember';
+import { PeersMember } from '../members/PeersMember';
 import { DocView } from '../components/DocView';
 import { SearchOverlay } from '../SearchOverlay';
 import { ThemePicker } from '../ThemePicker';
@@ -41,14 +42,15 @@ const MFiles = memo(FilesMember);
 const MForge = memo(ForgeMember);
 const MLucerna = memo(LucernaMember);
 const MSessions = memo(SessionsMember);
+const MPeers = memo(PeersMember);
 // GraphView + the global DocView are also kept-mounted and were the ACTUAL churn source (their
 // child GraphConfigModal / MarkdownView re-rendered on every Shell re-render). Memoize them too so
 // they go quiet unless their own props change.
 const MGraphView = memo(GraphView);
 const MDocView = memo(DocView);
 
-// Sessions is last (10th). Digits 1-9 keep members 0..8; Sessions is letter-key only (`S`).
-const MEMBERS = ['Dashboard', 'Tasks', 'Inbox', 'Reminders', 'Knowledge', 'Files', 'Forge', 'Lucerna', 'Graph', 'Sessions'] as const;
+// Digits 1-9 keep members 0..8; Sessions is letter-key only (`s`), Peers is `Shift+P`.
+const MEMBERS = ['Dashboard', 'Tasks', 'Inbox', 'Reminders', 'Knowledge', 'Files', 'Forge', 'Lucerna', 'Graph', 'Sessions', 'Peers'] as const;
 
 /**
  * Initial member index for launch presets.
@@ -401,6 +403,8 @@ export function Shell({ onQuit }: { onQuit?: () => void }) {
     // Sessions letter-key (digits 1-9 keep members 0..8; Sessions has no digit).
     // Free in the shell guard region: shell uses v t q / 1-9 ctrl+n/p; no bare `s`.
     if (n === 's') return setActive(MEMBERS.indexOf('Sessions'));
+    // Peers letter-key: Shift+P (bare `p` belongs to member-level actions).
+    if (key.sequence === 'P') return setActive(MEMBERS.indexOf('Peers'));
     if (key.ctrl && n === 'n') return setActive((a) => (a + 1) % MEMBERS.length);
     if (key.ctrl && n === 'p') return setActive((a) => (a - 1 + MEMBERS.length) % MEMBERS.length);
     if (/^[1-9]$/.test(n)) {
@@ -459,6 +463,8 @@ export function Shell({ onQuit }: { onQuit?: () => void }) {
         return <MForge inputActive={on} onCapture={cap} daemonUrl={daemonReady} />;
       case 'Lucerna':
         return <MLucerna inputActive={on} onCapture={cap} daemonUrl={daemonReady} />;
+      case 'Peers':
+        return <MPeers inputActive={on} onCapture={cap} daemonUrl={daemonReady} />;
       case 'Sessions':
         return (
           <MSessions

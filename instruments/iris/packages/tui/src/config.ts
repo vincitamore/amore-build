@@ -18,6 +18,8 @@ export interface IrisConfig {
   theme?: string;
   /** Collapsed group keys per view (e.g. { tasks: ['paused','complete'] }). */
   collapsed?: Record<string, string[]>;
+  /** Coord mail read cursor: newest message `ts` the operator has seen. */
+  coordReadTs?: string;
 }
 
 export function readConfig(): IrisConfig {

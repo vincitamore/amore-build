@@ -1,8 +1,16 @@
 import { describe, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { hostname, tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { formatMessages, formatPeers, formatPeersDetail, localSeat, readRoster } from './coord.ts';
+import {
+  formatMessages,
+  formatPeers,
+  formatPeersDetail,
+  localSeat,
+  readLocalRoster,
+  type PeerStatus,
+  type PresenceEntry,
+} from './coord.ts';
 
 function withEnv(vars: Record<string, string | undefined>, fn: () => void): void {
   const prev: Record<string, string | undefined> = {};
@@ -22,12 +30,12 @@ function withEnv(vars: Record<string, string | undefined>, fn: () => void): void
   }
 }
 
-describe('coord presence roster', () => {
+describe('coord local roster', () => {
   test('empty dir is zero live', () => {
     const dir = mkdtempSync(join(tmpdir(), 'iris-coord-'));
     withEnv({ HOUSE_SEAT: 'test' }, () => {
       try {
-        expect(readRoster(dir)).toEqual([]);
+        expect(readLocalRoster(dir)).toEqual([]);
         expect(formatPeers([])).toBe('0 LIVE');
       } finally {
         rmSync(dir, { recursive: true, force: true });
@@ -59,7 +67,7 @@ describe('coord presence roster', () => {
             started: '2026-08-25T11:00:00Z',
           }),
         );
-        const entries = readRoster(dir);
+        const entries = readLocalRoster(dir);
         expect(entries).toHaveLength(1);
         expect(entries[0]?.harness).toBe('amore');
         expect(formatPeers(entries)).toBe('1 LIVE');
@@ -70,7 +78,7 @@ describe('coord presence roster', () => {
     });
   });
 
-  test('dead remote row is kept without PID probe', () => {
+  test('registered-peer-seat file is a pushed-era artifact and is skipped', () => {
     const root = mkdtempSync(join(tmpdir(), 'iris-coord-remote-'));
     const dir = join(root, 'presence');
     mkdirSync(dir);
@@ -78,7 +86,7 @@ describe('coord presence roster', () => {
     withEnv({ HOUSE_SEAT: 'here', HOUSE_COORD_DIR: dir }, () => {
       try {
         writeFileSync(
-          join(dir, 'peer-0.json'),
+          join(dir, 'there-amore-0.json'),
           JSON.stringify({
             seat: 'there',
             harness: 'amore',
@@ -87,28 +95,14 @@ describe('coord presence roster', () => {
             started: '2026-08-25T11:00:00Z',
           }),
         );
-        writeFileSync(
-          join(dir, 'local-dead.json'),
-          JSON.stringify({
-            seat: 'here',
-            harness: 'cursor',
-            pid: 0,
-            tree: 'gone',
-            started: '2026-08-25T11:00:00Z',
-          }),
-        );
-        const entries = readRoster(dir);
-        expect(entries).toHaveLength(1);
-        expect(entries[0]?.seat).toBe('there');
-        expect(entries[0]?.remote).toBe(true);
-        expect(formatPeers(entries)).toBe('0 LIVE · 1 remote-reported');
+        expect(readLocalRoster(dir)).toEqual([]);
       } finally {
         rmSync(root, { recursive: true, force: true });
       }
     });
   });
 
-  test('unknown-seat dead pid is local (seats-register) and hidden', () => {
+  test('unknown-seat dead pid is local and hidden', () => {
     const root = mkdtempSync(join(tmpdir(), 'iris-coord-unknown-'));
     const dir = join(root, 'presence');
     mkdirSync(dir);
@@ -125,43 +119,33 @@ describe('coord presence roster', () => {
             started: '2026-08-25T11:00:00Z',
           }),
         );
-        expect(readRoster(dir)).toEqual([]);
+        expect(readLocalRoster(dir)).toEqual([]);
       } finally {
         rmSync(root, { recursive: true, force: true });
       }
     });
   });
 
-  test('stale remote mtime stops claiming LIVE', () => {
-    const root = mkdtempSync(join(tmpdir(), 'iris-coord-stale-'));
-    const dir = join(root, 'presence');
-    mkdirSync(dir);
-    writeFileSync(join(root, 'seats'), 'there user@host\n');
-    withEnv({ HOUSE_SEAT: 'here', HOUSE_COORD_DIR: dir }, () => {
-      try {
-        const peer = join(dir, 'peer-0.json');
-        writeFileSync(
-          peer,
-          JSON.stringify({
-            seat: 'there',
-            harness: 'amore',
-            pid: 0,
-            tree: 'peer',
-            started: '2026-08-25T11:00:00Z',
-          }),
-        );
-        const old = new Date(Date.now() - 13 * 3600 * 1000);
-        utimesSync(peer, old, old);
-        const entries = readRoster(dir);
-        expect(entries).toHaveLength(1);
-        expect(entries[0]?.remote).toBe(true);
-        expect(entries[0]?.stale).toBe(true);
-        expect(formatPeers(entries)).toBe('0 LIVE · 1 remote-reported');
-        expect(formatPeersDetail(entries)).toMatch(/seen \d+h ago/);
-      } finally {
-        rmSync(root, { recursive: true, force: true });
-      }
-    });
+  test('remote rows and dark peers render in line and detail', () => {
+    const entries: PresenceEntry[] = [
+      { seat: 'here', harness: 'amore', pid: 1, remote: false },
+      { seat: 'there', harness: 'amore', pid: 2, remote: true },
+      { seat: 'there', harness: 'claude-code', pid: 3, remote: true },
+    ];
+    const peers: PeerStatus[] = [
+      { seat: 'there', answered: true, sessions: 2 },
+      {
+        seat: 'elsewhere',
+        answered: false,
+        sessions: 0,
+        error: 'connect timed out',
+        last_answered: new Date(Date.now() - 2 * 3600 * 1000).toISOString(),
+      },
+    ];
+    expect(formatPeers(entries, peers)).toBe('1 LIVE · 2 remote · 1 dark');
+    const detail = formatPeersDetail(entries, peers);
+    expect(detail).toContain('there amore, claude-code');
+    expect(detail).toContain('elsewhere: dark (last answered 2h ago)');
   });
 
   test('empty log dir is none', () => {
