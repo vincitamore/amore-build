@@ -41,8 +41,8 @@
   },
   {
     "category": "fixes",
-    "description": "**Same-seat named pipe** — a Windows named-pipe stamp from another harness is a live hop (first-line token auth, text frame), not a silent inbox drop. A failed hop prints degraded (inbox) after live wake, never a success-shaped sent (inbox).",
-    "breaking_change": false
+    "breaking_change": false,
+    "description": "**Messages actually reach other harnesses now** — sends to a non-amore session speak that harness's real inject contract (auth line, then {\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":…}}), chosen by the target's harness on every transport. The earlier text frame was accepted at the transport and silently dropped at parse, so v1.0.8's cross-harness hop never delivered despite reporting enqueued. Exhibited: a message sent from one machine rendered inside a Claude conversation on another, with no amore session open anywhere. Receiving Claude sessions that bypass permission prompts also need crossSessionInbound: \"accept\" in their Claude settings. A failed hop prints degraded (inbox) after live wake:, never a success-shaped sent (inbox)."
   },
   {
     "category": "fixes",

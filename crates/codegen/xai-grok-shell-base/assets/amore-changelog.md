@@ -65,10 +65,20 @@ work it describes.
   unread count and the last message's age. The iris daemon serves the
   native pull (`amore coord roster --json`, cached) with the local file
   roster as its degrade path.
-- **Same-seat named pipe** — a Windows named-pipe stamp from another
-  harness is a live hop (first-line token auth, text frame), not a silent
-  inbox drop. A failed hop prints `degraded (inbox) after live wake:`,
-  never a success-shaped `sent (inbox)`.
+- **Messages actually reach other harnesses now** — sends to a non-amore
+  session speak that harness's real inject contract (auth line, then
+  `{"type":"user","message":{"role":"user","content":…}}`), chosen by the
+  target's harness on every transport (Windows named pipe and the POSIX
+  unix socket alike). The earlier text frame was accepted at the transport
+  and silently dropped at parse, so v1.0.8's cross-harness hop never
+  delivered despite reporting `enqueued`. Exhibited: a message sent from
+  one machine rendered inside a Claude conversation on another, with no
+  amore session open anywhere. Receiving Claude sessions that bypass
+  permission prompts also need `"crossSessionInbound": "accept"` in their
+  Claude settings — without it the harness holds an external post for
+  ~5 minutes and drops it. A failed hop prints
+  `degraded (inbox) after live wake:`, never a success-shaped
+  `sent (inbox)`.
 - **Leader comparator** — `1.0.8 < 1.0.8-hotfix.1 < 1.0.9`. Already-running
   v1.0.8 sessions still use raw semver until they exit and can force-kill
   the new leader. Restart live sessions after the hop, or expect a bounded
