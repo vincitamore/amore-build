@@ -132,7 +132,7 @@ fn deliver(
         && let (Some(addr), Some(token)) = (p.socket.as_deref(), p.socket_token.as_deref())
         && same_seat(p)
     {
-        match socket::post_local(addr, token, &env) {
+        match socket::post_local(addr, token, &env, &p.harness) {
             Ok(d) => {
                 return Ok(SendResult::new(d, format!("socket {addr}")));
             }

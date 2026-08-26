@@ -179,11 +179,17 @@ function forwardSend(
       resolve({ ok: false, error: `unknown socket addr: ${addr}` });
       return;
     }
+    // The frame is chosen by target harness: amore speaks {send, envelope};
+    // every other harness takes its own user frame — {type:"user", message:
+    // {role, content}} (the listener's documented inject contract; a
+    // type:"text" frame is silently ignored). Delivery into a session that
+    // bypasses permission prompts additionally needs crossSessionInbound:
+    // "accept" in its Claude settings.
     const amore = (target.harness || '').toLowerCase() === 'amore';
     const auth = JSON.stringify({ type: 'auth', token });
     const body = amore
       ? JSON.stringify({ type: 'send', envelope: env })
-      : JSON.stringify({ type: 'text', data: wrapPrompt(env) });
+      : JSON.stringify({ type: 'user', message: { role: 'user', content: wrapPrompt(env) } });
     let buf = '';
     let done = false;
     const finish = (r: { ok: boolean; disposition?: string; error?: string }) => {

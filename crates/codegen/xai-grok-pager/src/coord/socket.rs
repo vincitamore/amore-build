@@ -383,7 +383,18 @@ fn named_pipe_path(addr: &str) -> Option<&str> {
 }
 
 /// Blocking client used by `amore coord send`.
-pub fn post_local(addr: &str, token: &str, env: &Envelope) -> Result<Disposition, String> {
+///
+/// The frame is chosen by the TARGET HARNESS, never the transport: amore
+/// sessions speak `{type:"send", envelope}` and reply with a disposition;
+/// every other harness takes its own user frame (`{type:"user", message:
+/// {role, content}}`) and usually writes no reply — a quiet accepted write
+/// is an enqueue.
+pub fn post_local(
+    addr: &str,
+    token: &str,
+    env: &Envelope,
+    peer_harness: &str,
+) -> Result<Disposition, String> {
     if let Some(path) = named_pipe_path(addr) {
         #[cfg(windows)]
         {
@@ -395,9 +406,20 @@ pub fn post_local(addr: &str, token: &str, env: &Envelope) -> Result<Disposition
             return Err("named pipes are not available on this platform".into());
         }
     }
+    let amore = peer_harness.eq_ignore_ascii_case(super::HARNESS);
     let auth = serde_json::json!({"type": "auth", "token": token});
-    let send = serde_json::json!({"type": "send", "envelope": env});
-    let payload = format!("{auth}\n{send}\n");
+    let body = if amore {
+        serde_json::json!({"type": "send", "envelope": env})
+    } else {
+        serde_json::json!({
+            "type": "user",
+            "message": {"role": "user", "content": super::msg::wrap_prompt(env)},
+        })
+    };
+    let payload = format!("{auth}\n{body}\n");
+    if !amore {
+        return stream_post_no_reply(addr, &payload);
+    }
     let reply = if let Some(path) = addr.strip_prefix("unix:") {
         #[cfg(unix)]
         {
@@ -414,6 +436,45 @@ pub fn post_local(addr: &str, token: &str, env: &Envelope) -> Result<Disposition
         return Err(format!("unknown socket addr: {addr}"));
     };
     parse_disposition(&reply)
+}
+
+/// Write a frame to a harness that usually answers with silence. The write
+/// must succeed; a brief read window picks up an explicit refusal when one
+/// is offered, and quiet is an enqueue.
+fn stream_post_no_reply(addr: &str, payload: &str) -> Result<Disposition, String> {
+    let reply = if let Some(path) = addr.strip_prefix("unix:") {
+        #[cfg(unix)]
+        {
+            let mut s =
+                std::os::unix::net::UnixStream::connect(path).map_err(|e| e.to_string())?;
+            s.write_all(payload.as_bytes()).map_err(|e| e.to_string())?;
+            let _ = s.set_read_timeout(Some(std::time::Duration::from_secs(2)));
+            let mut r = BufReader::new(s);
+            let mut line = String::new();
+            let _ = r.read_line(&mut line);
+            line
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = path;
+            return Err("unix sockets are not available on this platform".into());
+        }
+    } else if let Some(rest) = addr.strip_prefix("tcp:") {
+        let mut s = std::net::TcpStream::connect(rest).map_err(|e| e.to_string())?;
+        s.write_all(payload.as_bytes()).map_err(|e| e.to_string())?;
+        let _ = s.set_read_timeout(Some(std::time::Duration::from_secs(2)));
+        let mut r = BufReader::new(s);
+        let mut line = String::new();
+        let _ = r.read_line(&mut line);
+        line
+    } else {
+        return Err(format!("unknown socket addr: {addr}"));
+    };
+    let line = reply.trim();
+    if line.is_empty() {
+        return Ok(Disposition::Enqueued);
+    }
+    parse_disposition(line).or(Ok(Disposition::Enqueued))
 }
 
 #[cfg(unix)]
@@ -436,7 +497,13 @@ fn tcp_post(hostport: &str, payload: &str) -> Result<String, String> {
 }
 
 /// Other harnesses on Windows stamp `\\.\pipe\...`. First line is token auth;
-/// the body is a text frame, not the Amore `{type: send, envelope}` pair.
+/// the body is the harness's user frame — `{type:"user", message:{role,
+/// content}}` (contract read out of the listener's own inject example; a
+/// `type:"text"` frame is silently ignored, which shipped as a false-green
+/// `enqueued` until 2026-08-26). Delivery into a session that bypasses
+/// permission prompts additionally needs `crossSessionInbound: "accept"` in
+/// its Claude settings — a classless sender's post is otherwise held and
+/// dropped.
 #[cfg(windows)]
 fn pipe_post(path: &str, token: &str, env: &Envelope) -> Result<Disposition, String> {
     use std::os::windows::fs::OpenOptionsExt;
@@ -444,8 +511,11 @@ fn pipe_post(path: &str, token: &str, env: &Envelope) -> Result<Disposition, Str
     const FILE_SHARE_WRITE: u32 = 0x2;
     let auth = serde_json::json!({"type": "auth", "token": token});
     let msg = serde_json::json!({
-        "type": "text",
-        "data": super::msg::wrap_prompt(env),
+        "type": "user",
+        "message": {
+            "role": "user",
+            "content": super::msg::wrap_prompt(env),
+        },
     });
     let payload = format!("{auth}\n{msg}\n");
     let file = std::fs::OpenOptions::new()
@@ -558,6 +628,7 @@ struct RoutePeer<'a> {
     session_id: Option<&'a str>,
     pid: u32,
     seat: &'a str,
+    harness: &'a str,
     socket: Option<&'a str>,
     socket_token: Option<&'a str>,
 }
@@ -573,6 +644,7 @@ fn route_other_session(env: &Envelope) -> RouteOutcome {
             session_id: p.session_id.as_deref(),
             pid: p.pid,
             seat: p.seat.as_str(),
+            harness: p.harness.as_str(),
             socket: p.socket.as_deref(),
             socket_token: p.socket_token.as_deref(),
         })
@@ -602,13 +674,13 @@ fn is_loopback_socket(addr: &str) -> bool {
 fn route_matched_peer(
     env: &Envelope,
     peer: &RoutePeer<'_>,
-    post: impl FnOnce(&str, &str, &Envelope) -> Result<Disposition, String>,
+    post: impl FnOnce(&str, &str, &Envelope, &str) -> Result<Disposition, String>,
 ) -> RouteOutcome {
     let sid = peer.session_id.unwrap_or("-");
     let (Some(addr), Some(token)) = (peer.socket, peer.socket_token) else {
         return RouteOutcome::Failed(format!("session {sid} has no loopback socket"));
     };
-    match post(addr, token, env) {
+    match post(addr, token, env, peer.harness) {
         Ok(d) => RouteOutcome::Forwarded(d),
         Err(e) => RouteOutcome::Failed(format!("forward to {sid} failed: {e}")),
     }
@@ -674,6 +746,7 @@ mod tests {
             session_id: Some(sid),
             pid,
             seat: "node-one",
+            harness: "amore",
             socket,
             socket_token: token,
         }
@@ -747,6 +820,7 @@ mod tests {
             session_id: Some("s-b"),
             pid: 2,
             seat: "node-two",
+            harness: "amore",
             socket: Some("tcp:127.0.0.1:1"),
             socket_token: Some("t"),
         }];
@@ -757,7 +831,7 @@ mod tests {
     fn missing_socket_is_failed_not_none() {
         let env = env_to(Some("s-b"));
         let p = peer("s-b", 2, None, None);
-        let out = route_matched_peer(&env, &p, |_a, _t, _e| Ok(Disposition::Woken));
+        let out = route_matched_peer(&env, &p, |_a, _t, _e, _h| Ok(Disposition::Woken));
         assert!(matches!(out, RouteOutcome::Failed(_)));
     }
 
@@ -765,7 +839,7 @@ mod tests {
     fn loopback_forward_error_is_failed_not_none() {
         let env = env_to(Some("s-b"));
         let p = peer("s-b", 2, Some("tcp:127.0.0.1:1"), Some("t"));
-        let out = route_matched_peer(&env, &p, |_a, _t, _e| Err("connection refused".into()));
+        let out = route_matched_peer(&env, &p, |_a, _t, _e, _h| Err("connection refused".into()));
         match out {
             RouteOutcome::Failed(e) => assert!(e.contains("connection refused")),
             other => panic!("expected Failed, got {other:?}"),
@@ -776,7 +850,7 @@ mod tests {
     fn named_pipe_forward_error_is_failed() {
         let env = env_to(Some("s-b"));
         let p = peer("s-b", 2, Some(r"\\.\pipe\harness-session"), Some("t"));
-        let out = route_matched_peer(&env, &p, |addr, _, _| {
+        let out = route_matched_peer(&env, &p, |addr, _, _, _| {
             Err(format!("named pipe {addr}: connection refused"))
         });
         match out {
@@ -789,7 +863,7 @@ mod tests {
     fn successful_forward_keeps_disposition() {
         let env = env_to(Some("s-b"));
         let p = peer("s-b", 2, Some("unix:/tmp/s.sock"), Some("t"));
-        let out = route_matched_peer(&env, &p, |_a, _t, _e| Ok(Disposition::Enqueued));
+        let out = route_matched_peer(&env, &p, |_a, _t, _e, _h| Ok(Disposition::Enqueued));
         assert_eq!(out, RouteOutcome::Forwarded(Disposition::Enqueued));
     }
 
