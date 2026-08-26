@@ -161,7 +161,7 @@ export function startServer(deps: DaemonDeps, opts?: StartServerOptions): Starte
     fetch: buildFetch(wired),
   });
 
-  // Seat-door keeper (operator ruling 2026-08-26): the daemon holds the
+  // Seat-door keeper: the daemon holds the
   // coord door whenever no amore session does, so this seat answers roster
   // pulls (and routes sends to local sessions) with zero TUIs open. The
   // HTTP surface above stays loopback-only; the door binds the Tailscale

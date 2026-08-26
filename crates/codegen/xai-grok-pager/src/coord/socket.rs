@@ -498,12 +498,11 @@ fn tcp_post(hostport: &str, payload: &str) -> Result<String, String> {
 
 /// Other harnesses on Windows stamp `\\.\pipe\...`. First line is token auth;
 /// the body is the harness's user frame — `{type:"user", message:{role,
-/// content}}` (contract read out of the listener's own inject example; a
-/// `type:"text"` frame is silently ignored, which shipped as a false-green
-/// `enqueued` until 2026-08-26). Delivery into a session that bypasses
-/// permission prompts additionally needs `crossSessionInbound: "accept"` in
-/// its Claude settings — a classless sender's post is otherwise held and
-/// dropped.
+/// content}}`. The listener silently drops frames of any other type, so a
+/// successful pipe write with the wrong shape still looks like an enqueue.
+/// Delivery into a session that bypasses permission prompts additionally
+/// needs `crossSessionInbound: "accept"` in that harness's settings — a
+/// classless sender's post is otherwise held and dropped.
 #[cfg(windows)]
 fn pipe_post(path: &str, token: &str, env: &Envelope) -> Result<Disposition, String> {
     use std::os::windows::fs::OpenOptionsExt;

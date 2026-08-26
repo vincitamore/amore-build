@@ -1,9 +1,10 @@
 // coord-door.ts — the seat door, held by the daemon when no amore session
-// holds it (operator ruling 2026-08-26).
+// holds it.
 //
-// A seat must be answerable whenever any session on it is live — a machine
-// full of other-harness sessions and no TUI is not "0 LIVE". The door is the
-// tailnet TLS listener on the coord port; amore sessions and this daemon
+// A seat must be answerable whenever any session on it is live, whatever
+// harness those sessions run under and whether or not a TUI is open. The
+// door is the tailnet TLS listener on the coord port; amore sessions and
+// this daemon
 // both keep trying to bind it (30s retry), first binder wins, and takeover
 // on the holder's exit is automatic. Both present the SAME persisted leaf
 // (`~/.house/coord/tls/cert.der` + `key.der`), so peers' TOFU pins hold no
