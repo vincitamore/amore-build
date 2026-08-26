@@ -1517,6 +1517,9 @@ pub(crate) async fn run(
             remote_announcements,
         );
         let resolved_announcements = xai_grok_announcements::filter_expired(announcements);
+        // Presence must exist before the splash reads Peers. Session
+        // identity is patched again at RegisterActiveSession.
+        crate::coord::start(None, &app.cwd.display().to_string());
         // Fork-owned: when the pager launches inside a house, the house
         // splash is the announcement source of truth — remote Grok promos
         // never show there. `GROK_ANNOUNCEMENTS_OVERRIDE` still wins: its

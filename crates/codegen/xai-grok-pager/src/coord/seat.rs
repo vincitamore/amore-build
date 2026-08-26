@@ -5,6 +5,7 @@
 //! from a `HOUSE_SEAT` or Tailscale resolution — never from the hostname
 //! fallback, so a degraded process cannot poison the file.
 
+use std::path::PathBuf;
 use std::process::Command;
 use std::sync::OnceLock;
 
@@ -121,6 +122,39 @@ pub fn tailscale_peer_ip(name: &str) -> Option<std::net::IpAddr> {
     None
 }
 
+fn tailscale_bins() -> Vec<PathBuf> {
+    let mut bins = vec![PathBuf::from("tailscale")];
+    #[cfg(windows)]
+    {
+        bins.push(PathBuf::from("tailscale.exe"));
+        if let Ok(pf) = std::env::var("ProgramFiles") {
+            bins.push(PathBuf::from(pf).join("Tailscale").join("tailscale.exe"));
+        }
+        bins.push(PathBuf::from(r"C:\Program Files\Tailscale\tailscale.exe"));
+    }
+    bins
+}
+
+fn tailscale_output() -> Option<std::process::Output> {
+    for bin in tailscale_bins() {
+        let mut cmd = Command::new(&bin);
+        cmd.args(["status", "--json"]);
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            cmd.creation_flags(CREATE_NO_WINDOW);
+        }
+        if let Ok(out) = cmd.output()
+            && out.status.success()
+            && !out.stdout.is_empty()
+        {
+            return Some(out);
+        }
+    }
+    None
+}
+
 fn tailscale_status() -> Option<serde_json::Value> {
     // Cache successes only. A failed probe must be retryable — a OnceLock of
     // `Option` would pin a miss for the process lifetime.
@@ -128,13 +162,7 @@ fn tailscale_status() -> Option<serde_json::Value> {
     if let Some(v) = CACHED.get() {
         return Some(v.clone());
     }
-    let out = Command::new("tailscale")
-        .args(["status", "--json"])
-        .output()
-        .ok()?;
-    if !out.status.success() {
-        return None;
-    }
+    let out = tailscale_output()?;
     let v: serde_json::Value = serde_json::from_slice(&out.stdout).ok()?;
     match CACHED.set(v.clone()) {
         Ok(()) => Some(v),
@@ -302,6 +330,16 @@ mod tests {
         });
         let dns = v.pointer("/Self/DNSName").unwrap().as_str().unwrap();
         assert_eq!(first_label(dns).as_deref(), Some("node-one"));
+    }
+
+    #[test]
+    fn tailscale_bins_include_bare_name() {
+        let bins = tailscale_bins();
+        assert!(
+            bins.iter()
+                .any(|p| p.ends_with("tailscale") || p.ends_with("tailscale.exe")),
+            "{bins:?}"
+        );
     }
 
     #[test]

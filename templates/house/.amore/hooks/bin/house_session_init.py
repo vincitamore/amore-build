@@ -202,16 +202,19 @@ def build_context(due: list[tuple[Path, str, str]],
 def coordination_lines(root: Path) -> list[str]:
     """Read the seat roster and return Peers + Origin + inbox notices.
 
-    Native Amore writes presence; this hook only reads so it does not
-    double-write a row. Fail-open, never blocks session start.
+    SessionStart runs before native start(). Write the amore row so Peers
+    includes this session; never honor leaked HOUSE_HARNESS. Native
+    overwrites the same file with the listen socket. Fail-open.
     """
     lines: list[str] = []
     try:
         sys.path.insert(0, str(Path(__file__).resolve().parent))
         import coord_presence
-        # Native Amore writes presence; do not call start() here.
+        self_pid, pname = coord_presence.find_session_pid()
+        if "amore" in pname.lower():
+            coord_presence.start(harness="amore", pid=self_pid)
+            coord_presence.stop(pid=self_pid, harness="claude-code")
         entries = coord_presence.roster()
-        self_pid, _ = coord_presence.find_session_pid()
         lines.append(coord_presence.format_roster(entries, self_pid))
         delta = coord_presence.origin_delta(str(root), fetch_timeout=3)
         if delta:

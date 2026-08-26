@@ -222,6 +222,7 @@ pub fn start(session_id: Option<&str>, cwd: &str) {
         let _ = THIS_SESSION_ID.set(sid.to_string());
     }
     seat::persist_authoritative();
+    std::thread::spawn(|| seats::converge_house_token());
     let path = entry_path(&dir, HARNESS, pid);
     let tmp = path.with_extension("tmp");
     match serde_json::to_string_pretty(&entry) {

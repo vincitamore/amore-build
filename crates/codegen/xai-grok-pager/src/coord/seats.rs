@@ -4,6 +4,7 @@
 //! coord-root defaults to the remote `~/.house/coord`.
 
 use std::fs;
+use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
@@ -195,6 +196,121 @@ fn ssh_run(ssh: &str, cmd: &str) -> Result<(), String> {
     } else {
         Err("ssh failed".into())
     }
+}
+
+/// One house token across seats. Pull any peer token, pick a deterministic
+/// winner, write it locally, and push it to peers that still differ.
+/// Fail-soft: unreachable peers are skipped.
+pub fn converge_house_token() {
+    let Ok(local) = super::tls::house_token() else {
+        return;
+    };
+    let rows = load();
+    if rows.is_empty() {
+        return;
+    }
+    let mut tokens = vec![local.clone()];
+    for row in &rows {
+        if let Some(t) = fetch_token(row) {
+            tokens.push(t);
+        }
+    }
+    tokens.sort();
+    tokens.dedup();
+    let Some(winner) = tokens.into_iter().next() else {
+        return;
+    };
+    if winner != local {
+        tracing::warn!("coord: house token diverged across seats; converging");
+        if super::tls::install_house_token(&winner).is_err() {
+            return;
+        }
+    }
+    for row in &rows {
+        if fetch_token(row).as_deref() != Some(winner.as_str()) {
+            let _ = push_token(row, &winner);
+        }
+    }
+}
+
+fn remote_tls_token(row: &SeatRow) -> String {
+    let root = row
+        .coord_root
+        .clone()
+        .unwrap_or_else(|| "$HOME/.house/coord".into());
+    format!("{root}/tls/token")
+}
+
+fn fetch_token(row: &SeatRow) -> Option<String> {
+    let path = remote_tls_token(row);
+    let cmd = format!("cat '{path}' 2>/dev/null");
+    let text = ssh_stdout(&row.ssh, &cmd).ok()?;
+    let t = text.trim();
+    if t.is_empty() {
+        None
+    } else {
+        Some(t.to_string())
+    }
+}
+
+fn push_token(row: &SeatRow, token: &str) -> Result<(), String> {
+    let path = remote_tls_token(row);
+    let script = format!(
+        "mkdir -p \"$(dirname '{path}')\" && cat > '{path}' && chmod 600 '{path}'"
+    );
+    let mut child = Command::new("ssh");
+    child.args([
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ConnectTimeout=8",
+        &row.ssh,
+        &script,
+    ]);
+    child.stdin(Stdio::piped());
+    child.stdout(Stdio::null());
+    child.stderr(Stdio::piped());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        child.creation_flags(CREATE_NO_WINDOW);
+    }
+    let mut proc = child.spawn().map_err(|e| format!("ssh spawn: {e}"))?;
+    if let Some(mut stdin) = proc.stdin.take() {
+        let _ = stdin.write_all(format!("{token}\n").as_bytes());
+    }
+    let out = proc.wait_with_output().map_err(|e| e.to_string())?;
+    if out.status.success() {
+        Ok(())
+    } else {
+        Err("ssh token push failed".into())
+    }
+}
+
+fn ssh_stdout(ssh: &str, cmd: &str) -> Result<String, String> {
+    let mut child = Command::new("ssh");
+    child.args([
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ConnectTimeout=5",
+        ssh,
+        cmd,
+    ]);
+    child.stdout(Stdio::piped());
+    child.stderr(Stdio::piped());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        child.creation_flags(CREATE_NO_WINDOW);
+    }
+    let out = child.output().map_err(|e| e.to_string())?;
+    if !out.status.success() {
+        return Err("ssh failed".into());
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).to_string())
 }
 
 pub fn drop_inbox_remote(row: &SeatRow, env: &Envelope) -> Result<String, String> {

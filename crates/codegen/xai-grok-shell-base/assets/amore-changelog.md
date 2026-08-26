@@ -12,6 +12,10 @@ work it describes.
   OS hostname or NetBIOS name, and not `unknown` when `HOSTNAME` is
   unset. `HOUSE_SEAT` wins; the hostname fallback is never written into
   the shared seat file.
+- **Splash Peers is live at first paint** — presence is registered before
+  the welcome announcement is built, so this session is not `0 LIVE`.
+- **House token converges** — seats share one `tls/token` on start (pull,
+  pick a winner, push). No hand copy between machines.
 - **Wake transport** — same-seat sessions stay on loopback (unix domain
   on POSIX, token-gated TCP 127.0.0.1 on Windows). Cross-seat live wake
   is TLS to the peer's Tailscale IPv4 only (house-issued cert, TOFU pin,

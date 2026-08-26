@@ -86,6 +86,19 @@ fn read_token(path: &Path) -> Option<String> {
     }
 }
 
+/// Replace the on-disk house token (used when seats converge on one secret).
+pub fn install_house_token(token: &str) -> Result<(), String> {
+    let path = token_path();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let tmp = path.with_extension("tmp");
+    fs::write(&tmp, format!("{token}\n")).map_err(|e| e.to_string())?;
+    fs::rename(&tmp, &path).map_err(|e| e.to_string())?;
+    set_owner_readwrite(&path);
+    Ok(())
+}
+
 fn set_owner_readwrite(path: &Path) {
     #[cfg(unix)]
     {
@@ -449,6 +462,16 @@ mod tests {
                 let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
                 assert_eq!(mode, 0o600);
             }
+        });
+    }
+
+    #[test]
+    fn install_house_token_replaces() {
+        with_isolated_coord(|_root| {
+            let a = house_token().expect("create");
+            install_house_token("converged-secret").expect("install");
+            assert_eq!(house_token().unwrap(), "converged-secret");
+            assert_ne!(a, "converged-secret");
         });
     }
 
