@@ -34,14 +34,30 @@ work it describes.
 - **Pulse** — Peers shows a count plus a sub-line of `seat/harness`
   identities, refreshed with the Dashboard poll. Duplicate harness rows
   for the same pid are collapsed.
-- **Cross-seat presence copy** — dest is discovered, not assumed POSIX.
-  ssh `echo $HOME` (bash and pwsh both have `$HOME`), then scp to the
-  absolute `{home}/.house/coord/presence/` (Windows OpenSSH does not
-  expand `~` on dest). Each seat links every local SSH-login home's
-  `.house/coord` to the house coord so the SSH user and the house user
-  share one directory. mkdir/rm try POSIX then pwsh. A closed session's
-  peer copy is removed; a live session's row actually lands on the
-  other seat.
+- **Presence is pulled live, never pushed** — every session runs a seat-door
+  keeper: it tries to hold the tailnet TLS listener on the coord port and
+  retries every 30s, so the door survives its owner's exit and a late
+  Tailscale bring-up. The door answers an authed `roster` request from its
+  own PID-probed presence dir (loopback tokens stripped), and consumers dial
+  every registered seat in parallel under a deadline — a seat that does not
+  answer renders **dark** with its last successful answer. Presence files
+  are local-only: the scp presence copy, its retract-at-exit race, and
+  remote ghost files are gone (pushed-era foreign-seat files are reaped on
+  read), and per-session ephemeral tailnet listeners no longer exist — one
+  tailnet listener per seat, loopback everywhere else. ssh remains only for
+  offline mail drops and house-token convergence. Sessions from other
+  harnesses on a seat are visible cross-seat through that seat's door
+  without publishing anything. Each seat still links every local SSH-login
+  home's `.house/coord` to the house coord so offline mail drops land in
+  one directory.
+- **Peers member in iris** — the first-class mesh surface (`P` in the member
+  bar, `--member Peers`): the per-seat session roster (harness, model, pid,
+  tree, start time, door marker; dark seats with their last answer) beside
+  the full coord message log with an unread divider and a persisted read
+  cursor. Pulse's Peers and Mail vitals click through to it; Mail shows the
+  unread count and the last message's age. The iris daemon serves the
+  native pull (`amore coord roster --json`, cached) with the local file
+  roster as its degrade path.
 - **Same-seat named pipe** — a Windows named-pipe stamp from another
   harness is a live hop (first-line token auth, text frame), not a silent
   inbox drop. A failed hop prints `degraded (inbox) after live wake:`,
