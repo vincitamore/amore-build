@@ -396,6 +396,76 @@ def roster(reap: bool = True) -> list[dict]:
     return entries
 
 
+def native_report(timeout: float = 4.0) -> dict | None:
+    """Live mesh pull via the native binary: each seat's door answers a
+    `roster` request from its own PID-probed presence dir, so remote rows are
+    live-as-answered and a seat that does not answer is reported dark. None
+    when `amore` is absent or the pull fails — callers fall back to the local
+    file roster (which is local-seat-only by design)."""
+    import shutil as _shutil
+    exe = _shutil.which("amore")
+    if not exe:
+        return None
+    kwargs: dict = {}
+    if os.name == "nt":
+        kwargs["creationflags"] = 0x08000000  # CREATE_NO_WINDOW
+    try:
+        p = subprocess.run([exe, "coord", "roster", "--json"],
+                           capture_output=True, text=True, timeout=timeout,
+                           **kwargs)
+        if p.returncode != 0 or not p.stdout.strip():
+            return None
+        v = json.loads(p.stdout)
+        if not isinstance(v, dict) or not isinstance(v.get("entries"), list):
+            return None
+        return v
+    except Exception:
+        return None
+
+
+def format_native_report(report: dict, self_pid: int | None = None) -> str:
+    """Peers line from a native mesh pull: local rows LIVE, peer rows
+    `remote` (answered seconds ago by their own door), unanswered registered
+    seats `dark` with their last successful answer."""
+    me = (_seat() or "").lower()
+    entries = report.get("entries") or []
+    peers = report.get("peers") or []
+    dark = [p for p in peers if isinstance(p, dict) and not p.get("answered")]
+    if not entries and not dark:
+        return "**Peers**: 0 LIVE"
+    parts = []
+    live = 0
+    for e in entries:
+        ident = f"{e.get('model') or e.get('harness', '?')}@{e.get('seat', '?')}/{e.get('harness', '?')}"
+        bits = [f"pid {e.get('pid')}"]
+        if e.get("tree"):
+            bits.append(e["tree"])
+        if e.get("work_unit"):
+            bits.append(f"unit {e['work_unit']}")
+        started = (e.get("started") or "")[11:16]
+        if started:
+            bits.append(f"since {started}Z")
+        if (e.get("seat") or "").lower() != me:
+            bits.append("remote")
+        else:
+            live += 1
+        tag = " (this session)" if self_pid and e.get("pid") == self_pid else ""
+        parts.append(f"{ident} ({', '.join(bits)}){tag}")
+    for p in dark:
+        when = p.get("last_answered") or ""
+        cap = f"{p.get('seat', '?')}: dark"
+        if len(when) >= 16:
+            cap += f", last answered {when[11:16]}Z"
+        parts.append(cap)
+    remote = len(entries) - live
+    head = f"{live} LIVE"
+    if remote:
+        head += f" · {remote} remote"
+    if dark:
+        head += f" · {len(dark)} dark"
+    return f"**Peers**: {head} — " + " · ".join(parts)
+
+
 def format_roster(entries: list[dict], self_pid: int | None = None) -> str:
     """The always-printed Peers line. `0 LIVE` is a finding; silence is the
     failure mode."""

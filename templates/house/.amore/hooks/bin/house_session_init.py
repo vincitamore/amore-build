@@ -214,8 +214,15 @@ def coordination_lines(root: Path) -> list[str]:
         if "amore" in pname.lower():
             coord_presence.start(harness="amore", pid=self_pid)
             coord_presence.stop(pid=self_pid, harness="claude-code")
+        # Native mesh pull first (each seat's door answers live over pinned
+        # TLS; unanswered seats report dark); local files as fallback. The
+        # local read still runs for its dead-entry reap side effect.
         entries = coord_presence.roster()
-        lines.append(coord_presence.format_roster(entries, self_pid))
+        report = coord_presence.native_report()
+        if report is not None:
+            lines.append(coord_presence.format_native_report(report, self_pid))
+        else:
+            lines.append(coord_presence.format_roster(entries, self_pid))
         delta = coord_presence.origin_delta(str(root), fetch_timeout=3)
         if delta:
             lines.append(delta)
