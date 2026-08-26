@@ -201,17 +201,36 @@ export function formatPeers(entries: PresenceEntry[]): string {
   return `${live} LIVE · ${remote} remote-reported`;
 }
 
+function groupSeatIdents(entries: PresenceEntry[], remote: boolean): string[] {
+  const order: string[] = [];
+  const harnesses = new Map<string, string[]>();
+  const cap = new Map<string, string>();
+  for (const e of entries) {
+    const seat = (e.seat || '?').trim() || '?';
+    if (!harnesses.has(seat)) {
+      order.push(seat);
+      harnesses.set(seat, []);
+    }
+    const h = (e.harness || '?').trim() || '?';
+    const list = harnesses.get(seat)!;
+    if (!list.includes(h)) list.push(h);
+    if (remote) {
+      const age = formatRemoteAge(e.ageHours ?? 0);
+      cap.set(seat, e.stale ? `seen ${age}` : `as of ${age}`);
+    }
+  }
+  return order.map((seat) => {
+    const ids = (harnesses.get(seat) || []).join(', ');
+    const c = cap.get(seat);
+    return c ? `${seat} ${ids} (${c})` : `${seat} ${ids}`;
+  });
+}
+
 export function formatPeersDetail(entries: PresenceEntry[]): string {
   if (entries.length === 0) return '';
-  return entries
-    .map((e) => {
-      const ident = `${e.seat || '?'}/${e.harness || '?'}`;
-      if (!e.remote) return ident;
-      const age = formatRemoteAge(e.ageHours ?? 0);
-      const cap = e.stale ? `remote, seen ${age}` : `remote, as of ${age}`;
-      return `${ident} (${cap})`;
-    })
-    .join(' · ');
+  const locals = entries.filter((e) => !e.remote);
+  const remotes = entries.filter((e) => e.remote);
+  return [...groupSeatIdents(locals, false), ...groupSeatIdents(remotes, true)].join(' · ');
 }
 
 export interface CoordMessage {

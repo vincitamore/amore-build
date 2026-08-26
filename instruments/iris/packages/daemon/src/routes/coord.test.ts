@@ -157,7 +157,7 @@ describe('coord presence roster', () => {
         expect(entries[0]?.remote).toBe(true);
         expect(entries[0]?.stale).toBe(true);
         expect(formatPeers(entries)).toBe('0 LIVE · 1 remote-reported');
-        expect(formatPeersDetail(entries)).toMatch(/remote, seen \d+h ago/);
+        expect(formatPeersDetail(entries)).toMatch(/seen \d+h ago/);
       } finally {
         rmSync(root, { recursive: true, force: true });
       }

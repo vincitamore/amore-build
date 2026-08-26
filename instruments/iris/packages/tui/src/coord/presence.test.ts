@@ -47,7 +47,7 @@ describe('Pulse presence display', () => {
   test('untagged entries count as LIVE (legacy daemon payload)', () => {
     const entries = [local('here', 'amore'), local('here', 'claude-code')];
     expect(formatPeers(entries)).toBe('2 LIVE');
-    expect(formatPeersDetail(entries)).toBe('here/amore · here/claude-code');
+    expect(formatPeersDetail(entries)).toBe('here amore, claude-code');
   });
 
   test('count on the label; identities on the detail line', () => {
@@ -58,7 +58,7 @@ describe('Pulse presence display', () => {
     ];
     expect(formatPeers(entries, NOW)).toBe('2 LIVE · 1 remote-reported');
     expect(formatPeersDetail(entries, NOW)).toBe(
-      'here/amore · here/claude-code · there/amore (remote, as of 15m ago)',
+      'here amore, claude-code · there amore (as of 15m ago)',
     );
   });
 
@@ -129,7 +129,7 @@ describe('Pulse presence display', () => {
     };
     expect(peersFromPayload(j, NOW)).toEqual({
       line: '1 LIVE · 1 remote-reported',
-      detail: 'here/amore · there/amore (remote, seen 13h ago)',
+      detail: 'here amore · there amore (seen 13h ago)',
     });
   });
 

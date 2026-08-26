@@ -236,6 +236,7 @@ pub fn start(session_id: Option<&str>, cwd: &str) {
                 tracing::debug!(error = %e, "coord presence: rename failed");
             } else {
                 let _ = fs::remove_file(legacy_entry_path(&dir, HARNESS, pid));
+                let _ = fs::remove_file(entry_path(&dir, "claude-code", pid));
                 let publish = path.clone();
                 std::thread::spawn(move || seats::publish_file(&publish));
             }
