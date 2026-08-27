@@ -21,8 +21,18 @@ mod pkce;
 pub mod resolver;
 mod store;
 
-pub use login::{run_provider_login_cli, resolve_api_key_reference};
+pub use login::{resolve_api_key_reference, run_provider_login_cli};
 pub use resolver::ProviderOAuthBearerResolver;
+
+/// Live access credentials for a provider's stored login (sync; refreshes
+/// on the dedicated thread when stale). Used by provider model discovery.
+pub(crate) use login::blocking_fresh_credentials;
+
+/// Whether a provider's stored credential exists (file read only; never
+/// refreshes). Seeds discovery without touching the network.
+pub(crate) fn has_stored_credentials(kind: ProviderKind) -> bool {
+    store::load(&store::default_store_path(), kind).is_some()
+}
 
 /// The provider an `oauth:<provider>` model `api_key` value references, if any.
 pub fn oauth_reference_kind(key: &str) -> Option<ProviderKind> {
@@ -78,8 +88,14 @@ mod tests {
 
     #[test]
     fn parses_reference_spellings() {
-        assert_eq!(oauth_reference("oauth:anthropic"), Some(ProviderKind::Anthropic));
-        assert_eq!(oauth_reference("oauth:anthropic:"), Some(ProviderKind::Anthropic));
+        assert_eq!(
+            oauth_reference("oauth:anthropic"),
+            Some(ProviderKind::Anthropic)
+        );
+        assert_eq!(
+            oauth_reference("oauth:anthropic:"),
+            Some(ProviderKind::Anthropic)
+        );
         assert_eq!(oauth_reference("oauth:cursor"), Some(ProviderKind::Cursor));
         assert_eq!(oauth_reference("oauth:unknown"), None);
         assert_eq!(oauth_reference("sk-ant-oat-example"), None);

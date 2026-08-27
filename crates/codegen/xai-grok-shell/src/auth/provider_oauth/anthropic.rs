@@ -5,11 +5,11 @@
 // shape, bootstrap identity fallback, refresh headers, and the ~30-day
 // grant-family re-login deadline.
 
-use anyhow::{anyhow, Context as _};
+use anyhow::{Context as _, anyhow};
 use serde::Deserialize;
 
-use super::store::ProviderCredentials;
 use super::ProviderKind;
+use super::store::ProviderCredentials;
 
 // The Claude Code desktop client's public OAuth client id. omp obfuscates this
 // with base64; it ships openly inside Claude Code, so it is kept plain here.
@@ -162,8 +162,9 @@ pub(super) async fn exchange_code(
     let text = post_json(body, &[])
         .await
         .map_err(|e| e.context("exchanging Anthropic authorization code"))?;
-    let data: TokenResponse = serde_json::from_str(&text)
-        .map_err(|e| anyhow!("Anthropic token exchange returned invalid JSON: {e}; body: {text}"))?;
+    let data: TokenResponse = serde_json::from_str(&text).map_err(|e| {
+        anyhow!("Anthropic token exchange returned invalid JSON: {e}; body: {text}")
+    })?;
     let identity = resolve_identity(&data, true).await;
     let authorized_at = super::store::now_ms();
     Ok(token_response_to_credentials(data, identity, authorized_at))
@@ -314,14 +315,15 @@ mod tests {
 
     #[test]
     fn authorize_url_carries_the_oauth_parameters() {
-        let url = authorize_url("state123", "http://127.0.0.1:54545/callback", "challenge");
+        // The loopback redirect must carry the registered host form
+        // (`localhost`); the IP literal is rejected by the authorization
+        // endpoint as an unauthorized callback address.
+        let url = authorize_url("state123", "http://localhost:54545/callback", "challenge");
         assert!(url.starts_with("https://claude.ai/oauth/authorize?"));
         assert!(url.contains("code=true"));
         assert!(url.contains(&format!("client_id={CLIENT_ID}")));
         assert!(url.contains("response_type=code"));
-        assert!(url.contains(
-            "redirect_uri=http%3A%2F%2F127.0.0.1%3A54545%2Fcallback"
-        ));
+        assert!(url.contains("redirect_uri=http%3A%2F%2Flocalhost%3A54545%2Fcallback"));
         assert!(url.contains(&format!("scope={}", urlencoding::encode(SCOPES))));
         assert!(url.contains("code_challenge=challenge"));
         assert!(url.contains("code_challenge_method=S256"));

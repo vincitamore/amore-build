@@ -40,6 +40,7 @@ pub mod logout;
 pub mod loop_cmd;
 pub mod mcps;
 pub mod model;
+pub mod model_groups;
 pub mod multiline;
 pub mod new;
 pub mod personas;

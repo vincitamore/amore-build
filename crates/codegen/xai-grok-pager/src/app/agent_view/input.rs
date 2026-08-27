@@ -1394,6 +1394,20 @@ impl AgentView {
                             previous_palette: None,
                             window: crate::views::modal_window::ModalWindowState::new(),
                         });
+                        // Grouped lists open past the leading header.
+                        if let Some(crate::views::modal::ActiveModal::ArgPicker {
+                            items,
+                            state,
+                            ..
+                        }) = self.active_modal.as_mut()
+                        {
+                            state.selected = items
+                                .iter()
+                                .position(|item| {
+                                    !crate::slash::commands::model_groups::is_section_header(item)
+                                })
+                                .unwrap_or(0);
+                        }
                         return InputOutcome::Changed;
                     }
                 }

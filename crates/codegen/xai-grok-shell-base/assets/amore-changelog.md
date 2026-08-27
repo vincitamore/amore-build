@@ -10,6 +10,31 @@ work it describes.
      fails a tag push until a `## v<version>` heading exists. -->
 ## Unreleased
 
+- **Provider model discovery: OpenRouter + Cursor** — a BYOK credential is
+  now enough to fill the model picker; no manual `[model.*]` block per
+  model. An OpenRouter seed (any entry pointing at `openrouter.ai` with
+  `api_key`/`env_key`, or a set `OPENROUTER_API_KEY` environment
+  variable) pulls the full `/api/v1/models` catalog with context window
+  and completion ceilings; a Cursor login
+  (`amore login --provider cursor`) lists the account's usable models
+  through the unary `GetUsableModels` RPC. Discovered entries merge into
+  the catalog below your own `[model.*]` overrides, cache for an hour,
+  and OpenRouter's `reasoning` capability object bridges to the
+  reasoning-effort menu (including thinking-off for optional-thinking
+  models).
+- **Grouped model picker** — the Ctrl+M model picker groups by provider
+  (xAI, OpenRouter, Cursor, Anthropic, OpenAI) with section headers and
+  search that keeps the sections of matching groups; single-provider
+  catalogs render exactly as before.
+- **Reasoning effort on BYOK models** — a `[model.<id>]` entry that
+  declares `reasoning_effort` (or a `reasoning_efforts` menu) now
+  self-enables effort support on any backend, so OpenRouter thinking
+  levels reach the wire from config or the `/model` effort menu.
+- **Anthropic OAuth login fix** — the loopback redirect URI now carries
+  the registered host form (`http://localhost:54545/callback`) instead of
+  the IP literal, which the authorization endpoint rejected as an
+  unauthorized callback address, and the callback listener also serves
+  the IPv6 loopback for browsers that resolve `localhost` to `::1` first.
 - **Cursor agent wire backend** — a model entry with
   `api_backend = "cursor"` and `api_key = "oauth:cursor"` talks Cursor's
   AgentService/Run endpoint directly (Connect protocol over HTTP/2):

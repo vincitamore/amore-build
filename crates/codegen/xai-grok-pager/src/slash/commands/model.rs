@@ -9,6 +9,7 @@ use crate::acp::model_state::ModelState;
 use crate::app::actions::Action;
 use crate::slash::command::{AppCtx, ArgItem, CommandExecCtx, CommandResult, SlashCommand};
 use crate::slash::commands::effort_levels::build_effort_arg_items;
+use crate::slash::commands::model_groups;
 
 /// Switch the active model (and optionally its reasoning effort).
 pub struct ModelCommand;
@@ -150,9 +151,12 @@ fn detect_effort_phase(models: &ModelState, args_query: &str) -> Option<acp::Mod
 
 /// One row per logical model. Reasoning models get a trailing space in
 /// `insert_text` so the prompt widget chains into the effort sub-menu.
+/// When the catalog mixes providers (shell-derived `provider` meta),
+/// rows group under provider section headers; single-provider catalogs
+/// render exactly as before.
 fn build_model_items(models: &ModelState) -> Vec<ArgItem> {
     let current_id = models.current.as_ref();
-    let mut items: Vec<ArgItem> = Vec::with_capacity(models.available.len());
+    let mut labeled: Vec<(ArgItem, Option<String>)> = Vec::with_capacity(models.available.len());
     for (id, info) in &models.available {
         let is_current = current_id == Some(id);
         let supports = supports_reasoning_effort(info);
@@ -172,14 +176,17 @@ fn build_model_items(models: &ModelState) -> Vec<ArgItem> {
             info.name.clone()
         };
 
-        items.push(ArgItem {
-            display,
-            match_text: info.name.clone(),
-            insert_text,
-            description: info.description.clone().unwrap_or_default(),
-        });
+        labeled.push((
+            ArgItem {
+                display,
+                match_text: info.name.clone(),
+                insert_text,
+                description: info.description.clone().unwrap_or_default(),
+            },
+            model_groups::provider_label(info).map(str::to_owned),
+        ));
     }
-    items
+    model_groups::group_model_items(models, labeled)
 }
 
 /// One row per effort level for the `/model` chained effort phase.

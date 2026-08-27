@@ -136,7 +136,8 @@ pub(crate) fn store(
 ) -> std::io::Result<()> {
     let mut file = read_file(path);
     file.version = STORE_VERSION;
-    file.providers.insert(kind.as_str().to_owned(), creds.clone());
+    file.providers
+        .insert(kind.as_str().to_owned(), creds.clone());
     write_file(path, &file)
 }
 
@@ -162,7 +163,8 @@ pub(crate) fn store_refresh_cas(
         Some(current) if current.refresh == expected_refresh => {
             let mut file = file;
             file.version = STORE_VERSION;
-            file.providers.insert(kind.as_str().to_owned(), creds.clone());
+            file.providers
+                .insert(kind.as_str().to_owned(), creds.clone());
             write_file(path, &file).is_ok()
         }
         _ => false,
@@ -194,7 +196,10 @@ mod tests {
         assert!(load(&path, ProviderKind::Anthropic).is_none());
 
         store(&path, ProviderKind::Anthropic, &creds("r1", 5_000)).unwrap();
-        assert_eq!(load(&path, ProviderKind::Anthropic), Some(creds("r1", 5_000)));
+        assert_eq!(
+            load(&path, ProviderKind::Anthropic),
+            Some(creds("r1", 5_000))
+        );
         assert!(load(&path, ProviderKind::Cursor).is_none());
 
         store(&path, ProviderKind::Cursor, &creds("r2", 6_000)).unwrap();
@@ -211,12 +216,28 @@ mod tests {
 
         // Sibling rotated r1 -> r2 while we were refreshing from r1.
         store(&path, ProviderKind::Anthropic, &creds("r2", 7_000)).unwrap();
-        assert!(!store_refresh_cas(&path, ProviderKind::Anthropic, "r1", &creds("r3", 9_000)));
-        assert_eq!(load(&path, ProviderKind::Anthropic), Some(creds("r2", 7_000)));
+        assert!(!store_refresh_cas(
+            &path,
+            ProviderKind::Anthropic,
+            "r1",
+            &creds("r3", 9_000)
+        ));
+        assert_eq!(
+            load(&path, ProviderKind::Anthropic),
+            Some(creds("r2", 7_000))
+        );
 
         // Matching expectation writes through.
-        assert!(store_refresh_cas(&path, ProviderKind::Anthropic, "r2", &creds("r3", 9_000)));
-        assert_eq!(load(&path, ProviderKind::Anthropic), Some(creds("r3", 9_000)));
+        assert!(store_refresh_cas(
+            &path,
+            ProviderKind::Anthropic,
+            "r2",
+            &creds("r3", 9_000)
+        ));
+        assert_eq!(
+            load(&path, ProviderKind::Anthropic),
+            Some(creds("r3", 9_000))
+        );
     }
 
     #[test]
@@ -227,7 +248,10 @@ mod tests {
 
         assert!(load(&path, ProviderKind::Anthropic).is_none());
         store(&path, ProviderKind::Anthropic, &creds("r1", 5_000)).unwrap();
-        assert_eq!(load(&path, ProviderKind::Anthropic), Some(creds("r1", 5_000)));
+        assert_eq!(
+            load(&path, ProviderKind::Anthropic),
+            Some(creds("r1", 5_000))
+        );
 
         let mut backups = 0;
         for entry in std::fs::read_dir(tmp.path()).unwrap().flatten() {

@@ -5,9 +5,9 @@
 // polled from api2.cursor.sh and refreshed against the exchange endpoint.
 // Expiry comes from the access token's own JWT `exp` claim.
 
-use anyhow::{anyhow, Context as _};
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use anyhow::{Context as _, anyhow};
 use base64::Engine;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use serde::Deserialize;
 
 use super::store::ProviderCredentials;
@@ -54,16 +54,16 @@ pub(super) fn generate_login_start() -> CursorLoginStart {
 pub(crate) enum PollOutcome {
     /// Login not completed yet (404 from the poll endpoint).
     Pending,
-    Ready { access_token: String, refresh_token: String },
+    Ready {
+        access_token: String,
+        refresh_token: String,
+    },
 }
 
 /// One poll attempt. 404 means "keep waiting"; any other non-success status is
 /// a hard failure; transport errors are reported as `Err` for the caller's
 /// consecutive-error counter.
-pub(super) async fn poll_once(
-    uuid: &str,
-    verifier: &str,
-) -> anyhow::Result<PollOutcome> {
+pub(super) async fn poll_once(uuid: &str, verifier: &str) -> anyhow::Result<PollOutcome> {
     let client = crate::http::shared_client();
     let response = client
         .get(POLL_URL)
@@ -128,11 +128,13 @@ pub(super) async fn refresh_token(
     let data: RefreshResponse = serde_json::from_str(&text)
         .map_err(|e| anyhow!("Cursor token refresh returned invalid JSON: {e}; body: {text}"))?;
     Ok(ProviderCredentials {
-        expires_ms: jwt_expiry_ms(&data.access_token)
-            .unwrap_or_else(default_expiry),
+        expires_ms: jwt_expiry_ms(&data.access_token).unwrap_or_else(default_expiry),
         access: data.access_token,
         // omp keeps the input token when the response omits a refresh token.
-        refresh: data.refresh_token.filter(|s| !s.is_empty()).unwrap_or_else(|| api_key_or_refresh_token.to_owned()),
+        refresh: data
+            .refresh_token
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| api_key_or_refresh_token.to_owned()),
         // Cursor logins carry no account/org identity payload; the anchor is
         // now (the grant never hard-expires the way Anthropic's does).
         authorized_at: super::store::now_ms(),
@@ -167,7 +169,11 @@ mod tests {
     #[test]
     fn login_url_carries_pkce_and_mode() {
         let start = generate_login_start();
-        assert!(start.login_url.starts_with("https://cursor.com/loginDeepControl?"));
+        assert!(
+            start
+                .login_url
+                .starts_with("https://cursor.com/loginDeepControl?")
+        );
         assert!(start.login_url.contains("mode=login"));
         assert!(start.login_url.contains("redirectTarget=cli"));
         assert!(start.login_url.contains(&format!("uuid={}", start.uuid)));

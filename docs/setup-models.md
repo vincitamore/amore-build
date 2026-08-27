@@ -269,6 +269,62 @@ either route. If thinking blocks are missing on some custom host, check
 `[ui] show_thinking_blocks` first, then the wire field name, not the
 model's reasoning effort.
 
+### Reasoning effort on custom models
+
+The effort pipeline (`none|minimal|low|medium|high|xhigh|max`) is gated
+per model. It lights up three ways:
+
+- Declare a default effort on the entry itself — a `[model.<id>]` block
+  with `reasoning_effort = "high"` self-enables effort support on any
+  backend:
+
+  ```toml
+  [model.deepseek-openrouter]
+  model = "deepseek/deepseek-v4-flash-0731"
+  base_url = "https://openrouter.ai/api/v1"
+  env_key = "OPENROUTER_API_KEY"
+  reasoning_effort = "high"
+  ```
+
+- Declare the menu (`reasoning_efforts`) for full control, including
+  thinking-off. Bare value strings parse directly; `"none"` sends
+  `reasoning_effort: "none"` on the wire (verified against OpenRouter —
+  a 200 with zero reasoning tokens), and an entry whose first listed
+  effort carries `default = true` becomes the catalog default:
+
+  ```toml
+  reasoning_efforts = ["none", "low", "medium", "high"]
+  ```
+
+- Or skip config entirely: when an OpenRouter seed exists (see
+  [Discovery](#model-discovery-openrouter-and-cursor)), the provider's
+  own `reasoning` capability object bridges to the per-model menu
+  automatically — `supported_efforts` becomes the menu, `default_effort`
+  the default, and thinking-off is offered for every optional-thinking
+  model.
+
+---
+
+## Model discovery (OpenRouter and Cursor)
+
+A BYOK credential can fill the picker with no `[model.*]` entries at
+all. Discovery runs when a seed exists and merges its entries into the
+catalog **below** your own `[model.*]` overrides (same catalog key: your
+block wins), cached for an hour under the Amore home.
+
+- **OpenRouter** — seeded by any config entry pointing at
+  `openrouter.ai` with `api_key`/`env_key`, or by a set
+  `OPENROUTER_API_KEY` environment variable. The full `/api/v1/models`
+  catalog arrives (context window and completion ceilings included),
+  with each model's `reasoning` metadata mapped onto the effort menu.
+- **Cursor** — seeded by a stored Cursor login
+  (`amore login --provider cursor`); the account's usable models come
+  from the unary `GetUsableModels` RPC and reference
+  `api_key = "oauth:cursor"` automatically.
+
+Hide or trim discovered models with the usual `[models]` glob filters
+(`hidden_models`, `disabled_models`, `allowed_models`).
+
 ---
 
 ## Shared provider blocks (optional DRY)

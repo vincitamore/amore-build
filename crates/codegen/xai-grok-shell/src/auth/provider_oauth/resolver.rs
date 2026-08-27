@@ -9,8 +9,8 @@
 
 use xai_grok_sampler::config::BearerResolver;
 
-use super::login::blocking_fresh_credentials;
 use super::ProviderKind;
+use super::login::blocking_fresh_credentials;
 
 #[derive(Debug)]
 pub struct ProviderOAuthBearerResolver {

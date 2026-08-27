@@ -325,7 +325,7 @@ impl ModelsManager {
             .is_some_and(|a| a.is_session_auth());
         let fetch_auth = ModelFetchAuth::resolve(&cfg.endpoints, has_session);
         let mut cached_etag = None;
-        let prefetched_models = prefetched_models.or_else(|| {
+        let xai_prefetched = prefetched_models.or_else(|| {
             let cache = ModelsCacheManager::new();
             cache
                 .load_fresh(
@@ -337,7 +337,12 @@ impl ModelsManager {
                     c.models
                 })
         });
-        let has_prefetched = prefetched_models.is_some();
+        // "Real catalog" stays an xAI-catalog notion: a discovery cache
+        // alone must not suppress the background refresh lane.
+        let has_prefetched = xai_prefetched.is_some();
+        // Provider discovery (fork): merge cached OpenRouter/Cursor
+        // entries into the prefetched layer without any network work.
+        let prefetched_models = discovery::merge_cached(cfg, xai_prefetched);
         let catalog = resolve_model_catalog(cfg, prefetched_models.clone());
 
         if has_prefetched {
@@ -384,7 +389,8 @@ impl ModelsManager {
             tracing::error!(error = %e, "ignoring config reload: invalid model filters");
             return;
         }
-        let prefetched = self.inner.catalog.read().prefetched.clone();
+        let prefetched =
+            discovery::merge_cached(&new_config, self.inner.catalog.read().prefetched.clone());
         let new_catalog = resolve_model_catalog(&new_config, prefetched);
         let has_real_catalog = self.inner.catalog.read().has_fetched_real_catalog;
         if has_real_catalog && let Err(e) = validate_selectable(&new_config, &new_catalog) {
@@ -928,9 +934,19 @@ impl ModelsManager {
 
     fn spawn_background_refresh_inner(&self, remote_fetch_enabled: bool) {
         if self.inner.catalog.read().has_fetched_real_catalog {
-            tracing::debug!(
-                "skipping startup background model refresh: fresh cache already loaded"
-            );
+            // A fresh xAI catalog suppresses the retry lane, but seeded
+            // provider discovery may still be missing or stale; refresh
+            // just the discovery layer in that case.
+            if has_stale_seeds(&self.inner.cfg.read()) {
+                let mgr = self.clone();
+                tokio::task::spawn(async move {
+                    discovery::refresh_discovery_only(&mgr).await;
+                });
+            } else {
+                tracing::debug!(
+                    "skipping startup background model refresh: fresh cache already loaded"
+                );
+            }
             return;
         }
         self.spawn_catalog_retry(remote_fetch_enabled);
@@ -1132,6 +1148,7 @@ impl ModelsManager {
                     None
                 }
             };
+            let new_prefetched = Self::merge_discovery_into(&cfg, new_prefetched).await;
             if !mgr.apply_refresh_result_fenced(&cfg, new_prefetched, new_etag, generation) {
                 return;
             }
@@ -1180,6 +1197,7 @@ impl ModelsManager {
                 None
             }
         };
+        let new_prefetched = Self::merge_discovery_into(&cfg, new_prefetched).await;
         let success = self.apply_refresh_result_fenced(&cfg, new_prefetched, None, generation);
         if success {
             xai_grok_telemetry::unified_log::info(
@@ -1189,6 +1207,29 @@ impl ModelsManager {
                     "model_count": self.available().len(),
                 })),
             );
+        }
+    }
+
+    /// Merge provider-discovery entries into a fresh wire result before
+    /// it is applied, so the applied prefetched layer keeps both. Blocking
+    /// work rides `spawn_blocking`; on timeout or panic the endpoint
+    /// result applies unchanged.
+    async fn merge_discovery_into(
+        cfg: &config::Config,
+        new_prefetched: Option<IndexMap<String, ModelEntry>>,
+    ) -> Option<IndexMap<String, ModelEntry>> {
+        let merged = tokio::time::timeout(
+            crate::http::STARTUP_FETCH_TIMEOUT,
+            tokio::task::spawn_blocking({
+                let cfg = cfg.clone();
+                let prefetched = new_prefetched.clone();
+                move || discovery::fetch_and_merge_blocking(&cfg, prefetched)
+            }),
+        )
+        .await;
+        match merged {
+            Ok(Ok(merged)) => merged,
+            Ok(Err(_)) | Err(_) => new_prefetched,
         }
     }
 
@@ -1348,11 +1389,13 @@ impl ModelsManager {
 }
 
 mod cache;
+mod discovery;
 mod endpoint;
 mod fetch;
 mod resolution;
 
 pub(crate) use cache::*;
+pub(crate) use discovery::*;
 pub(crate) use endpoint::*;
 pub(crate) use fetch::*;
 pub use fetch::{

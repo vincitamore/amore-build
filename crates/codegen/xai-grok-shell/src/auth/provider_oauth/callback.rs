@@ -5,10 +5,10 @@
 // a 5-minute wait, and paste input accepting either a full redirect URL or a
 // bare `code` (optionally `code#state`, Anthropic's fragment form).
 
-use anyhow::{anyhow, Context as _};
+use anyhow::{Context as _, anyhow};
+use axum::Router;
 use axum::extract::Query;
 use axum::routing::get;
-use axum::Router;
 use std::collections::HashMap;
 use tokio::net::TcpListener;
 
@@ -75,11 +75,26 @@ fn callback_from_params(params: &HashMap<String, String>) -> Option<CallbackCode
     })
 }
 
+/// The loopback listeners the OAuth callback wait serves, plus the
+/// redirect URI the authorization request must carry.
+pub(crate) struct CallbackListeners {
+    pub(crate) primary: TcpListener,
+    /// Same port on `::1`. Browsers resolve `localhost` to both loopback
+    /// families and commonly try IPv6 first; without this companion a
+    /// process holding the IPv6 loopback intercepts the callback and the
+    /// wait times out.
+    pub(crate) ipv6: Option<TcpListener>,
+    pub(crate) redirect_uri: String,
+}
+
 /// Bind the callback listener, preferring the provider's registered port and
 /// falling back to a random one. The redirect URI is derived from the same
 /// listener the callback wait consumes, so a fallback port is consistent
-/// between the authorization URL and the server.
-pub(crate) async fn bind_and_redirect_uri() -> anyhow::Result<(TcpListener, String)> {
+/// between the authorization URL and the server. The URI host is the
+/// loopback form registered for the Claude Code OAuth client
+/// (`localhost`); an IP literal is rejected at the authorization endpoint
+/// as an unauthorized callback address.
+pub(crate) async fn bind_and_redirect_uri() -> anyhow::Result<CallbackListeners> {
     let listener = match TcpListener::bind(("127.0.0.1", anthropic::CALLBACK_PORT)).await {
         Ok(listener) => listener,
         Err(preferred_err) => {
@@ -95,39 +110,66 @@ pub(crate) async fn bind_and_redirect_uri() -> anyhow::Result<(TcpListener, Stri
         }
     };
     let port = listener.local_addr()?.port();
-    let redirect_uri = format!("http://127.0.0.1:{port}{}", anthropic::CALLBACK_PATH);
+    let ipv6 = match TcpListener::bind(("::1", port)).await {
+        Ok(listener) => Some(listener),
+        Err(err) => {
+            tracing::debug!(port, error = %err, "IPv6 OAuth callback listener unavailable");
+            None
+        }
+    };
+    let redirect_uri = format!("http://localhost:{port}{}", anthropic::CALLBACK_PATH);
     tracing::debug!(port, redirect_uri = %redirect_uri, "provider OAuth callback bound");
-    Ok((listener, redirect_uri))
+    Ok(CallbackListeners {
+        primary: listener,
+        ipv6,
+        redirect_uri,
+    })
 }
 
 /// Wait for the OAuth callback: the loopback server and (when stdin is a
 /// terminal) pasted input race; the first valid code with a matching state
 /// wins.
 pub(crate) async fn wait_for_callback(
-    listener: TcpListener,
+    listeners: CallbackListeners,
     expected_state: &str,
     enable_stdin: bool,
 ) -> anyhow::Result<CallbackCode> {
     let (tx, mut rx) = tokio::sync::mpsc::channel::<CallbackEvent>(1);
-    let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
 
     let expected_state = expected_state.to_owned();
-    let route_tx = tx.clone();
-    let router = Router::new()
-        .route(
-            anthropic::CALLBACK_PATH,
-            get(move |Query(params): Query<HashMap<String, String>>| async move {
-                handle_callback(params, expected_state, route_tx.clone())
-            }),
-        )
-        .fallback(|| async { axum::http::StatusCode::NOT_FOUND });
-    let server = tokio::spawn(async move {
-        let _ = axum::serve(listener, router)
-            .with_graceful_shutdown(async {
-                let _ = shutdown_rx.await;
-            })
-            .await;
-    });
+    let build_router = |tx: tokio::sync::mpsc::Sender<CallbackEvent>| {
+        let expected_state = expected_state.clone();
+        Router::new()
+            .route(
+                anthropic::CALLBACK_PATH,
+                get(
+                    move |Query(params): Query<HashMap<String, String>>| async move {
+                        handle_callback(params, expected_state.clone(), tx.clone())
+                    },
+                ),
+            )
+            .fallback(|| async { axum::http::StatusCode::NOT_FOUND })
+    };
+
+    // One accept server per bound listener; both share the callback
+    // channel and are shut down together after the first event.
+    let mut shutdown_senders: Vec<tokio::sync::oneshot::Sender<()>> = Vec::new();
+    let mut servers = Vec::new();
+    for listener in [Some(listeners.primary), listeners.ipv6]
+        .into_iter()
+        .flatten()
+    {
+        let router = build_router(tx.clone());
+        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
+        shutdown_senders.push(shutdown_tx);
+        servers.push(tokio::spawn(async move {
+            let _ = axum::serve(listener, router)
+                .with_graceful_shutdown(async {
+                    let _ = shutdown_rx.await;
+                })
+                .await;
+        }));
+    }
 
     if enable_stdin {
         spawn_stdin_reader(tx.clone());
@@ -140,8 +182,12 @@ pub(crate) async fn wait_for_callback(
         .map_err(|_| anyhow!("timed out after 5 minutes waiting for the OAuth callback"))?
         .ok_or_else(|| anyhow!("OAuth callback channel closed without a code"))?;
 
-    let _ = shutdown_tx.send(());
-    let _ = server.await;
+    for sender in shutdown_senders {
+        let _ = sender.send(());
+    }
+    for server in servers {
+        let _ = server.await;
+    }
 
     match event {
         CallbackEvent::Code(code) => Ok(code),
@@ -210,10 +256,8 @@ mod tests {
 
     #[test]
     fn parses_full_redirect_url() {
-        let parsed = parse_pasted_input(
-            "http://127.0.0.1:54545/callback?code=abc123&state=st456",
-        )
-        .unwrap();
+        let parsed =
+            parse_pasted_input("http://127.0.0.1:54545/callback?code=abc123&state=st456").unwrap();
         assert_eq!(parsed.code, "abc123");
         assert_eq!(parsed.state, "st456");
     }

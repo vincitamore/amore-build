@@ -54,7 +54,7 @@ the token pair with automatic refresh.
 **Cursor backend.** The Cursor agent wire is a first-party backend: a model
 entry with `api_backend = "cursor"` talks Cursor's `AgentService/Run`
 endpoint (Connect protocol over HTTP/2) using the login's access token as
-the bearer:
+the bearer. Manual entries still work:
 
 ```toml
 [model.cursor-composer]
@@ -63,14 +63,13 @@ base_url = "https://api2.cursor.sh"
 api_key = "oauth:cursor"
 api_backend = "cursor"
 context_window = 200000
-
-[model.cursor-gpt]
-model = "gpt-5.4-mini-high"
-base_url = "https://api2.cursor.sh"
-api_key = "oauth:cursor"
-api_backend = "cursor"
-context_window = 200000
 ```
+
+Manual entries are optional, though: after a Cursor login the account's
+usable models are discovered automatically (unary `GetUsableModels` RPC)
+and appear in the picker under the Cursor group, each referencing
+`api_key = "oauth:cursor"`. Keep a manual entry only to pin a specific
+context window or name.
 
 Notes on the wire:
 

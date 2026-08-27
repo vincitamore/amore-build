@@ -93,6 +93,11 @@ impl AgentView {
             *original_items = model_items;
             // Model list is type-to-find: reopen input-default like the initial /model open.
             *state = crate::views::picker::PickerState::input_active();
+            // Grouped lists reopen past the leading header.
+            state.selected = items
+                .iter()
+                .position(|item| !crate::slash::commands::model_groups::is_section_header(item))
+                .unwrap_or(0);
         }
         true
     }
@@ -596,6 +601,15 @@ impl AgentView {
             _ => return InputOutcome::Changed,
         };
 
+        // Section headers (grouped model picker) are non-selectable.
+        let non_sel: Vec<bool> = match self.active_modal.as_ref() {
+            Some(ActiveModal::ArgPicker { items, .. }) => items
+                .iter()
+                .map(crate::slash::commands::model_groups::is_section_header)
+                .collect(),
+            _ => return InputOutcome::Changed,
+        };
+
         let config = PickerConfig {
             title: None,
             show_search_hint: false,
@@ -603,7 +617,7 @@ impl AgentView {
             esc_clears_query: false,
             shortcuts: Some(crate::views::picker::picker_shortcuts()),
             pending_hint: None,
-            non_selectable: &[],
+            non_selectable: &non_sel,
             non_selectable_clickable: &[],
             shortcuts_area: None,
             tabs: None,
@@ -626,6 +640,13 @@ impl AgentView {
             };
             match handle_picker_input(ev, state, entry_count, &config) {
                 PickerOutcome::Selected(i) => match items.get(i).cloned() {
+                    Some(item)
+                        if crate::slash::commands::model_groups::is_section_header(&item) =>
+                    {
+                        // Header rows are visual only; Enter on them is a
+                        // no-op.
+                        return InputOutcome::Changed;
+                    }
                     Some(item) => ArgPickerStep::Selected(item),
                     None => return InputOutcome::Changed,
                 },
@@ -646,17 +667,11 @@ impl AgentView {
                     ..
                 }) = self.active_modal.as_mut()
                 {
-                    let q = state.query().to_lowercase();
-                    *items = original_items
-                        .iter()
-                        .filter(|item| {
-                            q.is_empty()
-                                || item.match_text.to_lowercase().contains(&q)
-                                || item.display.to_lowercase().contains(&q)
-                                || item.description.to_lowercase().contains(&q)
-                        })
-                        .cloned()
-                        .collect();
+                    let q = state.query().to_string();
+                    *items = crate::slash::commands::model_groups::filter_preserving_sections(
+                        &q,
+                        original_items,
+                    );
                     state.selected = state.selected.min(items.len().saturating_sub(1));
                 }
                 InputOutcome::Changed
@@ -1912,23 +1927,33 @@ impl AgentView {
                     .iter()
                     .enumerate()
                     .map(|(i, item)| {
-                        PickerEntry::Row(PickerRow {
-                            label: &item.display,
-                            right_label: &item.description,
-                            selected: state.hovered == Some(i)
-                                || (state.hovered.is_none() && i == state.selected),
-                            expanded: false,
-                            fields: &[],
-                            description_lines: &[],
-                            summary_lines: &[],
-                            dimmed: false,
-                            indent: 0,
-                            badge: "",
-                            badge_color: None,
-                            collapsible: false,
-                            underline_last_desc: false,
-                        })
+                        if crate::slash::commands::model_groups::is_section_header(item) {
+                            PickerEntry::Header {
+                                label: &item.display,
+                            }
+                        } else {
+                            PickerEntry::Row(PickerRow {
+                                label: &item.display,
+                                right_label: &item.description,
+                                selected: state.hovered == Some(i)
+                                    || (state.hovered.is_none() && i == state.selected),
+                                expanded: false,
+                                fields: &[],
+                                description_lines: &[],
+                                summary_lines: &[],
+                                dimmed: false,
+                                indent: 0,
+                                badge: "",
+                                badge_color: None,
+                                collapsible: false,
+                                underline_last_desc: false,
+                            })
+                        }
                     })
+                    .collect();
+                let arg_non_sel: Vec<bool> = items
+                    .iter()
+                    .map(crate::slash::commands::model_groups::is_section_header)
                     .collect();
                 let compact = self.scrollback.appearance().prompt.compact;
                 // Surface `i search` in the footer when vim nav mode is active.
@@ -1959,7 +1984,7 @@ impl AgentView {
                         &theme,
                         state,
                         &picker_entries,
-                        &[],
+                        &arg_non_sel,
                         false,
                     );
                 }

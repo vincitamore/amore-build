@@ -14330,6 +14330,7 @@ dependencies = [
  "xai-grok-compaction",
  "xai-grok-config",
  "xai-grok-config-types",
+ "xai-grok-cursor",
  "xai-grok-env",
  "xai-grok-extra-ca",
  "xai-grok-foreign-sessions",

@@ -1,16 +1,16 @@
 // Login orchestration + live-token resolution for the provider OAuth flows.
 
-use anyhow::{anyhow, Context as _};
+use anyhow::{Context as _, anyhow};
 use std::io::IsTerminal as _;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use super::anthropic;
 use super::callback::{self, CallbackCode};
 use super::cursor;
 use super::pkce;
 use super::store::{self, ProviderCredentials};
-use super::{oauth_reference, ProviderKind};
+use super::{ProviderKind, oauth_reference};
 
 // ============================================================================
 // Login
@@ -19,8 +19,9 @@ use super::{oauth_reference, ProviderKind};
 /// `amore login --provider <name>`: run the interactive provider login and
 /// store the resulting credentials.
 pub async fn run_provider_login_cli(provider: &str) -> anyhow::Result<()> {
-    let kind = ProviderKind::parse(provider)
-        .ok_or_else(|| anyhow!("unknown login provider '{provider}' (expected: anthropic, cursor)"))?;
+    let kind = ProviderKind::parse(provider).ok_or_else(|| {
+        anyhow!("unknown login provider '{provider}' (expected: anthropic, cursor)")
+    })?;
     let creds = match kind {
         ProviderKind::Anthropic => login_anthropic().await?,
         ProviderKind::Cursor => login_cursor().await?,
@@ -60,7 +61,11 @@ fn provider_display(kind: ProviderKind) -> &'static str {
 
 fn format_epoch_ms(ms: i64) -> String {
     chrono::DateTime::from_timestamp_millis(ms)
-        .map(|dt| dt.with_timezone(&chrono::Local).format("%Y-%m-%d %H:%M %Z").to_string())
+        .map(|dt| {
+            dt.with_timezone(&chrono::Local)
+                .format("%Y-%m-%d %H:%M %Z")
+                .to_string()
+        })
         .unwrap_or_else(|| format!("{ms} ms epoch"))
 }
 
@@ -72,9 +77,10 @@ async fn login_anthropic() -> anyhow::Result<ProviderCredentials> {
     // registered port, or the fallback port) is known before the
     // authorization URL is built.
     let enable_stdin = std::io::stdin().is_terminal();
-    let (listener, redirect_uri) = callback::bind_and_redirect_uri()
+    let listeners = callback::bind_and_redirect_uri()
         .await
         .context("binding Anthropic OAuth callback listener")?;
+    let redirect_uri = listeners.redirect_uri.clone();
     let auth_url = anthropic::authorize_url(&state, &redirect_uri, &pkce.code_challenge);
 
     eprintln!();
@@ -87,13 +93,19 @@ async fn login_anthropic() -> anyhow::Result<ProviderCredentials> {
     eprintln!("  {auth_url}");
     if enable_stdin {
         eprintln!();
-        eprintln!("Paste the redirect URL (or code) here if the browser cannot reach this machine:");
+        eprintln!(
+            "Paste the redirect URL (or code) here if the browser cannot reach this machine:"
+        );
     }
 
-    let CallbackCode { code, state: received } =
-        callback::wait_for_callback(listener, &state, enable_stdin).await?;
+    let CallbackCode {
+        code,
+        state: received,
+    } = callback::wait_for_callback(listeners, &state, enable_stdin).await?;
     if !received.is_empty() && received != state {
-        return Err(anyhow!("OAuth state mismatch — possible CSRF; aborting login"));
+        return Err(anyhow!(
+            "OAuth state mismatch — possible CSRF; aborting login"
+        ));
     }
 
     eprintln!();
@@ -118,7 +130,10 @@ async fn login_cursor() -> anyhow::Result<ProviderCredentials> {
     for attempt in 0..cursor::POLL_MAX_ATTEMPTS {
         tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
         match cursor::poll_once(&start.uuid, &start.verifier).await {
-            Ok(cursor::PollOutcome::Ready { access_token, refresh_token }) => {
+            Ok(cursor::PollOutcome::Ready {
+                access_token,
+                refresh_token,
+            }) => {
                 return Ok(ProviderCredentials {
                     expires_ms: cursor::jwt_expiry_ms(&access_token)
                         .unwrap_or_else(|| store::now_ms() + 3_600 * 1000),
@@ -167,14 +182,15 @@ static GRANT_EXPIRY_WARNED: AtomicBool = AtomicBool::new(false);
 /// Load the provider's credentials and refresh them when stale.
 pub(crate) async fn fresh_credentials(kind: ProviderKind) -> anyhow::Result<ProviderCredentials> {
     let path = store::default_store_path();
-    let current = store::load(&path, kind)
-        .ok_or_else(|| missing_login_error(kind))?;
+    let current = store::load(&path, kind).ok_or_else(|| missing_login_error(kind))?;
 
     if current.is_fresh(store::now_ms()) {
         return Ok(current);
     }
 
-    let _guard = REFRESH_LOCK.lock().map_err(|_| anyhow!("OAuth refresh lock poisoned"))?;
+    let _guard = REFRESH_LOCK
+        .lock()
+        .map_err(|_| anyhow!("OAuth refresh lock poisoned"))?;
     // Re-load after taking the lock: a sibling task may have refreshed while
     // we waited.
     let current = match store::load(&path, kind) {

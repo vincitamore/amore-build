@@ -4156,8 +4156,13 @@ impl ConfigModelOverride {
         if let Some(v) = self.supports_reasoning_effort {
             entry.info.supports_reasoning_effort = v;
         } else if !entry.info.supports_reasoning_effort
-            && matches!(entry.info.api_backend, ApiBackend::Messages)
+            && (matches!(entry.info.api_backend, ApiBackend::Messages)
+                || self.reasoning_effort.is_some())
         {
+            // Messages-backend entries and overrides that declare a
+            // default effort self-enable the gate; a non-empty
+            // `reasoning_efforts` menu is derived later in
+            // `derive_reasoning_effort_fields`.
             entry.info.supports_reasoning_effort = true;
         }
         if !self.reasoning_efforts.is_empty() {
@@ -4392,9 +4397,7 @@ impl ModelInfo {
     fn nearest_declared_effort(&self, effort: ReasoningEffort) -> Option<ReasoningEffort> {
         self.reasoning_efforts
             .iter()
-            .min_by_key(|opt| {
-                Self::effort_rank(opt.value).abs_diff(Self::effort_rank(effort))
-            })
+            .min_by_key(|opt| Self::effort_rank(opt.value).abs_diff(Self::effort_rank(effort)))
             .map(|opt| opt.value)
     }
     fn effort_rank(effort: ReasoningEffort) -> u8 {
@@ -5296,9 +5299,8 @@ pub(crate) fn sampling_config_for_model(
         .own_credential()
         .and_then(|key| crate::auth::provider_oauth::oauth_reference_kind(&key))
         .map(|kind| {
-            std::sync::Arc::new(
-                crate::auth::provider_oauth::ProviderOAuthBearerResolver::new(kind),
-            ) as xai_grok_sampler::config::SharedBearerResolver
+            std::sync::Arc::new(crate::auth::provider_oauth::ProviderOAuthBearerResolver::new(kind))
+                as xai_grok_sampler::config::SharedBearerResolver
         });
     SamplerConfig {
         api_key: credentials.api_key,
@@ -5486,6 +5488,14 @@ pub(crate) fn to_acp_model_info(
                     "totalContextTokens".to_string(),
                     serde_json::Value::Number(total_context_tokens.into()),
                 );
+                // Picker group label: the route decides the provider, not
+                // the model.
+                if let Some(provider) = crate::agent::models::provider_group_label(info) {
+                    map.insert(
+                        "provider".to_string(),
+                        serde_json::Value::String(provider.to_string()),
+                    );
+                }
                 map.insert(
                     "agentType".to_string(),
                     serde_json::Value::String(info.agent_type.clone()),

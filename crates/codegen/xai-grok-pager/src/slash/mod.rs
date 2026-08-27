@@ -1248,6 +1248,12 @@ impl SlashController {
         let Some(items) = command.suggest_args(&ctx, query) else {
             return Vec::new();
         };
+        // Section headers (grouped model picker) are visual-only in the
+        // modal; the typed dropdown stays a flat completion list.
+        let items: Vec<crate::slash::command::ArgItem> = items
+            .into_iter()
+            .filter(|item| !crate::slash::commands::model_groups::is_section_header(item))
+            .collect();
         if items.is_empty() {
             return Vec::new();
         }

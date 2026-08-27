@@ -1,6 +1,6 @@
 use super::*;
-use crate::proto::{AgentServerMessage, InteractionUpdate};
 use crate::proto::agent_server_message::Message as ServerMessage;
+use crate::proto::{AgentServerMessage, InteractionUpdate};
 
 fn end_stream_error(code: &str, message: &str) -> ConnectEndStreamError {
     ConnectEndStreamError {
@@ -15,6 +15,7 @@ fn the_run_request_header_set_matches_the_connect_contract() {
     let request = build_h2_request(
         "https://api2.cursor.sh",
         RUN_PATH,
+        "application/connect+proto",
         "cursor-token",
     );
     assert_eq!(request.method(), http::Method::POST);
@@ -41,7 +42,10 @@ fn the_run_request_header_set_matches_the_connect_contract() {
         request.headers().get("x-cursor-client-version").unwrap(),
         CURSOR_CLIENT_VERSION
     );
-    assert_eq!(request.headers().get("x-cursor-client-type").unwrap(), "cli");
+    assert_eq!(
+        request.headers().get("x-cursor-client-type").unwrap(),
+        "cli"
+    );
     // A per-request id, not a constant.
     let request_id = request.headers().get("x-request-id").unwrap();
     assert!(uuid::Uuid::parse_str(request_id.to_str().unwrap()).is_ok());
@@ -59,7 +63,12 @@ fn end_stream_errors_map_onto_the_sampler_error_model() {
     );
 
     let not_found = connect_error_to_sampling(&end_stream_error("not_found", "model gone"));
-    let SamplingError::Api { status, should_retry, .. } = &not_found else {
+    let SamplingError::Api {
+        status,
+        should_retry,
+        ..
+    } = &not_found
+    else {
         panic!("api error");
     };
     assert_eq!(*status, reqwest::StatusCode::NOT_FOUND);
@@ -91,8 +100,16 @@ fn transport_progress_tracking_distinguishes_heartbeats_from_work() {
             )),
         })),
     };
-    track_message(&heartbeat, &progress, &mut saw_token_delta, &mut saw_turn_ended);
-    assert!(!progress.load(Ordering::Relaxed), "heartbeat is keepalive only");
+    track_message(
+        &heartbeat,
+        &progress,
+        &mut saw_token_delta,
+        &mut saw_turn_ended,
+    );
+    assert!(
+        !progress.load(Ordering::Relaxed),
+        "heartbeat is keepalive only"
+    );
 
     let token_delta = AgentServerMessage {
         message: Some(ServerMessage::InteractionUpdate(InteractionUpdate {
@@ -101,7 +118,12 @@ fn transport_progress_tracking_distinguishes_heartbeats_from_work() {
             )),
         })),
     };
-    track_message(&token_delta, &progress, &mut saw_token_delta, &mut saw_turn_ended);
+    track_message(
+        &token_delta,
+        &progress,
+        &mut saw_token_delta,
+        &mut saw_turn_ended,
+    );
     assert!(progress.load(Ordering::Relaxed));
     assert!(saw_token_delta);
 
@@ -112,7 +134,12 @@ fn transport_progress_tracking_distinguishes_heartbeats_from_work() {
             )),
         })),
     };
-    track_message(&turn_ended, &progress, &mut saw_token_delta, &mut saw_turn_ended);
+    track_message(
+        &turn_ended,
+        &progress,
+        &mut saw_token_delta,
+        &mut saw_turn_ended,
+    );
     assert!(saw_turn_ended);
 }
 
@@ -122,11 +149,13 @@ fn non_interaction_frames_count_as_progress() {
     let mut saw_token_delta = false;
     let mut saw_turn_ended = false;
     let kv = AgentServerMessage {
-        message: Some(ServerMessage::KvServerMessage(crate::proto::KvServerMessage {
-            id: 1,
-            message: None,
-            ..Default::default()
-        })),
+        message: Some(ServerMessage::KvServerMessage(
+            crate::proto::KvServerMessage {
+                id: 1,
+                message: None,
+                ..Default::default()
+            },
+        )),
     };
     track_message(&kv, &progress, &mut saw_token_delta, &mut saw_turn_ended);
     assert!(progress.load(Ordering::Relaxed));
@@ -184,4 +213,65 @@ fn missing_turn_ended_is_reported_as_an_incomplete_stream() {
     // without a turnEnded frame; pin the text the sampler surfaces.
     let err = SamplingError::EventStreamError("Cursor stream ended before turnEnded".to_string());
     assert!(err.to_string().contains("turnEnded"));
+}
+
+#[test]
+fn the_unary_request_header_set_matches_omp_discovery() {
+    let request = build_h2_request(
+        "https://api2.cursor.sh",
+        USABLE_MODELS_PATH,
+        "application/proto",
+        "cursor-token",
+    );
+    assert_eq!(
+        request.uri(),
+        "https://api2.cursor.sh/agent.v1.AgentService/GetUsableModels"
+    );
+    assert_eq!(
+        request.headers().get("content-type").unwrap(),
+        "application/proto"
+    );
+    assert_eq!(request.headers().get("te").unwrap(), "trailers");
+    assert_eq!(
+        request.headers().get("authorization").unwrap(),
+        "Bearer cursor-token"
+    );
+    assert_eq!(request.headers().get("x-ghost-mode").unwrap(), "true");
+}
+
+#[test]
+fn usable_models_body_decodes_enveloped_and_bare() {
+    use crate::proto::GetUsableModelsResponse;
+    let response = GetUsableModelsResponse {
+        models: vec![proto::ModelDetails {
+            model_id: "composer-2.5".into(),
+            ..Default::default()
+        }],
+    };
+    let bare = response.encode_to_vec();
+
+    // Enveloped: flags 0 + BE length + payload.
+    let mut enveloped = vec![0u8];
+    enveloped.extend_from_slice(&(bare.len() as u32).to_be_bytes());
+    enveloped.extend_from_slice(&bare);
+    let enveloped = enveloped;
+
+    let decoded = decode_get_usable_models_body(&enveloped).expect("enveloped decodes");
+    assert_eq!(decoded.models.len(), 1);
+    assert_eq!(decoded.models[0].model_id, "composer-2.5");
+
+    let bare_decoded = decode_get_usable_models_body(&bare).expect("bare decodes");
+    assert_eq!(bare_decoded.models.len(), 1);
+    assert_eq!(bare_decoded.models[0].model_id, "composer-2.5");
+
+    // An end-stream envelope reports the Connect error, not an empty list.
+    let end_payload = frame_connect_message(
+        br#"{"error":{"code":"unauthenticated","message":"expired"}}"#,
+        framing::FLAG_END_STREAM,
+    );
+    let err = decode_get_usable_models_body(&end_payload).unwrap_err();
+    assert!(matches!(err, SamplingError::Auth { .. }));
+
+    // Empty body is an error, not an empty model list.
+    assert!(decode_get_usable_models_body(&[]).is_err());
 }

@@ -10,8 +10,8 @@
 //! output is retried once with the configured model id verbatim — the
 //! effort-slug normalization that split the id is the likely cause.
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use bytes::Bytes;
@@ -23,10 +23,12 @@ use prost::Message;
 use xai_grok_sampling_types::conversation::ConversationItem;
 use xai_grok_sampling_types::{ReasoningEffort, SamplingError};
 
-use crate::framing::{self, frame_connect_message, parse_end_stream, ConnectEndStreamError};
+use crate::framing::{self, ConnectEndStreamError, frame_connect_message, parse_end_stream};
 use crate::proto::agent_client_message::Message as ClientMessage;
 use crate::proto::{AgentClientMessage, AgentServerMessage};
-use crate::request::{build_run_request, normalize_system_prompts, BuiltRunRequest, RunRequestInput};
+use crate::request::{
+    BuiltRunRequest, RunRequestInput, build_run_request, normalize_system_prompts,
+};
 use crate::responder::{self, ResponderState};
 use crate::{
     can_rotate, conversation_id_for, mark_conversation_completed, proto, rotate_conversation_id,
@@ -36,6 +38,8 @@ use crate::{
 pub const CURSOR_API_URL: &str = "https://api2.cursor.sh";
 /// Run RPC path.
 pub const RUN_PATH: &str = "/agent.v1.AgentService/Run";
+/// GetUsableModels RPC path (unary; model discovery).
+pub const USABLE_MODELS_PATH: &str = "/agent.v1.AgentService/GetUsableModels";
 /// Client fingerprint the endpoint expects.
 pub const CURSOR_CLIENT_VERSION: &str = "cli-2026.07.23-e383d2b";
 /// Heartbeat cadence on the open Run stream.
@@ -74,7 +78,9 @@ pub async fn run_stream(
     futures_util::stream::BoxStream<'static, Result<AgentServerMessage, SamplingError>>,
     SamplingError,
 > {
-    let base_url = config.base_url.unwrap_or_else(|| CURSOR_API_URL.to_string());
+    let base_url = config
+        .base_url
+        .unwrap_or_else(|| CURSOR_API_URL.to_string());
     let base_conversation_id = config
         .base_conversation_id
         .filter(|id| !id.is_empty())
@@ -172,7 +178,7 @@ async fn run_once(
     );
 
     let mut h2 = connect_h2(&authority).await?;
-    let request = build_h2_request(&authority, &path, access_token);
+    let request = build_h2_request(&authority, &path, "application/connect+proto", access_token);
     let (response_fut, send_stream) = h2.send_request(request, false).map_err(h2_send_error)?;
     let response = response_fut.await.map_err(h2_send_error)?;
     let status = response.status();
@@ -507,14 +513,19 @@ async fn connect_h2(authority: &str) -> Result<h2::client::SendRequest<Bytes>, S
     Ok(send_request)
 }
 
-fn build_h2_request(authority: &str, path: &str, access_token: &str) -> Request<()> {
+fn build_h2_request(
+    authority: &str,
+    path: &str,
+    content_type: &str,
+    access_token: &str,
+) -> Request<()> {
     // No content-length: the request body keeps growing (heartbeats,
     // KV replies, exec responses) after the headers are sent.
     Request::builder()
         .method(http::Method::POST)
         .version(http::Version::HTTP_2)
         .uri(format!("{authority}{path}"))
-        .header("content-type", "application/connect+proto")
+        .header("content-type", content_type)
         .header("connect-protocol-version", "1")
         .header("te", "trailers")
         .header("authorization", format!("Bearer {access_token}"))
@@ -597,6 +608,106 @@ fn h2_error(err: h2::Error) -> SamplingError {
 fn reqwest_status(status: http::StatusCode) -> reqwest::StatusCode {
     reqwest::StatusCode::from_u16(status.as_u16())
         .unwrap_or(reqwest::StatusCode::INTERNAL_SERVER_ERROR)
+}
+
+// ── Unary Connect RPCs ──────────────────────────────────────────────────────
+
+/// Everything one unary agent-service RPC needs.
+pub struct UnaryConfig {
+    /// Cursor access token (bearer).
+    pub access_token: String,
+    /// Base URL override (tests / bridges); defaults to
+    /// [`CURSOR_API_URL`].
+    pub base_url: Option<String>,
+}
+
+/// Fetch the account's usable models via the unary
+/// `POST /agent.v1.AgentService/GetUsableModels` RPC.
+///
+/// Unlike [`run_stream`] this is a one-shot call: the request body is
+/// the bare proto message under `content-type: application/proto` (the
+/// endpoint serves HTTP/2 only), and the response is one proto message
+/// that may arrive inside a 5-byte Connect envelope — both quirks the
+/// endpoint is known to produce, so the envelope unwrap falls back to a
+/// bare-body decode. No mid-stream writes are needed, so there is no
+/// heartbeat or responder loop.
+pub async fn get_usable_models(
+    config: UnaryConfig,
+) -> Result<Vec<proto::ModelDetails>, SamplingError> {
+    let base_url = config
+        .base_url
+        .unwrap_or_else(|| CURSOR_API_URL.to_string());
+    let authority = split_url(&base_url).0;
+    let mut h2 = connect_h2(&authority).await?;
+    let request = build_h2_request(
+        &authority,
+        USABLE_MODELS_PATH,
+        "application/proto",
+        &config.access_token,
+    );
+    let (response_fut, _send_stream) = h2.send_request(request, true).map_err(h2_send_error)?;
+    let response = response_fut.await.map_err(h2_send_error)?;
+    let status = response.status();
+    let mut recv = response.into_body();
+    let mut body: Vec<u8> = Vec::new();
+    while let Some(chunk) = recv.data().await {
+        let chunk = chunk.map_err(h2_error)?;
+        let _ = recv.flow_control().release_capacity(chunk.len());
+        body.extend_from_slice(&chunk);
+    }
+    if !status.is_success() {
+        // Connect-level failures can arrive as an end-stream JSON error
+        // document; map those through the shared verdicts when present.
+        if let Ok(Some(err)) = framing::parse_end_stream(&body) {
+            return Err(connect_error_to_sampling(&err));
+        }
+        return Err(SamplingError::Api {
+            status: reqwest_status(status),
+            message: format!("Cursor GetUsableModels endpoint returned HTTP {status}"),
+            model_metadata: None,
+            retry_after_secs: None,
+            should_retry: None,
+            error_code: None,
+        });
+    }
+    decode_get_usable_models_body(&body).map(|decoded| decoded.models)
+}
+
+/// Decode the GetUsableModels response body. The endpoint envelopes the
+/// unary response (observed), so an envelope message frame wins when
+/// the body parses as one; otherwise the body is a bare proto message.
+/// A bare body's first field tag can double as an envelope flag byte,
+/// so a wrong envelope decode falls through to the bare decode.
+fn decode_get_usable_models_body(
+    body: &[u8],
+) -> Result<proto::GetUsableModelsResponse, SamplingError> {
+    if body.is_empty() {
+        // An empty body is a transport failure, not "no usable models".
+        return Err(SamplingError::EventStreamError(
+            "Cursor GetUsableModels returned an empty response".to_owned(),
+        ));
+    }
+    if let Ok(Some((frame, _))) = framing::parse_frame(body) {
+        match frame {
+            framing::Frame::Message(payload) => {
+                if let Ok(decoded) = proto::GetUsableModelsResponse::decode(&payload[..]) {
+                    return Ok(decoded);
+                }
+            }
+            framing::Frame::EndStream(payload) => {
+                // A real end-stream document maps through the shared
+                // verdicts; an unparseable one is the bare-body false
+                // positive (a proto field tag reads as the end-stream
+                // flag) and falls through to the bare decode.
+                if let Ok(Some(err)) = framing::parse_end_stream(&payload) {
+                    return Err(connect_error_to_sampling(&err));
+                }
+            }
+        }
+    }
+    proto::GetUsableModelsResponse::decode(body).map_err(|err| {
+        SamplingError::EventStreamError(format!("Cursor GetUsableModels decode: {err}"))
+    })
 }
 
 /// Split a base URL into the TLS authority and nothing else — the Run
