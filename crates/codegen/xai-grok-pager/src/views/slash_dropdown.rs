@@ -318,6 +318,18 @@ fn build_item_lines(
     row_bg: ratatui::style::Color,
     theme: &Theme,
 ) {
+    // Section header (grouped model dropdown): dimmed flush-left label,
+    // no prefix arrow, no selection/hover band.
+    if crate::slash::commands::model_groups::is_suggestion_header(item) {
+        out.push(Line::from(Span::styled(
+            truncate_str(&item.display, total_w.saturating_sub(PREFIX_W)).to_string(),
+            Style::default()
+                .fg(theme.gray)
+                .bg(theme.bg_light)
+                .add_modifier(Modifier::BOLD),
+        )));
+        return;
+    }
     let bold = if is_selected {
         Modifier::BOLD
     } else {

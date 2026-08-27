@@ -625,9 +625,145 @@ fn fetch_cursor_blocking() -> Option<Vec<config::ModelEntryConfig>> {
             return None;
         }
     };
-    let entries: Vec<config::ModelEntryConfig> = details.iter().filter_map(cursor_entry).collect();
+    let entries: Vec<config::ModelEntryConfig> = cursor_entries(&details);
     tracing::info!(count = entries.len(), "Discovered Cursor models");
     Some(entries)
+}
+
+/// One OpenAI-family sibling group: per-effort slugs sharing a base id
+/// (and optionally the `-fast` lane).
+struct CursorSiblingGroup {
+    /// Shortest display name in the group (the tier names embed their
+    /// effort token; the shortest is closest to the bare model name).
+    display_name: Option<String>,
+    context_window: u64,
+    thinking: bool,
+    efforts: Vec<ReasoningEffort>,
+}
+
+/// Synthesize catalog entries from `GetUsableModels` details. OpenAI-family
+/// per-effort sibling slugs (`gpt-5.4-mini-low`, `-high`, `-high-fast`, …)
+/// collapse into one entry per (base, fast lane) with an effort menu — the
+/// Run transport splits the slug anyway, and one entry per tier is what
+/// makes the picker noisy. Everything else (composer, Claude siblings)
+/// stays one-to-one.
+fn cursor_entries(
+    details: &[xai_grok_cursor::proto::ModelDetails],
+) -> Vec<config::ModelEntryConfig> {
+    let mut groups: IndexMap<(String, bool), CursorSiblingGroup> = IndexMap::new();
+    let mut singles: Vec<&xai_grok_cursor::proto::ModelDetails> = Vec::new();
+    for detail in details {
+        let id = detail.model_id.trim();
+        if id.is_empty() {
+            continue;
+        }
+        match xai_grok_cursor::request::split_effort_sibling(id) {
+            Some((base, effort, fast)) => {
+                let key = (base.to_owned(), fast);
+                let group = groups.entry(key).or_insert(CursorSiblingGroup {
+                    display_name: None,
+                    context_window: 0,
+                    thinking: false,
+                    efforts: Vec::new(),
+                });
+                if let Some(tier) = effort.parse::<ReasoningEffort>().ok()
+                    && !group.efforts.contains(&tier)
+                {
+                    group.efforts.push(tier);
+                }
+                group.thinking |= detail.thinking_details.is_some();
+                group.context_window = group.context_window.max(cursor_context_window(detail, id));
+                let name = cursor_display_name(detail, id);
+                match &group.display_name {
+                    Some(existing) if name.chars().count() >= existing.chars().count() => {}
+                    _ => group.display_name = Some(name),
+                }
+            }
+            None => singles.push(detail),
+        }
+    }
+
+    let mut entries: Vec<config::ModelEntryConfig> =
+        Vec::with_capacity(singles.len() + groups.len());
+    for ((base, fast), group) in groups {
+        let id = if fast {
+            format!("{base}-fast")
+        } else {
+            base
+        };
+        entries.push(cursor_group_entry(&id, group));
+    }
+    entries.extend(singles.iter().filter_map(|detail| cursor_entry(detail)));
+    entries
+}
+
+/// The display name for one detail, falling back through the standard
+/// candidates to the id.
+fn cursor_display_name(details: &xai_grok_cursor::proto::ModelDetails, id: &str) -> String {
+    [
+        details.display_name.trim(),
+        details.display_name_short.trim(),
+        details.display_model_id.trim(),
+    ]
+    .into_iter()
+    .find(|candidate| !candidate.is_empty())
+    .or_else(|| {
+        details
+            .aliases
+            .iter()
+            .map(String::as_str)
+            .map(str::trim)
+            .find(|s| !s.is_empty())
+    })
+    .unwrap_or(id)
+    .to_owned()
+}
+
+/// A collapsed sibling-group entry: the lane's wire id, the tier-stripped
+/// name, and the group's effort menu (default `high` when offered, else
+/// the highest tier — the tiers arrived as distinct models, so the fork's
+/// menu replaces them).
+fn cursor_group_entry(
+    id: &str,
+    mut group: CursorSiblingGroup,
+) -> config::ModelEntryConfig {
+    let mut name = group.display_name.unwrap_or_else(|| id.to_owned());
+    // Strip a trailing tier token ("GPT-5.4 Mini High" → "GPT-5.4 Mini");
+    // the effort now lives in the menu, not the name.
+    let tier_words = ["minimal", "low", "medium", "high", "xhigh", "max", "fast"];
+    let trimmed = name.trim_end();
+    if let Some((head, last)) = trimmed.rsplit_once(' ')
+        && tier_words.contains(&last.to_ascii_lowercase().as_str())
+        && !head.trim().is_empty()
+    {
+        name = head.trim_end().to_owned();
+    }
+
+    group.efforts.sort_by_key(|effort| effort_rank(*effort));
+    let default_effort = if group.efforts.contains(&ReasoningEffort::High) {
+        Some(ReasoningEffort::High)
+    } else {
+        group.efforts.last().copied()
+    };
+    let menu = efforts_menu(group.efforts, default_effort);
+
+    let mut entry = cursor_entry(&xai_grok_cursor::proto::ModelDetails {
+        model_id: id.to_owned(),
+        display_name: name,
+        thinking_details: group
+            .thinking
+            .then_some(xai_grok_cursor::proto::ThinkingDetails {}),
+        ..Default::default()
+    })
+    .expect("collapsed group entry has a non-empty id");
+    entry.supports_reasoning_effort = true;
+    entry.reasoning_efforts = menu;
+    entry.reasoning_effort = default_effort;
+    if group.context_window > 0 {
+        entry.context_window = std::num::NonZeroU64::new(group.context_window)
+            .expect("context windows are filtered > 0");
+    }
+    entry
 }
 
 /// Synthesize a catalog entry from one `ModelDetails`. Sibling effort

@@ -1296,6 +1296,11 @@ impl PromptWidget {
         let Some(row) = snap.selection() else {
             return false;
         };
+        // Section headers (grouped model dropdown) are visual only; Enter
+        // on one must not splice their empty insert text.
+        if crate::slash::commands::model_groups::is_suggestion_header(row) {
+            return false;
+        }
         // Accepting rewrites the token — an unrelated highlight must not survive it.
         self.textarea.clear_selection();
         let insert_text = row.insert_text.clone();

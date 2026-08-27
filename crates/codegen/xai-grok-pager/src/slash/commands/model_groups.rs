@@ -34,6 +34,13 @@ pub(crate) fn is_section_header(item: &ArgItem) -> bool {
     item.insert_text.is_empty() && item.match_text.is_empty()
 }
 
+/// Dropdown twin of [`is_section_header`]: a suggestion row with nothing
+/// to insert is a visual section header — rendered dimmed, skipped by
+/// selection, never accepted.
+pub(crate) fn is_suggestion_header(row: &crate::slash::SuggestionRow) -> bool {
+    row.insert_text.is_empty()
+}
+
 /// Group flat model rows under provider headers when the catalog mixes
 /// providers (≥2 groups). Single-group catalogs render flat — the default
 /// look for existing setups. Group order: the current model's group
@@ -136,6 +143,7 @@ pub(crate) fn filter_preserving_sections(query: &str, items: &[ArgItem]) -> Vec<
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::slash::SlashController;
     use agent_client_protocol as acp;
     use std::sync::Arc;
 
@@ -255,5 +263,54 @@ mod tests {
         assert_eq!(all.len(), items.len());
         let none = filter_preserving_sections("zzz", &items);
         assert!(none.is_empty());
+    }
+
+    #[test]
+    fn suggestion_header_sentinel_tracks_empty_insert_text() {
+        let header_row = crate::slash::SuggestionRow {
+            display: section_header("xAI").display,
+            description: String::new(),
+            insert_text: String::new(),
+            indices: Vec::new(),
+            tag: None,
+            provenance: None,
+        };
+        assert!(is_suggestion_header(&header_row));
+
+        let value_row = crate::slash::SuggestionRow {
+            display: "Grok 5".to_owned(),
+            description: String::new(),
+            insert_text: "Grok 5".to_owned(),
+            indices: Vec::new(),
+            tag: None,
+            provenance: None,
+        };
+        assert!(!is_suggestion_header(&value_row));
+    }
+
+    #[test]
+    fn selection_snapping_skips_leading_headers() {
+        // Simulates the grouped model dropdown: header rows interleaved
+        // with value rows (same sentinel: empty insert_text).
+        let make = |display: &str, insert: &str| crate::slash::SuggestionRow {
+            display: display.to_owned(),
+            description: String::new(),
+            insert_text: insert.to_owned(),
+            indices: Vec::new(),
+            tag: None,
+            provenance: None,
+        };
+        let matches = vec![
+            make("xAI", ""),
+            make("Grok 5", "Grok 5"),
+            make("OpenRouter", ""),
+            make("DeepSeek", "DeepSeek"),
+        ];
+        // A fresh selection (0) lands past the leading header.
+        assert_eq!(SlashController::snap_to_selectable(&matches, 0), 1);
+        // An carried selection landing on a header moves forward.
+        assert_eq!(SlashController::snap_to_selectable(&matches, 2), 3);
+        // A value row stays put.
+        assert_eq!(SlashController::snap_to_selectable(&matches, 1), 1);
     }
 }

@@ -146,22 +146,13 @@ fn reasoning_param(effort: &str) -> pb::RequestedModelModelParameterbytes {
 /// unless the Standard tier is pinned explicitly; `-fast` selections
 /// keep the Fast lane by omitting the parameter.
 pub fn resolve_wire_model(model: &str) -> (String, Vec<pb::RequestedModelModelParameterbytes>) {
-    const EFFORTS: [&str; 6] = ["minimal", "low", "medium", "high", "xhigh", "max"];
-    if let Some(stripped) = model.strip_suffix("-fast") {
-        for effort in EFFORTS {
-            if let Some(base) = stripped.strip_suffix(&format!("-{effort}"))
-                && is_openai_family(base)
-            {
-                return (format!("{base}-fast"), vec![reasoning_param(effort)]);
-            }
-        }
-    }
-    for effort in EFFORTS {
-        if let Some(base) = model.strip_suffix(&format!("-{effort}"))
-            && is_openai_family(base)
-        {
-            return (base.to_string(), vec![reasoning_param(effort)]);
-        }
+    if let Some((base, effort, fast)) = split_effort_sibling(model) {
+        let wire = if fast {
+            format!("{base}-fast")
+        } else {
+            base.to_string()
+        };
+        return (wire, vec![reasoning_param(effort)]);
     }
     if model == "composer-2.5" {
         return (
@@ -173,6 +164,31 @@ pub fn resolve_wire_model(model: &str) -> (String, Vec<pb::RequestedModelModelPa
         );
     }
     (model.to_string(), Vec::new())
+}
+
+/// The `(base id, effort tier, fast lane)` when `model_id` is an
+/// OpenAI-family per-effort sibling slug (`gpt-5.4-mini-low`), including
+/// the `-fast` lane suffix. Discovery collapses these siblings into one
+/// entry per lane with an effort menu; the Run transport splits them.
+pub fn split_effort_sibling(model_id: &str) -> Option<(&str, &str, bool)> {
+    const EFFORTS: [&str; 6] = ["minimal", "low", "medium", "high", "xhigh", "max"];
+    if let Some(stripped) = model_id.strip_suffix("-fast") {
+        for effort in EFFORTS {
+            if let Some(base) = stripped.strip_suffix(&format!("-{effort}"))
+                && is_openai_family(base)
+            {
+                return Some((base, effort, true));
+            }
+        }
+    }
+    for effort in EFFORTS {
+        if let Some(base) = model_id.strip_suffix(&format!("-{effort}"))
+            && is_openai_family(base)
+        {
+            return Some((base, effort, false));
+        }
+    }
+    None
 }
 
 /// Collect the system prompt entries from history, in order, trimmed

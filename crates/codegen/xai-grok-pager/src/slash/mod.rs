@@ -886,7 +886,16 @@ impl SlashController {
                 return;
             }
             let current = inner.selected.min(len - 1) as isize;
-            let next = (current + delta).rem_euclid(len as isize) as usize;
+            // Step over section headers (grouped model dropdown); a full
+            // lap stops on the original row rather than spinning forever.
+            let mut next = (current + delta).rem_euclid(len as isize) as usize;
+            let mut steps = 0;
+            while steps < len
+                && crate::slash::commands::model_groups::is_suggestion_header(&inner.matches[next])
+            {
+                next = (next as isize + delta).rem_euclid(len as isize) as usize;
+                steps += 1;
+            }
             inner.selected = next;
             sync_inline_ghost_to_selection(inner);
         });
@@ -901,7 +910,16 @@ impl SlashController {
                 return;
             }
             let current = inner.selected.min(len - 1) as isize;
-            let next = (current + delta).clamp(0, len as isize - 1) as usize;
+            let mut next = (current + delta).clamp(0, len as isize - 1) as usize;
+            while next != current as usize
+                && crate::slash::commands::model_groups::is_suggestion_header(&inner.matches[next])
+            {
+                let stepped = next as isize + delta;
+                if stepped < 0 || stepped >= len as isize {
+                    break;
+                }
+                next = stepped as usize;
+            }
             inner.selected = next;
             sync_inline_ghost_to_selection(inner);
         });
@@ -924,7 +942,7 @@ impl SlashController {
             !previous.cursor_in_command && previous.args_range == input.args_range
         };
         if !same_context || previous.matches.is_empty() {
-            return 0;
+            return Self::snap_to_selectable(matches, 0);
         }
 
         let prev_idx = previous
@@ -934,11 +952,31 @@ impl SlashController {
             && let Some(pos) = matches
                 .iter()
                 .position(|row| row.insert_text == prev_row.insert_text)
+            && !crate::slash::commands::model_groups::is_suggestion_header(&matches[pos])
         {
             return pos;
         }
 
-        previous.selected.min(matches.len().saturating_sub(1))
+        let fallback = previous.selected.min(matches.len().saturating_sub(1));
+        Self::snap_to_selectable(matches, fallback)
+    }
+
+    /// First non-header index at or after `start` (wrapping). Headers are
+    /// visual section labels; the selection must never rest on one.
+    fn snap_to_selectable(matches: &[SuggestionRow], start: usize) -> usize {
+        let len = matches.len();
+        if len == 0 {
+            return 0;
+        }
+        let mut idx = start.min(len - 1);
+        let mut steps = 0;
+        while steps < len
+            && crate::slash::commands::model_groups::is_suggestion_header(&matches[idx])
+        {
+            idx = (idx + 1) % len;
+            steps += 1;
+        }
+        idx
     }
 
     /// Byte ranges of recognized `/command` tokens anywhere in `text`.
@@ -1248,12 +1286,10 @@ impl SlashController {
         let Some(items) = command.suggest_args(&ctx, query) else {
             return Vec::new();
         };
-        // Section headers (grouped model picker) are visual-only in the
-        // modal; the typed dropdown stays a flat completion list.
-        let items: Vec<crate::slash::command::ArgItem> = items
-            .into_iter()
-            .filter(|item| !crate::slash::commands::model_groups::is_section_header(item))
-            .collect();
+        // Section headers (grouped model picker) flow through: the
+        // dropdown renders them dimmed and selection skips them. The
+        // fuzzy matcher drops them on a non-empty query (empty
+        // `match_text` never matches).
         if items.is_empty() {
             return Vec::new();
         }
