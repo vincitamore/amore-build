@@ -226,7 +226,11 @@ fn handle_callback(
     };
 
     if let Some(event) = event {
-        let _ = tx.blocking_send(event);
+        // Async handler context: a blocking send would panic on the tokio
+        // worker. The channel is capacity-1 and idle between callbacks, so
+        // a full slot can only mean an unmatched event raced in first —
+        // dropping keeps the wait loop on the right event.
+        let _ = tx.try_send(event);
     }
     axum::response::Html(
         "<html><body style=\"font-family: sans-serif; text-align: center; padding-top: 4em;\">\
