@@ -888,6 +888,7 @@ pub(crate) fn parse_remote_model_value(
             "responses" => Some(crate::sampling::ApiBackend::Responses),
             "chat_completions" => Some(crate::sampling::ApiBackend::ChatCompletions),
             "messages" => Some(crate::sampling::ApiBackend::Messages),
+            "cursor" => Some(crate::sampling::ApiBackend::Cursor),
             _ => None,
         })
         .unwrap_or_default();

@@ -788,6 +788,91 @@ pub(crate) async fn generate_session_compact(
                 itl_max_ms: timing.itl_max_ms(),
             }
         }
+        ApiBackend::Cursor => {
+            // The agent wire runs through the sampler's L2 transform;
+            // only its text channel feeds the summary.
+            let request = ConversationRequest {
+                items: chat_history,
+                model: Some(sampling_config.model.to_owned()),
+                temperature: Some(1.0),
+                x_grok_conv_id: Some(session_id.to_string()),
+                x_grok_req_id: Some(format!("xai-compact-{}", uuid::Uuid::new_v4())),
+                x_grok_session_id: Some(session_id.to_string()),
+                x_grok_agent_id: Some(xai_grok_telemetry::id::agent_id()),
+                ..Default::default()
+            };
+            let stream_result =
+                await_unless_cancelled(cancel, client.conversation_stream_cursor(request)).await?;
+            let (raw, _metadata) = match stream_result {
+                Ok(pair) => pair,
+                Err(e) => return Err(classify_sampling_error(e)),
+            };
+            let events = xai_grok_sampler::stream_cursor(
+                raw,
+                None,
+                xai_grok_sampler::RequestId::random(),
+                idle_timeout,
+            );
+            let mut events = std::pin::pin!(events);
+            let mut timing = StreamTiming::new();
+            let mut content = String::new();
+            let mut stop_reason: Option<String> = None;
+            let mut truncated = false;
+            let mut last_progress_at = std::time::Instant::now();
+            loop {
+                let idle_remaining = idle_timeout.saturating_sub(last_progress_at.elapsed());
+                let step = next_stream_step(&mut events, idle_remaining, cancel).await?;
+                // Wall-clock backstop (0 = disabled): cut a runaway - incl. a
+                // reasoning spiral that token limits miss - and let it retry.
+                if wall_clock_budget_secs > 0 && timing.elapsed_secs() >= wall_clock_budget_secs {
+                    return Err(CompactFailure::Transient(
+                        acp::Error::internal_error().data(format!(
+                            "compact failed: exceeded wall-clock budget {wall_clock_budget_secs}s (runaway generation)"
+                        )),
+                    ));
+                }
+                match step {
+                    StreamStep::Item(event) => match event {
+                        xai_grok_sampler::SamplingEvent::ChannelToken {
+                            channel: xai_grok_sampler::SamplingChannel::Text,
+                            text,
+                            ..
+                        } => {
+                            timing.record_delta();
+                            content.push_str(&text);
+                            last_progress_at = std::time::Instant::now();
+                        }
+                        xai_grok_sampler::SamplingEvent::Failed { error, .. } => {
+                            let acp_err = acp::Error::internal_error()
+                                .data(format!("compact failed: {}", error.message));
+                            if error.is_retryable {
+                                return Err(CompactFailure::Transient(acp_err));
+                            }
+                            return Err(CompactFailure::Deterministic(acp_err));
+                        }
+                        _ => {}
+                    },
+                    StreamStep::Ended => break,
+                    StreamStep::IdleTimeout => {
+                        return Err(CompactFailure::Transient(
+                            acp::Error::internal_error().data(format!(
+                                "compact failed: stream idle timeout after {idle_timeout:?} ({} chars received)",
+                                content.chars().count()
+                            )),
+                        ));
+                    }
+                }
+            }
+            CompactOutput {
+                content,
+                stop_reason: stop_reason.or_else(|| Some("stop".to_string())),
+                truncated,
+                ttft_ms: timing.ttft_ms(),
+                stream_ms: timing.stream_ms(),
+                delta_count: timing.count,
+                itl_max_ms: timing.itl_max_ms(),
+            }
+        }
     };
 
     if output.content.is_empty() {

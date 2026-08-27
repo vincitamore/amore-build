@@ -27,6 +27,7 @@ members = [
     "crates/codegen/xai-grok-bundle",
     "crates/codegen/xai-grok-config",
     "crates/codegen/xai-grok-config-types",
+    "crates/codegen/xai-grok-cursor",
     "crates/codegen/xai-grok-diag-server",
     "crates/codegen/xai-grok-env",
     "crates/codegen/xai-grok-extra-ca",
@@ -171,6 +172,7 @@ gethostname = "1"
 gix = { version = "0.83", default-features = false, features = ["sha1"] }
 glob = "0.3"
 globset = "0.4"
+h2 = "0.4"
 htmd = "0.5.4"
 html-escape = "0.2"
 http = "1"
@@ -270,6 +272,7 @@ time = "0.3"
 tiny-skia = "0.12"
 tokio = { version = "1", features = ["full"] }
 tokio-retry = "0.3"
+tokio-rustls = "0.26"
 tokio-stream = { version = "0.1", features = ["net"] }
 tokio-tungstenite = "0.27"
 tokio-util = { version = "0.7", features = ["rt"] }

@@ -485,6 +485,48 @@ def cmd_verify(dry_run: bool) -> int:
         "anthropic_oauth::apply_oauth_headers",
         "post() swaps the header set for OAuth bearer requests", problems)
 
+    # 6d-cursor. Cursor agent wire backend: pins the seams cut into
+    #     upstream files so a merge that drops one fails here instead of
+    #     silently reverting the wire lane. Most seams are also
+    #     compile-protected (exhaustive ApiBackend matches); these are
+    #     the cheap tripwires on top.
+    _check_file_contains(
+        "crates/codegen/xai-grok-sampling-types/src/types.rs",
+        "Cursor agent wire (Connect protocol over HTTP/2",
+        "api backend enum carries the Cursor agent wire variant", problems)
+    _check_file_contains(
+        "crates/codegen/xai-grok-sampler/src/client.rs",
+        "conversation_stream_cursor",
+        "sampler client opens the Cursor Run stream", problems)
+    _check_file_contains(
+        "crates/codegen/xai-grok-sampler/src/actor/request_task.rs",
+        "ApiBackend::Cursor =>",
+        "request_task dispatches the Cursor backend to its transform", problems)
+    _check_file_contains(
+        "crates/codegen/xai-grok-sampler/src/stream/mod.rs",
+        "pub mod cursor;",
+        "sampler declares the Cursor L2 transform module", problems)
+    _check_file_contains(
+        "crates/codegen/xai-grok-sampler/src/lib.rs",
+        "stream_cursor",
+        "sampler re-exports the Cursor L2 transform", problems)
+    _check_file_contains(
+        "Cargo.toml",
+        '"crates/codegen/xai-grok-cursor"',
+        "workspace carries the cursor wire crate", problems)
+    _check_file_contains(
+        "crates/codegen/xai-grok-sampler/Cargo.toml",
+        "xai-grok-cursor",
+        "sampler depends on the cursor wire crate", problems)
+    _check_file_contains(
+        "crates/codegen/xai-grok-shell/src/session/helpers/session_compact.rs",
+        "ApiBackend::Cursor",
+        "compaction drives the Cursor backend through its L2 transform", problems)
+    _check_file_contains(
+        "crates/codegen/xai-grok-shell/src/remote/client.rs",
+        '"cursor" => Some(crate::sampling::ApiBackend::Cursor)',
+        "remote model entries can select the Cursor backend", problems)
+
     # 6. fork-owned surface boundary (Phase-2 script, if present)
     if (REPO / BOUNDARY_SCRIPT).exists():
         r = run(["python", BOUNDARY_SCRIPT, "--check"])

@@ -1,0 +1,31 @@
+[package]
+license = "Apache-2.0"
+name = "xai-grok-cursor"
+version = "0.1.0"
+edition.workspace = true
+description = "Cursor agent wire backend: Connect protocol over HTTP/2 (Run streaming, KV blobs, request context)"
+
+[dependencies]
+async-stream = { workspace = true }
+bytes = { workspace = true }
+futures-util = { workspace = true }
+h2 = { workspace = true }
+http = { workspace = true }
+prost = { workspace = true }
+reqwest = { workspace = true, default-features = false }
+rustls = { workspace = true }
+rustls-native-certs = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+tokio = { workspace = true, features = ["rt", "macros", "time", "sync", "net"] }
+tokio-rustls = { workspace = true }
+tokio-util = { workspace = true, features = ["rt"] }
+tracing = { workspace = true }
+uuid = { workspace = true, features = ["v4"] }
+xai-grok-sampling-types = { path = "../xai-grok-sampling-types" }
+
+[build-dependencies]
+prost-build = { workspace = true }
+
+[lints]
+workspace = true

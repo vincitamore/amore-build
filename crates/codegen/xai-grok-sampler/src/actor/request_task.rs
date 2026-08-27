@@ -31,7 +31,7 @@ use crate::retry::{
     self as retry_mod, RetryDecision, classify_error, clone_error, resolve_max_retries,
 };
 use crate::stream::responses::stream_responses_tracked;
-use crate::stream::{stream_chat_completions, stream_messages};
+use crate::stream::{stream_chat_completions, stream_cursor, stream_messages};
 use crate::types::RequestId;
 
 /// Default per-chunk idle timeout when neither config nor caller
@@ -604,6 +604,25 @@ async fn run_one_attempt(
             };
             let (teed, captured) = tee_errors(raw);
             let l2 = stream_messages(teed, metadata, request_id.clone(), idle_timeout);
+            drive_l2(
+                l2,
+                request_id,
+                event_tx,
+                cancel_token,
+                captured,
+                None,
+                FailedResponseCapture::default(),
+                output_observed,
+            )
+            .await
+        }
+        ApiBackend::Cursor => {
+            let (raw, metadata) = match client.conversation_stream_cursor(request).await {
+                Ok(pair) => pair,
+                Err(e) => return AttemptOutcome::InitFailed { error: e },
+            };
+            let (teed, captured) = tee_errors(raw);
+            let l2 = stream_cursor(teed, metadata, request_id.clone(), idle_timeout);
             drive_l2(
                 l2,
                 request_id,

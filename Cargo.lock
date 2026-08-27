@@ -13542,6 +13542,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "xai-grok-cursor"
+version = "0.1.0"
+dependencies = [
+ "async-stream",
+ "bytes",
+ "futures-util",
+ "h2",
+ "http 1.4.0",
+ "prost",
+ "prost-build",
+ "reqwest 0.12.24",
+ "rustls",
+ "rustls-native-certs",
+ "serde_json",
+ "sha2 0.10.9",
+ "tokio",
+ "tokio-rustls",
+ "tokio-util",
+ "tracing",
+ "uuid",
+ "xai-grok-sampling-types",
+]
+
+[[package]]
 name = "xai-grok-diag-server"
 version = "0.1.0"
 dependencies = [
@@ -14076,6 +14100,7 @@ dependencies = [
  "tracing",
  "uuid",
  "xai-grok-auth",
+ "xai-grok-cursor",
  "xai-grok-extra-ca",
  "xai-grok-sampling-types",
  "xai-grok-test-support",

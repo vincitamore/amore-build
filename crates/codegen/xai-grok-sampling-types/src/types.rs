@@ -1093,6 +1093,9 @@ pub enum ApiBackend {
     Responses,
     /// Use the Anthropic Messages API (/v1/messages)
     Messages,
+    /// Use the Cursor agent wire (Connect protocol over HTTP/2 to
+    /// Cursor's AgentService/Run; consumes an `oauth:cursor` bearer).
+    Cursor,
 }
 
 impl ApiBackend {

@@ -51,18 +51,42 @@ amore login --provider cursor
 This runs Cursor's account OAuth (deep-link login + poll, PKCE) and stores
 the token pair with automatic refresh.
 
-**Scope note:** Cursor's own agent API is a gRPC/Connect protocol this
-harness's HTTP sampling backends do not speak, so there is no first-party
-model provider wired to a Cursor login yet. The login, storage, and refresh
-are complete, and the credential is consumable as a bearer token by any
-endpoint you point a model entry at:
+**Cursor backend.** The Cursor agent wire is a first-party backend: a model
+entry with `api_backend = "cursor"` talks Cursor's `AgentService/Run`
+endpoint (Connect protocol over HTTP/2) using the login's access token as
+the bearer:
 
 ```toml
-[model.my-cursor-compatible-endpoint]
-model = "..."
-base_url = "https://example.internal/v1"   # an endpoint that accepts a Cursor access token
+[model.cursor-composer]
+model = "composer-2.5"
+base_url = "https://api2.cursor.sh"
 api_key = "oauth:cursor"
+api_backend = "cursor"
+context_window = 200000
+
+[model.cursor-gpt]
+model = "gpt-5.4-mini-high"
+base_url = "https://api2.cursor.sh"
+api_key = "oauth:cursor"
+api_backend = "cursor"
+context_window = 200000
 ```
+
+Notes on the wire:
+
+- The model id is Cursor's own id from its model list. OpenAI-family
+  effort slugs (`-minimal|low|medium|high|xhigh|max`, with an optional
+  `-fast` lane suffix) are split into a `reasoning` parameter
+  automatically; `composer-2.5` is pinned to the Standard tier.
+- The system prompt rides the request-context handshake as global rules
+  (Cursor reconstructs the model prompt from those, not from the
+  history blobs). Tools are advertised as none; any native tool frame
+  the model still emits is rejected in band.
+- Text, thinking, and usage stream through the ordinary sampling event
+  path, so compaction, memory notes, and the pager all work unchanged.
+- Keep `base_url` at the default endpoint; it only needs changing to
+  front the wire with a local HTTP/2 bridge (the endpoint requires
+  HTTP/2 with TLS-ALPN `h2`, and HTTP/1.1 is rejected with 464).
 
 ## Managing credentials
 

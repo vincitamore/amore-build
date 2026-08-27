@@ -2177,6 +2177,55 @@ impl SamplingClient {
         self.create_message(wrapper).await
     }
 
+    /// Send a conversation request over the Cursor agent wire
+    /// (Connect protocol over HTTP/2). Consumes the resolved Cursor
+    /// access token as a plain bearer; the session-stable conversation
+    /// id keys the wire's rotation registry.
+    #[allow(clippy::type_complexity)]
+    pub async fn conversation_stream_cursor(
+        &self,
+        request: ConversationRequest,
+    ) -> Result<(
+        BoxStream<'static, Result<xai_grok_cursor::proto::AgentServerMessage>>,
+        Option<ResponseModelMetadata>,
+    )> {
+        let access_token = self
+            .bearer_resolver
+            .as_ref()
+            .and_then(|resolver| resolver.current_bearer())
+            .or_else(|| {
+                crate::anthropic_oauth::credential_from_headers(
+                    &self.default_headers,
+                    self.defaults.auth_scheme,
+                )
+            })
+            .filter(|token| !token.is_empty())
+            .ok_or(SamplingError::InvalidConfiguration(
+                "cursor backend requires a cursor credential (amore login --provider cursor)",
+            ))?;
+
+        let model = request
+            .model
+            .clone()
+            .unwrap_or_else(|| self.defaults.model.clone());
+        let base_conversation_id = request
+            .x_grok_session_id
+            .clone()
+            .filter(|id| !id.is_empty())
+            .or_else(|| request.x_grok_conv_id.clone());
+
+        let config = xai_grok_cursor::RunStreamConfig {
+            access_token,
+            base_url: Some(self.base_url.clone()),
+            model,
+            reasoning_effort: request.reasoning_effort,
+            items: request.items,
+            base_conversation_id,
+        };
+        let raw = xai_grok_cursor::transport::run_stream(config).await?;
+        Ok((raw, None))
+    }
+
     /// Backend-aware streaming call that collects the full response.
     pub async fn conversation_collect(
         &self,
@@ -2200,6 +2249,11 @@ impl SamplingClient {
             ApiBackend::Messages => {
                 let (raw, meta) = self.conversation_stream_messages(request).await?;
                 let events = crate::stream::stream_messages(raw, meta, request_id, idle_timeout);
+                crate::stream::collect_response(events).await
+            }
+            ApiBackend::Cursor => {
+                let (raw, meta) = self.conversation_stream_cursor(request).await?;
+                let events = crate::stream::stream_cursor(raw, meta, request_id, idle_timeout);
                 crate::stream::collect_response(events).await
             }
         };

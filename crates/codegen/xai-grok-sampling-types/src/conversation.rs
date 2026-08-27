@@ -2457,6 +2457,8 @@ mod tests {
                         .get("prompt_cache_key")
                         .is_some()
                 }
+                // The Cursor wire has no cache-key slot at all.
+                crate::ApiBackend::Cursor => false,
             };
             assert_eq!(
                 on_wire,

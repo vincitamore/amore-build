@@ -10,6 +10,15 @@ work it describes.
      fails a tag push until a `## v<version>` heading exists. -->
 ## Unreleased
 
+- **Cursor agent wire backend** — a model entry with
+  `api_backend = "cursor"` and `api_key = "oauth:cursor"` talks Cursor's
+  AgentService/Run endpoint directly (Connect protocol over HTTP/2):
+  conversation state as sha256-addressed blobs, the mandatory
+  request-context handshake carrying the system prompt as global rules,
+  heartbeats and blob replies written mid-stream, streaming text and
+  thinking, usage from checkpoints, and conversation-id rotation when the
+  server poisons an id. See `docs/oauth-providers.md` for the model-entry
+  recipe.
 - **Provider OAuth: `amore login --provider anthropic|cursor`** — sign in
   with Claude Pro/Max through the Claude Code OAuth flow (PKCE + loopback
   callback on 54545 with a paste fallback, bootstrap identity, refresh, and
