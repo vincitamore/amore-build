@@ -64,7 +64,7 @@ pub(crate) fn now_ms() -> i64 {
 }
 
 impl ProviderCredentials {
-    pub fn is_fresh(&self, now: i64) -> bool {
+    pub(crate) fn is_fresh(&self, now: i64) -> bool {
         now < self.expires_ms.saturating_sub(REFRESH_MARGIN_MS)
     }
 }

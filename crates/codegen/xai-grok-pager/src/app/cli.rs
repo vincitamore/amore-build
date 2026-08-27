@@ -70,9 +70,14 @@ pub enum Command {
         devbox: bool,
         /// Sign in with a third-party model provider instead of the xAI
         /// account.
+        ///
+        /// `devbox` is deliberately absent from the conflicts list: it is
+        /// `arg(skip)`-unregistered unless the devbox-login feature is on,
+        /// and clap's debug asserts reject conflicts against an
+        /// unregistered arg id.
         #[arg(
             long = "provider",
-            conflicts_with_all = ["oauth", "device_auth", "devbox"]
+            conflicts_with_all = ["oauth", "device_auth"]
         )]
         provider: Option<LoginProvider>,
     },
