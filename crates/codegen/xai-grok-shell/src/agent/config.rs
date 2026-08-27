@@ -5003,7 +5003,10 @@ pub(crate) fn try_resolve_model_credentials(
     let cfg = Config::new_from_toml_cfg(&raw)
         .map_err(|e| tracing::warn!(error = %e, "config parse failed for credential resolution"))
         .ok()?;
-    let models = resolve_model_list(&cfg, None);
+    // Include cached provider-discovery entries: a discovered model's
+    // credential lives on its discovery entry, not in `[model.*]`.
+    let discovered = crate::agent::models::merge_cached_any_age(&cfg, None);
+    let models = resolve_model_list(&cfg, discovered);
     let entry = find_model_by_id(&models, model_id)?;
     let mut credentials = resolve_credentials(entry, session_key);
     enforce_disable_api_key_auth(
@@ -5081,7 +5084,13 @@ fn with_resolved_model<T>(model_id: &str, f: impl FnOnce(ModelLookup) -> T) -> T
     else {
         return f(ModelLookup::ConfigUnavailable);
     };
-    let models = resolve_model_list(&cfg, None);
+    // Include cached provider-discovery entries: a discovered model is
+    // BYOK (its entry carries the provider credential), and a lookup
+    // blind to discovery classifies it `NotByok` — which activates the
+    // session-token gate and sends the first-party session token to the
+    // provider's endpoint (`unauthenticated` on every request).
+    let discovered = crate::agent::models::merge_cached_any_age(&cfg, None);
+    let models = resolve_model_list(&cfg, discovered);
     f(ModelLookup::Loaded(find_model_by_id(&models, model_id)))
 }
 /// Resolve a standalone `SamplerConfig` for an auxiliary model slug (image

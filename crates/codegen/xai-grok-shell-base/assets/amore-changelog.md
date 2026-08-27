@@ -10,6 +10,16 @@ work it describes.
      fails a tag push until a `## v<version>` heading exists. -->
 ## Unreleased
 
+- **Discovered models authenticate with their own credential** — picking
+  a discovered Cursor (or OpenRouter) model no longer fails with
+  `Connect error unauthenticated` on every turn. The per-model auth
+  lookup resolved models from config alone, so a discovered entry read
+  as not-BYOK and the turn swapped its provider credential for the xAI
+  session token — which the provider's endpoint rejected, and the retry
+  lane then refreshed the wrong (xAI) token. The lookup now includes
+  cached discovery entries regardless of cache age, so discovered
+  models keep their `oauth:<provider>` credential exactly like a manual
+  `[model.*]` entry.
 - **Provider model discovery: OpenRouter + Cursor** — a BYOK credential is
   now enough to fill the model picker; no manual `[model.*]` block per
   model. An OpenRouter seed (any entry pointing at `openrouter.ai` with

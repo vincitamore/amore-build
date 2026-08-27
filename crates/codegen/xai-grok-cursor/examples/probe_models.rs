@@ -52,15 +52,29 @@ async fn main() {
         return;
     }
 
+    // `--shared m1 m2 ...` drives every listed model over ONE conversation
+    // id, in order — the model-switch shape a live session produces. A
+    // per-model verdict shows whether the endpoint accepts a conversation
+    // continued under a different model.
+    if args.first().map(String::as_str) == Some("--shared") {
+        let shared_id = uuid::Uuid::new_v4().to_string();
+        writeln!(std::io::stdout(), "shared conversation id: {shared_id}").ok();
+        for model in &args[1..] {
+            let verdict = probe_run(&access, model, Some(shared_id.clone())).await;
+            writeln!(std::io::stdout(), "{model}: {verdict}").ok();
+        }
+        return;
+    }
+
     for model in &args {
-        let verdict = probe_run(&access, model).await;
+        let verdict = probe_run(&access, model, None).await;
         writeln!(std::io::stdout(), "{model}: {verdict}").ok();
     }
 }
 
 /// Fire a minimal Run turn and drive it to the first terminal verdict
 /// (frame flow, error, or turn end) instead of stopping at the first frame.
-async fn probe_run(access: &str, model: &str) -> String {
+async fn probe_run(access: &str, model: &str, conversation_id: Option<String>) -> String {
     use futures_util::StreamExt;
     let items = vec![xai_grok_sampling_types::conversation::ConversationItem::user("hi")];
     let config = xai_grok_cursor::transport::RunStreamConfig {
@@ -69,14 +83,15 @@ async fn probe_run(access: &str, model: &str) -> String {
         model: model.to_owned(),
         reasoning_effort: None,
         items,
-        base_conversation_id: Some(uuid::Uuid::new_v4().to_string()),
+        base_conversation_id: Some(
+            conversation_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+        ),
     };
     let mut stream = match xai_grok_cursor::transport::run_stream(config).await {
         Ok(stream) => stream,
         Err(e) => return format!("open failed: {e}"),
     };
     let mut frames = 0usize;
-    let mut saw_turn_ended = false;
     while let Some(item) = tokio::time::timeout(std::time::Duration::from_secs(60), stream.next())
         .await
         .unwrap_or(None)

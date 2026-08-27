@@ -1,5 +1,10 @@
 [
   {
+    "category": "fixes",
+    "description": "**Discovered models authenticate with their own credential** - picking a discovered Cursor (or OpenRouter) model no longer fails with `Connect error unauthenticated` on every turn. The per-model auth lookup resolved models from config alone, so a discovered entry read as not-BYOK and the turn swapped its provider credential for the xAI session token. The lookup now includes cached discovery entries regardless of cache age, so discovered models keep their `oauth:<provider>` credential exactly like a manual `[model.*]` entry.",
+    "breaking_change": false
+  },
+  {
     "category": "features",
     "description": "**Provider model discovery: OpenRouter + Cursor** - a BYOK credential is now enough to fill the model picker; no manual [model.*] block per model. An OpenRouter seed (any entry pointing at openrouter.ai with api_key/env_key, or a set OPENROUTER_API_KEY environment variable) pulls the full /api/v1/models catalog with context window and completion ceilings; a Cursor login (amore login --provider cursor) lists the account's usable models through the unary GetUsableModels RPC. Discovered entries merge into the catalog below your own [model.*] overrides, cache for an hour, and OpenRouter's reasoning capability object bridges to the reasoning-effort menu (including thinking-off for optional-thinking models).",
     "breaking_change": false

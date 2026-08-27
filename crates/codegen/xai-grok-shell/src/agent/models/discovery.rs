@@ -194,7 +194,8 @@ fn source_cache(source: DiscoverySource) -> ModelsCacheManager {
     }
 }
 
-/// Load regardless of TTL — best-effort fallback when a refetch fails.
+/// Load regardless of TTL — best-effort fallback when a refetch fails,
+/// and the read behind [`merge_cached_any_age`].
 fn load_stale(cache: &ModelsCacheManager, origin: &str) -> Option<IndexMap<String, ModelEntry>> {
     let data = std::fs::read(&cache.path).ok()?;
     let parsed: ModelsCache = serde_json::from_slice(&data).ok()?;
@@ -222,6 +223,35 @@ pub(crate) fn merge_cached(
         let cache = source_cache(source);
         if let Some(cached) = cache.load_fresh(&CacheAuthMethod::ApiKey, &source_origin(seed)) {
             for (key, entry) in cached.models {
+                merged.entry(key).or_insert(entry);
+            }
+        }
+    }
+    (!merged.is_empty()).then_some(merged)
+}
+
+/// Append cached discovery entries to `prefetched` regardless of cache
+/// age (sync, no network). The per-model auth lookups use this: whether
+/// a model is a discovered BYOK entry is not a property that expires
+/// with the fetch TTL, and a lookup blind to discovery classifies the
+/// model `NotByok` — which activates the session-token gate and sends
+/// the first-party session token to a third-party endpoint.
+pub(crate) fn merge_cached_any_age(
+    cfg: &config::Config,
+    prefetched: Option<IndexMap<String, ModelEntry>>,
+) -> Option<IndexMap<String, ModelEntry>> {
+    let seeds = discovery_seeds(cfg);
+    if seeds.is_empty() {
+        return prefetched;
+    }
+    let mut merged = prefetched.unwrap_or_default();
+    for source in seeded_sources(&seeds) {
+        let Some(seed) = seeds.iter().find(|s| s.source == source) else {
+            continue;
+        };
+        let cache = source_cache(source);
+        if let Some(models) = load_stale(&cache, &source_origin(seed)) {
+            for (key, entry) in models {
                 merged.entry(key).or_insert(entry);
             }
         }
@@ -1036,6 +1066,57 @@ mod tests {
         assert_eq!(
             cursor_context_window(&details, "composer-2.5"),
             DISCOVERY_DEFAULT_CONTEXT_WINDOW
+        );
+    }
+
+    #[test]
+    fn discovered_cursor_entries_read_as_byok() {
+        let details = xai_grok_cursor::proto::ModelDetails {
+            model_id: "claude-opus-5-thinking-high".to_owned(),
+            ..Default::default()
+        };
+        let map = discovered_map(cursor_entries(&[details]));
+        let entry = map.get("claude-opus-5-thinking-high").expect("entry");
+        assert!(
+            entry.has_own_credentials(),
+            "a discovered entry must classify as BYOK — NotByok activates the \
+             session-token gate and sends the first-party token to the provider"
+        );
+    }
+
+    #[test]
+    fn stale_discovery_cache_still_serves_the_auth_lookup() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let cache = ModelsCacheManager {
+            path: dir.path().join("models_discovery_cursor.json"),
+            ttl: DISCOVERY_TTL,
+        };
+        let origin = "amore-discovery:cursor";
+        let details = xai_grok_cursor::proto::ModelDetails {
+            model_id: "composer-2.5".to_owned(),
+            ..Default::default()
+        };
+        let map = discovered_map(cursor_entries(&[details]));
+        cache.persist(&map, None, CacheAuthMethod::ApiKey, origin);
+
+        // Backdate the cache past the discovery TTL.
+        let mut parsed: ModelsCache =
+            serde_json::from_slice(&std::fs::read(&cache.path).expect("cache file"))
+                .expect("cache parses");
+        parsed.fetched_at = Utc::now() - ChronoDuration::hours(48);
+        cache.atomic_write(&parsed);
+
+        assert!(
+            cache.load_fresh(&CacheAuthMethod::ApiKey, origin).is_none(),
+            "sanity: the backdated cache must be stale"
+        );
+        let models = load_stale(&cache, origin).expect("any-age load");
+        assert!(
+            models
+                .get("composer-2.5")
+                .expect("entry survives")
+                .has_own_credentials(),
+            "the any-age load must keep the entry's credential"
         );
     }
 
