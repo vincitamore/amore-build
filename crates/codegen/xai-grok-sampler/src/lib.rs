@@ -17,6 +17,8 @@
 //! and the actor with its per-request task tie these layers together.
 
 pub mod actor;
+/// Anthropic OAuth (Claude Code) wire fingerprint for the Messages backend.
+pub mod anthropic_oauth;
 pub mod attribution;
 pub mod client;
 pub mod commands;

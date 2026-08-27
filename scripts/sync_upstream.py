@@ -444,6 +444,47 @@ def cmd_verify(dry_run: bool) -> int:
         "event loop consumes the session-socket wake channel",
         problems)
 
+    # 6c-provider. provider OAuth (Anthropic Claude Code / Cursor login):
+    #     the new-module surface is merge-safe by construction; these pin the
+    #     few seams cut into upstream files so a merge that drops one fails
+    #     here instead of silently reverting the login lane.
+    _check_file_contains(
+        "crates/codegen/xai-grok-pager/src/app/cli.rs",
+        "pub enum LoginProvider",
+        "login exposes the third-party provider enum (--provider)", problems)
+    _check_file_contains(
+        "crates/codegen/xai-grok-pager/src/app/cli.rs",
+        'long = "provider"',
+        "login carries the --provider flag", problems)
+    _check_file_contains(
+        "crates/codegen/xai-grok-pager-bin/src/main.rs",
+        "provider_oauth::run_provider_login_cli",
+        "login --provider dispatches to the provider OAuth lane", problems)
+    _check_file_contains(
+        "crates/codegen/xai-grok-shell/src/auth/mod.rs",
+        "pub mod provider_oauth;",
+        "shell auth declares the provider_oauth module", problems)
+    _check_file_contains(
+        "crates/codegen/xai-grok-shell/src/agent/config.rs",
+        "provider_oauth::resolve_api_key_reference",
+        "resolve_credentials swaps oauth: references for live tokens", problems)
+    _check_file_contains(
+        "crates/codegen/xai-grok-shell/src/agent/config.rs",
+        "ProviderOAuthBearerResolver::new",
+        "oauth: model credentials get a live bearer resolver", problems)
+    _check_file_contains(
+        "crates/codegen/xai-grok-sampler/src/lib.rs",
+        "pub mod anthropic_oauth;",
+        "sampler declares the Anthropic OAuth fingerprint module", problems)
+    _check_file_contains(
+        "crates/codegen/xai-grok-sampler/src/client.rs",
+        "anthropic_oauth::credential_from_headers",
+        "messages requests apply the Claude Code OAuth fingerprint", problems)
+    _check_file_contains(
+        "crates/codegen/xai-grok-sampler/src/client.rs",
+        "anthropic_oauth::apply_oauth_headers",
+        "post() swaps the header set for OAuth bearer requests", problems)
+
     # 6. fork-owned surface boundary (Phase-2 script, if present)
     if (REPO / BOUNDARY_SCRIPT).exists():
         r = run(["python", BOUNDARY_SCRIPT, "--check"])
@@ -741,14 +782,14 @@ def cmd_verify(dry_run: bool) -> int:
         "grok-build-public-artifacts",
     ):
         _check_file_lacks(
-            "crates/codegen/xai-grok-pager/src/self_update/**",
+            "crates/codegen/xai-grok-pager/src/self_update/**/*.rs",
             needle,
             f"11e: self_update/** must not contain {needle!r}",
             problems,
         )
     for needle in ("base_url", "from_base"):
         _check_file_lacks(
-            "crates/codegen/xai-grok-pager/src/self_update/**",
+            "crates/codegen/xai-grok-pager/src/self_update/**/*.rs",
             needle,
             f"11f: self_update/** must not contain {needle!r}",
             problems,

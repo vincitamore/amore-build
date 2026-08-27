@@ -1,0 +1,14 @@
+feat: provider OAuth login (Claude Code, Cursor) with a live-credential lane
+
+amore login --provider anthropic|cursor runs the provider's own OAuth flow
+(PKCE + loopback callback + paste fallback for Anthropic; deep-link + poll
+for Cursor) and stores credentials in ~/.amore/oauth-credentials.json.
+Model entries reference them with api_key = "oauth:<provider>"; a per-model
+bearer resolver re-reads the store per request with CAS-protected refresh,
+and the Anthropic Messages backend applies the Claude Code OAuth wire
+fingerprint (bearer auth, CC beta/client headers, billing+cch system
+blocks, CC metadata, 64k clamp) for sk-ant-oat credentials. Fingerprint
+constants track omp 18.0.7's Cowork claude-desktop profile. Cursor has
+login+refresh only: its agent API is a gRPC/Connect protocol the HTTP
+backends do not speak yet. Also fixes the self_update verify glob
+(pathlib ** yields no files).

@@ -13,6 +13,9 @@ mod jwt;
 pub(crate) mod manager;
 mod model;
 pub mod oidc;
+/// Third-party OAuth login (Anthropic Claude Code, Cursor) — ported from the
+/// omp harness's provider OAuth methods.
+pub mod provider_oauth;
 pub(crate) mod recovery;
 pub(crate) mod refresh;
 pub(crate) mod single_flight;

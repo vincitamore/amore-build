@@ -6,6 +6,28 @@ monorepo sync commits; everything below is the fork's own delta, newest first.
 This document is compiled into the binary — update it in the same change as the
 work it describes.
 
+<!-- The next release cut renames this section to its tag version; release.yml
+     fails a tag push until a `## v<version>` heading exists. -->
+## Unreleased
+
+- **Provider OAuth: `amore login --provider anthropic|cursor`** — sign in
+  with Claude Pro/Max through the Claude Code OAuth flow (PKCE + loopback
+  callback on 54545 with a paste fallback, bootstrap identity, refresh, and
+  a printed ~30-day re-login deadline) or with a Cursor account
+  (deep-link login + poll + refresh). Credentials live in
+  `~/.amore/oauth-credentials.json`, separate from `auth.json`. See
+  `docs/oauth-providers.md`.
+- **`oauth:<provider>` model credentials** — an `api_key = "oauth:anthropic"`
+  model entry resolves to a live access token on every request, refreshing
+  near expiry with a compare-and-set so concurrent processes never clobber
+  a rotated token.
+- **Claude Code wire fingerprint on Anthropic OAuth** — Messages-backend
+  requests carrying an `sk-ant-oat…` token authenticate with
+  `Authorization: Bearer`, send the Claude Code beta/client header set and
+  system blocks (billing header + `cch` attestation + CC instruction),
+  CC-shaped request metadata, and the 64k output clamp. API keys keep the
+  ordinary path.
+
 ## v1.0.8-hotfix.1
 
 - **Seat identity is the Tailscale node** — MagicDNS first label, not the

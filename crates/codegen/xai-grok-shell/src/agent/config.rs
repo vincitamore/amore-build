@@ -4891,8 +4891,12 @@ pub(crate) fn resolve_credentials(
 ) -> ResolvedCredentials {
     let info = model.info();
     let (api_key, base_url, auth_type) = if let Some(key) = model.own_credential() {
+        // `oauth:<provider>` references swap for a live access token from the
+        // provider OAuth store (auth::provider_oauth). A reference with no
+        // stored login resolves to None so the request fails as
+        // "no credential" instead of sending the literal string as a bearer.
         (
-            Some(key),
+            crate::auth::provider_oauth::resolve_api_key_reference(&key),
             info.base_url.clone(),
             xai_chat_state::AuthType::ApiKey,
         )
@@ -5284,6 +5288,18 @@ pub(crate) fn sampling_config_for_model(
         &api_backend,
         &credentials.base_url,
     );
+    // `oauth:<provider>` credentials get a live bearer resolver so every
+    // request reads the store: tokens refreshed by a login (or another
+    // process) are picked up mid-session instead of dying with the
+    // construction-time seed key.
+    let bearer_resolver = model
+        .own_credential()
+        .and_then(|key| crate::auth::provider_oauth::oauth_reference_kind(&key))
+        .map(|kind| {
+            std::sync::Arc::new(
+                crate::auth::provider_oauth::ProviderOAuthBearerResolver::new(kind),
+            ) as xai_grok_sampler::config::SharedBearerResolver
+        });
     SamplerConfig {
         api_key: credentials.api_key,
         model: model_name,
@@ -5309,7 +5325,7 @@ pub(crate) fn sampling_config_for_model(
         user_id,
         origin_client: None,
         attribution_callback: None,
-        bearer_resolver: None,
+        bearer_resolver,
         supports_backend_search: info.supports_backend_search,
         compactions_remaining: info.compactions_remaining,
         compaction_at_tokens: info.compaction_at_tokens,

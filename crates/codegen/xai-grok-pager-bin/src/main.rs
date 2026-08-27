@@ -2268,9 +2268,20 @@ async fn async_main(args: PagerArgs) -> Result<()> {
                 oauth,
                 device_auth,
                 devbox,
+                provider,
             } => {
                 init_tracing_simple("cli");
                 let _otel_guard = xai_grok_telemetry::otel_layer::otel_guard();
+                if let Some(provider) = provider {
+                    // Third-party provider OAuth (Anthropic Claude Code /
+                    // Cursor): does not touch the xAI auth chain.
+                    xai_grok_shell::auth::provider_oauth::run_provider_login_cli(
+                        provider.as_arg_str(),
+                    )
+                    .await?;
+                    println!();
+                    xai_grok_shell::instrumentation::finalize_and_exit(0);
+                }
                 let config = xai_grok_shell::config::load_agent_config_disk_only()
                     .map_err(|e| anyhow::anyhow!("Failed to create agent config: {e}"))?;
                 xai_grok_shell::auth::run_cli_login(&config, oauth, device_auth, devbox).await?;

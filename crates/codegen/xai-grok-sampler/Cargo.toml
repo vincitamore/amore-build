@@ -22,6 +22,8 @@ indexmap = { workspace = true, features = ["serde"] }
 reqwest = { workspace = true, features = ["stream", "rustls-tls-native-roots"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
+# Anthropic OAuth fingerprint: billing-header sha256 suffix + device-id hash.
+sha2 = { workspace = true }
 tokio = { workspace = true, features = ["rt", "macros", "time", "sync"] }
 tokio-util = { workspace = true }
 tracing = { workspace = true }
