@@ -25,6 +25,10 @@ the model. Decision logic:
   `Gate released`, …) or a capture-path write in this turn releases;
 - trivial sessions (< 3 work signals) and non-house workspaces (no
   `AGENTS.md`-class marker + `tasks/`) never fire;
+- idle Monitor / agora deliveries (`<monitor-event>` or monitor-ended) whose
+  tools this turn only read or posted to the room never fire. A human prompt,
+  a write/edit, a mutating shell, or a dispatch keeps the gate. Watcher
+  lifetime is the wrong boundary: native Monitor lives for the session;
 - only `reason == "end_turn"` is gated — session-end observe fires release;
 - fail-open on parse/IO errors.
 

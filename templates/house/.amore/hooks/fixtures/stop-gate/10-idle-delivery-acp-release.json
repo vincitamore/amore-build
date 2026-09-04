@@ -1,0 +1,12 @@
+{
+  "hookEventName": "stop",
+  "sessionId": "sess-idle-acp",
+  "cwd": "__HOUSE__",
+  "workspaceRoot": "__HOUSE__",
+  "timestamp": "2026-07-30T00:00:00Z",
+  "promptId": "prompt-K",
+  "reason": "end_turn",
+  "stopHookActive": false,
+  "lastAssistantMessage": "not for me",
+  "transcriptPath": "__IDLE_ACP_TRANSCRIPT__"
+}

@@ -1,0 +1,12 @@
+{
+  "hookEventName": "stop",
+  "sessionId": "sess-idle",
+  "cwd": "__HOUSE__",
+  "workspaceRoot": "__HOUSE__",
+  "timestamp": "2026-07-30T00:00:00Z",
+  "promptId": "prompt-I",
+  "reason": "end_turn",
+  "stopHookActive": false,
+  "lastAssistantMessage": "not for me",
+  "transcriptPath": "__IDLE_TRANSCRIPT__"
+}

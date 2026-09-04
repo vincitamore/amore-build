@@ -80,6 +80,99 @@ def capture_lines() -> list[dict]:
     ]
 
 
+MONITOR_USER = {
+    "type": "user",
+    "content": [
+        {
+            "type": "text",
+            "text": (
+                "<system-reminder>\n"
+                "<monitor-event task_id=\"m1\">\n"
+                "noop from the room\n"
+                "</monitor-event>\n"
+                "</system-reminder>"
+            ),
+        }
+    ],
+    "synthetic_reason": "system_reminder",
+}
+READ_ASSIST = {
+    "type": "assistant",
+    "content": "looking",
+    "tool_calls": [
+        {
+            "id": "r",
+            "name": "read_file",
+            "arguments": json.dumps({"target_file": "x.md"}),
+        }
+    ],
+}
+READ_RES = {"type": "tool_result", "tool_call_id": "r", "content": "ok"}
+
+
+def idle_lines() -> list[dict]:
+    # Prior human work in the tail would fire without the idle-delivery skip.
+    return busy_lines() + [MONITOR_USER] + [READ_ASSIST, READ_RES] * 5
+
+
+def idle_write_lines() -> list[dict]:
+    return busy_lines() + [MONITOR_USER] + [READ_ASSIST, READ_RES] * 3 + [
+        {
+            "type": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "w",
+                    "name": "search_replace",
+                    "arguments": json.dumps(
+                        {
+                            "file_path": "src/foo.py",
+                            "old_string": "a",
+                            "new_string": "b",
+                        }
+                    ),
+                }
+            ],
+        }
+    ]
+
+
+def acp_idle_lines(prompt_id: str) -> list[dict]:
+    def chunk(text: str) -> dict:
+        return {
+            "params": {
+                "update": {
+                    "sessionUpdate": "user_message_chunk",
+                    "content": {"type": "text", "text": text},
+                },
+                "_meta": {"promptId": prompt_id},
+            }
+        }
+
+    def tool(title: str, raw: dict) -> dict:
+        return {
+            "params": {
+                "update": {
+                    "sessionUpdate": "tool_call",
+                    "title": title,
+                    "rawInput": raw,
+                    "_meta": {
+                        "x.ai/tool": {"name": title, "read_only": True}
+                    },
+                },
+                "_meta": {"promptId": prompt_id},
+            }
+        }
+
+    return [
+        chunk("<monitor-event task_id=\"m1\">\nnoop\n</monitor-event>"),
+        tool("read_file", {"target_file": "a.md"}),
+        tool("read_file", {"target_file": "b.md"}),
+        tool("read_file", {"target_file": "c.md"}),
+        tool("grep", {"pattern": "x"}),
+    ]
+
+
 def make_house(root: Path) -> None:
     (root / "tasks").mkdir(parents=True, exist_ok=True)
     (root / "reminders").mkdir(parents=True, exist_ok=True)
@@ -191,6 +284,9 @@ def main() -> int:
         busy = write_jsonl(fx / "busy.jsonl", busy_lines())
         cap = write_jsonl(fx / "cap.jsonl", capture_lines())
         triv = write_jsonl(fx / "triv.jsonl", [USERQ, ASSIST_TOOLS])
+        idle = write_jsonl(fx / "idle.jsonl", idle_lines())
+        idle_write = write_jsonl(fx / "idle-write.jsonl", idle_write_lines())
+        idle_acp = write_jsonl(fx / "idle-acp.jsonl", acp_idle_lines("prompt-K"))
         mat_dir = td_path / "materialized"
         mat_dir.mkdir()
 
@@ -200,6 +296,9 @@ def main() -> int:
             "__BUSY_TRANSCRIPT__": busy.replace("\\", "/"),
             "__CAPTURE_TRANSCRIPT__": cap.replace("\\", "/"),
             "__TRIVIAL_TRANSCRIPT__": triv.replace("\\", "/"),
+            "__IDLE_TRANSCRIPT__": idle.replace("\\", "/"),
+            "__IDLE_WRITE_TRANSCRIPT__": idle_write.replace("\\", "/"),
+            "__IDLE_ACP_TRANSCRIPT__": idle_acp.replace("\\", "/"),
             "__HOUSE_WITH_DUE__": str(house_due).replace("\\", "/"),
             "__HOUSE_WITH_MALFORMED__": str(house_bad).replace("\\", "/"),
             "__HOUSE_WITH_FUTURE__": str(house_future).replace("\\", "/"),
@@ -229,6 +328,12 @@ def main() -> int:
             ("06-non-org-release.json", "stop: non-org release",
              lambda rc, out: rc == 0 and out == ""),
             ("07-session-end-release.json", "stop: session-end release",
+             lambda rc, out: rc == 0 and out == ""),
+            ("08-idle-delivery-release.json", "stop: idle-delivery release",
+             lambda rc, out: rc == 0 and out == ""),
+            ("09-idle-delivery-write-block.json", "stop: idle-delivery write still blocks",
+             lambda rc, out: rc == 0 and '"decision": "block"' in out and "HOUSE STOP GATE" in out),
+            ("10-idle-delivery-acp-release.json", "stop: idle-delivery ACP release",
              lambda rc, out: rc == 0 and out == ""),
         ]
 

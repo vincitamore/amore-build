@@ -1,0 +1,12 @@
+{
+  "hookEventName": "stop",
+  "sessionId": "sess-idle-write",
+  "cwd": "__HOUSE__",
+  "workspaceRoot": "__HOUSE__",
+  "timestamp": "2026-07-30T00:00:00Z",
+  "promptId": "prompt-J",
+  "reason": "end_turn",
+  "stopHookActive": false,
+  "lastAssistantMessage": "patched the file",
+  "transcriptPath": "__IDLE_WRITE_TRANSCRIPT__"
+}

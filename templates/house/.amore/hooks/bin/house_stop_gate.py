@@ -15,6 +15,11 @@ Gate discipline:
 - release-phrase (line-anchored) releases;
 - a capture-path write observed in this turn's transcript releases;
 - trivial sessions (< 3 work signals in the transcript) never fire;
+- idle background delivery (Monitor `<monitor-event>` / monitor-ended) whose
+  tools this turn only read or posted to the room never fire — the checklist
+  has nothing to catch. A human `<user_query>`, a write/edit, a mutating
+  shell, or a dispatch keeps the gate. Native Monitor lives for the session,
+  so watcher lifetime is the wrong boundary;
 - non-org workspaces (no AGENTS.md-class marker + tasks/ at workspaceRoot)
   never fire;
 - session-end observe fires (reason != "end_turn") never fire.
@@ -35,6 +40,41 @@ RELEASE_LINES = {
 }
 
 CAPTURE_TOOLS = {"write", "search_replace", "edit", "multiedit", "create_file"}
+
+# Names the chat-history schema uses when the harness has not stamped
+# x.ai/tool.read_only. Prefer that stamp on the live ACP stream.
+READ_ONLY_TOOL_NAMES = {
+    "read_file", "read", "grep", "list_dir", "glob",
+    "web_search", "web_fetch", "open_page", "open_page_with_find",
+    "get_command_or_subagent_output", "search_tool",
+    "x_keyword_search", "x_semantic_search", "x_user_search", "x_thread_fetch",
+    "scheduler_list",
+}
+SHELL_TOOL_NAMES = {"run_terminal_command", "bash", "powershell", "shell"}
+
+# Room-speak and read-only inspection. Not agora join/claim/pull/watch:
+# those mutate roster, git, or session obligations.
+_IDLE_SHELL = re.compile(
+    r"^\s*(?:(?:\$env:[A-Za-z_][A-Za-z0-9_]*\s*=\s*(?:'[^']*'|\"[^\"]*\")\s*;\s*)*)"
+    r"(?:(?:cd|Set-Location)\s+\S+\s*(?:&&|;)\s*)?"
+    r"(?:"
+    r"agora\s+(?:read|who|doctor|post|session\s+--list|status|schema)"
+    r"|git\s+(?:log|status|show|diff|branch|fetch|rev-parse|ls-files|worktree\s+list)"
+    r"|gh\s+(?:pr\s+(?:view|checks|diff|list)|run\s+(?:list|view)|issue\s+(?:view|list)|api)"
+    r"|python(?:3)?\s+-c"
+    r"|curl\s+-s"
+    r"|type\s+"
+    r"|Get-Content\s+"
+    r"|Select-String\s+"
+    r"|echo\s+"
+    r"|Write-Output\s+"
+    r")",
+    re.IGNORECASE,
+)
+_MUTATING_SHELL_TOKS = (
+    "git commit", "git push", "git add ", "gh pr create", "gh pr comment",
+    " > ", ">>", "rm ", "mv ", "cp ", "Remove-Item", "Move-Item", "Copy-Item",
+)
 
 CAPTURE_MARKERS = [
     "knowledge/", "knowledge\\",
@@ -201,14 +241,137 @@ def args_mention_capture(args_text: str) -> bool:
     return any(m.lower() in lowered for m in CAPTURE_MARKERS)
 
 
+def envelope_meta(entry: dict) -> dict:
+    """promptId lives on params._meta in live updates.jsonl, not the top-level
+    line. Fall back to entry._meta for older/test shapes."""
+    params = entry.get("params")
+    if isinstance(params, dict) and isinstance(params.get("_meta"), dict):
+        return params["_meta"]
+    meta = entry.get("_meta")
+    return meta if isinstance(meta, dict) else {}
+
+
+def extract_update_text(update: dict) -> str:
+    content = update.get("content")
+    if isinstance(content, dict) and isinstance(content.get("text"), str):
+        return content["text"]
+    if isinstance(content, str):
+        return content
+    return ""
+
+
+def is_stop_gate_injection(text: str) -> bool:
+    lowered = text.lower()
+    return (
+        "[house stop gate" in lowered
+        or "[amore stop gate" in lowered
+        or "[arcus stop gate" in lowered
+        or lowered.lstrip().startswith("<maintenance-gate")
+        or "stop hook feedback:" in lowered
+    )
+
+
+def is_idle_delivery_text(text: str) -> bool:
+    """True when this user stimulus is a harness background delivery, not a person.
+
+    This substrate wraps Monitor wakes as <monitor-event>, optionally inside
+    <system-reminder>. A human <user_query> in the same text wins (keep the gate).
+    Compact-boundary packets are not idle deliveries.
+    """
+    if "<user_query>" in text:
+        return False
+    lowered = text.lower()
+    if "<monitor-event" in lowered:
+        return True
+    if "[monitor ended" in lowered:
+        return True
+    return False
+
+
+def _command_from_raw(raw) -> str:
+    if isinstance(raw, dict):
+        return str(raw.get("command") or "")
+    if isinstance(raw, str):
+        try:
+            obj = json.loads(raw)
+        except (ValueError, json.JSONDecodeError):
+            return raw
+        if isinstance(obj, dict):
+            return str(obj.get("command") or "")
+        return raw
+    return ""
+
+
+def tool_is_idle(name: str, raw, update: dict | None = None) -> bool:
+    name_l = (name or "").lower()
+    xa = {}
+    if isinstance(update, dict):
+        meta = update.get("_meta") or {}
+        if isinstance(meta, dict):
+            maybe = meta.get("x.ai/tool") or {}
+            if isinstance(maybe, dict):
+                xa = maybe
+    if xa.get("read_only") is True and name_l not in SHELL_TOOL_NAMES:
+        return True
+    if name_l in READ_ONLY_TOOL_NAMES:
+        return True
+    if name_l in SHELL_TOOL_NAMES:
+        command = _command_from_raw(raw)
+        if _IDLE_SHELL.match(command) and not any(tok in command for tok in _MUTATING_SHELL_TOKS):
+            return True
+        return False
+    return False
+
+
+def idle_delivery_turn(entries: list[dict]) -> bool:
+    """Last user stimulus is a Monitor/agora delivery and every tool since it
+    only read (or posted to the room). Ambiguity keeps the gate.
+
+    Tools after that stimulus are this turn even when promptId is missing —
+    updates.jsonl is append-only. Do not count the whole tail: a long session
+    always looks busy, which is why every agora no-op used to fire.
+    """
+    last_user = None
+    tools: list[tuple[str, object, dict | None]] = []
+    saw_acp_user = False
+    for entry in entries:
+        update = (entry.get("params") or {}).get("update") or {}
+        kind = update.get("sessionUpdate")
+        if kind == "user_message_chunk":
+            saw_acp_user = True
+            text = extract_update_text(update)
+            if not text.strip() or is_stop_gate_injection(text):
+                continue
+            last_user = text
+            tools = []
+        elif kind == "tool_call" and saw_acp_user:
+            tools.append((str(update.get("title") or ""), update.get("rawInput"), update))
+    if not saw_acp_user:
+        last_user = None
+        tools = []
+        for entry in entries:
+            if entry.get("type") == "user":
+                text = entry_texts(entry)
+                if not text.strip() or is_stop_gate_injection(text):
+                    continue
+                last_user = text
+                tools = []
+            elif entry.get("type") == "assistant":
+                for call in tool_call_list(entry):
+                    tools.append((str(call.get("name") or ""), call.get("arguments"), None))
+    if last_user is None or not is_idle_delivery_text(last_user):
+        return False
+    return all(tool_is_idle(name, raw, update) for name, raw, update in tools)
+
+
 def transcript_signals(entries: list[dict], prompt_id: str | None) -> tuple[int, bool]:
     """(work_count_for_this_prompt, capture_addressed_this_prompt).
 
     Understands two transcript schemas:
     - the ACP update stream (`updates.jsonl`, what `transcriptPath` points to):
-      entries shaped {"params": {"update": {"sessionUpdate": ...}}, "_meta":
-      {"promptId": ...}}; `tool_call` updates carry `title` + `rawInput`, and
-      when entries carry `_meta.promptId` the count is sliced to this prompt.
+      entries shaped {"params": {"update": {"sessionUpdate": ...}, "_meta":
+      {"promptId": ...}}}; `tool_call` updates carry `title` + `rawInput`, and
+      when entries carry params._meta.promptId the count is sliced to this prompt.
     - chat-history exports (`chat_history.jsonl`): {"type": "assistant"|
       "tool_result"|"user", ...}; the fallback path used in tests and by other clients.
     """
@@ -218,12 +381,12 @@ def transcript_signals(entries: list[dict], prompt_id: str | None) -> tuple[int,
         if update.get("sessionUpdate") == "tool_call":
             updates_calls.append({"entry": entry, "update": update})
     if updates_calls:
-        have_prompt_ids = any((e["entry"].get("_meta") or {}).get("promptId") for e in updates_calls)
+        have_prompt_ids = any(envelope_meta(e["entry"]).get("promptId") for e in updates_calls)
         work = 0
         addressed = False
         for item in updates_calls:
             entry, update = item["entry"], item["update"]
-            entry_prompt = (entry.get("_meta") or {}).get("promptId")
+            entry_prompt = envelope_meta(entry).get("promptId")
             in_turn = (entry_prompt == prompt_id) if (have_prompt_ids and prompt_id) else True
             if not in_turn:
                 continue
@@ -346,6 +509,8 @@ def main() -> None:
             state["addressed_prompt_id"] = prompt_id
             save(state_dir, state_file, state)
             release_logged("capture-addressed")
+        if idle_delivery_turn(entries):
+            release_logged("idle-delivery")
 
     # Fire: record this prompt so the re-fired Stop (and any further stops this
     # turn) release, then block with the checklist.

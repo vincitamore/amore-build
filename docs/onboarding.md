@@ -225,6 +225,11 @@ registers that directory in `~/.amore/hooks-paths`.
     `forge/{proposals,handles,output,sessions}`, `.amore/skills`, or
     `.grok/skills` releases without a phrase.
   - **Trivial suppression:** fewer than 3 work signals in the transcript → release.
+  - **Idle-delivery suppression:** last user stimulus is a Monitor
+    `<monitor-event>` (or monitor-ended) and every tool since it only
+    read or posted to the room → release. A human prompt, write/edit,
+    mutating shell, or dispatch keeps the gate. Native Monitor is
+    session-lifetime, so a watch-mode sentinel is the wrong boundary.
   - **Non-org suppression:** workspace lacks an AGENTS-class marker
     (`AGENTS.md` / `Agents.md` / `AGENT.md` / `CLAUDE.md`) **and** a `tasks/`
     directory → never fires.
