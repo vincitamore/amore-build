@@ -1,6 +1,16 @@
 [
   {
     "category": "features",
+    "description": "**Upstream intake: seven monorepo bundles (1.0.8 to 1.0.24)** — memory v2 capture, the `terminal` theme, hook `systemMessage` and PostToolUse output replacement, a request `LengthPolicy` that completes truncated turns with complete tool calls, startup spans, the agent-host daemon lane, and dozens of upstream fixes. Every fork surface (`.amore` roots, `AMORE_*` env, the house SessionStart context, the baked changelog, the hard-off updater, the crowned-heart splash) is re-seated on the new tree.",
+    "breaking_change": false
+  },
+  {
+    "category": "fixes",
+    "description": "**`sync_upstream.py --check` no longer crashes** on a bundle message carrying non-ASCII text.",
+    "breaking_change": false
+  },
+  {
+    "category": "features",
     "description": "**Seat identity is the Tailscale node** — MagicDNS first label, not the OS hostname or NetBIOS name, and not `unknown` when `HOSTNAME` is unset. `HOUSE_SEAT` wins; the hostname fallback is never written into the shared seat file.",
     "breaking_change": false
   },

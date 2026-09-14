@@ -2,15 +2,8 @@ use semver::Version;
 use toml::Value as TomlValue;
 
 /// Machine-readable channel name derived from the GCS stable pointer cache.
-///
-/// Reads `stable_version` from `~/.grok/version.json` (written by the
-/// auto-updater) and compares the compiled-in version against it:
-/// - `Some("alpha")` when the current version is ahead of stable,
-/// - `Some("stable")` when at or behind stable,
-/// - `None` when no cached pointer is available (first launch, old cache).
-///
-/// This is a lightweight duplicate of `xai_grok_update::channel_name()` for
-/// use in `xai-grok-shell` which cannot depend on `xai-grok-update`.
+/// Reads `stable_version` from `~/.grok/version.json` (written by the auto-updater) and compares the compiled-in version against it: `Some("alpha")` when the current version is ahead of stable, `Some("stable")` when at or behind stable, `None` when no cached pointer is available (first launch, old cache).
+/// This is a lightweight duplicate of `xai_grok_update::channel_name()` for use in `xai-grok-shell` which cannot depend on `xai-grok-update`.
 pub(crate) fn channel_name_from_cache() -> Option<&'static str> {
     use std::sync::OnceLock;
     static NAME: OnceLock<Option<&'static str>> = OnceLock::new();
@@ -160,7 +153,7 @@ fn fold_bound(raws: Vec<String>, knob: VersionKnob) -> Option<Version> {
     best
 }
 
-/// Env joins the same extreme as the layers, so it can only tighten a managed bound.
+/// Env folds into the same max/min as the layers, so it can only tighten a managed bound.
 fn resolve_version_bound<E: Fn(&str) -> Option<String>>(
     layers: &crate::config::ConfigLayers,
     env: &E,
@@ -171,7 +164,7 @@ fn resolve_version_bound<E: Fn(&str) -> Option<String>>(
     fold_bound(raws, knob)
 }
 
-/// Org-deployed layers only (no `user` layer, no env).
+/// Resolves from org-deployed layers only (no `user` layer, no env).
 fn resolve_version_bound_managed(
     layers: &crate::config::ConfigLayers,
     knob: VersionKnob,
@@ -179,8 +172,7 @@ fn resolve_version_bound_managed(
     fold_bound(version_candidates(layers, knob.toml_key(), true), knob)
 }
 
-/// The four resolved version bounds: soft `minimum`/`maximum` steer the updater;
-/// hard `required_*` gate startup.
+/// The four resolved version bounds: soft `minimum`/`maximum` steer the updater; hard `required_*` gate startup.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct VersionPolicy {
     pub minimum: Option<Version>,
@@ -209,9 +201,8 @@ impl VersionPolicy {
         let mut required_minimum = get(VersionKnob::RequiredMinimum);
         let mut required_maximum = get(VersionKnob::RequiredMaximum);
 
-        // A contradictory required range means a user/env bound crossed it. Managed
-        // policy is authoritative, so fall back to the managed-only bounds wholesale;
-        // a purely managed contradiction still fails open below.
+        // A contradictory required range means a user/env bound crossed it
+        // Managed policy is authoritative, so fall back to the managed-only bounds wholesale; a purely managed contradiction still fails open below
         if let (Some(lo), Some(hi)) = (&required_minimum, &required_maximum)
             && lo > hi
         {
@@ -241,7 +232,7 @@ impl VersionPolicy {
         )
     }
 
-    /// `None` on a contradictory range, so the fail-open guard lives in one place.
+    /// Returns `None` on a contradictory range, so the fail-open guard lives in one place.
     fn effective_required_minimum(&self) -> Option<&Version> {
         (!self.has_contradictory_required_range())
             .then_some(self.required_minimum.as_ref())
@@ -254,8 +245,7 @@ impl VersionPolicy {
             .flatten()
     }
 
-    /// Shared clamp core: cap at the ceilings, then the hard `required_minimum`
-    /// last so it wins over a lower ceiling.
+    /// Shared clamp core: cap at the ceilings, then the hard `required_minimum` last so it wins over a lower ceiling.
     fn clamp_version(&self, mut v: Version) -> Version {
         if let Some(c) = &self.maximum
             && v > *c
@@ -275,15 +265,14 @@ impl VersionPolicy {
         v
     }
 
-    /// Clamp then skip; the single place that ordering lives. `None` means an
-    /// anti-downgrade skip.
+    /// Clamp then skip; this is the single place that ordering lives.
+    /// `None` means an anti-downgrade skip.
     pub fn resolve_target(&self, latest: &str) -> Option<String> {
         let target = self.clamp(latest);
         (!self.skips_update_target(&target)).then_some(target)
     }
 
-    /// Clamp `target` into range. An unparseable target resolves to the lowest
-    /// in-range version when a hard floor applies, else passes through unchanged.
+    /// An unparseable target resolves to the lowest in-range version when a hard floor applies, else passes through unchanged.
     fn clamp(&self, target: &str) -> String {
         match Version::parse(target) {
             Ok(v) => self.clamp_version(v).to_string(),
@@ -302,8 +291,8 @@ impl VersionPolicy {
         )
     }
 
-    /// Lowest version an explicit `--version` pin may install, always agreeing
-    /// with [`clamp`](Self::clamp). Only the hard `required_minimum` blocks a pin.
+    /// Lowest version an explicit `--version` pin may install, always agreeing with [`clamp`](Self::clamp).
+    /// Only the hard `required_minimum` blocks a pin.
     pub fn installable_floor(&self) -> Option<Version> {
         self.effective_required_minimum()?;
         Some(self.clamp_version(Version::new(0, 0, 0)))
@@ -592,8 +581,8 @@ mod tests {
             pol(None, Some("0.2.150"), None, None).resolve_target("0.2.200"),
             Some("0.2.150".into())
         );
-        // max < min clamps below the floor, then the skip catches the clamped
-        // value. This is the ordering every updater path depends on.
+        // max < min clamps below the floor, then the skip catches the clamped value
+        // This is the ordering every updater path depends on
         assert_eq!(
             pol(Some("0.2.100"), Some("0.2.50"), None, None).resolve_target("0.2.200"),
             None

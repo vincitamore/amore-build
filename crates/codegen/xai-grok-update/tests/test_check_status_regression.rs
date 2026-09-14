@@ -1,6 +1,5 @@
-//! End-to-end regression tests for `check_update_status` that lock in the
-//! exact JSON shape produced by `grok update --check --json` for the failure
-//! modes that real users have hit in the wild.
+//! End-to-end regression tests for `check_update_status`, locking in the exact JSON shape produced by `grok update --check --json`.
+//! The cases are failure modes real users have hit in the wild.
 //!
 //! Seen when a user is behind a corporate npm registry mirror:
 //!
@@ -17,11 +16,9 @@
 //!   "autoUpdate": true, "error": null }
 //! ```
 //!
-//! The first case produces `error != null`, the second produces
-//! `error == null` but `updateAvailable == false`. Both result in zero
-//! visible change for an interactive user — the in-process auto-update
-//! check (`run_update_if_available`) silently swallows the same error and
-//! the same "already current" outcome.
+//! The first case produces `error != null`, the second produces `error == null` but `updateAvailable == false`.
+//! Both result in zero visible change for an interactive user.
+//! The in-process auto-update check (`run_update_if_available`) silently swallows the same error and the same "already current" outcome.
 //!
 //! These tests verify the JSON contract so any refactor to `UpdateStatus`,
 //! `check_update_status`, or the npm dispatch path will surface a diff.
@@ -44,9 +41,8 @@ use common::{FakeBinGuard, reset_home, set_test_version, test_home};
 use xai_grok_update::UpdateConfig;
 use xai_grok_update::auto_update::check_update_status;
 
-/// Set up a fake `npm` on PATH, set `GROK_INSTALLER=npm` so the auto-update
-/// code dispatches to npm without consulting config, and pin the installed
-/// version to `0.1.181` (matches the user's report).
+/// Set up a fake `npm` on PATH and set `GROK_INSTALLER=npm` so the auto-update code dispatches to npm without consulting config.
+/// Pin the installed version to `0.1.181` (matches the user's report).
 fn setup() -> FakeBinGuard {
     let _ = test_home();
     reset_home();
@@ -113,8 +109,7 @@ fn make_update_config() -> UpdateConfig {
 async fn check_status_surfaces_npm_403_in_error_field() {
     let g = setup();
 
-    // Mimic a corporate registry-mirror 403 response shape (npm exits non-zero,
-    // writes the error message to stderr).
+    // Mimic a corporate registry-mirror 403 response shape (npm exits non-zero, writes the error message to stderr)
     g.set_exit_code(1);
     g.set_stderr(
         "npm error code E403\n\
@@ -155,14 +150,9 @@ async fn check_status_npm_403_serializes_to_user_visible_json() {
 #[tokio::test]
 #[serial]
 async fn check_status_returns_no_update_when_registry_has_older_version() {
-    // The public registry returns 0.1.4 (much older than installed 0.1.181).
-    // `needs_update("0.1.181", "0.1.4", "stable")` returns Some(false), so
-    // `updateAvailable` is false and `error` is null. From the user's
-    // perspective: silent no-op, even though their preferred upgrade lane
-    // (corporate mirror) was unreachable. There's nothing the auto-update
-    // code can do here without knowing about scoped registries — but we want
-    // to lock in this exact shape so a future change doesn't accidentally
-    // present a downgrade as an upgrade.
+    // `needs_update("0.1.181", "0.1.4", "stable")` returns Some(false), so `updateAvailable` is false and `error` is null.
+    // From the user's perspective: silent no-op, even though their preferred registry (the corporate mirror) was
+    // unreachable. There's nothing the auto-update code can do here without knowing about scoped registries.
     let g = setup();
     g.set_stdout("\"0.1.4\"");
 
@@ -186,10 +176,8 @@ async fn check_status_stale_version_serializes_to_user_visible_json() {
     assert_hard_off_json(&json);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Sanity: when npm returns a NEWER version, we DO report an update.
-// (Anti-regression: the silent-skip paths must only fire on actual no-op
-//  conditions, not collapse into "always returns no update".)
+// ─────────────────────────────────────────────────────────────────────────────. (Anti-regression: the silent-skip paths
+// must only fire on actual no-op conditions, not collapse into "always returns no update".)
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[tokio::test]

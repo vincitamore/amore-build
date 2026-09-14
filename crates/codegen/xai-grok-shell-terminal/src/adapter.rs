@@ -1,5 +1,4 @@
-//! `AcpTerminalAdapter`: implements `xai-grok-tools::TerminalBackend` over ACP
-//! gateway calls, for bash execution when the terminal is served by the client.
+//! Implements `xai-grok-tools::TerminalBackend` over ACP gateway calls, for bash execution when the client serves the terminal.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -40,8 +39,8 @@ pub(super) struct TrackedTask {
     block_waited: bool,
     explicitly_killed: bool,
     kill_result_delivered: bool,
-    /// In-flight `wait_for_completion` callers. ACP has no oneshot list;
-    /// this is the live-waiter count used for kill delivery.
+    /// In-flight `wait_for_completion` callers.
+    /// ACP has no oneshot list; this is the live-waiter count used for kill delivery.
     live_waiters: usize,
     kind: TaskKind,
     owner_session_id: Option<String>,
@@ -49,7 +48,7 @@ pub(super) struct TrackedTask {
     output_byte_limit: usize,
 }
 
-/// Hand-written (`SystemTime` has no `Default`); call sites spread from it.
+/// Hand-written because `SystemTime` has no `Default`; call sites build tasks with `..Default::default()`.
 impl Default for TrackedTask {
     fn default() -> Self {
         Self {
@@ -122,10 +121,9 @@ pub(super) type TaskMap = Arc<Mutex<HashMap<String, TrackedTask>>>;
 struct LiveWaiter<'a> {
     tasks: TaskMap,
     task_id: &'a str,
-    /// Set on the normal return path so Drop does not treat this wait as
-    /// cancelled. A cancelled wait must clear `block_waited` immediately:
-    /// ClientUi kill only does that after the kill RPC, and the exit
-    /// watcher can emit `TaskCompleted` in that gap.
+    /// Set on the normal return path so Drop does not treat this wait as cancelled.
+    /// A cancelled wait must clear `block_waited` immediately.
+    /// ClientUi kill only clears it after the kill RPC, and the exit watcher can emit `TaskCompleted` in that gap.
     finished: bool,
 }
 
@@ -206,7 +204,26 @@ impl AcpTerminalAdapter {
     fn terminal_id(&self, task_id: &str) -> acp::TerminalId {
         acp::TerminalId::new(task_id)
     }
+
+    fn local_snapshot(&self, task_id: &str) -> Option<TaskSnapshot> {
+        let tasks = self.tasks.lock().unwrap();
+        let tracked = tasks.get(task_id)?;
+        Some(tracked.to_snapshot(
+            task_id,
+            SnapshotOutput {
+                output: tracked.last_output.clone(),
+                truncated: tracked.last_truncated,
+                exit_code: tracked.exit_code,
+                signal: tracked.signal.clone(),
+            },
+        ))
+    }
 }
+
+/// Per-task budget for live `terminal/output` during `list_tasks` (task/list).
+/// After this expires that id falls back to local metadata; remaining ids still
+/// get their own live attempt with a fresh budget.
+const TERMINAL_OUTPUT_RPC_BUDGET: Duration = Duration::from_secs(2);
 
 #[async_trait::async_trait]
 impl TerminalBackend for AcpTerminalAdapter {
@@ -339,8 +356,7 @@ impl TerminalBackend for AcpTerminalAdapter {
             .await
             .ok();
 
-        // The std Mutex guard cannot be held across the await below, so resolve
-        // under the lock and read the log file after releasing it.
+        // The std Mutex guard cannot be held across the await below, so resolve under the lock and read the log file after releasing it
         enum Resolved {
             Ready(TaskSnapshot),
             FromLog {
@@ -377,8 +393,7 @@ impl TerminalBackend for AcpTerminalAdapter {
                         },
                     ))
                 }
-                // Live poll failed: a completed task keeps its authoritative
-                // last_output; only a still-running task falls back to the log.
+                // Live poll failed: a completed task keeps its authoritative last_output; only a still-running task falls back to the log
                 (None, Some(tracked)) => {
                     let snapshot = tracked.to_snapshot(
                         task_id,
@@ -438,12 +453,9 @@ impl TerminalBackend for AcpTerminalAdapter {
                 Some(task) if task.completed => Tracked::Completed,
                 Some(task) => {
                     task.explicitly_killed = true;
-                    // ModelTool/Teardown suppress auto-wake immediately
-                    // (`marks_result_delivered(false)` is true). ClientUi
-                    // waits until after the kill RPC so a cancelled waiter
-                    // is visible. Setting only `explicitly_killed` here
-                    // would let the exit watcher emit TaskCompleted with
-                    // `kill_result_delivered` still false.
+                    // ModelTool/Teardown suppress auto-wake immediately (`marks_result_delivered(false)` is true)
+                    // ClientUi waits until after the kill RPC so a cancelled waiter is visible
+                    // Setting only `explicitly_killed` here would let the exit watcher emit TaskCompleted with `kill_result_delivered` still false
                     if source.marks_result_delivered(false) {
                         task.kill_result_delivered = true;
                     }
@@ -491,11 +503,9 @@ impl TerminalBackend for AcpTerminalAdapter {
             Ok(_) => KillOutcome::Killed,
             Err(_) => KillOutcome::NotFound,
         };
-        // ClientUi: sample waiters after the RPC so a wait cancelled at
-        // its own `.await` (Drop of `LiveWaiter`) is not still counted as
-        // delivered. ACP has no oneshot list; this is the closest we get
-        // to local's `reply.send(...).is_ok()`. ModelTool/Teardown already
-        // marked delivered under the first lock.
+        // ClientUi: sample waiters after the RPC so a wait cancelled at its own `.await` (Drop of `LiveWaiter`) is not still counted as delivered
+        // ACP has no oneshot list; this is the closest we get to local's `reply.send(...).is_ok()`
+        // ModelTool/Teardown already marked delivered under the first lock
         if matches!(tracked, Tracked::Running)
             && !source.marks_result_delivered(false)
             && let Ok(mut tasks) = self.tasks.lock()
@@ -540,13 +550,8 @@ impl TerminalBackend for AcpTerminalAdapter {
         match start {
             WaitStart::Immediate => return self.get_task(task_id).await,
             WaitStart::ProbeThenMaybeBlock => {
-                // Not tracked as running: one output probe. A dead or unknown
-                // terminal must not burn the wait budget on WaitForTerminalExit.
-                // Match kill's untracked probe: `get_task` maps every
-                // TerminalOutput error to None, so a transport/channel blip
-                // on a still-live resumed terminal must not look like
-                // not-found. Only a client that answered and disowned the
-                // id is a definitive miss.
+                // Not tracked as running: one output probe A dead or unknown terminal must not burn the wait budget on WaitForTerminalExit Match kill's untracked probe: `get_task` maps every TerminalOutput error to None
+                // So a transport/channel blip on a still-live resumed terminal must not look like not-found Only a client that answered and disowned the id is a definitive miss
                 let probe = self
                     .gateway
                     .send(acp::TerminalOutputRequest::new(
@@ -623,17 +628,50 @@ impl TerminalBackend for AcpTerminalAdapter {
     }
 
     async fn list_tasks(&self) -> Vec<TaskSnapshot> {
+        // Preserve x.ai/task/list output for running rows via get_task (live terminal/output or log tail).
+        // Bound each RPC so a hung client cannot stall enumeration indefinitely; only the timed-out id
+        // falls back, and the remaining ids still get a live attempt with their own budget.
         let task_ids: Vec<String> = {
             let tasks = self.tasks.lock().unwrap();
             tasks.keys().cloned().collect()
         };
         let mut snapshots = Vec::new();
         for task_id in task_ids {
-            if let Some(snapshot) = self.get_task(&task_id).await {
-                snapshots.push(snapshot);
+            match tokio::time::timeout(TERMINAL_OUTPUT_RPC_BUDGET, self.get_task(&task_id)).await {
+                Ok(Some(snapshot)) => snapshots.push(snapshot),
+                Ok(None) => {}
+                Err(_) => {
+                    tracing::warn!(
+                        task_id = %task_id,
+                        budget_ms = TERMINAL_OUTPUT_RPC_BUDGET.as_millis() as u64,
+                        "terminal/output RPC timed out; using local snapshot for this id only"
+                    );
+                    if let Some(local) = self.local_snapshot(&task_id) {
+                        snapshots.push(local);
+                    }
+                }
             }
         }
         snapshots
+    }
+
+    async fn list_tasks_metadata(&self) -> Vec<TaskSnapshot> {
+        // Snapshot path: one lock, no terminal/output RPCs, no log reads.
+        let tasks = self.tasks.lock().unwrap();
+        tasks
+            .iter()
+            .map(|(task_id, tracked)| {
+                tracked.to_snapshot(
+                    task_id,
+                    SnapshotOutput {
+                        output: String::new(),
+                        truncated: false,
+                        exit_code: tracked.exit_code,
+                        signal: tracked.signal.clone(),
+                    },
+                )
+            })
+            .collect()
     }
 
     async fn kill_all_background_tasks(&self) {

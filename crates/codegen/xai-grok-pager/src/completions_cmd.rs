@@ -1,8 +1,7 @@
 //! `completions <shell>` — generate shell completion scripts for the invoked
 //! binary name.
 //!
-//! Used by the installers and npm postinstall; must stay side-effect free
-//! (no network, auth, tracing, or tokio).
+//! Used by the installers and npm postinstall; must stay side-effect free (no network, auth, tracing, or tokio).
 
 use clap::CommandFactory as _;
 use clap_complete::{Shell, generate};
@@ -101,9 +100,8 @@ mod tests {
     fn zsh_completions_drop_prompt_slot_and_dispatch_on_line_1() {
         let bin_name = crate::app::cli::resolved_bin_name();
         let raw = zsh_script();
-        // Preconditions: the workaround is still needed. If these start
-        // failing, clap_complete fixed the positional handling — delete
-        // `fix_zsh_root_prompt_positional` instead of updating the test.
+        // Preconditions: the workaround is still needed
+        // If these start failing, clap_complete fixed the positional handling; delete `fix_zsh_root_prompt_positional` instead of updating the test
         assert!(raw.contains("'::prompt -- "), "raw script has prompt slot");
         assert!(
             raw.contains("case $line[2] in"),

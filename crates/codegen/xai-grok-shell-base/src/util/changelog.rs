@@ -77,10 +77,8 @@ fn strip_markdown_inline(s: &str) -> String {
 }
 
 /// Convert changelog entries to plain-text bullet strings.
-///
-/// Strips `**bold**` and backtick formatting from each description,
-/// skips entries with empty descriptions (from tolerant deserialization),
-/// and returns at most `max` entries.
+/// Strips `**bold**` and backtick formatting from each description and returns at most `max` entries.
+/// Entries with an empty description (from tolerant deserialization) are skipped.
 pub fn bullets_from_entries(entries: &[ChangelogEntry], max: usize) -> Vec<String> {
     entries
         .iter()
@@ -155,7 +153,7 @@ mod tests {
             },
             ChangelogEntry {
                 category: String::new(),
-                description: String::new(), // bad entry from tolerant deser
+                description: String::new(), // bad entry from tolerant deserialization
                 breaking_change: false,
             },
             ChangelogEntry {
@@ -170,7 +168,7 @@ mod tests {
 
     #[test]
     fn tolerant_deserialization_partial_entry() {
-        // Missing description field → defaults to empty string, not a parse error
+        // A missing description field defaults to an empty string, not a parse error
         let json = r#"[{"category":"features"},{"description":"ok"}]"#;
         let entries: Vec<ChangelogEntry> = serde_json::from_str(json).unwrap();
         assert_eq!(entries.len(), 2);

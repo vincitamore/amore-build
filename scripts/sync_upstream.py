@@ -321,12 +321,12 @@ def cmd_verify(dry_run: bool) -> int:
     else:
         problems.append("no .amore project-root load site found in agent crates")
 
-    # 2. default home compiled in (xai-grok-home; paths.rs is a re-export)
+    # 2. default home compiled in (xai-dirs, formerly xai-grok-home; paths.rs is a re-export)
     _check_file_contains(
-        "crates/codegen/xai-grok-home/src/lib.rs",
+        "crates/codegen/xai-dirs/src/lib.rs",
         'join(".amore")', "~/.amore compiled-in default home", problems)
     _check_file_contains(
-        "crates/codegen/xai-grok-home/src/lib.rs",
+        "crates/codegen/xai-dirs/src/lib.rs",
         'xai_grok_env::var_os("GROK_HOME")',
         "home override reads through xai_grok_env dual-map", problems)
 
@@ -649,8 +649,11 @@ def cmd_verify(dry_run: bool) -> int:
         "crates/codegen/xai-grok-sampler/src/actor/request_task.rs", "classify_length_stop",
         "zero-output length-stops classify to input-overflow (compaction) not MaxTokensTruncation", problems)
     _check_file_contains(
-        "crates/codegen/xai-grok-sampler/src/stream/messages.rs", "input_overflow_error",
-        "Messages backend routes zero-output length-stops to input-overflow carrying model_metadata", problems)
+        "crates/codegen/xai-grok-sampler/src/actor/request_task.rs", "response.empty_reason().is_some()",
+        "zero-output length-stops are classified before the LengthPolicy verdict (all backends)", problems)
+    _check_file_contains(
+        "crates/codegen/xai-grok-shell/src/managed_config/store.rs", ".unwrap_or(false)",
+        "managed-config fetching is opt-in (default false)", problems)
     _check_file_contains(
         "crates/codegen/xai-grok-sampling-types/src/conversation/messages.rs", "prepare_history",
         "strip foreign reasoning signatures on a cross-backend switch (rule in messages.rs)", problems)

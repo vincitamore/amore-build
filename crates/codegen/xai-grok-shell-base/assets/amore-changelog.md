@@ -6,6 +6,21 @@ monorepo sync commits; everything below is the fork's own delta, newest first.
 This document is compiled into the binary — update it in the same change as the
 work it describes.
 
+## v1.0.24
+
+- **Upstream intake: seven monorepo bundles (1.0.8 to 1.0.24)** — memory v2
+  observation capture and the safe memory-file workflow, the `terminal`
+  theme (your terminal's own colors, no background of its own), hook
+  `systemMessage` output and PostToolUse output replacement, a request
+  `LengthPolicy` so a length-truncated turn whose tool calls are complete
+  runs them instead of failing, startup spans, the agent-host daemon lane,
+  and dozens of upstream fixes. Every fork surface was re-seated on the new
+  tree: `.amore` roots ahead of `.grok`, `AMORE_*` env ahead of `GROK_*`,
+  the SessionStart house context, the baked changelog, the hard-off updater,
+  and the crowned-heart splash inside upstream's tiered welcome layout.
+- **`sync_upstream.py --check` no longer crashes** on a bundle message that
+  carries non-ASCII text.
+
 ## v1.0.8-hotfix.1
 
 - **Seat identity is the Tailscale node** — MagicDNS first label, not the

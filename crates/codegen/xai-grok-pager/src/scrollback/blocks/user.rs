@@ -1,5 +1,3 @@
-//! UserPromptBlock - displays user input.
-
 use std::ops::Range;
 
 use ratatui::style::{Modifier, Style};
@@ -18,9 +16,8 @@ const COLLAPSED_MAX_LINES: usize = 3;
 use crate::appearance::AppearanceConfig;
 use crate::theme::Theme;
 
-/// Drop invalid token ranges (replay meta is untrusted): out of bounds, not
-/// on char boundaries, or empty. Survivors are sorted; overlaps with an
-/// earlier kept range are dropped so span slicing never goes backwards.
+/// Drop invalid token ranges (replayed session metadata is untrusted): out of bounds, not on char boundaries, or empty.
+/// Survivors are sorted; overlaps with an earlier kept range are dropped so span slicing never goes backwards.
 fn sanitize_token_ranges(text: &str, mut ranges: Vec<Range<usize>>) -> Vec<Range<usize>> {
     ranges.retain(|r| {
         r.start < r.end
@@ -39,8 +36,7 @@ fn sanitize_token_ranges(text: &str, mut ranges: Vec<Range<usize>>) -> Vec<Range
     out
 }
 
-/// Split one logical line into token/body spans by intersecting the line's
-/// byte span in the block text with the (sanitized) token ranges.
+/// Split one logical line into token/body spans by intersecting the line's byte span in the block text with the (sanitized) token ranges.
 fn token_styled_line(
     line_text: &str,
     line_start: usize,
@@ -78,29 +74,25 @@ fn token_styled_line(
     Line::from(spans)
 }
 
-/// Block displaying a user's prompt.
 #[derive(Debug, Clone)]
 pub struct UserPromptBlock {
-    /// The user's input text.
     pub text: String,
     /// Whether this was a bash command (! prefix).
     pub is_bash: bool,
     /// Whether this prompt was injected by the scheduler (cron/loop).
     pub is_cron: bool,
-    /// Mid-turn interjection. Renders identically to a typed prompt but is
-    /// excluded from shell prompt-index bookkeeping — the shell numbers only
-    /// turn-starting prompts, so counting interjections would skew the
-    /// positional prompt↔entry mapping used by rewind.
+    /// Mid-turn interjection.
+    /// Renders identically to a typed prompt but is excluded from shell prompt-index bookkeeping.
+    /// The shell numbers only turn-starting prompts, so counting interjections would skew the positional prompt-to-entry mapping rewind uses.
     pub is_interjection: bool,
     pub prompt_index: Option<usize>,
-    /// Sanitized byte ranges into `text` rendered in the skill accent color
-    /// (recognized `/command` tokens). Empty = plain prompt styling. This is
-    /// the sole skill signal — a leading skill invocation is `[0..token_end]`.
+    /// Sanitized byte ranges into `text` rendered in the skill accent color (recognized `/command` tokens).
+    /// Empty means plain prompt styling.
+    /// This is the sole skill signal; a leading skill invocation is `[0..token_end]`.
     pub skill_token_ranges: Vec<Range<usize>>,
 }
 
 impl UserPromptBlock {
-    /// Create a new user prompt block.
     pub fn new(text: impl Into<String>) -> Self {
         Self {
             text: text.into(),
@@ -112,12 +104,10 @@ impl UserPromptBlock {
         }
     }
 
-    /// Get the copyable text for this block.
     pub fn copy_text(&self) -> String {
         self.text.clone()
     }
 
-    /// Create a new bash command prompt block.
     pub fn bash(text: impl Into<String>) -> Self {
         Self {
             text: text.into(),
@@ -129,8 +119,7 @@ impl UserPromptBlock {
         }
     }
 
-    /// Create a new skill invocation prompt block. The leading token on the
-    /// first line (up to whitespace, or the whole line) gets the skill accent.
+    /// The leading token on the first line (up to whitespace, or the whole line) gets the skill accent.
     pub fn skill(text: impl Into<String>) -> Self {
         let text = text.into();
         let first_line = text.lines().next().unwrap_or("");
@@ -153,9 +142,8 @@ impl UserPromptBlock {
         }
     }
 
-    /// Create a plain user prompt with recognized mid-text slash tokens
-    /// styled in the skill accent. Ranges are sanitized here — replay meta
-    /// is untrusted, so invalid ranges are dropped rather than panicking.
+    /// Create a plain user prompt with recognized mid-text slash tokens styled in the skill accent.
+    /// Ranges are sanitized here: replayed session metadata is untrusted, so invalid ranges are dropped rather than panicking.
     pub fn with_skill_tokens(text: impl Into<String>, ranges: Vec<Range<usize>>) -> Self {
         let text = text.into();
         let skill_token_ranges = sanitize_token_ranges(&text, ranges);
@@ -169,7 +157,6 @@ impl UserPromptBlock {
         }
     }
 
-    /// Create a scheduled (cron) prompt block.
     pub fn cron(text: impl Into<String>) -> Self {
         Self {
             text: text.into(),
@@ -181,8 +168,6 @@ impl UserPromptBlock {
         }
     }
 
-    /// Create a mid-turn interjection prompt block (standard prompt
-    /// rendering; never receives a shell prompt index).
     pub fn interjection(text: impl Into<String>) -> Self {
         Self {
             text: text.into(),
@@ -194,29 +179,21 @@ impl UserPromptBlock {
         }
     }
 
-    /// Elevated band behind user-prompt rows so turns are scannable in a long
-    /// transcript. Pure band selection (no process-global reads) — unit-tested
-    /// without toggling `terminal_native_lock`, which races concurrent
-    /// `Theme::current()` tests that do not hold the theme test mutex.
+    /// The elevated band behind user-prompt rows in the full TUI.
+    /// Minimal / terminal-native keeps bold only — no fill.
     ///
-    /// - Terminal-native / minimal: ANSI bright black as **background** — dark
-    ///   profiles elevate off black, light profiles darken off white (bright-black
-    ///   / `dark-ansi` slot). Semantic line bg survives
-    ///   `flat_background` (unlike block-level `bg_light`, which minimal strips).
-    ///   Selected prompts step up to silver (`Gray`) for a clearer focus cue.
-    /// - RGB themes: `bg_light` (matches the fullscreen prompt band).
+    /// RGB themes: `bg_light` (matches the fullscreen prompt band).
+    ///
+    /// Takes `theme` so unit tests can call it without toggling `terminal_native_lock`, which races `Theme::current()`
+    /// tests that do not hold the theme test mutex.
     fn prompt_band_color_for(
         theme: &Theme,
-        is_selected: bool,
+        _is_selected: bool,
         terminal_native: bool,
     ) -> Option<ratatui::style::Color> {
         use ratatui::style::Color;
         if terminal_native {
-            Some(if is_selected {
-                Color::Gray
-            } else {
-                Color::DarkGray
-            })
+            None
         } else {
             match theme.bg_light {
                 Color::Reset => None,
@@ -225,11 +202,11 @@ impl UserPromptBlock {
         }
     }
 
-    /// Prefix/body/skill styles. Bold only when `terminal_native` (minimal mode).
-    /// Cyan pointer when `accent_user` is Reset so OSC 12 leaves the host cursor alone.
+    /// Prefix/body/skill styles. Bold only when `terminal_native` (minimal mode). Minimal keeps a Cyan pointer when
+    /// `accent_user` is Reset (its prompt rows have no band, so the pointer is the turn cue).
     fn prompt_styles(theme: &Theme, terminal_native: bool) -> (Style, Style, Style) {
         let prefix_color = match theme.accent_user {
-            ratatui::style::Color::Reset => ratatui::style::Color::Cyan,
+            ratatui::style::Color::Reset if terminal_native => ratatui::style::Color::Cyan,
             c => c,
         };
         let mut prefix_style = theme.fg(prefix_color);
@@ -243,9 +220,8 @@ impl UserPromptBlock {
         (prefix_style, text_style, skill_style)
     }
 
-    /// Wrap and style the prompt text, returning visual lines. When
-    /// `max_lines` is set and content exceeds it, the last line is
-    /// truncated with a " …" ellipsis.
+    /// Wrap and style the prompt text, returning visual lines.
+    /// When `max_lines` is set and content exceeds it, the last line is truncated with a " …" ellipsis.
     fn wrap_prompt_lines(
         &self,
         width: u16,
@@ -256,9 +232,21 @@ impl UserPromptBlock {
         let theme = Theme::current();
         // Minimal mode engages this lock; read it here instead of app state.
         let terminal_native = crate::theme::cache::terminal_native_locked();
-        let (prefix_style, text_style, skill_style) = Self::prompt_styles(&theme, terminal_native);
+        // The terminal theme (fullscreen) renders prompts bandless: bold
+        // primary text instead of a bright-black band, which can sit too
+        // close to the default fg on some profiles. Minimal keeps its band.
+        let attribute_emphasis = !terminal_native && crate::theme::cache::terminal_native_active();
+        let (mut prefix_style, mut text_style, mut skill_style) =
+            Self::prompt_styles(&theme, terminal_native);
+        if attribute_emphasis {
+            prefix_style = prefix_style.add_modifier(Modifier::BOLD);
+            text_style = text_style.add_modifier(Modifier::BOLD);
+            skill_style = skill_style.add_modifier(Modifier::BOLD);
+        }
         let band = Self::prompt_band_color_for(&theme, is_selected, terminal_native);
         // Semantic line bg (not a "panel") so it survives minimal's flat_background.
+        // Bandless prompts (terminal theme) carry no extra selected cue: the
+        // rewind picker and the dimmed tail already mark the target.
         let with_band = |line: BlockLine| -> BlockLine {
             match band {
                 Some(c) => line.with_background(c),
@@ -280,7 +268,6 @@ impl UserPromptBlock {
         let ellipsis = " \u{2026}";
         let ellipsis_width = 2;
 
-        // Available width for text content (after prefix/indent)
         let base_content_width = (width as usize).saturating_sub(prefix_width).max(1);
 
         let mut all_lines: Vec<BlockLine> = Vec::new();
@@ -289,7 +276,7 @@ impl UserPromptBlock {
 
         for (logical_idx, line_text) in logical_lines.iter().enumerate() {
             if line_text.is_empty() {
-                // Empty line - just show prefix/indent
+                // Empty line: just show prefix/indent
                 let indent = " ".repeat(prefix_width);
                 let line = if logical_idx == 0 {
                     Line::from(vec![Span::styled(prefix.to_string(), prefix_style)])
@@ -312,7 +299,6 @@ impl UserPromptBlock {
                 if let Some(max) = max_lines
                     && all_lines.len() >= max
                 {
-                    // There's more content if we haven't processed all logical lines
                     let has_more = logical_idx + 1 < total_logical;
                     if has_more {
                         // Add ellipsis to last line
@@ -331,8 +317,7 @@ impl UserPromptBlock {
             let content_line = if self.skill_token_ranges.is_empty() {
                 Line::from(Span::styled(line_text.to_string(), text_style))
             } else {
-                // `lines()` strips terminators, so recover this line's byte
-                // offset from the subslice pointer into `self.text`.
+                // `lines()` strips terminators, so recover this line's byte offset from the subslice pointer into `self.text`
                 debug_assert!(
                     self.text
                         .as_bytes()
@@ -360,7 +345,6 @@ impl UserPromptBlock {
                 let indent: String = " ".repeat(prefix_width);
                 let line_prefix = if is_first_line { prefix } else { &indent };
 
-                // Check if this will be the last allowed line
                 let will_be_last = max_lines.is_some_and(|max| all_lines.len() + 1 == max);
 
                 // Check if there's more content after this line
@@ -377,10 +361,8 @@ impl UserPromptBlock {
                 };
 
                 if will_be_last && has_more {
-                    // This is the last allowed line and there's more content.
-                    // Re-wrap the current line's content with reduced width to
-                    // make room for the ellipsis. Re-wrapping the styled line
-                    // (not flattened text) keeps token spans teal here.
+                    // Re-wrap the current line's content with reduced width to make room for the ellipsis
+                    // Re-wrapping the styled line (not flattened text) keeps token spans teal here
                     let reduced_width = base_content_width.saturating_sub(ellipsis_width);
                     let (re_wrapped_lines, _) =
                         word_wrap_line_with_joiners(&wrapped_line, RtOptions::new(reduced_width));
@@ -435,7 +417,7 @@ impl UserPromptBlock {
                 });
                 all_lines.push(block_line);
 
-                // Check if we hit max_lines (for edge case where no more content)
+                // Stop at max_lines (the case where no more content follows)
                 if let Some(max) = max_lines
                     && all_lines.len() >= max
                 {
@@ -498,10 +480,9 @@ impl BlockContent for UserPromptBlock {
     }
 
     fn is_foldable(&self) -> bool {
-        // Estimate visual line count to catch long single-line prompts that
-        // wrap past the limit. Uses a conservative content width (terminal
-        // width minus prefix/padding); at wider terminals we may slightly
-        // over-report foldability, which is harmless.
+        // Estimate visual line count to catch long single-line prompts that wrap past the limit. Uses a conservative
+        // content width (terminal width minus prefix/padding). at wider terminals we may slightly over-report foldability,
+        // which is harmless.
         const MIN_CONTENT_WIDTH: usize = 60;
         let mut visual_lines = 0usize;
         for line in self.text.lines() {
@@ -538,13 +519,14 @@ impl BlockContent for UserPromptBlock {
 mod tests {
     use super::*;
 
-    /// Helper to get line text content (excluding styles)
+    /// Concatenated text content of a line (styles excluded)
     fn line_text(line: &Line) -> String {
         line.spans.iter().map(|s| s.content.as_ref()).collect()
     }
 
     #[test]
     fn test_short_prompt_no_truncation() {
+        let _guard = crate::theme::cache::pin_theme();
         let block = UserPromptBlock::new("hello");
         let lines = block.wrap_prompt_lines(80, None, true, false);
         let expected = format!("{}hello", crate::glyphs::prompt_arrow());
@@ -555,6 +537,7 @@ mod tests {
 
     #[test]
     fn test_short_prompt_with_max_lines() {
+        let _guard = crate::theme::cache::pin_theme();
         let block = UserPromptBlock::new("hello");
         let lines = block.wrap_prompt_lines(80, Some(2), true, false);
         let expected = format!("{}hello", crate::glyphs::prompt_arrow());
@@ -567,6 +550,7 @@ mod tests {
 
     #[test]
     fn test_long_prompt_wraps() {
+        let _guard = crate::theme::cache::pin_theme();
         let block = UserPromptBlock::new("this is a very long prompt that should wrap");
         let lines = block.wrap_prompt_lines(20, None, true, false);
 
@@ -578,12 +562,12 @@ mod tests {
 
     #[test]
     fn test_truncation_adds_ellipsis() {
+        let _guard = crate::theme::cache::pin_theme();
         let block =
             UserPromptBlock::new("this is a very long prompt that should wrap to many lines");
         let lines = block.wrap_prompt_lines(20, Some(2), true, false);
 
         assert_eq!(lines.len(), 2);
-        // Last line should have ellipsis
         let last = line_text(&lines[1].content);
         assert!(
             last.ends_with(" \u{2026}"),
@@ -594,6 +578,7 @@ mod tests {
 
     #[test]
     fn test_ellipsis_fits_within_width() {
+        let _guard = crate::theme::cache::pin_theme();
         // Create a prompt that wraps to exactly fill lines
         let block = UserPromptBlock::new("aaaa bbbb cccc dddd eeee ffff");
         let width = 15; // Narrow width to force wrapping
@@ -614,12 +599,12 @@ mod tests {
             );
         }
 
-        // Last line should have ellipsis
         assert!(line_text(&lines[1].content).ends_with(" \u{2026}"));
     }
 
     #[test]
     fn test_bash_prompt_prefix() {
+        let _guard = crate::theme::cache::pin_theme();
         let block = UserPromptBlock::bash("ls -la");
         let lines = block.wrap_prompt_lines(80, None, true, false);
 
@@ -627,8 +612,40 @@ mod tests {
         assert!(line_text(&lines[0].content).starts_with("$ "));
     }
 
+    /// Terminal theme (fullscreen): prompts render bandless — bold primary
+    /// text instead of a bright-black band — including when selected (the
+    /// rewind picker and dimmed tail carry the selection cue).
+    #[test]
+    fn terminal_theme_prompt_is_bold_and_bandless() {
+        let _guard = crate::theme::cache::pin_theme();
+        crate::theme::cache::set(crate::theme::ThemeKind::Terminal);
+
+        let block = UserPromptBlock::new("hello");
+        let lines = block.wrap_prompt_lines(80, None, true, false);
+        assert!(lines[0].background.is_none(), "no band");
+        let text_span = lines[0].content.spans.last().unwrap();
+        assert!(
+            text_span.style.add_modifier.contains(Modifier::BOLD),
+            "prompt text is bold, got {:?}",
+            text_span.style
+        );
+        assert!(!text_span.style.add_modifier.contains(Modifier::REVERSED));
+
+        let selected = block.wrap_prompt_lines(80, None, true, true);
+        assert!(selected[0].background.is_none(), "selected: still no band");
+        assert!(
+            selected[0]
+                .content
+                .spans
+                .iter()
+                .all(|s| !s.style.add_modifier.contains(Modifier::REVERSED)),
+            "selected prompt carries no reverse video (picker + dim tail cue it)"
+        );
+    }
+
     #[test]
     fn skill_with_args_only_command_is_teal() {
+        let _guard = crate::theme::cache::pin_theme();
         let block = UserPromptBlock::skill("/pr-workflow create a ticket for this");
         let lines = block.wrap_prompt_lines(80, None, true, false);
         assert_eq!(lines.len(), 1);
@@ -644,6 +661,7 @@ mod tests {
 
     #[test]
     fn skill_without_args_all_teal() {
+        let _guard = crate::theme::cache::pin_theme();
         let block = UserPromptBlock::skill("/pr-workflow");
         let lines = block.wrap_prompt_lines(80, None, true, false);
         assert_eq!(lines.len(), 1);
@@ -657,6 +675,7 @@ mod tests {
 
     #[test]
     fn skill_multiline_only_first_token_teal() {
+        let _guard = crate::theme::cache::pin_theme();
         let block = UserPromptBlock::skill("/foo bar\nbaz");
         let lines = block.wrap_prompt_lines(80, None, true, false);
         assert_eq!(lines.len(), 2);
@@ -677,6 +696,7 @@ mod tests {
 
     #[test]
     fn mid_text_token_only_token_is_teal() {
+        let _guard = crate::theme::cache::pin_theme();
         let text = "great /pr-workflow all good now";
         let block = UserPromptBlock::with_skill_tokens(text, vec![6..18]);
         let lines = block.wrap_prompt_lines(80, None, true, false);
@@ -695,6 +715,7 @@ mod tests {
 
     #[test]
     fn mid_text_multiple_tokens_each_teal() {
+        let _guard = crate::theme::cache::pin_theme();
         let text = "run /commit then /review please";
         let block = UserPromptBlock::with_skill_tokens(text, vec![4..11, 17..24]);
         let lines = block.wrap_prompt_lines(80, None, true, false);
@@ -713,6 +734,7 @@ mod tests {
 
     #[test]
     fn mid_text_token_on_second_logical_line() {
+        let _guard = crate::theme::cache::pin_theme();
         let text = "first line\nthen /model here";
         // "/model" starts after "first line\nthen " = 16 bytes.
         let block = UserPromptBlock::with_skill_tokens(text, vec![16..22]);
@@ -735,6 +757,7 @@ mod tests {
 
     #[test]
     fn invalid_token_ranges_are_dropped() {
+        let _guard = crate::theme::cache::pin_theme();
         let text = "héllo /model now"; // 'é' is 2 bytes: "/model" = 7..13
         let block = UserPromptBlock::with_skill_tokens(
             text,
@@ -762,6 +785,7 @@ mod tests {
 
     #[test]
     fn all_token_ranges_invalid_renders_plain() {
+        let _guard = crate::theme::cache::pin_theme();
         let block = UserPromptBlock::with_skill_tokens("plain text", vec![100..200]);
         assert!(block.skill_token_ranges.is_empty());
         let lines = block.wrap_prompt_lines(80, None, true, false);
@@ -782,9 +806,9 @@ mod tests {
 
     #[test]
     fn collapsed_truncation_keeps_teal_on_straddling_token() {
-        // "/pr-workflow" (bytes 8..20) is wider than the content width, so it
-        // straddles the last visible row and the hidden continuation; the
-        // truncating re-wrap must keep the visible head teal.
+        let _guard = crate::theme::cache::pin_theme();
+        // "/pr-workflow" (bytes 8..20) is wider than the content width, so it straddles the last visible row and the hidden continuation
+        // The truncating re-wrap must keep the visible head teal
         let text = "one\ntwo\n/pr-workflow tail";
         let block = UserPromptBlock::with_skill_tokens(text, vec![8..20]);
         let lines = block.wrap_prompt_lines(8, Some(3), false, false);
@@ -802,8 +826,8 @@ mod tests {
 
     #[test]
     fn collapsed_truncation_keeps_teal_on_token_within_last_line() {
-        // "/do-it" (bytes 8..14) fits fully on the truncated last line even at
-        // the ellipsis-reduced width, so it must survive whole and teal.
+        let _guard = crate::theme::cache::pin_theme();
+        // "/do-it" (bytes 8..14) fits fully on the truncated last line even at the ellipsis-reduced width, so it must survive whole and teal
         let text = "one\ntwo\n/do-it more words here";
         let block = UserPromptBlock::with_skill_tokens(text, vec![8..14]);
         let lines = block.wrap_prompt_lines(20, Some(3), false, false);
@@ -824,8 +848,8 @@ mod tests {
 
     #[test]
     fn narrow_wrap_keeps_teal_on_both_rows_of_split_token() {
-        // Expanded (no max_lines): the 12-wide token cannot fit at width 8, so
-        // the wrapper splits it mid-token; every piece must stay teal.
+        let _guard = crate::theme::cache::pin_theme();
+        // Expanded (no max_lines): the 12-wide token cannot fit at width 8, so the wrapper splits it mid-token; every piece must stay teal
         let text = "aa /pr-workflow zz";
         let block = UserPromptBlock::with_skill_tokens(text, vec![3..15]);
         let lines = block.wrap_prompt_lines(8, None, false, false);
@@ -846,6 +870,7 @@ mod tests {
 
     #[test]
     fn test_multiline_input() {
+        let _guard = crate::theme::cache::pin_theme();
         let block = UserPromptBlock::new("line one\nline two\nline three");
         let lines = block.wrap_prompt_lines(80, None, true, false);
 
@@ -857,6 +882,7 @@ mod tests {
 
     #[test]
     fn test_multiline_truncated() {
+        let _guard = crate::theme::cache::pin_theme();
         let block = UserPromptBlock::new("line one\nline two\nline three");
         let lines = block.wrap_prompt_lines(80, Some(2), true, false);
 
@@ -867,6 +893,7 @@ mod tests {
 
     #[test]
     fn test_exact_fit_no_ellipsis() {
+        let _guard = crate::theme::cache::pin_theme();
         // If content fits exactly in max_lines, no ellipsis needed
         let block = UserPromptBlock::new("short");
         let lines = block.wrap_prompt_lines(80, Some(1), true, false);
@@ -877,6 +904,9 @@ mod tests {
 
     #[test]
     fn test_selected_prompt_uses_accent_color() {
+        // Pinned: asserts non-bold prompts, which the ambient terminal
+        // theme (bold fullscreen prompts) legitimately fails.
+        let _guard = crate::theme::cache::pin_theme();
         let block = UserPromptBlock::new("hello");
         let lines = block.wrap_prompt_lines(80, None, true, true);
         let expected = format!("{}hello", crate::glyphs::prompt_arrow());
@@ -884,38 +914,33 @@ mod tests {
         assert_eq!(lines.len(), 1);
         assert_eq!(line_text(&lines[0].content), expected);
 
-        // Prefix always uses accent (or Cyan when accent_user is Reset for
-        // terminal-native / NO_COLOR), never dim gray. Bold is minimal-only.
+        // Prefix always uses accent, never dim gray
+        // A Reset accent passes through so it matches the composer's marker (Cyan is minimal-only, where prompt rows have no band)
+        // Bold is minimal-only
         let theme = Theme::current();
         let prefix_span = &lines[0].content.spans[0];
-        let expected_fg = match theme.accent_user {
-            ratatui::style::Color::Reset => Some(ratatui::style::Color::Cyan),
-            c => Some(c),
-        };
+        let expected_fg = Some(theme.accent_user);
         assert_eq!(prefix_span.style.fg, expected_fg);
         assert!(!prefix_span.style.add_modifier.contains(Modifier::BOLD));
     }
 
     #[test]
     fn test_unselected_prompt_still_uses_accent_pointer() {
+        // Pinned: see test_selected_prompt_uses_accent_color.
+        let _guard = crate::theme::cache::pin_theme();
         let block = UserPromptBlock::new("hello");
         let lines = block.wrap_prompt_lines(80, None, true, false);
 
         assert_eq!(lines.len(), 1);
 
-        // Unselected no longer collapses onto gray_dim — same accent pointer
-        // so user turns stay scannable in a long transcript.
+        // Unselected no longer collapses onto gray_dim: the same accent pointer keeps user turns scannable in a long transcript
         let theme = Theme::current();
         let prefix_span = &lines[0].content.spans[0];
-        let expected_fg = match theme.accent_user {
-            ratatui::style::Color::Reset => Some(ratatui::style::Color::Cyan),
-            c => Some(c),
-        };
+        let expected_fg = Some(theme.accent_user);
         assert_eq!(prefix_span.style.fg, expected_fg);
         // Fullscreen (default test env): accent pointer, not bold.
         assert!(!prefix_span.style.add_modifier.contains(Modifier::BOLD));
-        // Not the old unselected path (dim gray), unless the whole palette is
-        // Reset (NO_COLOR / native grays), in which case Cyan still wins above.
+        // Not the old unselected path (dim gray), unless the whole palette is Reset (NO_COLOR / native grays), in which case Cyan still wins above
         if !matches!(theme.gray_dim, ratatui::style::Color::Reset) {
             assert_ne!(prefix_span.style.fg, Some(theme.gray_dim));
         }
@@ -925,6 +950,7 @@ mod tests {
 
     #[test]
     fn test_prompt_lines_have_selection_range() {
+        let _guard = crate::theme::cache::pin_theme();
         let block = UserPromptBlock::new("hello");
         let lines = block.wrap_prompt_lines(80, None, true, false);
         assert!(
@@ -936,6 +962,7 @@ mod tests {
 
     #[test]
     fn test_prompt_prefix_excluded_from_selection() {
+        let _guard = crate::theme::cache::pin_theme();
         let block = UserPromptBlock::new("hello");
         let lines = block.wrap_prompt_lines(80, None, true, false);
         assert_eq!(lines.len(), 1);
@@ -950,6 +977,7 @@ mod tests {
 
     #[test]
     fn test_prompt_no_prefix_all_selectable() {
+        let _guard = crate::theme::cache::pin_theme();
         let block = UserPromptBlock::new("hello");
         let lines = block.wrap_prompt_lines(80, None, false, false);
         assert_eq!(lines.len(), 1);
@@ -958,28 +986,28 @@ mod tests {
 
     #[test]
     fn test_prompt_wrapped_lines_have_joiners() {
+        let _guard = crate::theme::cache::pin_theme();
         let block = UserPromptBlock::new("this is a long prompt that should wrap");
         let lines = block.wrap_prompt_lines(15, None, true, false);
         assert!(lines.len() > 1);
-        // First line: no joiner
         assert!(lines[0].joiner.is_none());
-        // Continuation lines within same logical line: should have joiner
         assert!(lines.iter().skip(1).any(|l| l.joiner.is_some()));
     }
 
     #[test]
     fn test_prompt_multiline_joiners() {
+        let _guard = crate::theme::cache::pin_theme();
         let block = UserPromptBlock::new("line one\nline two");
         let lines = block.wrap_prompt_lines(80, None, true, false);
         assert_eq!(lines.len(), 2);
-        // First line: no joiner
         assert!(lines[0].joiner.is_none());
-        // Second line: also no joiner (hard break between logical lines)
+        // No joiner on the second line either (hard break between logical lines)
         assert!(lines[1].joiner.is_none());
     }
 
     #[test]
     fn test_cron_prompt_prefix() {
+        let _guard = crate::theme::cache::pin_theme();
         let block = UserPromptBlock::cron("/pr-babysit check");
         let lines = block.wrap_prompt_lines(80, None, true, false);
         assert_eq!(lines.len(), 1);
@@ -993,6 +1021,7 @@ mod tests {
 
     #[test]
     fn test_bash_prefix_excluded_from_selection() {
+        let _guard = crate::theme::cache::pin_theme();
         let block = UserPromptBlock::bash("ls -la");
         let lines = block.wrap_prompt_lines(80, None, true, false);
         assert_eq!(lines.len(), 1);
@@ -1006,6 +1035,7 @@ mod tests {
 
     #[test]
     fn test_continuation_indent_excluded_from_selection() {
+        let _guard = crate::theme::cache::pin_theme();
         let block = UserPromptBlock::new("line one\nline two");
         let lines = block.wrap_prompt_lines(80, None, true, false);
         assert_eq!(lines.len(), 2);
@@ -1046,7 +1076,7 @@ mod tests {
     #[test]
     fn test_long_single_line_is_foldable() {
         // A single line long enough to wrap past 3 visual lines at 60-char width
-        let long_line = "a ".repeat(120); // 240 chars → 4 visual lines at 60
+        let long_line = "a ".repeat(120); // 240 chars wraps to 4 visual lines at 60
         let block = UserPromptBlock::new(long_line);
         assert!(block.is_foldable());
         assert_eq!(block.default_display_mode(), DisplayMode::Collapsed);
@@ -1055,7 +1085,7 @@ mod tests {
     #[test]
     fn test_short_single_line_not_foldable() {
         // A single line that fits in 3 visual lines at 60-char width
-        let short_line = "a ".repeat(60); // 120 chars → 2 visual lines at 60
+        let short_line = "a ".repeat(60); // 120 chars wraps to 2 visual lines at 60
         let block = UserPromptBlock::new(short_line);
         assert!(!block.is_foldable());
     }
@@ -1089,6 +1119,9 @@ mod tests {
 
     #[test]
     fn user_prompt_bold_only_in_minimal() {
+        // Pinned: on the terminal theme fullscreen prompts are bold too
+        // (covered by terminal_theme_prompt_is_bold_and_bandless).
+        let _guard = crate::theme::cache::pin_theme();
         let theme = Theme::current();
         let (prefix, body, skill) = UserPromptBlock::prompt_styles(&theme, true);
         assert!(prefix.add_modifier.contains(Modifier::BOLD));
@@ -1108,28 +1141,24 @@ mod tests {
         assert!(!spans[1].style.add_modifier.contains(Modifier::BOLD));
     }
 
-    /// Pure band logic (no global `terminal_native_lock` — that races other
-    /// tests that call `Theme::current()` without the theme test mutex).
+    /// Pure band logic (no global `terminal_native_lock`; that races other tests that call `Theme::current()` without the theme test mutex).
     #[test]
     fn prompt_band_color_native_vs_rgb() {
-        use ratatui::style::Color;
-
         let theme = Theme::groknight();
         assert_eq!(
             UserPromptBlock::prompt_band_color_for(&theme, false, true),
-            Some(Color::DarkGray)
+            None
         );
         assert_eq!(
             UserPromptBlock::prompt_band_color_for(&theme, true, true),
-            Some(Color::Gray)
+            None
         );
         // RGB theme: band follows bg_light.
         assert_eq!(
             UserPromptBlock::prompt_band_color_for(&theme, false, false),
             Some(theme.bg_light)
         );
-        // Terminal-native palette: bg_light is Reset → no RGB band when not
-        // in native mode; native mode still uses the ANSI elevated slots.
+        // Terminal-native palette: bg_light is Reset, so there is no RGB band outside native mode; native mode still uses the ANSI elevated slots
         let native = Theme::terminal_default();
         assert_eq!(
             UserPromptBlock::prompt_band_color_for(&native, false, false),
@@ -1137,22 +1166,22 @@ mod tests {
         );
         assert_eq!(
             UserPromptBlock::prompt_band_color_for(&native, false, true),
-            Some(Color::DarkGray)
+            None
         );
     }
 
-    /// Applied band is semantic (not a panel) so minimal `flat_background`
-    /// keeps it. Does not toggle process-global native lock.
+    /// Applied band is semantic (not a panel). Minimal leaves it unset.
+    /// Does not toggle the process-global native lock.
     #[test]
     fn user_prompt_band_is_semantic_not_panel() {
+        let _guard = crate::theme::cache::pin_theme();
         let block = UserPromptBlock::new("scan me");
         let lines = block.wrap_prompt_lines(80, None, true, false);
         assert!(
             !lines[0].background_is_panel,
             "band must be semantic so flat_background keeps it"
         );
-        // Whatever Theme::current() is this moment, wrap used the same source
-        // for band selection (same process, no lock toggle in this test).
+        // Whatever Theme::current() is this moment, wrap used the same source for band selection (same process, no lock toggle in this test)
         let theme = Theme::current();
         assert_eq!(
             lines[0].background,

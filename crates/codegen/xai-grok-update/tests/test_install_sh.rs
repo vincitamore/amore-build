@@ -255,8 +255,8 @@ fn install_sh_blitz_keeps_amore_runnable_under_corruption() {
     let fakedir = tempfile::tempdir().unwrap();
     write_fake_curl(fakedir.path(), &artifact);
 
-    // Each entry: (mode, should the installer succeed?). Loop a few rounds so a
-    // re-install over an existing good install is also exercised.
+    // Each entry: (mode, should the installer succeed?)
+    // Loop a few rounds so a re-install over an existing good install is also exercised
     let cases = [
         ("full", true),
         ("truncate", false),
