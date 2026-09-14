@@ -97,7 +97,9 @@ SELF_UPDATE_ORIGIN_FILE = (
 
 
 def run(cmd: list[str], **kw) -> subprocess.CompletedProcess:
-    return subprocess.run(cmd, cwd=REPO, capture_output=True, text=True, **kw)
+    return subprocess.run(
+        cmd, cwd=REPO, capture_output=True, text=True, encoding="utf-8", errors="replace", **kw
+    )
 
 
 def git(*args: str) -> subprocess.CompletedProcess:
