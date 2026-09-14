@@ -2328,6 +2328,8 @@ mod tests {
         );
     }
 
+    // Runs the hook through `sh -c`; on Windows this asserts the host's shell, not the runner.
+    #[cfg(unix)]
     #[tokio::test]
     async fn parameter_expansion_default_is_not_refused() {
         let tmp = tempfile::tempdir().unwrap();
