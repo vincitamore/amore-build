@@ -4156,13 +4156,8 @@ impl ConfigModelOverride {
         if let Some(v) = self.supports_reasoning_effort {
             entry.info.supports_reasoning_effort = v;
         } else if !entry.info.supports_reasoning_effort
-            && (matches!(entry.info.api_backend, ApiBackend::Messages)
-                || self.reasoning_effort.is_some())
+            && matches!(entry.info.api_backend, ApiBackend::Messages)
         {
-            // Messages-backend entries and overrides that declare a
-            // default effort self-enable the gate; a non-empty
-            // `reasoning_efforts` menu is derived later in
-            // `derive_reasoning_effort_fields`.
             entry.info.supports_reasoning_effort = true;
         }
         if !self.reasoning_efforts.is_empty() {
@@ -4397,7 +4392,9 @@ impl ModelInfo {
     fn nearest_declared_effort(&self, effort: ReasoningEffort) -> Option<ReasoningEffort> {
         self.reasoning_efforts
             .iter()
-            .min_by_key(|opt| Self::effort_rank(opt.value).abs_diff(Self::effort_rank(effort)))
+            .min_by_key(|opt| {
+                Self::effort_rank(opt.value).abs_diff(Self::effort_rank(effort))
+            })
             .map(|opt| opt.value)
     }
     fn effort_rank(effort: ReasoningEffort) -> u8 {
@@ -4894,12 +4891,8 @@ pub(crate) fn resolve_credentials(
 ) -> ResolvedCredentials {
     let info = model.info();
     let (api_key, base_url, auth_type) = if let Some(key) = model.own_credential() {
-        // `oauth:<provider>` references swap for a live access token from the
-        // provider OAuth store (auth::provider_oauth). A reference with no
-        // stored login resolves to None so the request fails as
-        // "no credential" instead of sending the literal string as a bearer.
         (
-            crate::auth::provider_oauth::resolve_api_key_reference(&key),
+            Some(key),
             info.base_url.clone(),
             xai_chat_state::AuthType::ApiKey,
         )
@@ -5003,10 +4996,7 @@ pub(crate) fn try_resolve_model_credentials(
     let cfg = Config::new_from_toml_cfg(&raw)
         .map_err(|e| tracing::warn!(error = %e, "config parse failed for credential resolution"))
         .ok()?;
-    // Include cached provider-discovery entries: a discovered model's
-    // credential lives on its discovery entry, not in `[model.*]`.
-    let discovered = crate::agent::models::merge_cached_any_age(&cfg, None);
-    let models = resolve_model_list(&cfg, discovered);
+    let models = resolve_model_list(&cfg, None);
     let entry = find_model_by_id(&models, model_id)?;
     let mut credentials = resolve_credentials(entry, session_key);
     enforce_disable_api_key_auth(
@@ -5084,13 +5074,7 @@ fn with_resolved_model<T>(model_id: &str, f: impl FnOnce(ModelLookup) -> T) -> T
     else {
         return f(ModelLookup::ConfigUnavailable);
     };
-    // Include cached provider-discovery entries: a discovered model is
-    // BYOK (its entry carries the provider credential), and a lookup
-    // blind to discovery classifies it `NotByok` — which activates the
-    // session-token gate and sends the first-party session token to the
-    // provider's endpoint (`unauthenticated` on every request).
-    let discovered = crate::agent::models::merge_cached_any_age(&cfg, None);
-    let models = resolve_model_list(&cfg, discovered);
+    let models = resolve_model_list(&cfg, None);
     f(ModelLookup::Loaded(find_model_by_id(&models, model_id)))
 }
 /// Resolve a standalone `SamplerConfig` for an auxiliary model slug (image
@@ -5300,17 +5284,6 @@ pub(crate) fn sampling_config_for_model(
         &api_backend,
         &credentials.base_url,
     );
-    // `oauth:<provider>` credentials get a live bearer resolver so every
-    // request reads the store: tokens refreshed by a login (or another
-    // process) are picked up mid-session instead of dying with the
-    // construction-time seed key.
-    let bearer_resolver = model
-        .own_credential()
-        .and_then(|key| crate::auth::provider_oauth::oauth_reference_kind(&key))
-        .map(|kind| {
-            std::sync::Arc::new(crate::auth::provider_oauth::ProviderOAuthBearerResolver::new(kind))
-                as xai_grok_sampler::config::SharedBearerResolver
-        });
     SamplerConfig {
         api_key: credentials.api_key,
         model: model_name,
@@ -5336,7 +5309,7 @@ pub(crate) fn sampling_config_for_model(
         user_id,
         origin_client: None,
         attribution_callback: None,
-        bearer_resolver,
+        bearer_resolver: None,
         supports_backend_search: info.supports_backend_search,
         compactions_remaining: info.compactions_remaining,
         compaction_at_tokens: info.compaction_at_tokens,
@@ -5497,14 +5470,6 @@ pub(crate) fn to_acp_model_info(
                     "totalContextTokens".to_string(),
                     serde_json::Value::Number(total_context_tokens.into()),
                 );
-                // Picker group label: the route decides the provider, not
-                // the model.
-                if let Some(provider) = crate::agent::models::provider_group_label(info) {
-                    map.insert(
-                        "provider".to_string(),
-                        serde_json::Value::String(provider.to_string()),
-                    );
-                }
                 map.insert(
                     "agentType".to_string(),
                     serde_json::Value::String(info.agent_type.clone()),

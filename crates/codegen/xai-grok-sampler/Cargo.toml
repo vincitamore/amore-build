@@ -8,7 +8,6 @@ description = "Actor-based sampling/inference layer for xAI grok (HTTP streaming
 [dependencies]
 # Internal
 xai-grok-auth = { workspace = true }
-xai-grok-cursor = { path = "../xai-grok-cursor" }
 xai-grok-extra-ca = { workspace = true }
 xai-grok-sampling-types = { path = "../xai-grok-sampling-types" }
 xai-grok-version = { workspace = true }
@@ -23,8 +22,6 @@ indexmap = { workspace = true, features = ["serde"] }
 reqwest = { workspace = true, features = ["stream", "rustls-tls-native-roots"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
-# Anthropic OAuth fingerprint: billing-header sha256 suffix + device-id hash.
-sha2 = { workspace = true }
 tokio = { workspace = true, features = ["rt", "macros", "time", "sync"] }
 tokio-util = { workspace = true }
 tracing = { workspace = true }

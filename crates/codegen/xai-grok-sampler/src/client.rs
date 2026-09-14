@@ -768,19 +768,6 @@ impl SamplingClient {
                 }
             }
         }
-        // Anthropic OAuth (Claude Code) requests swap the fork's default
-        // header set for the CC fingerprint (bearer auth, CC betas + UA). The
-        // live resolver's bearer, when present, survives: the fingerprint
-        // only ensures a bearer exists and never overwrites one.
-        let oauth_key =
-            crate::anthropic_oauth::credential_from_headers(&headers, self.defaults.auth_scheme);
-        if self.defaults.api_backend == ApiBackend::Messages
-            && oauth_key
-                .as_deref()
-                .is_some_and(crate::anthropic_oauth::is_anthropic_oauth_token)
-        {
-            crate::anthropic_oauth::apply_oauth_headers(&mut headers, oauth_key.as_deref());
-        }
         {
             let auth_prefix = headers
                 .get(AUTHORIZATION)
@@ -1660,32 +1647,7 @@ impl SamplingClient {
             builder,
             sent_bearer,
         } = self.post(self.endpoint("messages"));
-        let oauth_key = crate::anthropic_oauth::credential_from_headers(
-            &self.default_headers,
-            self.defaults.auth_scheme,
-        );
-        let http_request = if oauth_key
-            .as_deref()
-            .is_some_and(crate::anthropic_oauth::is_anthropic_oauth_token)
-        {
-            // OAuth tokens carry the Claude Code wire shape: CC payload
-            // transform, then a serialized body with the cch attestation
-            // patched in (`.json()` would re-serialize unpatched).
-            crate::anthropic_oauth::apply_oauth_request(
-                &mut request.inner,
-                request.x_grok_session_id.as_deref(),
-            );
-            let body = crate::anthropic_oauth::serialize_patched(&request.inner)
-                .map_err(SamplingError::Serialization)?;
-            let builder = match request.x_grok_session_id.as_deref() {
-                Some(session_id) if !session_id.is_empty() => builder
-                    .header("X-Claude-Code-Session-Id", session_id),
-                _ => builder,
-            };
-            builder.body(body)
-        } else {
-            grok_headers.apply(builder).json(&request.inner)
-        };
+        let http_request = grok_headers.apply(builder).json(&request.inner);
 
         let response = http_request.send().await.map_err(|e| {
             tracing::debug!("HTTP request failed: {}", e);
@@ -1801,34 +1763,10 @@ impl SamplingClient {
             builder,
             sent_bearer,
         } = self.post(self.endpoint("messages"));
-        let oauth_key = crate::anthropic_oauth::credential_from_headers(
-            &self.default_headers,
-            self.defaults.auth_scheme,
-        );
-        let http_request = if oauth_key
-            .as_deref()
-            .is_some_and(crate::anthropic_oauth::is_anthropic_oauth_token)
-        {
-            // OAuth tokens carry the Claude Code wire shape; see the
-            // non-streaming create_message arm.
-            crate::anthropic_oauth::apply_oauth_request(
-                &mut request.inner,
-                request.x_grok_session_id.as_deref(),
-            );
-            let body = crate::anthropic_oauth::serialize_patched(&request.inner)
-                .map_err(SamplingError::Serialization)?;
-            let builder = match request.x_grok_session_id.as_deref() {
-                Some(session_id) if !session_id.is_empty() => builder
-                    .header("X-Claude-Code-Session-Id", session_id),
-                _ => builder,
-            };
-            builder.body(body)
-        } else {
-            grok_headers
-                .apply(builder)
-                .header(ACCEPT, HeaderValue::from_static("text/event-stream"))
-                .json(&request.inner)
-        };
+        let http_request = grok_headers
+            .apply(builder)
+            .header(ACCEPT, HeaderValue::from_static("text/event-stream"))
+            .json(&request.inner);
 
         let built_request = http_request.build().map_err(|e| {
             tracing::error!("Failed to build HTTP request: {}", e);
@@ -2177,55 +2115,6 @@ impl SamplingClient {
         self.create_message(wrapper).await
     }
 
-    /// Send a conversation request over the Cursor agent wire
-    /// (Connect protocol over HTTP/2). Consumes the resolved Cursor
-    /// access token as a plain bearer; the session-stable conversation
-    /// id keys the wire's rotation registry.
-    #[allow(clippy::type_complexity)]
-    pub async fn conversation_stream_cursor(
-        &self,
-        request: ConversationRequest,
-    ) -> Result<(
-        BoxStream<'static, Result<xai_grok_cursor::proto::AgentServerMessage>>,
-        Option<ResponseModelMetadata>,
-    )> {
-        let access_token = self
-            .bearer_resolver
-            .as_ref()
-            .and_then(|resolver| resolver.current_bearer())
-            .or_else(|| {
-                crate::anthropic_oauth::credential_from_headers(
-                    &self.default_headers,
-                    self.defaults.auth_scheme,
-                )
-            })
-            .filter(|token| !token.is_empty())
-            .ok_or(SamplingError::InvalidConfiguration(
-                "cursor backend requires a cursor credential (amore login --provider cursor)",
-            ))?;
-
-        let model = request
-            .model
-            .clone()
-            .unwrap_or_else(|| self.defaults.model.clone());
-        let base_conversation_id = request
-            .x_grok_session_id
-            .clone()
-            .filter(|id| !id.is_empty())
-            .or_else(|| request.x_grok_conv_id.clone());
-
-        let config = xai_grok_cursor::RunStreamConfig {
-            access_token,
-            base_url: Some(self.base_url.clone()),
-            model,
-            reasoning_effort: request.reasoning_effort,
-            items: request.items,
-            base_conversation_id,
-        };
-        let raw = xai_grok_cursor::transport::run_stream(config).await?;
-        Ok((raw, None))
-    }
-
     /// Backend-aware streaming call that collects the full response.
     pub async fn conversation_collect(
         &self,
@@ -2249,11 +2138,6 @@ impl SamplingClient {
             ApiBackend::Messages => {
                 let (raw, meta) = self.conversation_stream_messages(request).await?;
                 let events = crate::stream::stream_messages(raw, meta, request_id, idle_timeout);
-                crate::stream::collect_response(events).await
-            }
-            ApiBackend::Cursor => {
-                let (raw, meta) = self.conversation_stream_cursor(request).await?;
-                let events = crate::stream::stream_cursor(raw, meta, request_id, idle_timeout);
                 crate::stream::collect_response(events).await
             }
         };

@@ -444,89 +444,6 @@ def cmd_verify(dry_run: bool) -> int:
         "event loop consumes the session-socket wake channel",
         problems)
 
-    # 6c-provider. provider OAuth (Anthropic Claude Code / Cursor login):
-    #     the new-module surface is merge-safe by construction; these pin the
-    #     few seams cut into upstream files so a merge that drops one fails
-    #     here instead of silently reverting the login lane.
-    _check_file_contains(
-        "crates/codegen/xai-grok-pager/src/app/cli.rs",
-        "pub enum LoginProvider",
-        "login exposes the third-party provider enum (--provider)", problems)
-    _check_file_contains(
-        "crates/codegen/xai-grok-pager/src/app/cli.rs",
-        'long = "provider"',
-        "login carries the --provider flag", problems)
-    _check_file_contains(
-        "crates/codegen/xai-grok-pager-bin/src/main.rs",
-        "provider_oauth::run_provider_login_cli",
-        "login --provider dispatches to the provider OAuth lane", problems)
-    _check_file_contains(
-        "crates/codegen/xai-grok-shell/src/auth/mod.rs",
-        "pub mod provider_oauth;",
-        "shell auth declares the provider_oauth module", problems)
-    _check_file_contains(
-        "crates/codegen/xai-grok-shell/src/agent/config.rs",
-        "provider_oauth::resolve_api_key_reference",
-        "resolve_credentials swaps oauth: references for live tokens", problems)
-    _check_file_contains(
-        "crates/codegen/xai-grok-shell/src/agent/config.rs",
-        "ProviderOAuthBearerResolver::new",
-        "oauth: model credentials get a live bearer resolver", problems)
-    _check_file_contains(
-        "crates/codegen/xai-grok-sampler/src/lib.rs",
-        "pub mod anthropic_oauth;",
-        "sampler declares the Anthropic OAuth fingerprint module", problems)
-    _check_file_contains(
-        "crates/codegen/xai-grok-sampler/src/client.rs",
-        "anthropic_oauth::credential_from_headers",
-        "messages requests apply the Claude Code OAuth fingerprint", problems)
-    _check_file_contains(
-        "crates/codegen/xai-grok-sampler/src/client.rs",
-        "anthropic_oauth::apply_oauth_headers",
-        "post() swaps the header set for OAuth bearer requests", problems)
-
-    # 6d-cursor. Cursor agent wire backend: pins the seams cut into
-    #     upstream files so a merge that drops one fails here instead of
-    #     silently reverting the wire lane. Most seams are also
-    #     compile-protected (exhaustive ApiBackend matches); these are
-    #     the cheap tripwires on top.
-    _check_file_contains(
-        "crates/codegen/xai-grok-sampling-types/src/types.rs",
-        "Cursor agent wire (Connect protocol over HTTP/2",
-        "api backend enum carries the Cursor agent wire variant", problems)
-    _check_file_contains(
-        "crates/codegen/xai-grok-sampler/src/client.rs",
-        "conversation_stream_cursor",
-        "sampler client opens the Cursor Run stream", problems)
-    _check_file_contains(
-        "crates/codegen/xai-grok-sampler/src/actor/request_task.rs",
-        "ApiBackend::Cursor =>",
-        "request_task dispatches the Cursor backend to its transform", problems)
-    _check_file_contains(
-        "crates/codegen/xai-grok-sampler/src/stream/mod.rs",
-        "pub mod cursor;",
-        "sampler declares the Cursor L2 transform module", problems)
-    _check_file_contains(
-        "crates/codegen/xai-grok-sampler/src/lib.rs",
-        "stream_cursor",
-        "sampler re-exports the Cursor L2 transform", problems)
-    _check_file_contains(
-        "Cargo.toml",
-        '"crates/codegen/xai-grok-cursor"',
-        "workspace carries the cursor wire crate", problems)
-    _check_file_contains(
-        "crates/codegen/xai-grok-sampler/Cargo.toml",
-        "xai-grok-cursor",
-        "sampler depends on the cursor wire crate", problems)
-    _check_file_contains(
-        "crates/codegen/xai-grok-shell/src/session/helpers/session_compact.rs",
-        "ApiBackend::Cursor",
-        "compaction drives the Cursor backend through its L2 transform", problems)
-    _check_file_contains(
-        "crates/codegen/xai-grok-shell/src/remote/client.rs",
-        '"cursor" => Some(crate::sampling::ApiBackend::Cursor)',
-        "remote model entries can select the Cursor backend", problems)
-
     # 6. fork-owned surface boundary (Phase-2 script, if present)
     if (REPO / BOUNDARY_SCRIPT).exists():
         r = run(["python", BOUNDARY_SCRIPT, "--check"])
@@ -824,14 +741,14 @@ def cmd_verify(dry_run: bool) -> int:
         "grok-build-public-artifacts",
     ):
         _check_file_lacks(
-            "crates/codegen/xai-grok-pager/src/self_update/**/*.rs",
+            "crates/codegen/xai-grok-pager/src/self_update/**",
             needle,
             f"11e: self_update/** must not contain {needle!r}",
             problems,
         )
     for needle in ("base_url", "from_base"):
         _check_file_lacks(
-            "crates/codegen/xai-grok-pager/src/self_update/**/*.rs",
+            "crates/codegen/xai-grok-pager/src/self_update/**",
             needle,
             f"11f: self_update/** must not contain {needle!r}",
             problems,

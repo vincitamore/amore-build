@@ -17,8 +17,6 @@
 //! and the actor with its per-request task tie these layers together.
 
 pub mod actor;
-/// Anthropic OAuth (Claude Code) wire fingerprint for the Messages backend.
-pub mod anthropic_oauth;
 pub mod attribution;
 pub mod client;
 pub mod commands;
@@ -57,7 +55,5 @@ pub use retry::{
     retry_after_or_backoff, retry_backoff_with_jitter,
 };
 pub use sampling_log::AuthInfo;
-pub use stream::{
-    collect_response, stream_chat_completions, stream_cursor, stream_messages, stream_responses,
-};
+pub use stream::{collect_response, stream_chat_completions, stream_messages, stream_responses};
 pub use types::RequestId;
