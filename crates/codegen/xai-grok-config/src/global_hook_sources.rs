@@ -552,6 +552,28 @@ pub fn is_direct_hook_json_name(name: &str) -> bool {
     true
 }
 
+/// Whether this host should load `name` from `dir`.
+///
+/// `*-posix.json` is the Unix registration. When `stem-posix.json` sits
+/// beside `stem.json`, `stem.json` is the Windows registration of the same
+/// hook. This host loads its own file and skips the other. An unpaired
+/// `*.json` loads on either host.
+pub fn hook_json_applies_to_host(dir: &Path, name: &str) -> bool {
+    if !is_direct_hook_json_name(name) {
+        return false;
+    }
+    if cfg!(windows) {
+        return !name.ends_with("-posix.json");
+    }
+    let Some(stem) = name.strip_suffix(".json") else {
+        return false;
+    };
+    if stem.ends_with("-posix") {
+        return true;
+    }
+    !dir.join(format!("{stem}-posix.json")).is_file()
+}
+
 /// Immediate discovery JSON files under `dir` (sorted, non-recursive).
 pub fn list_direct_hook_json_files(dir: &Path) -> io::Result<Vec<PathBuf>> {
     let mut out = Vec::new();
@@ -566,7 +588,7 @@ pub fn list_direct_hook_json_files(dir: &Path) -> io::Result<Vec<PathBuf>> {
         let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
             continue;
         };
-        if !is_direct_hook_json_name(name) {
+        if !hook_json_applies_to_host(dir, name) {
             continue;
         }
         out.push(path);

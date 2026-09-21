@@ -338,7 +338,7 @@ fn load_hooks_from_directory(dir: &Path) -> (Vec<HookSpec>, Vec<HookError>) {
         let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
             continue;
         };
-        if !xai_grok_config::is_direct_hook_json_name(name) || !path.is_file() {
+        if !xai_grok_config::hook_json_applies_to_host(dir, name) || !path.is_file() {
             continue;
         }
         json_files.push(path);

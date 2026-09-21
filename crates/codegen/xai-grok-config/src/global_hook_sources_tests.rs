@@ -279,6 +279,28 @@ fn list_direct_hook_json_files_matches_discovery_filter() {
 }
 
 #[test]
+fn list_direct_hook_json_files_keeps_this_hosts_registration() {
+    let tmp = TempDir::new().unwrap();
+    let dir = tmp.path();
+    std::fs::write(dir.join("house-stop-gate.json"), b"{}").unwrap();
+    std::fs::write(dir.join("house-stop-gate-posix.json"), b"{}").unwrap();
+    std::fs::write(dir.join("solo.json"), b"{}").unwrap();
+    let names: Vec<String> = list_direct_hook_json_files(dir)
+        .unwrap()
+        .iter()
+        .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+        .collect();
+    assert!(names.contains(&"solo.json".to_string()));
+    if cfg!(windows) {
+        assert!(names.contains(&"house-stop-gate.json".to_string()));
+        assert!(!names.iter().any(|n| n.ends_with("-posix.json")));
+    } else {
+        assert!(names.contains(&"house-stop-gate-posix.json".to_string()));
+        assert!(!names.contains(&"house-stop-gate.json".to_string()));
+    }
+}
+
+#[test]
 #[cfg(unix)]
 fn validate_direct_hook_json_rejects_hardlink_and_symlink() {
     let tmp = TempDir::new().unwrap();

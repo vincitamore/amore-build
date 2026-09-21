@@ -38,7 +38,8 @@ pub use campaigns::{
 pub use global_hook_sources::{
     GlobalHookSource, GlobalHookSourceError, GlobalHookSourceKind, ResolvedGlobalHookSources,
     TRUST_BOUNDARY_FILENAMES, ensure_grok_hook_slots, existing_ancestor_chain,
-    is_direct_hook_json_name, list_direct_hook_json_files, missing_configured_sources,
+    hook_json_applies_to_host, is_direct_hook_json_name, list_direct_hook_json_files,
+    missing_configured_sources,
     path_has_symlink_component, resolve_global_hook_sources, resolve_trust_boundary_sources,
     unique_ancestors_rootward,
 };
