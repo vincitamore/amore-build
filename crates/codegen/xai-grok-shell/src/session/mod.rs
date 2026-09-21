@@ -567,7 +567,7 @@ pub mod signals;
 pub(crate) mod slash_authority;
 pub(crate) mod slash_commands;
 pub mod usage_file;
-pub use slash_commands::PAGER_COMMAND_KEYS;
+pub use slash_commands::{PAGER_COMMAND_KEYS, builtin_command};
 pub(crate) mod repo_status_prefix;
 pub mod storage;
 pub(crate) mod streaming_capture;
@@ -575,6 +575,7 @@ pub(crate) mod summary;
 pub(crate) mod telemetry;
 #[cfg(feature = "test-support")]
 pub mod testkit;
+pub mod tool_definitions_artifact;
 pub mod tool_index;
 pub mod turn_completion;
 pub mod unified_list;

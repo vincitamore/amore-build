@@ -5,6 +5,7 @@
     unreachable_code,
     dead_code
 )]
+#![deny(clippy::indexing_slicing)]
 //! Backend environment presets for the Grok CLI crate family: endpoint URL
 //! defaults, environment selection, and env-var test support.
 //!

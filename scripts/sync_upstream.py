@@ -739,6 +739,7 @@ def cmd_verify(dry_run: bool) -> int:
         "crates/codegen/xai-grok-pager-bin/src/main.rs",
         "self_update::run_apply_result",
         "11d: main.rs wires quit-for-update to self_update::run_apply_result", problems)
+    # A bare `**` matches only the directory on this pathlib; `**/*.rs` is the scan.
     for needle in (
         "x.ai",
         "storage.googleapis.com",
@@ -746,14 +747,14 @@ def cmd_verify(dry_run: bool) -> int:
         "grok-build-public-artifacts",
     ):
         _check_file_lacks(
-            "crates/codegen/xai-grok-pager/src/self_update/**",
+            "crates/codegen/xai-grok-pager/src/self_update/**/*.rs",
             needle,
             f"11e: self_update/** must not contain {needle!r}",
             problems,
         )
     for needle in ("base_url", "from_base"):
         _check_file_lacks(
-            "crates/codegen/xai-grok-pager/src/self_update/**",
+            "crates/codegen/xai-grok-pager/src/self_update/**/*.rs",
             needle,
             f"11f: self_update/** must not contain {needle!r}",
             problems,

@@ -25,7 +25,8 @@ fn title_key(s: &str) -> String {
 pub(crate) fn title_miss_hint(arg: &str) -> String {
     format!(
         "no session id or title matched {arg:?} for this directory; \
-         try `grok sessions search {arg:?}`"
+         try `{} sessions search {arg:?}`",
+        crate::app::cli::resolved_bin_name()
     )
 }
 

@@ -118,6 +118,7 @@ pub fn print_report(
             count_verb(report.worktrees_outside_managed_roots)
         )?;
     }
+    let bin = crate::app::cli::resolved_bin_name();
     match report.registry {
         RegistryState::Read => {}
         RegistryState::Absent => {
@@ -144,7 +145,7 @@ pub fn print_report(
         RegistryState::Corrupt => {
             writeln!(
                 out,
-                "  Worktree registry is damaged; rows show as untracked. Remove {} and run `grok worktree db rebuild` to recreate it.",
+                "  Worktree registry is damaged; rows show as untracked. Remove {} and run `{bin} worktree db rebuild` to recreate it.",
                 abbreviate(&report.registry_path, &report.grok_home, &home_label)
             )?;
         }
@@ -194,13 +195,13 @@ pub fn print_report(
         if report.worktrees.iter().any(WorktreeUsage::is_tracked) {
             writeln!(
                 out,
-                "To reclaim space, run `grok worktree gc --max-age 7d --dry-run`, then the same command without `--dry-run`. Without `--max-age`, gc expires nothing, and it keeps a worktree whose work it cannot find elsewhere, naming each one."
+                "To reclaim space, run `{bin} worktree gc --max-age 7d --dry-run`, then the same command without `--dry-run`. Without `--max-age`, gc expires nothing, and it keeps a worktree whose work it cannot find elsewhere, naming each one."
             )?;
         }
         if !report.worktrees.iter().all(WorktreeUsage::is_tracked) {
             writeln!(
                 out,
-                "Untracked rows are not in the registry, so gc never visits them. Remove one with `grok worktree rm --dry-run <path>`, then without `--dry-run`."
+                "Untracked rows are not in the registry, so gc never visits them. Remove one with `{bin} worktree rm --dry-run <path>`, then without `--dry-run`."
             )?;
         }
     }

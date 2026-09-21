@@ -1220,7 +1220,9 @@ fn tmux_top_level_commands(
     let chars = text.chars().collect::<Vec<_>>();
     let mut index = 0;
     while index < chars.len() {
-        let character = chars[index];
+        let Some(&character) = chars.get(index) else {
+            break;
+        };
         if escaped {
             if character == '\n' {
                 // tmux removes escaped newlines exactly; it does not insert a space.
@@ -1256,14 +1258,15 @@ fn tmux_top_level_commands(
         if character == '#'
             && (line_start || current.chars().last().is_some_and(char::is_whitespace))
         {
-            while index < chars.len() && chars[index] != '\n' {
+            while chars.get(index).is_some_and(|&c| c != '\n') {
                 index += 1;
             }
             continue;
         }
         if line_start && character == '%' {
-            let directive = chars[index..]
+            let directive = chars
                 .iter()
+                .skip(index)
                 .take_while(|character| **character != '\n')
                 .collect::<String>();
             let directive = directive.trim();
@@ -1272,7 +1275,7 @@ fn tmux_top_level_commands(
             } else if directive.starts_with("%endif") {
                 conditional_depth = conditional_depth.saturating_sub(1);
             }
-            while index < chars.len() && chars[index] != '\n' {
+            while chars.get(index).is_some_and(|&c| c != '\n') {
                 index += 1;
             }
             line_start = true;
@@ -1320,7 +1323,7 @@ fn tokenize_tmux_command<'a>(
     let mut tokens = Vec::new();
     let mut index = 0;
     while index < bytes.len() {
-        while bytes[index..].first().is_some_and(u8::is_ascii_whitespace) {
+        while bytes.get(index).is_some_and(u8::is_ascii_whitespace) {
             index += 1;
             if index == bytes.len() {
                 return Ok(tokens);
@@ -1330,7 +1333,9 @@ fn tokenize_tmux_command<'a>(
         let mut quote = None;
         let mut quoted = false;
         while index < bytes.len() {
-            let byte = bytes[index];
+            let Some(&byte) = bytes.get(index) else {
+                break;
+            };
             if let Some(active) = quote {
                 if byte == active {
                     quote = None;
@@ -1356,7 +1361,9 @@ fn tokenize_tmux_command<'a>(
                 "unterminated quoted tmux token",
             ));
         }
-        let raw = &command[start..index];
+        let Some(raw) = command.get(start..index) else {
+            break;
+        };
         let value = raw
             .strip_prefix(['\'', '"'])
             .and_then(|value| value.strip_suffix(['\'', '"']))
@@ -1419,7 +1426,10 @@ fn classify_tmux_assignment(
             index += 1;
             break;
         }
-        let flags = &token.value[1..];
+        let Some(flags) = token.value.get(1..) else {
+            index += 1;
+            continue;
+        };
         is_global |= flags.contains('g');
         if flags.contains('s') {
             explicit_scope = Some(TmuxOptionScope::Server);
@@ -1480,13 +1490,19 @@ fn classify_tmux_assignment(
             }
         }
     }
-    if tokens.len() != index + 2 || tokens[index + 1].quoted {
+    let Some(value_token) = tokens.get(index + 1) else {
+        return TmuxAssignment::Ambiguous(format!(
+            "ambiguous direct assignment of `{}`",
+            spec.option
+        ));
+    };
+    if tokens.len() != index + 2 || value_token.quoted {
         return TmuxAssignment::Ambiguous(format!(
             "ambiguous direct assignment of `{}`",
             spec.option
         ));
     }
-    let value = tokens[index + 1].value;
+    let value = value_token.value;
     if spec.healthy_values.contains(&value) {
         TmuxAssignment::Healthy
     } else {
@@ -1600,7 +1616,10 @@ fn is_posix_ssh_function_declaration(line: &str) -> bool {
     };
     let after_name = after_name.trim_start();
     after_name.starts_with("()")
-        || (after_name.starts_with('(') && after_name[1..].trim_start().starts_with(')'))
+        || (after_name.starts_with('(')
+            && after_name
+                .get(1..)
+                .is_some_and(|s| s.trim_start().starts_with(')')))
 }
 
 fn token_is_exact_name(text: &str, name: &str) -> bool {

@@ -450,8 +450,10 @@ impl SessionHandle {
         })
     }
     /// Snapshot the session's resolved tool schema for verbatim-fork inheritance.
-    /// A dead actor or dropped reply fails open to an empty list (child then builds its own toolset, same as a non-fork spawn).
-    pub(crate) async fn snapshot_tool_definitions(&self) -> Vec<xai_grok_sampling_types::ToolSpec> {
+    /// A dead actor, dropped reply, or empty schema fails open to `None`; the child builds its own.
+    pub(crate) async fn snapshot_tool_definitions(
+        &self,
+    ) -> Option<crate::session::commands::ForkedToolSnapshot> {
         let (tx, rx) = oneshot::channel();
         if self
             .cmd_tx
@@ -461,14 +463,18 @@ impl SessionHandle {
             tracing::warn!(
                 "snapshot_tool_definitions: session actor gone; fork child inherits no parent tools"
             );
-            return Vec::new();
+            return None;
         }
-        rx.await.unwrap_or_else(|_| {
-            tracing::warn!(
-                "snapshot_tool_definitions: reply dropped; fork child inherits no parent tools"
-            );
-            Vec::new()
-        })
+        match rx.await {
+            Ok(snapshot) if !snapshot.specs.is_empty() => Some(snapshot),
+            Ok(_) => None,
+            Err(_) => {
+                tracing::warn!(
+                    "snapshot_tool_definitions: reply dropped; fork child inherits no parent tools"
+                );
+                None
+            }
+        }
     }
     pub(crate) async fn workflow_catalog_state(&self) -> (bool, bool) {
         let (tx, rx) = oneshot::channel();

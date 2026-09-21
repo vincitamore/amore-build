@@ -3244,17 +3244,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "fancy-regex"
-version = "0.16.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "998b056554fbe42e03ae0e152895cd1a7e1002aec800fdc6635d20270260c46f"
-dependencies = [
- "bit-set 0.8.0",
- "regex-automata",
- "regex-syntax",
-]
-
-[[package]]
 name = "fast-float2"
 version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7250,6 +7239,28 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
+name = "onig"
+version = "6.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e9f0430136375a315630bfaf61d6bca71a048258b312be75f26f910fb4333e44"
+dependencies = [
+ "bitflags 2.13.0",
+ "libc",
+ "once_cell",
+ "onig_sys",
+]
+
+[[package]]
+name = "onig_sys"
+version = "69.9.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1e68317604e77e53b85896388e1a803c1d21b74c899ec9e5e1112db90735edd7"
+dependencies = [
+ "cc",
+ "pkg-config",
+]
+
+[[package]]
 name = "oorandom"
 version = "11.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10586,10 +10597,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "656b45c05d95a5704399aeef6bd0ddec7b2b3531b7c9e900abbf7c4d2190c925"
 dependencies = [
  "bincode",
- "fancy-regex 0.16.2",
  "flate2",
  "fnv",
  "once_cell",
+ "onig",
  "plist",
  "regex-syntax",
  "serde",
@@ -10841,9 +10852,9 @@ dependencies = [
 
 [[package]]
 name = "tikv-jemalloc-ctl"
-version = "0.6.1"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "661f1f6a57b3a36dc9174a2c10f19513b4866816e13425d3e418b11cc37bc24c"
+checksum = "3a184c43b8ab2f41df2733b55556e3f5f632f4aeaa205b1bb018f574b7f5f142"
 dependencies = [
  "libc",
  "paste",
@@ -10852,9 +10863,9 @@ dependencies = [
 
 [[package]]
 name = "tikv-jemalloc-sys"
-version = "0.6.1+5.3.0-1-ge13ca993e8ccb9ba9847cc330696e02839f328f7"
+version = "0.7.1+5.3.1-0-g81034ce1f1373e37dc865038e1bc8eeecf559ce8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cd8aa5b2ab86a2cefa406d889139c162cbb230092f7d1d7cbc1716405d852a3b"
+checksum = "1a2825c78386b4ae0314074867860ba9577875de945f05992c38815cbec327f0"
 dependencies = [
  "cc",
  "libc",
@@ -10862,9 +10873,9 @@ dependencies = [
 
 [[package]]
 name = "tikv-jemallocator"
-version = "0.6.1"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0359b4327f954e0567e69fb191cf1436617748813819c94b8cd4a431422d053a"
+checksum = "249f09e49ab1609436f34c776e84231bead18d6a955f119f939bdc1d847561bd"
 dependencies = [
  "libc",
  "tikv-jemalloc-sys",
@@ -13617,6 +13628,7 @@ dependencies = [
  "xai-grok-config",
  "xai-grok-hooks",
  "xai-grok-sampling-types",
+ "xai-grok-telemetry",
  "xai-grok-tools",
  "xai-token-estimation",
  "xai-tool-types",
@@ -13884,11 +13896,13 @@ dependencies = [
  "chrono",
  "filetime",
  "fs2",
+ "indexmap",
  "jsonwebtoken",
  "libc",
  "loom",
  "obfstr",
  "parking_lot",
+ "pretty_assertions",
  "prost",
  "rand 0.9.5",
  "reqwest 0.12.24",
@@ -13912,6 +13926,7 @@ dependencies = [
  "urlencoding",
  "uuid",
  "webbrowser",
+ "wiremock",
  "xai-file-utils",
  "xai-grok-auth",
  "xai-grok-config",
@@ -13974,7 +13989,6 @@ dependencies = [
  "libc",
  "oauth2",
  "parking_lot",
- "regex",
  "reqwest 0.13.4",
  "rmcp",
  "serde",
@@ -14088,7 +14102,6 @@ dependencies = [
  "tracing-opentelemetry",
  "tracing-subscriber",
  "url",
- "xai-dirs",
  "xai-grok-auth",
  "xai-grok-env",
  "xai-grok-extra-ca",
@@ -14097,7 +14110,7 @@ dependencies = [
 
 [[package]]
 name = "xai-grok-pager"
-version = "1.0.24"
+version = "1.0.38"
 dependencies = [
  "agent-client-protocol",
  "ansi-to-tui",
@@ -14113,6 +14126,7 @@ dependencies = [
  "crossterm",
  "dunce",
  "flate2",
+ "gethostname",
  "git2",
  "image",
  "include_dir",
@@ -14144,6 +14158,7 @@ dependencies = [
  "tar",
  "tempfile",
  "textwrap",
+ "thiserror 2.0.18",
  "tokio",
  "tokio-rustls",
  "tokio-stream",
@@ -14160,7 +14175,9 @@ dependencies = [
  "walkdir",
  "which",
  "windows-sys 0.59.0",
+ "wiremock",
  "xai-acp-lib",
+ "xai-chat-state",
  "xai-crash-handler",
  "xai-dirs",
  "xai-fast-worktree",
@@ -14182,6 +14199,7 @@ dependencies = [
  "xai-grok-pager-diff",
  "xai-grok-pager-render",
  "xai-grok-plugin-marketplace",
+ "xai-grok-sampling-types",
  "xai-grok-sandbox",
  "xai-grok-shell",
  "xai-grok-status-line",
@@ -14197,13 +14215,14 @@ dependencies = [
  "xai-ratatui-inline",
  "xai-ratatui-textarea",
  "xai-token-estimation",
+ "xai-tool-types",
  "xai-tty-utils",
  "zip 3.0.0",
 ]
 
 [[package]]
 name = "xai-grok-pager-bin"
-version = "1.0.24"
+version = "1.0.38"
 dependencies = [
  "anyhow",
  "clap",
@@ -14256,8 +14275,10 @@ dependencies = [
  "chrono",
  "crossterm",
  "ratatui",
+ "serial_test",
  "similar",
  "tracing",
+ "unicode-width 0.2.0",
  "uuid",
  "xai-grok-pager",
  "xai-grok-pager-diff",
@@ -14305,6 +14326,7 @@ dependencies = [
  "anstyle",
  "anyhow",
  "base64 0.22.1",
+ "blake3",
  "chrono",
  "crossterm",
  "dark-light",
@@ -14412,6 +14434,7 @@ dependencies = [
  "xai-grok-sampling-types",
  "xai-grok-test-support",
  "xai-grok-version",
+ "zstd",
 ]
 
 [[package]]
@@ -14534,7 +14557,7 @@ dependencies = [
 
 [[package]]
 name = "xai-grok-shell"
-version = "1.0.24"
+version = "1.0.38"
 dependencies = [
  "agent-client-protocol",
  "anyhow",
@@ -14584,7 +14607,6 @@ dependencies = [
  "regex",
  "reqwest 0.12.24",
  "reqwest-middleware 0.4.2",
- "ring",
  "rustls",
  "semver",
  "serde",
@@ -14826,6 +14848,7 @@ dependencies = [
  "xai-grok-sampler",
  "xai-grok-secrets",
  "xai-grok-session-events",
+ "xai-grok-test-support",
  "xai-grok-version",
  "xai-mixpanel",
  "xai-token-estimation",
@@ -14840,14 +14863,23 @@ dependencies = [
  "anyhow",
  "async-trait",
  "axum",
+ "axum-server",
+ "base64 0.22.1",
  "clap",
  "futures-util",
  "libc",
+ "opentelemetry-proto",
  "portable-pty",
+ "prost",
+ "rcgen",
+ "regex",
  "reqwest 0.12.24",
+ "ring",
+ "rustls",
  "serde",
  "serde_json",
  "tempfile",
+ "thiserror 2.0.18",
  "tokio",
  "tokio-tungstenite",
  "tokio-util",
@@ -14979,6 +15011,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serial_test",
+ "sha2 0.10.9",
  "tempfile",
  "thiserror 2.0.18",
  "time",
@@ -14993,12 +15026,14 @@ dependencies = [
  "xai-grok-telemetry",
  "xai-grok-tools",
  "xai-grok-version",
+ "xai-tty-utils",
+ "zip 3.0.0",
  "zstd",
 ]
 
 [[package]]
 name = "xai-grok-version"
-version = "1.0.24"
+version = "1.0.38"
 dependencies = [
  "semver",
 ]

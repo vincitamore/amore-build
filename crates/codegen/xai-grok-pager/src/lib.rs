@@ -8,9 +8,11 @@
 //! xai-grok-pager: Grok Build TUI.
 //!
 //! A clean-room implementation built on the v3 pager rendering engine.
+#![deny(clippy::indexing_slicing)]
 pub mod acp;
 pub mod actions;
 pub mod announcements;
+pub mod agent_runtime;
 pub mod app;
 pub mod best_effort_stderr;
 pub mod client_identity;
