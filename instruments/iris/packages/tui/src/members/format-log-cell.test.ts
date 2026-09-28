@@ -105,7 +105,7 @@ describe('formatLogCell', () => {
 
 describe('collapseHomeInText (display-only tilde collapse)', () => {
   test('POSIX home prefix → tilde', () => {
-    expect(collapseHomeInText('daemon start house=/home/alex/proj', '/home/alex')).toBe(
+    expect(collapseHomeInText('daemon start house=/home/ada/proj', '/home/ada')).toBe(
       'daemon start house=~/proj',
     );
   });
@@ -128,13 +128,13 @@ describe('collapseHomeInText (display-only tilde collapse)', () => {
 
   test('formatLucernaDisplayLine applies collapse then exact width', () => {
     const out = formatLucernaDisplayLine(
-      'daemon start house=/home/alex/h',
+      'daemon start house=/home/ada/h',
       32,
-      '/home/alex',
+      '/home/ada',
     );
     expect(out.length).toBe(32);
     expect(out.startsWith('daemon start house=~/h')).toBe(true);
-    expect(out).not.toContain('/home/alex');
+    expect(out).not.toContain('/home/ada');
   });
 
   test('pulse status line keeps middle-dot through display pipeline', () => {
