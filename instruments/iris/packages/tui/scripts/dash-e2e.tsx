@@ -27,7 +27,7 @@ import { Shell } from '../src/shell/Shell';
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const FRAMES_DIR = join(SCRIPT_DIR, 'e2e-frames');
 const TOPOLOGY_PATH = join(SCRIPT_DIR, 'e2e-sessions-topology.txt');
-const ORG_ROOT = process.env.IRIS_ORG_ROOT ?? 'C:\\Users\\AlexMoyer\\Documents\\amore';
+const ORG_ROOT = process.env.IRIS_ORG_ROOT ?? join(homedir(), 'Documents', 'amore');
 const SESSIONS_ROOT = join(homedir(), '.amore', 'sessions');
 
 process.env.IRIS_ORG_ROOT = ORG_ROOT;

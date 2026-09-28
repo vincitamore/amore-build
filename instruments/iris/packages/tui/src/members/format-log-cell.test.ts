@@ -111,14 +111,14 @@ describe('collapseHomeInText (display-only tilde collapse)', () => {
   });
 
   test('Windows backslash home prefix → tilde', () => {
-    const home = 'C:\\Users\\AlexMoyer';
-    const line = 'daemon start house=C:\\Users\\AlexMoyer\\Documents\\house';
+    const home = 'C:\\Users\\ada';
+    const line = 'daemon start house=C:\\Users\\ada\\Documents\\house';
     expect(collapseHomeInText(line, home)).toBe('daemon start house=~\\Documents\\house');
   });
 
   test('Windows forward-slash form of home also collapses', () => {
-    const home = 'C:\\Users\\AlexMoyer';
-    const line = 'daemon start house=C:/Users/AlexMoyer/Documents/house';
+    const home = 'C:\\Users\\ada';
+    const line = 'daemon start house=C:/Users/ada/Documents/house';
     expect(collapseHomeInText(line, home)).toBe('daemon start house=~/Documents/house');
   });
 

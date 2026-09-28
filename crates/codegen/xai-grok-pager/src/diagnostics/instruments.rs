@@ -1243,8 +1243,8 @@ mod tests {
             "My_House-730fc801682b"
         );
         assert_eq!(
-            derive_house_id_str(r"C:\Users\AlexMoyer\Documents\amore", win_cwd),
-            "amore-95a9bb53dd38"
+            derive_house_id_str(r"C:\Users\ada\Documents\amore", win_cwd),
+            "amore-d94f1838a9a4"
         );
     }
 

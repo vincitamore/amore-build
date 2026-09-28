@@ -21,7 +21,7 @@ later campaign opens a chrome-stable golden phase.
 From the fork root:
 
 ```powershell
-cd C:\Users\AlexMoyer\Documents\amore-build
+cd C:\Users\ada\Documents\amore-build
 python scripts/dash-e2e-pty.py --profile operator
 python scripts/dash-e2e-pty.py --profile narrow
 python scripts/dash-e2e-pty.py --profile tight

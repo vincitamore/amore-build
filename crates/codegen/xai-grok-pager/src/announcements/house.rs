@@ -309,7 +309,7 @@ fn house_name(root: &Path) -> String {
 /// ```text
 /// 6 active tasks
 ///   • De-grok the Amore Build fork and build upstream-sync tooling
-///   • Port house-op skills from opus
+///   • Port house-op skills from the previous house
 ///
 /// 1 reminder due
 ///   • Renew certs (due 2026-07-01 09:00)

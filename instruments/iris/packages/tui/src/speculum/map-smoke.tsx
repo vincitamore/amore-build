@@ -142,9 +142,9 @@ CREATE VIRTUAL TABLE events_fts USING fts5(
 );
 `;
 
-const OP = 'C:\\Users\\AlexMoyer\\Documents\\amore';
-const OP2 = 'C:\\Users\\AlexMoyer\\Documents\\amore-build';
-const EXP = 'C:\\Users\\AlexMoyer\\AppData\\Local\\Temp\\arcus-identity-study\\A-sen-01-r1-Fz7FoM';
+const OP = 'C:\\Users\\ada\\Documents\\amore';
+const OP2 = 'C:\\Users\\ada\\Documents\\amore-build';
+const EXP = 'C:\\Users\\ada\\AppData\\Local\\Temp\\arcus-identity-study\\A-sen-01-r1-Fz7FoM';
 const HAR = '/tmp/chat-mode-build-refuse-1';
 
 type SeedSpec = {

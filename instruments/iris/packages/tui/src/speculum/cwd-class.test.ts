@@ -19,17 +19,17 @@ const SAMPLES: { input: string; want: CwdOrigin; note: string }[] = [
     note: 'encoded chat-mode conv-ok',
   },
   {
-    input: 'C%3A%5CUsers%5CAlexMoyer%5CAppData%5CLocal%5CTemp%5Camore-sf1-resume-smoke',
+    input: 'C%3A%5CUsers%5Cada%5CAppData%5CLocal%5CTemp%5Camore-sf1-resume-smoke',
     want: 'harness',
     note: 'encoded sf1 resume smoke',
   },
   {
-    input: 'C%3A%5CUsers%5CAlexMoyer%5CAppData%5CLocal%5CTemp%5Csf1-smoke',
+    input: 'C%3A%5CUsers%5Cada%5CAppData%5CLocal%5CTemp%5Csf1-smoke',
     want: 'harness',
     note: 'encoded sf1-smoke under Temp',
   },
   {
-    input: 'C%3A%5CUsers%5CAlexMoyer%5Csf1-smoke',
+    input: 'C%3A%5CUsers%5Cada%5Csf1-smoke',
     want: 'harness',
     note: 'encoded sf1-smoke under home',
   },
@@ -39,55 +39,55 @@ const SAMPLES: { input: string; want: CwdOrigin; note: string }[] = [
     note: 'decoded chat-mode refuse',
   },
   {
-    input: 'C:\\Users\\AlexMoyer\\AppData\\Local\\Temp\\amore-sf1-resume-smoke',
+    input: 'C:\\Users\\ada\\AppData\\Local\\Temp\\amore-sf1-resume-smoke',
     want: 'harness',
     note: 'decoded resume-smoke',
   },
   {
-    input: 'C:\\Users\\AlexMoyer\\sf1-smoke',
+    input: 'C:\\Users\\ada\\sf1-smoke',
     want: 'harness',
     note: 'decoded sf1-smoke',
   },
   {
     input:
-      'C%3A%5CUsers%5CAlexMoyer%5CAppData%5CLocal%5CTemp%5Carcus-identity-study%5CA-sen-01-r1-Fz7FoM',
+      'C%3A%5CUsers%5Cada%5CAppData%5CLocal%5CTemp%5Carcus-identity-study%5CA-sen-01-r1-Fz7FoM',
     want: 'experiment',
     note: 'encoded identity-study arm',
   },
   {
     input:
-      'C%3A%5CUsers%5CAlexMoyer%5CAppData%5CLocal%5CTemp%5Carcus-model-comparison%5Cdeployed-0eujTL',
+      'C%3A%5CUsers%5Cada%5CAppData%5CLocal%5CTemp%5Carcus-model-comparison%5Cdeployed-0eujTL',
     want: 'experiment',
     note: 'encoded model-comparison arm',
   },
   {
     input:
-      'C%3A%5CUsers%5CAlexMoyer%5CDocuments%5Copus%5Cprojects%5Cncu-grants%5Cresearch%5Cglm%5Cidentity-study%5Carms%5Carcus',
+      'C%3A%5CUsers%5Cada%5CDocuments%5Cwork%5Cresearch%5Cglm%5Cidentity-study%5Carms%5Carcus',
     want: 'experiment',
     note: 'Documents-hosted identity-study arm still experiment',
   },
   {
-    input: 'C:\\Users\\AlexMoyer\\AppData\\Local\\Temp\\arcus-identity-study\\A-sen-02-r1-FaTNwz',
+    input: 'C:\\Users\\ada\\AppData\\Local\\Temp\\arcus-identity-study\\A-sen-02-r1-FaTNwz',
     want: 'experiment',
     note: 'decoded identity-study',
   },
   {
-    input: 'C%3A%5CUsers%5CAlexMoyer%5CDocuments%5Camore',
+    input: 'C%3A%5CUsers%5Cada%5CDocuments%5Camore',
     want: 'operator',
     note: 'encoded Documents/amore',
   },
   {
-    input: 'C%3A%5CUsers%5CAlexMoyer%5CDocuments%5Camore-build',
+    input: 'C%3A%5CUsers%5Cada%5CDocuments%5Camore-build',
     want: 'operator',
     note: 'encoded Documents/amore-build',
   },
   {
-    input: 'C%3A%5CUsers%5CAlexMoyer%5CDocuments%5Carcus',
+    input: 'C%3A%5CUsers%5Cada%5CDocuments%5Carcus',
     want: 'operator',
     note: 'encoded Documents/arcus',
   },
   {
-    input: 'C:\\Users\\AlexMoyer\\Documents\\amore-build\\instruments\\iris\\packages\\tui',
+    input: 'C:\\Users\\ada\\Documents\\amore-build\\instruments\\iris\\packages\\tui',
     want: 'operator',
     note: 'decoded nested workspace',
   },
@@ -115,8 +115,8 @@ const SAMPLES: { input: string; want: CwdOrigin; note: string }[] = [
 
 describe('decodeCwdPath', () => {
   test('decodes URL-encoded Windows path', () => {
-    expect(decodeCwdPath('C%3A%5CUsers%5CAlexMoyer%5CDocuments%5Camore')).toBe(
-      'C:\\Users\\AlexMoyer\\Documents\\amore',
+    expect(decodeCwdPath('C%3A%5CUsers%5Cada%5CDocuments%5Camore')).toBe(
+      'C:\\Users\\ada\\Documents\\amore',
     );
   });
 
@@ -136,11 +136,11 @@ describe('classifyCwd', () => {
 describe('buildOriginsReport', () => {
   test('counts rows and distinct roots per class', () => {
     const rows = [
-      { project_path: 'C:\\Users\\AlexMoyer\\Documents\\amore', agent: 'primary' },
-      { project_path: 'C:\\Users\\AlexMoyer\\Documents\\amore', agent: 'subagent' },
-      { project_path: 'C:\\Users\\AlexMoyer\\Documents\\arcus', agent: 'primary' },
+      { project_path: 'C:\\Users\\ada\\Documents\\amore', agent: 'primary' },
+      { project_path: 'C:\\Users\\ada\\Documents\\amore', agent: 'subagent' },
+      { project_path: 'C:\\Users\\ada\\Documents\\arcus', agent: 'primary' },
       {
-        project_path: 'C:\\Users\\AlexMoyer\\AppData\\Local\\Temp\\arcus-identity-study\\A-sen-01',
+        project_path: 'C:\\Users\\ada\\AppData\\Local\\Temp\\arcus-identity-study\\A-sen-01',
         agent: 'primary',
       },
       { project_path: '/tmp/chat-mode-build-refuse-1', agent: 'primary' },

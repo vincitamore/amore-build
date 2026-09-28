@@ -3,7 +3,7 @@
 // member and that a re-visit works from the mounted instance.
 //
 // Run (org root required — Dashboard resolveOrgRoot):
-//   $env:IRIS_ORG_ROOT = "C:\Users\AlexMoyer\Documents\amore"   # or any org root / org cwd
+//   $env:IRIS_ORG_ROOT = "C:\Users\ada\Documents\amore"   # or any org root / org cwd
 //   bun run src/shell/shell-smoke.tsx
 //
 // Sessions hop is fixture-free: with no SPECULUM_BIN / no binary on PATH the status strip shows

@@ -22,7 +22,7 @@ No new Python packages beyond the capture pipeline.
 From the repo root:
 
 ```powershell
-cd C:\Users\AlexMoyer\Documents\amore-build
+cd C:\Users\ada\Documents\amore-build
 python scripts/dash-e2e-pty.py
 ```
 

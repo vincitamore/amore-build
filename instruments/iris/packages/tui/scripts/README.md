@@ -9,7 +9,7 @@ Headless end-to-end driver of the **real** Iris dash `Shell` focused on the Sess
 From `packages/tui`:
 
 ```powershell
-$env:IRIS_ORG_ROOT = "C:\Users\AlexMoyer\Documents\amore"   # default if unset
+$env:IRIS_ORG_ROOT = "C:\Users\ada\Documents\amore"   # default if unset
 bun run scripts/dash-e2e.tsx
 ```
 

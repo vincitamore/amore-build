@@ -73,7 +73,7 @@ import { fitViewport } from '../render/viewport';
 function row(partial: Partial<SessionListRow> & { id: string }): SessionListRow {
   return {
     id: partial.id,
-    projectPath: partial.projectPath ?? 'C:\\Users\\AlexMoyer\\Documents\\amore',
+    projectPath: partial.projectPath ?? 'C:\\Users\\ada\\Documents\\amore',
     agent: partial.agent ?? 'primary',
     parentSession: partial.parentSession ?? null,
     modelId: partial.modelId ?? null,
@@ -88,8 +88,8 @@ function row(partial: Partial<SessionListRow> & { id: string }): SessionListRow 
   };
 }
 
-const OP = 'C:\\Users\\AlexMoyer\\Documents\\amore';
-const EXP = 'C:\\Users\\AlexMoyer\\AppData\\Local\\Temp\\arcus-identity-study\\A-sen-01-r1-Fz7FoM';
+const OP = 'C:\\Users\\ada\\Documents\\amore';
+const EXP = 'C:\\Users\\ada\\AppData\\Local\\Temp\\arcus-identity-study\\A-sen-01-r1-Fz7FoM';
 const HAR = '/tmp/chat-mode-build-refuse-1';
 
 const mixed: SessionListRow[] = [
