@@ -708,6 +708,12 @@ def cmd_verify(dry_run: bool) -> int:
     _check_file_contains(
         "crates/codegen/xai-grok-pager/src/app/effects/mod.rs", "// start identity filled in by register()",
         "RegisterActiveSession effect literal names the started_at field", problems)
+    _check_file_contains(
+        "crates/codegen/xai-chat-state/src/actor/request_builder.rs", "self.state.pruning_latched",
+        "request-copy pruning latches across pruned token drops until compaction/replace", problems)
+    _check_file_contains(
+        "crates/codegen/xai-grok-sampler/src/client.rs", "is_openrouter_endpoint",
+        "OpenRouter chat_completions requests attach session_id and ephemeral cache_control", problems)
 
     # remote startup-gate refusal: server-synced layers cannot set required_* that exit at launch
     _check_file_contains(

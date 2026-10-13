@@ -4256,6 +4256,81 @@ async fn apply_turn_request_pruning_keeps_items_when_actor_is_gone() {
     assert!(matches!(out.first(), Some(ConversationItem::User(_))));
 }
 
+#[tokio::test]
+async fn turn_request_pruning_latches_across_pruned_token_drop_and_resets_on_compaction() {
+    use crate::actor::ChatStateActor;
+    use crate::persistence::MockChatPersistence;
+    use crate::types::PruningConfig;
+
+    let (mock, _rx) = MockChatPersistence::new();
+    let (event_tx, _) = tokio::sync::mpsc::unbounded_channel();
+    let token = tokio_util::sync::CancellationToken::new();
+    let config = PruningConfig {
+        keep_last_n_turns: 2,
+        soft_trim_threshold: 4000,
+        soft_trim_head: 20,
+        soft_trim_tail: 20,
+        hard_clear_age_turns: 10,
+        ..Default::default()
+    };
+    let handle = ChatStateActor::spawn_with_pruning(
+        vec![],
+        test_config_with_window(10_000),
+        config,
+        Box::new(mock),
+        event_tx,
+        token,
+    );
+
+    push_turns(&handle, 5, 8_000).await;
+    // Cross 50% of the 10k window so request pruning activates.
+    handle.record_token_usage(6_001);
+    let req1 = handle
+        .build_request(vec![], None, false, None, "c".into(), "r1".into())
+        .await
+        .unwrap();
+    let Some(ConversationItem::ToolResult(tr1)) = req1.items.get(2) else {
+        panic!("expected ToolResult at index 2");
+    };
+    assert!(
+        tr1.content.contains("[…trimmed…]"),
+        "call 1 over 50% must soft-trim older tool results"
+    );
+
+    // Provider reports usage for the pruned request, which is now below 50% (2,500 <= 5,000).
+    // Without latching, the next request would send unpruned history and bust the prefix cache.
+    handle.record_token_usage(2_500);
+    let req2 = handle
+        .build_request(vec![], None, false, None, "c".into(), "r2".into())
+        .await
+        .unwrap();
+    let Some(ConversationItem::ToolResult(tr2)) = req2.items.get(2) else {
+        panic!("expected ToolResult at index 2");
+    };
+    assert_eq!(
+        tr1.content.as_ref(),
+        tr2.content.as_ref(),
+        "pruning must stay latched after provider-reported tokens drop below 50%"
+    );
+
+    // Compaction replaces the conversation and resets the latch when the compacted size is under 50%.
+    handle.replace_conversation_for_compaction(vec![ConversationItem::system("compacted")]);
+    push_turns(&handle, 5, 8_000).await;
+    handle.record_token_usage(3_000);
+    let req3 = handle
+        .build_request(vec![], None, false, None, "c".into(), "r3".into())
+        .await
+        .unwrap();
+    let Some(ConversationItem::ToolResult(tr3)) = req3.items.get(3) else {
+        panic!("expected ToolResult at index 3");
+    };
+    assert_eq!(
+        tr3.content.len(),
+        8_000,
+        "compaction below 50% must clear the pruning latch for the new segment"
+    );
+}
+
 /// Retained conversation size is bounded after many turns: old tool results
 /// are replaced with a short placeholder, not retained in full.
 #[tokio::test]

@@ -225,6 +225,10 @@ impl ChatStateActor {
                 self.increment_prompt_index();
             }
             ChatStateCommand::UpdateSamplingConfig { config } => {
+                self.state.pruning_latched = request_builder::should_prune(
+                    self.state.total_tokens,
+                    config.context_window,
+                );
                 self.state.sampling_config = *config;
             }
             ChatStateCommand::RecordAgentEditedPath { path } => {

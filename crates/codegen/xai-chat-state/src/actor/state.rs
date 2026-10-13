@@ -136,6 +136,12 @@ pub(crate) struct ChatState {
     pub prompt_texts: Vec<String>,
     /// Accumulated token usage.
     pub total_tokens: u64,
+    /// Sticky per-segment flag: once `total_tokens` crosses `context_window / 2`,
+    /// `prune_items_for_turn_request` stays active until compaction, conversation
+    /// replacement, rewind, or snapshot restore resets the conversation.
+    /// Prevents pruning from turning off on the next call after pruned items
+    /// reduce the provider-reported `total_tokens` below 50% of the window.
+    pub pruning_latched: bool,
     /// Timestamp when the current stream started (epoch ms).
     pub stream_start_ms: Option<i64>,
     /// Timestamp when the current turn started (epoch ms).
@@ -220,6 +226,7 @@ impl ChatState {
             prompt_index: 0,
             prompt_texts: Vec::new(),
             total_tokens: initial_tokens,
+            pruning_latched: false,
             stream_start_ms: None,
             turn_start_ms: None,
             agent_edited_paths: BTreeSet::new(),

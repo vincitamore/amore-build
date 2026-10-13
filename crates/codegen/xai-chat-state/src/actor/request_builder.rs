@@ -105,13 +105,16 @@ impl ChatStateActor {
     }
 
     pub(super) fn prune_items_for_turn_request(
-        &self,
+        &mut self,
         mut items: Vec<ConversationItem>,
     ) -> Vec<ConversationItem> {
         if should_prune(
             self.state.total_tokens,
             self.state.sampling_config.context_window,
         ) {
+            self.state.pruning_latched = true;
+        }
+        if self.state.pruning_latched {
             prune_conversation(&mut items, &self.pruning_config);
         }
         items

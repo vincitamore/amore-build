@@ -8,6 +8,15 @@ work it describes.
 
 ## v1.0.45
 
+- **OpenRouter prompt-cache sticky routing and pruning stability** —
+  `ChatStateActor` latches request-copy tool-result pruning once a session
+  crosses 50% of its context window (resetting only on compaction, rewind, or
+  conversation replacement) so pruned requests no longer oscillate between
+  pruned and unpruned prefixes on every subsequent turn. Every sampling request
+  now forwards `x-session-id`, and OpenRouter `/chat/completions` requests
+  include top-level `session_id` and `cache_control: { "type": "ephemeral" }`
+  so multi-turn agent loops pin sticky routing from turn 1 and advance the
+  cache breakpoint across small tool turns.
 - **Upstream intake: four monorepo bundles (1.0.38 to 1.0.45)** — Claude
   settings import, typed `requirements.toml` sections, context-window
   selection in the model picker, per-folder sandbox and network egress hold

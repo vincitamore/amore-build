@@ -560,6 +560,7 @@ mod tests {
             role: None,
             content: None,
             reasoning_content: None,
+            reasoning_key: None,
             tool_calls: vec![ChunkToolCallDelta {
                 index: 0,
                 id: Some("call_cut".into()),

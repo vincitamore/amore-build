@@ -60,6 +60,10 @@ impl ChatStateActor {
         self.state.prompt_index = target_prompt_index;
         let base_estimate = super::state::estimate_conversation_tokens(&self.state.conversation);
         self.state.total_tokens = self.reseed_total_tokens(base_estimate);
+        self.state.pruning_latched = super::request_builder::should_prune(
+            self.state.total_tokens,
+            self.state.sampling_config.context_window,
+        );
         self.state.estimated_tokens_since_model = 0;
         self.state.estimate_at_last_response = base_estimate;
 

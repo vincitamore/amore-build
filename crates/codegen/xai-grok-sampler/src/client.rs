@@ -73,6 +73,11 @@ impl GrokRequestHeaders<'_> {
             .header("x-grok-model-override", self.model_id)
             .header("x-grok-session-id", self.session_id)
             .header("x-grok-agent-id", self.agent_id);
+        if !self.session_id.is_empty() {
+            b = b.header("x-session-id", self.session_id);
+        } else if !self.conv_id.is_empty() {
+            b = b.header("x-session-id", self.conv_id);
+        }
         if let Some(idx) = self.turn_idx {
             b = b.header("x-grok-turn-idx", idx);
         }
@@ -255,6 +260,25 @@ struct StreamingChatRequest<'a> {
     inner: &'a ChatCompletionRequest,
     stream: bool,
     stream_options: StreamOptions,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    session_id: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cache_control: Option<xai_grok_sampling_types::messages::CacheControl>,
+}
+
+/// Wrapper for non-streaming chat completion requests when gateway extensions apply.
+#[derive(Serialize)]
+struct NonStreamingChatRequest<'a> {
+    #[serde(flatten)]
+    inner: &'a ChatCompletionRequest,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    session_id: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cache_control: Option<xai_grok_sampling_types::messages::CacheControl>,
+}
+
+fn is_openrouter_endpoint(base_url: &str) -> bool {
+    base_url.to_ascii_lowercase().contains("openrouter.ai")
 }
 
 #[derive(Serialize)]
@@ -977,8 +1001,27 @@ impl SamplingClient {
             builder,
             sent_bearer,
         } = self.post(self.endpoint("chat/completions"));
+        let openrouter = is_openrouter_endpoint(&self.base_url);
+        let session_id = openrouter
+            .then(|| {
+                payload
+                    .x_grok_session_id
+                    .as_deref()
+                    .filter(|s| !s.is_empty())
+                    .or_else(|| {
+                        (!x_grok_conv_id.is_empty()).then_some(x_grok_conv_id.as_str())
+                    })
+            })
+            .flatten();
+        let cache_control =
+            openrouter.then(xai_grok_sampling_types::messages::CacheControl::ephemeral);
+        let nonstream_request = NonStreamingChatRequest {
+            inner: &payload,
+            session_id,
+            cache_control,
+        };
         let built_request = self
-            .build_json_request(grok_headers.apply(builder), &payload)
+            .build_json_request(grok_headers.apply(builder), &nonstream_request)
             .await?;
         let response = self.send(built_request).await?;
 
@@ -1090,6 +1133,21 @@ impl SamplingClient {
         let x_grok_req_id = &payload.x_grok_req_id.clone().unwrap_or_default();
         let model_id = payload.model.clone().unwrap_or_default();
 
+        let openrouter = is_openrouter_endpoint(&self.base_url);
+        let session_id = openrouter
+            .then(|| {
+                payload
+                    .x_grok_session_id
+                    .as_deref()
+                    .filter(|s| !s.is_empty())
+                    .or_else(|| {
+                        (!x_grok_conv_id.is_empty()).then_some(x_grok_conv_id.as_str())
+                    })
+            })
+            .flatten();
+        let cache_control =
+            openrouter.then(xai_grok_sampling_types::messages::CacheControl::ephemeral);
+
         // Wrap the request with streaming fields and serialize once.
         let streaming_request = StreamingChatRequest {
             inner: &payload,
@@ -1097,6 +1155,8 @@ impl SamplingClient {
             stream_options: StreamOptions {
                 include_usage: true,
             },
+            session_id,
+            cache_control,
         };
 
         let grok_headers = GrokRequestHeaders {
@@ -2446,6 +2506,8 @@ mod tests {
             stream_options: StreamOptions {
                 include_usage: true,
             },
+            session_id: None,
+            cache_control: None,
         };
 
         let json: serde_json::Value = serde_json::to_value(&wrapper).unwrap();
@@ -3612,5 +3674,99 @@ mod tests {
         let mut request = CreateResponseWrapper::new(rs::CreateResponse::default());
         without.apply_response_defaults(&mut request).unwrap();
         assert_eq!(request.inner.reasoning, None);
+    }
+
+    #[test]
+    fn grok_request_headers_forwards_x_session_id_for_gateway_sticky_routing() {
+        let client = reqwest::Client::new();
+        let headers = GrokRequestHeaders {
+            conv_id: "conv-123",
+            req_id: "req-456",
+            model_id: "google/gemini-4-argon",
+            session_id: "sess-789",
+            turn_idx: Some("1"),
+            transient_retry: None,
+            agent_id: "agent-1",
+            deployment_id: None,
+            user_id: None,
+        };
+        let req = headers
+            .apply(client.post("https://openrouter.ai/api/v1/chat/completions"))
+            .build()
+            .unwrap();
+        assert_eq!(
+            req.headers().get("x-session-id").and_then(|v| v.to_str().ok()),
+            Some("sess-789")
+        );
+
+        let fallback_headers = GrokRequestHeaders {
+            conv_id: "conv-fallback",
+            req_id: "req-456",
+            model_id: "google/gemini-4-argon",
+            session_id: "",
+            turn_idx: None,
+            transient_retry: None,
+            agent_id: "agent-1",
+            deployment_id: None,
+            user_id: None,
+        };
+        let fallback_req = fallback_headers
+            .apply(client.post("https://openrouter.ai/api/v1/chat/completions"))
+            .build()
+            .unwrap();
+        assert_eq!(
+            fallback_req
+                .headers()
+                .get("x-session-id")
+                .and_then(|v| v.to_str().ok()),
+            Some("conv-fallback")
+        );
+    }
+
+    #[test]
+    fn openrouter_endpoint_attaches_session_id_and_ephemeral_cache_control() {
+        assert!(is_openrouter_endpoint("https://openrouter.ai/api/v1"));
+        assert!(!is_openrouter_endpoint("https://api.x.ai/v1"));
+
+        let request = ChatCompletionRequest {
+            model: Some("google/gemini-4-argon".into()),
+            messages: vec![ChatRequestMessage::user("hello")],
+            temperature: None,
+            max_tokens: None,
+            top_p: None,
+            frequency_penalty: None,
+            presence_penalty: None,
+            user: None,
+            tools: None,
+            tool_choice: None,
+            search_parameters: None,
+            response_format: None,
+            reasoning_effort: None,
+            x_grok_conv_id: Some("conv-1".into()),
+            x_grok_req_id: None,
+            x_grok_session_id: Some("sess-1".into()),
+            x_grok_turn_idx: None,
+            x_grok_transient_retry: None,
+            x_grok_agent_id: None,
+            x_grok_deployment_id: None,
+            x_grok_user_id: None,
+            trace: None,
+            traceparent: None,
+        };
+        let wrapper = StreamingChatRequest {
+            inner: &request,
+            stream: true,
+            stream_options: StreamOptions {
+                include_usage: true,
+            },
+            session_id: Some("sess-1"),
+            cache_control: Some(xai_grok_sampling_types::messages::CacheControl::ephemeral()),
+        };
+        let json: serde_json::Value = serde_json::to_value(&wrapper).unwrap();
+        assert_eq!(json.get("session_id").and_then(|v| v.as_str()), Some("sess-1"));
+        assert_eq!(
+            json.get("cache_control"),
+            Some(&serde_json::json!({ "type": "ephemeral" }))
+        );
     }
 }
