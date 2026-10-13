@@ -279,7 +279,7 @@ struct NonStreamingChatRequest<'a> {
 
 fn openrouter_auto_cache_control(
     openrouter: bool,
-    messages: &[ChatRequestMessage],
+    messages: &[xai_grok_sampling_types::ChatRequestMessage],
 ) -> Option<xai_grok_sampling_types::messages::CacheControl> {
     if !openrouter {
         return None;
