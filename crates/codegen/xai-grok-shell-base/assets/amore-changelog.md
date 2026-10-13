@@ -6,6 +6,19 @@ monorepo sync commits; everything below is the fork's own delta, newest first.
 This document is compiled into the binary — update it in the same change as the
 work it describes.
 
+## v1.0.45
+
+- **Upstream intake: four monorepo bundles (1.0.38 to 1.0.45)** — Claude
+  settings import, typed `requirements.toml` sections, context-window
+  selection in the model picker, per-folder sandbox and network egress hold
+  in the workspace daemon, minimal-mode history reprint on resize, clip-route
+  voice dictation state machine, MCP SDK 3.4.0, tree-sitter 0.26.13, bounded
+  file locks, and dozens of upstream fixes. Every fork surface (`.amore`
+  roots ahead of `.grok`, `AMORE_*` env ahead of `GROK_*`, the SessionStart
+  house context, the seat-roster and wake plane, the baked changelog, the
+  hard-off updater, and the crowned-heart splash) is re-seated on the new
+  tree.
+
 ## v1.0.24
 
 - **Upstream intake: seven monorepo bundles (1.0.8 to 1.0.24)** — memory v2

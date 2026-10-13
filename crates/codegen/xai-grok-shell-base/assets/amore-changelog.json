@@ -1,6 +1,11 @@
 [
   {
     "category": "features",
+    "description": "**Upstream intake: four monorepo bundles (1.0.38 to 1.0.45)** — Claude settings import, typed `requirements.toml` sections, context-window selection in the model picker, per-folder sandbox and network egress hold in the workspace daemon, minimal-mode history reprint on resize, clip-route voice dictation state machine, MCP SDK 3.4.0, tree-sitter 0.26.13, bounded file locks, and dozens of upstream fixes. Every fork surface (`.amore` roots, `AMORE_*` env, the house SessionStart context, the seat-roster and wake plane, the baked changelog, the hard-off updater, the crowned-heart splash) is re-seated on the new tree.",
+    "breaking_change": false
+  },
+  {
+    "category": "features",
     "description": "**Upstream intake: seven monorepo bundles (1.0.8 to 1.0.24)** — memory v2 capture, the `terminal` theme, hook `systemMessage` and PostToolUse output replacement, a request `LengthPolicy` that completes truncated turns with complete tool calls, startup spans, the agent-host daemon lane, and dozens of upstream fixes. Every fork surface (`.amore` roots, `AMORE_*` env, the house SessionStart context, the baked changelog, the hard-off updater, the crowned-heart splash) is re-seated on the new tree.",
     "breaking_change": false
   },

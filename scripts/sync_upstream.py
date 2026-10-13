@@ -652,7 +652,7 @@ def cmd_verify(dry_run: bool) -> int:
         "crates/codegen/xai-grok-sampler/src/actor/request_task.rs", "response.empty_reason().is_some()",
         "zero-output length-stops are classified before the LengthPolicy verdict (all backends)", problems)
     _check_file_contains(
-        "crates/codegen/xai-grok-shell/src/managed_config/store.rs", ".unwrap_or(false)",
+        "crates/codegen/xai-grok-cloud-config/src/managed_config/store.rs", ".unwrap_or(false)",
         "managed-config fetching is opt-in (default false)", problems)
     _check_file_contains(
         "crates/codegen/xai-grok-sampling-types/src/conversation/messages.rs", "prepare_history",

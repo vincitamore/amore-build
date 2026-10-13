@@ -328,7 +328,7 @@ async fn list_skills_with_options(
 /// Collect and parse skills from `SkillsConfig.paths` entries.
 /// Each entry is a SKILL.md file or a directory to walk. `~` is expanded.
 /// Scope is `Repo` if the path falls inside `git_root`, otherwise `User`.
-fn collect_config_skills(config_paths: &[String], git_root: Option<&Path>) -> Vec<SkillInfo> {
+pub fn collect_config_skills(config_paths: &[String], git_root: Option<&Path>) -> Vec<SkillInfo> {
     let mut skill_files: Vec<(PathBuf, SkillScope)> = Vec::new();
     let mut seen = HashSet::new();
 
@@ -1505,6 +1505,7 @@ mod tests {
             disable_model_invocation: false,
             has_user_specified_description: false,
             paths: None,
+            origin: None,
             enabled: true,
             body: None,
         }
@@ -1545,6 +1546,7 @@ mod tests {
             lsp_server_count: 0,
             has_inline_lsp_only: false,
             inline_hooks: None,
+            hook_specs: Vec::new(),
             inline_mcp_servers: None,
             inline_lsp_servers: None,
             conflict: None,
@@ -2379,6 +2381,7 @@ mod tests {
             lsp_server_count: 0,
             has_inline_lsp_only: false,
             inline_hooks: None,
+            hook_specs: Vec::new(),
             inline_mcp_servers: None,
             inline_lsp_servers: None,
             conflict: None,

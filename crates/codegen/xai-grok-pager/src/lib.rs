@@ -42,6 +42,8 @@ pub mod memory_trace;
 pub mod minimal_api;
 #[path = "minimal/hook.rs"]
 pub mod minimal_hook;
+#[path = "minimal/reprint.rs"]
+pub mod minimal_reprint;
 pub mod models;
 pub mod notifications;
 #[allow(unused_imports, unused_macros)]
@@ -54,6 +56,7 @@ pub mod self_update;
 pub mod sessions_cmd;
 pub mod settings;
 pub mod share_cmd;
+pub mod signal_streams;
 pub mod slash;
 pub mod startup;
 pub mod tips;
