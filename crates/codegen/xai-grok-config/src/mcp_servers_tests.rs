@@ -187,7 +187,7 @@ fn plugin_inline_stdio_expands_plugin_root() {
         panic!("expected a stdio server");
     };
     assert_eq!(
-        vec![root.join("mcp-echo-server.py").display().to_string()],
+        vec![format!("{}/mcp-echo-server.py", root.display())],
         stdio.args
     );
 }
