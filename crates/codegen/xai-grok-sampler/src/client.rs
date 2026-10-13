@@ -277,6 +277,19 @@ struct NonStreamingChatRequest<'a> {
     cache_control: Option<xai_grok_sampling_types::messages::CacheControl>,
 }
 
+fn openrouter_auto_cache_control(
+    openrouter: bool,
+    messages: &[ChatRequestMessage],
+) -> Option<xai_grok_sampling_types::messages::CacheControl> {
+    if !openrouter {
+        return None;
+    }
+    let ends_with_tool_result = messages
+        .last()
+        .is_some_and(|m| matches!(m.role, xai_grok_sampling_types::Role::Tool));
+    (!ends_with_tool_result).then(xai_grok_sampling_types::messages::CacheControl::ephemeral)
+}
+
 fn is_openrouter_endpoint(base_url: &str) -> bool {
     base_url.to_ascii_lowercase().contains("openrouter.ai")
 }
@@ -1013,8 +1026,7 @@ impl SamplingClient {
                     })
             })
             .flatten();
-        let cache_control =
-            openrouter.then(xai_grok_sampling_types::messages::CacheControl::ephemeral);
+        let cache_control = openrouter_auto_cache_control(openrouter, &payload.messages);
         let nonstream_request = NonStreamingChatRequest {
             inner: &payload,
             session_id,
@@ -1145,8 +1157,7 @@ impl SamplingClient {
                     })
             })
             .flatten();
-        let cache_control =
-            openrouter.then(xai_grok_sampling_types::messages::CacheControl::ephemeral);
+        let cache_control = openrouter_auto_cache_control(openrouter, &payload.messages);
 
         // Wrap the request with streaming fields and serialize once.
         let streaming_request = StreamingChatRequest {
@@ -3760,13 +3771,22 @@ mod tests {
                 include_usage: true,
             },
             session_id: Some("sess-1"),
-            cache_control: Some(xai_grok_sampling_types::messages::CacheControl::ephemeral()),
+            cache_control: openrouter_auto_cache_control(true, &request.messages),
         };
         let json: serde_json::Value = serde_json::to_value(&wrapper).unwrap();
         assert_eq!(json.get("session_id").and_then(|v| v.as_str()), Some("sess-1"));
         assert_eq!(
             json.get("cache_control"),
             Some(&serde_json::json!({ "type": "ephemeral" }))
+        );
+
+        let tool_tail = [
+            ChatRequestMessage::user("hello"),
+            ChatRequestMessage::tool("call_1", "result"),
+        ];
+        assert!(
+            openrouter_auto_cache_control(true, &tool_tail).is_none(),
+            "tool-result tail must omit top-level cache_control so Gemini tool loops do not stall"
         );
     }
 }

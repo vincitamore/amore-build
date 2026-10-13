@@ -14,9 +14,9 @@ work it describes.
   conversation replacement) so pruned requests no longer oscillate between
   pruned and unpruned prefixes on every subsequent turn. Every sampling request
   now forwards `x-session-id`, and OpenRouter `/chat/completions` requests
-  include top-level `session_id` and `cache_control: { "type": "ephemeral" }`
-  so multi-turn agent loops pin sticky routing from turn 1 and advance the
-  cache breakpoint across small tool turns.
+  include top-level `session_id` (plus `cache_control: { "type": "ephemeral" }`
+  on user/system-tail turns) so multi-turn agent loops pin sticky routing from
+  turn 1 without stalling tool-result continuations.
 - **Upstream intake: four monorepo bundles (1.0.38 to 1.0.45)** — Claude
   settings import, typed `requirements.toml` sections, context-window
   selection in the model picker, per-folder sandbox and network egress hold

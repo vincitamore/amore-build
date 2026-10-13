@@ -1,7 +1,7 @@
 [
   {
     "category": "fixes",
-    "description": "**OpenRouter prompt-cache sticky routing and pruning stability** — `ChatStateActor` latches request-copy tool-result pruning once a session crosses 50% of its context window (resetting on compaction, rewind, or conversation replacement) so pruned requests no longer oscillate between pruned and unpruned prefixes. Sampling requests forward `x-session-id`, and OpenRouter `/chat/completions` requests include top-level `session_id` and `cache_control: { \"type\": \"ephemeral\" }`.",
+    "description": "**OpenRouter prompt-cache sticky routing and pruning stability** — `ChatStateActor` latches request-copy tool-result pruning once a session crosses 50% of its context window (resetting on compaction, rewind, or conversation replacement) so pruned requests no longer oscillate between pruned and unpruned prefixes. Sampling requests forward `x-session-id`, and OpenRouter `/chat/completions` requests include top-level `session_id` (plus `cache_control: { \"type\": \"ephemeral\" }` on non-tool-result tails).",
     "breaking_change": false
   },
   {
