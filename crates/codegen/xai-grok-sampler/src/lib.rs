@@ -22,6 +22,8 @@ pub mod events;
 pub mod handle;
 pub mod metrics;
 pub mod openai_codex_oauth;
+// amore: preserve gateway provider details in sampling errors.
+mod openrouter_error;
 mod prewarm;
 mod request_compression;
 pub mod retry;

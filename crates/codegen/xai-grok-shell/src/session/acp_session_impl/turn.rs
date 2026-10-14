@@ -3510,8 +3510,24 @@ impl SessionActor {
             let record_response_span = xai_grok_telemetry::region::Region::from_span(
                 tracing::info_span!("turn.record_response", item_count = response_item_count),
             );
-            self.record_response_items(response.items, usage_reported)
-                .await;
+            let committed = self
+                .record_response_items(response.items, usage_reported)
+                .await
+                .map_err(|error| {
+                    crate::sampling::error::local_error(
+                        "chat_state_commit_failed",
+                        error.to_string(),
+                    )
+                })?;
+            // amore: execution and persisted results share the committed call IDs.
+            tool_calls = committed
+                .iter()
+                .rev()
+                .find_map(|item| match item {
+                    ConversationItem::Assistant(a) => Some(a.tool_calls.clone()),
+                    _ => None,
+                })
+                .unwrap_or_default();
             record_response_span.close();
             if let Some(text) = fallback_text {
                 tracing::warn!(

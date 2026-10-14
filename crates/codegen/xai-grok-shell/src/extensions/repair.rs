@@ -38,6 +38,8 @@ pub(crate) struct RepairSessionResponse {
     pub dry_run: bool,
     /// Whether the session was resident (repaired via the live actor) or repaired directly on disk.
     pub resident: bool,
+    /// Colliding tool-call IDs re-minted with matching result references.
+    pub tool_call_ids_reminted: usize,
     /// Duplicate `ToolResult` entries removed.
     pub duplicates_removed: usize,
     /// `tool_call_id`s of the orphaned or displaced `ToolResult`s that were stripped.
@@ -52,6 +54,7 @@ impl RepairSessionResponse {
             repaired: report.changed(),
             dry_run,
             resident,
+            tool_call_ids_reminted: report.tool_call_ids_reminted,
             duplicates_removed: report.duplicates_removed,
             stripped_tool_result_ids: report.stripped_tool_result_ids,
             synthetic_results_inserted: report.synthetic_results_inserted,
@@ -131,6 +134,7 @@ async fn repair_on_disk(grok_root: &std::path::Path, session_id: &str, dry_run: 
             })?;
         tracing::warn!(
             session_id,
+            tool_call_ids_reminted = report.tool_call_ids_reminted,
             duplicates_removed = report.duplicates_removed,
             stripped_tool_result_ids = ?report.stripped_tool_result_ids,
             synthetic_results_inserted = report.synthetic_results_inserted,
@@ -193,6 +197,59 @@ mod tests {
 
     fn parse(resp: &acp::ExtResponse) -> serde_json::Value {
         serde_json::from_str(resp.0.get()).expect("repair response json")
+    }
+
+    #[tokio::test]
+    async fn disk_repair_preserves_colliding_call_results_and_dry_run() {
+        let tmp = TempDir::new().unwrap();
+        let call = || {
+            ConversationItem::assistant_tool_calls(vec![ToolCall {
+                id: "dup".into(),
+                name: "read_file".into(),
+                arguments: "{}".into(),
+            }])
+        };
+        let items = vec![
+            call(),
+            ConversationItem::tool_result("dup", "first"),
+            ConversationItem::user("next"),
+            call(),
+            ConversationItem::tool_result("dup", "second"),
+        ];
+        let (adapter, info) = seed_session(tmp.path(), &items).await;
+        let dry = parse(&repair_on_disk(tmp.path(), SESSION_ID, true).await.unwrap());
+        assert_eq!(dry.get("toolCallIdsReminted"), Some(&serde_json::json!(1)));
+        assert_eq!(
+            serde_json::to_vec(
+                &adapter
+                    .load_session_without_updates(&info)
+                    .await
+                    .unwrap()
+                    .chat_history
+            )
+            .unwrap(),
+            serde_json::to_vec(&items).unwrap()
+        );
+        let actual = parse(&repair_on_disk(tmp.path(), SESSION_ID, false).await.unwrap());
+        assert_eq!(actual.get("repaired"), Some(&serde_json::json!(true)));
+        assert_eq!(actual.get("duplicatesRemoved"), Some(&serde_json::json!(0)));
+        let reloaded = adapter
+            .load_session_without_updates(&info)
+            .await
+            .unwrap()
+            .chat_history;
+        let outputs: Vec<_> = reloaded
+            .iter()
+            .filter_map(|item| match item {
+                ConversationItem::ToolResult(result) => {
+                    Some((result.tool_call_id.as_str(), result.content.as_ref()))
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(outputs, [("dup", "first"), ("call_amore_1", "second")]);
+        let again = parse(&repair_on_disk(tmp.path(), SESSION_ID, false).await.unwrap());
+        assert_eq!(again.get("repaired"), Some(&serde_json::json!(false)));
     }
 
     #[tokio::test]

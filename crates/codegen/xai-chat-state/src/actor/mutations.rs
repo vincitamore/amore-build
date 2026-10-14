@@ -101,6 +101,8 @@ impl ChatStateActor {
         mut answers: HashMap<String, String>,
     ) {
         self.rewrite_history(HistoryRewrite::IntegrityRepair, |conversation| {
+            // amore: repair identities before results are deduplicated.
+            let reminted = crate::tool_call_ids::repair_tool_call_ids(conversation);
             let deduped = dedup_duplicate_tool_results(conversation);
             if deduped > 0 {
                 tracing::info!(
@@ -119,8 +121,9 @@ impl ChatStateActor {
                     "Repaired dangling tool calls in conversation"
                 );
             }
-            repaired + deduped
+            repaired + deduped + reminted
         });
+        self.tool_call_ids.clear();
         if !answers.is_empty() {
             tracing::debug!(
                 leftover = answers.len(),
@@ -186,6 +189,7 @@ impl ChatStateActor {
         let report = crate::compaction_utils::repair_history(&mut items);
         if report.changed() {
             tracing::warn!(
+                tool_call_ids_reminted = report.tool_call_ids_reminted,
                 duplicates_removed = report.duplicates_removed,
                 stripped_tool_result_ids = ?report.stripped_tool_result_ids,
                 synthetic_results_inserted = report.synthetic_results_inserted,
@@ -279,9 +283,16 @@ impl ChatStateActor {
         self.persist_and_push_message(item);
     }
 
-    fn persist_and_push_message(&mut self, item: ConversationItem) {
+    pub(super) fn persist_and_push_message(
+        &mut self,
+        mut item: ConversationItem,
+    ) -> ConversationItem {
+        // amore: canonical IDs are shared by persistence and acknowledged dispatch.
+        self.tool_call_ids
+            .normalize(&self.state.conversation, &mut item);
         self.persistence.persist_message(&item);
-        self.state.conversation.push(item);
+        self.state.conversation.push(item.clone());
+        item
     }
 
     /// Push a user message, repairing dangling tool calls first so cancel/crash tails stay consistent.
@@ -327,8 +338,7 @@ impl ChatStateActor {
             model_reported_total = self.state.total_tokens,
             "ChatState: push_user_message updated estimated_tokens_since_model"
         );
-        self.persistence.persist_message(&item);
-        self.state.conversation.push(item);
+        self.persist_and_push_message(item);
         self.prune_retained_conversation();
     }
 
@@ -535,7 +545,7 @@ impl ChatStateActor {
     /// `is_compaction` only marks the turn capture; the reseed math is the same for every rewrite.
     pub(super) fn replace_conversation(
         &mut self,
-        items: Vec<ConversationItem>,
+        mut items: Vec<ConversationItem>,
         is_compaction: bool,
     ) {
         self.snapshot_turn_slice();
@@ -545,6 +555,9 @@ impl ChatStateActor {
         // `harness_trace_buffer` / `harness_trace_turns` intentionally untouched:
         // the planner/verifier subagents ran, so their sealed trace turns survive
         // a conversation replace (same intent as the `TruncateToPromptIndex` arm).
+        // amore: external histories carry the same identity invariant.
+        crate::tool_call_ids::repair_tool_call_ids(&mut items);
+        self.tool_call_ids.clear();
         self.persistence.replace_history(&items);
         let base_estimate = super::state::estimate_conversation_tokens(&items);
         let estimated_tokens = self.reseed_total_tokens(base_estimate);
@@ -581,7 +594,12 @@ impl ChatStateActor {
     }
 
     /// Restore all state fields from a snapshot.
-    pub(super) fn restore_snapshot(&mut self, snap: ChatStateSnapshot) {
+    pub(super) fn restore_snapshot(&mut self, mut snap: ChatStateSnapshot) {
+        // amore: snapshots may predate collision repair.
+        if crate::tool_call_ids::repair_tool_call_ids(&mut snap.conversation) > 0 {
+            self.persistence.replace_history(&snap.conversation);
+        }
+        self.tool_call_ids.clear();
         self.snapshot_turn_slice();
         // Harness trace buffers are transient (not part of the snapshot) and
         // intentionally survive a restore — see `replace_conversation`.

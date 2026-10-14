@@ -202,6 +202,8 @@ impl ChatState {
     /// Handles a kill mid-tool-execution leaving unmatched call IDs in `chat_history.jsonl`.
     /// Without this, broken history would sit in memory until the next `build_request`.
     pub fn new(mut conversation: Vec<ConversationItem>, sampling_config: SamplingConfig) -> Self {
+        // amore: preserve distinct calls before result deduplication.
+        crate::tool_call_ids::repair_tool_call_ids(&mut conversation);
         let deduped = dedup_duplicate_tool_results(&mut conversation);
         if deduped > 0 {
             tracing::info!(

@@ -733,6 +733,36 @@ def cmd_verify(dry_run: bool) -> int:
         "crates/codegen/xai-grok-pager-bin/src/main.rs", "run_provider_login_cli",
         "main.rs dispatches amore login --provider to provider_oauth", problems)
 
+    # Provider call identities are canonical before dispatch and result cleanup.
+    for path, needle, what in [
+        ("crates/codegen/xai-chat-state/src/lib.rs", "mod tool_call_ids;", "chat-state collision repair module"),
+        ("crates/codegen/xai-chat-state/src/actor/mod.rs", "repair_tool_call_ids(&mut initial_conversation)", "load-time collision repair before initial dedup"),
+        ("crates/codegen/xai-chat-state/src/actor/state.rs", "repair_tool_call_ids(&mut conversation)", "initial-state collision repair before result dedup"),
+        ("crates/codegen/xai-chat-state/src/actor/mutations.rs", "self.tool_call_ids", "ingest canonicalization and replacement alias reset"),
+        ("crates/codegen/xai-chat-state/src/actor/mutations.rs", "repair_tool_call_ids(&mut items)", "replacement history collision repair"),
+        ("crates/codegen/xai-chat-state/src/actor/mutations.rs", "repair_tool_call_ids(&mut snap.conversation)", "snapshot collision repair"),
+        ("crates/codegen/xai-chat-state/src/actor/mod.rs", "ChatStateCommand::PushModelOutputAndAck", "canonical model-output commit acknowledgement"),
+        ("crates/codegen/xai-grok-shell/src/session/acp_session_impl/sampler_turn.rs", ".push_model_output_and_ack(assistant_item, usage_reported)", "shell awaits canonical assistant commit"),
+        ("crates/codegen/xai-grok-shell/src/session/acp_session_impl/turn.rs", "tool_calls = committed", "dispatch uses committed tool-call identities"),
+        ("crates/codegen/xai-grok-sampler/src/client.rs", "use crate::openrouter_error::user_facing_api_error_message;", "provider metadata reaches user-visible errors and terminal logs"),
+        (".github/workflows/ci.yml", "cargo test -p xai-chat-state -p xai-grok-sampler --lib", "CI exercises conversation identity and sampler regressions"),
+    ]:
+        _check_file_contains(path, needle, what, problems)
+    for path in [
+        "crates/codegen/xai-chat-state/src/actor/state.rs",
+        "crates/codegen/xai-chat-state/src/actor/mutations.rs",
+        "crates/codegen/xai-chat-state/src/compaction_utils.rs",
+    ]:
+        text = (REPO / path).read_text(encoding="utf-8")
+        repair = text.find("repair_tool_call_ids(")
+        dedup = text.find("= dedup_duplicate_tool_results(")
+        if dedup < 0:
+            dedup = text.find("= xai_grok_sampling_types::dedup_duplicate_tool_results(")
+        if repair < 0 or dedup < repair:
+            problems.append(f"collision repair must precede result deduplication: {path}")
+        else:
+            print(f"  ok  collision repair precedes result deduplication: {path}")
+
     # remote startup-gate refusal: server-synced layers cannot set required_* that exit at launch
     _check_file_contains(
         "crates/codegen/xai-grok-shell/src/util/config/resolve/version.rs",

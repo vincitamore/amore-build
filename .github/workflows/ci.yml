@@ -201,6 +201,16 @@ jobs:
       # --no-fail-fast: cargo otherwise stops at the first failing test
       # BINARY, which masked the update-crate suite behind an agent-crate
       # failure for multiple runs (2026-08-05). Report the whole field.
+      - name: Test committed output and disk history repair (linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          cargo test -p xai-grok-shell --lib record_response_token_usage_tests
+          cargo test -p xai-grok-shell --lib extensions::repair::tests
+
+      - name: Test conversation identity and sampler regressions
+        if: matrix.os != 'macos-latest'
+        run: cargo test -p xai-chat-state -p xai-grok-sampler --lib
+
       - name: Test crate suites (linux)
         if: matrix.os == 'ubuntu-latest'
         run: >-

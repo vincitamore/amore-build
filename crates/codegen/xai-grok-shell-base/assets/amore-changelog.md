@@ -6,6 +6,10 @@ monorepo sync commits; everything below is the fork's own delta, newest first.
 This document is compiled into the binary — update it in the same change as the
 work it describes.
 
+## Unreleased
+
+- **Tool-call identity collision recovery** — repeated provider tool-call IDs are re-minted when assistant output is committed, and execution uses the committed IDs so parallel results stay correctly paired. Session load, history replacement, snapshot restore, and explicit repair recover existing collisions before duplicate-result cleanup. Unique provider IDs remain unchanged. OpenRouter HTTP 400 errors show the upstream provider name and error detail in the client and unified log.
+
 ## v1.0.45
 
 - **OpenAI Codex OAuth login (`amore login --provider openai`)** — signs in with

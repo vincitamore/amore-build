@@ -30,6 +30,8 @@ use xai_grok_sampling_types::{ConversationItem, SamplingConfig};
 pub struct ChatStateActor {
     /// Internal state — conversation, tokens, config, etc.
     state: ChatState,
+    // amore: aliases for legacy fire-and-forget tool-result producers.
+    tool_call_ids: crate::tool_call_ids::ToolCallIdIngest,
     /// Pruning configuration for tool-result trimming.
     pruning_config: PruningConfig,
     /// Persistence implementation — owned exclusively, called with `&mut self`.
@@ -70,17 +72,22 @@ impl ChatStateActor {
 
     /// Spawn the actor with a custom pruning config.
     pub fn spawn_with_pruning(
-        initial_conversation: Vec<ConversationItem>,
+        mut initial_conversation: Vec<ConversationItem>,
         sampling_config: SamplingConfig,
         pruning_config: PruningConfig,
-        persistence: Box<dyn ChatPersistence>,
+        mut persistence: Box<dyn ChatPersistence>,
         event_tx: mpsc::UnboundedSender<ChatStateEvent>,
         cancellation_token: tokio_util::sync::CancellationToken,
     ) -> ChatStateHandle {
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
 
+        // amore: persist load-time repair before the existing dedup pass.
+        if crate::tool_call_ids::repair_tool_call_ids(&mut initial_conversation) > 0 {
+            persistence.replace_history(&initial_conversation);
+        }
         let actor = ChatStateActor {
             state: ChatState::new(initial_conversation, sampling_config),
+            tool_call_ids: Default::default(),
             pruning_config,
             persistence,
             cmd_rx,
@@ -180,6 +187,19 @@ impl ChatStateActor {
             }
             ChatStateCommand::PushAssistantResponse { item } => {
                 self.push_message(item);
+            }
+            ChatStateCommand::PushModelOutputAndAck {
+                item,
+                usage_reported,
+                reply,
+            } => {
+                if !usage_reported {
+                    self.state.estimated_tokens_since_model += state::estimate_item_tokens(&item);
+                }
+                let committed = self.persist_and_push_message(item);
+                // amore: acknowledged dispatch returns canonical result IDs directly.
+                self.tool_call_ids.clear();
+                let _ = reply.send(committed);
             }
             ChatStateCommand::PushToolResult { item } => {
                 self.push_message(item);
@@ -400,6 +420,7 @@ impl ChatStateActor {
                 reply,
             } => {
                 self.truncate_to_prompt_index(target_prompt_index);
+                self.tool_call_ids.clear();
                 self.state.turn_capture = None;
                 self.state.prompt_usage = None;
                 // `harness_trace_buffer` / `harness_trace_turns` survive a rewind: the

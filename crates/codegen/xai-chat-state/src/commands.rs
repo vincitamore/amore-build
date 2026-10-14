@@ -91,6 +91,13 @@ pub enum ChatStateCommand {
     /// Record the assistant's response (text + tool calls).
     PushAssistantResponse { item: ConversationItem },
 
+    // amore: return committed identities before the caller dispatches tools.
+    PushModelOutputAndAck {
+        item: ConversationItem,
+        usage_reported: bool,
+        reply: oneshot::Sender<ConversationItem>,
+    },
+
     /// Record a tool result.
     PushToolResult { item: ConversationItem },
 

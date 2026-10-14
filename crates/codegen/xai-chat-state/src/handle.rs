@@ -124,6 +124,23 @@ impl ChatStateHandle {
             .send(ChatStateCommand::PushAssistantResponse { item });
     }
 
+    // amore: dispatch only the IDs acknowledged by the state owner.
+    pub async fn push_model_output_and_ack(
+        &self,
+        item: ConversationItem,
+        usage_reported: bool,
+    ) -> Result<ConversationItem, ChatStateMailboxClosed> {
+        self.query("PushModelOutputAndAck", |reply| {
+            ChatStateCommand::PushModelOutputAndAck {
+                item,
+                usage_reported,
+                reply,
+            }
+        })
+        .await
+        .ok_or(ChatStateMailboxClosed)
+    }
+
     /// Record a tool result.
     pub fn push_tool_result(&self, item: ConversationItem) {
         let _ = self.cmd_tx.send(ChatStateCommand::PushToolResult { item });

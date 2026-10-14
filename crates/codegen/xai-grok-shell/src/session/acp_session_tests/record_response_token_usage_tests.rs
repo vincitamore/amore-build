@@ -42,6 +42,63 @@ fn response_without_usage() -> ConversationResponse {
     }
 }
 
+#[tokio::test(flavor = "current_thread")]
+async fn response_items_return_canonical_tool_ids_for_dispatch() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let (gateway_tx, _) =
+                tokio::sync::mpsc::unbounded_channel::<xai_acp_lib::AcpClientMessage>();
+            let (persistence_tx, _) = tokio::sync::mpsc::unbounded_channel::<PersistenceMsg>();
+            let actor = create_test_actor(0, 128_000, 85, gateway_tx, persistence_tx).await;
+            let call = || xai_grok_sampling_types::ToolCall {
+                id: "dup".into(),
+                name: "read_file".into(),
+                arguments: "{}".into(),
+            };
+            let committed = actor
+                .record_response_items(
+                    vec![ConversationItem::assistant_tool_calls(vec![call(), call()])],
+                    true,
+                )
+                .await
+                .unwrap();
+            let Some(ConversationItem::Assistant(assistant)) = committed.last() else {
+                panic!("expected committed assistant");
+            };
+            assert_eq!(assistant.tool_calls.first().unwrap().id.as_ref(), "dup");
+            assert_eq!(
+                assistant.tool_calls.get(1).unwrap().id.as_ref(),
+                "call_amore_1"
+            );
+            for call in assistant.tool_calls.iter().rev() {
+                actor
+                    .chat_state_handle
+                    .push_tool_result(ConversationItem::tool_result(
+                        call.id.as_ref(),
+                        format!("result for {}", call.id),
+                    ));
+            }
+            let history = actor.chat_state_handle.get_conversation().await;
+            let outputs: Vec<_> = history
+                .iter()
+                .filter_map(|item| match item {
+                    ConversationItem::ToolResult(result) => {
+                        Some((result.tool_call_id.as_str(), result.content.as_ref()))
+                    }
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(
+                outputs,
+                [
+                    ("call_amore_1", "result for call_amore_1"),
+                    ("dup", "result for dup")
+                ]
+            );
+        })
+        .await;
+}
+
 /// A reasoning-capable Responses turn reports the live context after its output has already been included.
 /// Persisting that output must not add it again to the context sent to the pager or the pre-sampling compaction gate.
 #[tokio::test(flavor = "current_thread")]
@@ -99,7 +156,8 @@ async fn response_reasoning_does_not_inflate_model_reported_context() {
             let usage_reported = response.usage.is_some();
             actor
                 .record_response_items(response.items, usage_reported)
-                .await;
+                .await
+                .unwrap();
 
             assert_eq!(actor.chat_state_handle.get_total_tokens().await, 440_000);
             assert_eq!(
@@ -174,7 +232,8 @@ async fn response_without_usage_keeps_model_output_as_estimated_growth() {
             let usage_reported = response.usage.is_some();
             actor
                 .record_response_items(response.items, usage_reported)
-                .await;
+                .await
+                .unwrap();
 
             assert_eq!(actor.chat_state_handle.get_total_tokens().await, 100_000);
             assert!(

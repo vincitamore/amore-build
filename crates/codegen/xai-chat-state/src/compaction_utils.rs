@@ -1051,6 +1051,8 @@ pub fn sanitize_compacted_history(items: Vec<ConversationItem>) -> SanitizeResul
 /// What [`repair_history`] changed; all-zero/empty means nothing was rewritten.
 #[derive(Debug, Clone, Default)]
 pub struct HistoryRepairReport {
+    /// Colliding tool-call identities re-minted with matching result references.
+    pub tool_call_ids_reminted: usize,
     /// Duplicate `ToolResult` entries removed.
     pub duplicates_removed: usize,
     /// `tool_call_id`s of orphaned/displaced `ToolResult`s stripped — the
@@ -1062,7 +1064,8 @@ pub struct HistoryRepairReport {
 impl HistoryRepairReport {
     /// Whether the repair modified the conversation.
     pub fn changed(&self) -> bool {
-        self.duplicates_removed > 0
+        self.tool_call_ids_reminted > 0
+            || self.duplicates_removed > 0
             || !self.stripped_tool_result_ids.is_empty()
             || self.synthetic_results_inserted > 0
     }
@@ -1071,6 +1074,8 @@ impl HistoryRepairReport {
 /// Dedup, strip displaced results, then backfill synthetic results for calls left unanswered.
 /// Pure and idempotent.
 pub fn repair_history(items: &mut Vec<ConversationItem>) -> HistoryRepairReport {
+    // amore: distinct calls must survive duplicate-result cleanup.
+    let tool_call_ids_reminted = crate::tool_call_ids::repair_tool_call_ids(items);
     let duplicates_removed = xai_grok_sampling_types::dedup_duplicate_tool_results(items);
     let stripped_tool_result_ids = strip_displaced_tool_results(items);
     let synthetic_results_inserted = xai_grok_sampling_types::repair_dangling_tool_calls(
@@ -1080,6 +1085,7 @@ pub fn repair_history(items: &mut Vec<ConversationItem>) -> HistoryRepairReport 
         },
     );
     HistoryRepairReport {
+        tool_call_ids_reminted,
         duplicates_removed,
         stripped_tool_result_ids,
         synthetic_results_inserted,

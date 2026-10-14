@@ -37,6 +37,8 @@ pub mod image_budget;
 pub mod persistence;
 pub mod types;
 pub mod usage;
+// amore: normalize provider tool-call identities at chat-state boundaries.
+mod tool_call_ids;
 
 // Re-export main types for convenience
 pub use actor::ChatStateActor;

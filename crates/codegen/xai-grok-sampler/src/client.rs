@@ -24,9 +24,9 @@ use reqwest::header::{
 use serde::Serialize;
 use tracing::Instrument;
 
-use xai_grok_sampling_types::error::{
-    parse_error_code, try_parse_stream_error, user_facing_api_error_message,
-};
+use xai_grok_sampling_types::error::{parse_error_code, try_parse_stream_error};
+// amore: include upstream provider diagnostics from gateway metadata.
+use crate::openrouter_error::user_facing_api_error_message;
 use xai_grok_sampling_types::{
     ChatCompletionChunk, ChatCompletionRequest, ChatCompletionResponse, ConversationRequest,
     ConversationResponse, CreateResponseWrapper, DEFAULT_EXACT_REPETITION_MIN_TOKENS,

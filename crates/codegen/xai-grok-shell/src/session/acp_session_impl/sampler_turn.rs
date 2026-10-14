@@ -2248,23 +2248,37 @@ impl SessionActor {
         &self,
         items: Vec<ConversationItem>,
         usage_reported: bool,
-    ) {
+    ) -> Result<Vec<ConversationItem>, xai_chat_state::ChatStateMailboxClosed> {
+        let mut committed = Vec::with_capacity(items.len());
         for item in items {
-            match item {
+            let item = match item {
                 ConversationItem::Assistant(_) => {
-                    self.record_assistant_response(item, usage_reported).await;
+                    self.record_assistant_response(item, usage_reported).await?
                 }
-                _ if usage_reported => self.chat_state_handle.push_model_output(item),
-                _ => self.chat_state_handle.push_tool_result(item),
-            }
+                _ => {
+                    if usage_reported {
+                        self.chat_state_handle.push_model_output(item.clone());
+                    } else {
+                        self.chat_state_handle.push_tool_result(item.clone());
+                    }
+                    item
+                }
+            };
+            committed.push(item);
         }
+        Ok(committed)
     }
 
     pub(super) async fn record_assistant_response(
         &self,
         assistant_item: ConversationItem,
         usage_reported: bool,
-    ) {
+    ) -> Result<ConversationItem, xai_chat_state::ChatStateMailboxClosed> {
+        // amore: acknowledge canonical call IDs before tool dispatch.
+        let assistant_item = self
+            .chat_state_handle
+            .push_model_output_and_ack(assistant_item, usage_reported)
+            .await?;
         self.signals_handle().record_assistant_message();
 
         // DEBUG: Log the model_id on the assistant item being recorded
@@ -2278,13 +2292,7 @@ impl SessionActor {
             tracing::info!("Assistant requested tool call: {}", first_call.id);
         }
 
-        if usage_reported {
-            self.chat_state_handle
-                .push_assistant_response(assistant_item);
-        } else {
-            self.chat_state_handle
-                .push_unreported_model_output(assistant_item);
-        }
+        Ok(assistant_item)
     }
 }
 
