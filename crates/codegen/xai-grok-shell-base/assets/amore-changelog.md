@@ -8,6 +8,7 @@ work it describes.
 
 ## Unreleased
 
+- **Responses SSE keepalive control frames** — the Responses stream reader consumes explicit `keepalive` heartbeats after raw SSE logging and error/doom-loop checks, yielding between control frames so cancellation and progress timeouts remain responsive without counting heartbeats as model output or first-content timing.
 - **Tool-call identity collision recovery** — repeated provider tool-call IDs are re-minted when assistant output is committed, and execution uses the committed IDs so parallel results stay correctly paired. Session load, history replacement, snapshot restore, and explicit repair recover existing collisions before duplicate-result cleanup. Unique provider IDs remain unchanged. OpenRouter HTTP 400 errors show the upstream provider name and error detail in the client and unified log.
 
 ## v1.0.45

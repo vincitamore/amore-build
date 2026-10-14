@@ -1737,19 +1737,20 @@ impl SamplingClient {
         let events = event_stream
             .scan(false, move |had_transport_error, event_res| {
                 if *had_transport_error {
-                    return std::future::ready(None);
+                    return crate::responses_control::finish_scan_item(None);
                 }
                 let item = match event_res {
                     Ok(event) => {
                         let data = &event.data;
                         if data == "[DONE]" {
-                            return std::future::ready(None);
+                            return crate::responses_control::finish_scan_item(None);
                         }
 
                         tracing::info!(
                             target: crate::sampling_log::TARGET,
                             event = "sse_chunk",
                             backend = "responses",
+                            event_name = %event.event,
                             data = %data,
                         );
 
@@ -1764,6 +1765,9 @@ impl SamplingClient {
                             Some(None)
                         } else if let Some(stream_error) = try_parse_stream_error(data) {
                             Some(Some(Err(stream_error)))
+                        } else if crate::responses_control::is_keepalive(&event.event, data) {
+                            // amore: absorb control frames while awaiting model progress.
+                            Some(None)
                         } else {
                             Some(Some(deserialize_response_event(data)))
                         }
@@ -1773,7 +1777,7 @@ impl SamplingClient {
                         Some(Some(Err(SamplingError::EventStreamError(e.to_string()))))
                     }
                 };
-                std::future::ready(item)
+                crate::responses_control::finish_scan_item(item)
             })
             .filter_map(std::future::ready)
             .boxed();

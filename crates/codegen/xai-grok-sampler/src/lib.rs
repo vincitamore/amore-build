@@ -26,6 +26,8 @@ pub mod openai_codex_oauth;
 mod openrouter_error;
 mod prewarm;
 mod request_compression;
+// amore: keep provider heartbeat control frames outside content decoding.
+mod responses_control;
 pub mod retry;
 pub mod sampling_log;
 mod shared_http;

@@ -745,6 +745,9 @@ def cmd_verify(dry_run: bool) -> int:
         ("crates/codegen/xai-grok-shell/src/session/acp_session_impl/sampler_turn.rs", ".push_model_output_and_ack(assistant_item, usage_reported)", "shell awaits canonical assistant commit"),
         ("crates/codegen/xai-grok-shell/src/session/acp_session_impl/turn.rs", "tool_calls = committed", "dispatch uses committed tool-call identities"),
         ("crates/codegen/xai-grok-sampler/src/client.rs", "use crate::openrouter_error::user_facing_api_error_message;", "provider metadata reaches user-visible errors and terminal logs"),
+        ("crates/codegen/xai-grok-sampler/src/lib.rs", "mod responses_control;", "Responses control-frame module registered"),
+        ("crates/codegen/xai-grok-sampler/src/client.rs", "crate::responses_control::is_keepalive(&event.event, data)", "Responses SSE stream absorbs keepalive control frames before content decoding"),
+        ("crates/codegen/xai-grok-sampler/src/client.rs", "crate::responses_control::finish_scan_item(item)", "Responses SSE scan yields across absorbed control frames"),
         (".github/workflows/ci.yml", "cargo test -p xai-chat-state -p xai-grok-sampler --lib", "CI exercises conversation identity and sampler regressions"),
     ]:
         _check_file_contains(path, needle, what, problems)
