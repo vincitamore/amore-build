@@ -21,6 +21,7 @@ mod doom_loop_recovery;
 pub mod events;
 pub mod handle;
 pub mod metrics;
+pub mod openai_codex_oauth;
 mod prewarm;
 mod request_compression;
 pub mod retry;

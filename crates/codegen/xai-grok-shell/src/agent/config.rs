@@ -3543,8 +3543,18 @@ impl ConfigModelOverride {
         if self.model_family.is_some() {
             entry.info.model_family.clone_from(&self.model_family);
         }
+        let is_openai_oauth = self
+            .api_key
+            .as_deref()
+            .and_then(xai_grok_login::provider_oauth::oauth_reference_kind)
+            == Some(xai_grok_login::provider_oauth::ProviderKind::OpenAi);
         if let Some(ref v) = self.base_url {
             entry.info.base_url = v.clone();
+            if self.api_base_url.is_none() {
+                entry.api_base_url = None;
+            }
+        } else if is_openai_oauth {
+            entry.info.base_url = xai_grok_sampler::openai_codex_oauth::CODEX_BASE_URL.to_owned();
             if self.api_base_url.is_none() {
                 entry.api_base_url = None;
             }
@@ -3572,6 +3582,8 @@ impl ConfigModelOverride {
         }
         if let Some(ref v) = self.api_backend {
             entry.info.api_backend = v.clone();
+        } else if is_openai_oauth {
+            entry.info.api_backend = ApiBackend::Responses;
         }
         if !self.extra_headers.is_empty() {
             entry.info.extra_headers = self.extra_headers.clone();
@@ -3630,7 +3642,7 @@ impl ConfigModelOverride {
         if let Some(v) = self.supports_reasoning_effort {
             entry.info.supports_reasoning_effort = v;
         } else if !entry.info.supports_reasoning_effort
-            && matches!(entry.info.api_backend, ApiBackend::Messages)
+            && (matches!(entry.info.api_backend, ApiBackend::Messages) || is_openai_oauth)
         {
             entry.info.supports_reasoning_effort = true;
         }
@@ -4343,9 +4355,17 @@ pub(crate) fn resolve_credentials(
 ) -> ResolvedCredentials {
     let info = model.info();
     let (api_key, base_url, auth_type) = if let Some(key) = model.own_credential() {
+        let base_url = if xai_grok_login::provider_oauth::oauth_reference_kind(&key)
+            == Some(xai_grok_login::provider_oauth::ProviderKind::OpenAi)
+            && (info.base_url.is_empty() || crate::util::is_xai_api_url(&info.base_url))
+        {
+            xai_grok_sampler::openai_codex_oauth::CODEX_BASE_URL.to_owned()
+        } else {
+            info.base_url.clone()
+        };
         (
-            Some(key),
-            info.base_url.clone(),
+            xai_grok_login::provider_oauth::resolve_api_key_reference(&key),
+            base_url,
             xai_chat_state::AuthType::ApiKey,
         )
     } else if let Some(provider) = model.auth_provider.as_ref() {
@@ -4724,7 +4744,15 @@ pub(crate) fn sampling_config_for_model(
         alpha_test_key.as_deref(),
         &credentials.base_url,
     );
-    let api_backend = info.api_backend.clone();
+    let is_openai_oauth = model
+        .own_credential()
+        .and_then(|key| xai_grok_login::provider_oauth::oauth_reference_kind(&key))
+        == Some(xai_grok_login::provider_oauth::ProviderKind::OpenAi);
+    let api_backend = if is_openai_oauth && info.api_backend == ApiBackend::default() {
+        ApiBackend::Responses
+    } else {
+        info.api_backend.clone()
+    };
     let extra_response_includes = response_include_extensions(
         info.supports_backend_search,
         &api_backend,
@@ -4732,6 +4760,14 @@ pub(crate) fn sampling_config_for_model(
     );
     let request_compression =
         crate::util::config::request_compression_for_url(&credentials.base_url);
+    let bearer_resolver = model
+        .own_credential()
+        .and_then(|key| xai_grok_login::provider_oauth::oauth_reference_kind(&key))
+        .map(|kind| {
+            std::sync::Arc::new(
+                xai_grok_login::provider_oauth::ProviderOAuthBearerResolver::new(kind),
+            ) as xai_grok_sampler::config::SharedBearerResolver
+        });
     SamplerConfig {
         api_key: credentials.api_key,
         model: model_name,
@@ -4766,7 +4802,7 @@ pub(crate) fn sampling_config_for_model(
         conversation_group_id: None,
         origin_client: None,
         attribution_callback: None,
-        bearer_resolver: None,
+        bearer_resolver,
         supports_backend_search: info.supports_backend_search,
         compactions_remaining: info.compactions_remaining,
         compaction_at_tokens: info.compaction_at_tokens,

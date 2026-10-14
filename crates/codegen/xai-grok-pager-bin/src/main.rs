@@ -2461,9 +2461,19 @@ async fn async_main(mut args: PagerArgs) -> Result<()> {
                 oauth,
                 device_auth,
                 devbox,
+                provider,
             } => {
                 init_tracing_simple("cli");
                 let _otel_guard = xai_grok_telemetry::otel_layer::otel_guard();
+                if let Some(provider) = provider {
+                    xai_grok_login::provider_oauth::run_provider_login_cli(
+                        provider.as_arg_str(),
+                        device_auth,
+                    )
+                    .await?;
+                    println!();
+                    xai_grok_shell::instrumentation::finalize_and_exit(0);
+                }
                 let config = xai_grok_shell::config::load_agent_config_disk_only()
                     .map_err(|e| anyhow::anyhow!("Failed to create agent config: {e}"))?;
                 let authenticated = xai_grok_login::run_cli_login(

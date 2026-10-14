@@ -28,6 +28,7 @@ pub mod manager;
 pub mod model;
 pub mod oidc;
 pub mod pre_tui;
+pub mod provider_oauth;
 pub mod recovery;
 pub mod refresh;
 pub mod side_call_bearer;

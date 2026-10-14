@@ -897,6 +897,14 @@ impl SamplingClient {
         self.endpoint.url_for_path(path)
     }
 
+    fn responses_endpoint(&self) -> String {
+        if crate::openai_codex_oauth::is_codex_backend_url(&self.base_url) {
+            crate::openai_codex_oauth::resolve_codex_responses_url(&self.base_url)
+        } else {
+            self.endpoint("responses")
+        }
+    }
+
     fn apply_defaults(&self, mut request: ChatCompletionRequest) -> Result<ChatCompletionRequest> {
         if request.model.is_none() {
             request.model = Some(self.defaults.model.clone());
@@ -1390,7 +1398,7 @@ impl SamplingClient {
         request.trace.take();
 
         tracing::debug!("create_response: {:?}", &request);
-        tracing::debug!("endpoint: {:?}", self.endpoint("responses"));
+        tracing::debug!("endpoint: {:?}", self.responses_endpoint());
 
         let grok_headers = GrokRequestHeaders {
             conv_id: x_grok_conv_id,
@@ -1414,13 +1422,45 @@ impl SamplingClient {
         // Patch it in after serializing
         xai_grok_sampling_types::patch_reasoning_text_types(&mut request_body);
         self.prepare_bearer().await;
+        let endpoint = self.responses_endpoint();
         let SentRequest {
             builder,
             sent_bearer,
-        } = self.post(self.endpoint("responses"));
-        let built_request = self
-            .build_json_request(grok_headers.apply(builder), &request_body)
+        } = self.post(&endpoint);
+        let is_codex = crate::openai_codex_oauth::is_codex_backend_url(&self.base_url);
+        let session_id_for_codex = request
+            .x_grok_session_id
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .or_else(|| (!x_grok_conv_id.is_empty()).then_some(x_grok_conv_id));
+        if is_codex {
+            crate::openai_codex_oauth::apply_codex_request_body(
+                &mut request_body,
+                session_id_for_codex,
+            );
+        }
+        let http_request = if is_codex {
+            builder
+        } else {
+            grok_headers.apply(builder)
+        };
+        let mut built_request = self
+            .build_json_request(http_request, &request_body)
             .await?;
+        if is_codex
+            && let Some(token) = crate::openai_codex_oauth::credential_from_headers(
+                built_request.headers(),
+                self.defaults.auth_scheme,
+            )
+            .filter(|t| crate::openai_codex_oauth::is_openai_codex_oauth_token(t))
+        {
+            crate::openai_codex_oauth::apply_codex_request_headers(
+                &mut built_request,
+                &token,
+                &model_id,
+                session_id_for_codex,
+            );
+        }
         let response = self.send(built_request).await?;
 
         let status = response.status();
@@ -1440,7 +1480,7 @@ impl SamplingClient {
                     crate::attribution::SamplingConsumer::Responses,
                     sent_bearer.as_deref(),
                 );
-                let endpoint = self.endpoint("responses");
+                let endpoint = self.responses_endpoint();
                 let server_message = user_facing_api_error_message(status, bytes.as_ref());
                 return Err(auth_rejected(
                     format!("Unauthorized (401) from {endpoint}: {server_message}"),
@@ -1493,7 +1533,7 @@ impl SamplingClient {
     )> {
         let region = crate::span_timing::stream_span!(
             "http.create_response_stream",
-            endpoint = %self.endpoint("responses"),
+            endpoint = %self.responses_endpoint(),
             model_id = request.inner.model.as_deref().unwrap_or(""),
         );
         self.adopt_traceparent(region.span(), request.traceparent.as_deref());
@@ -1566,14 +1606,33 @@ impl SamplingClient {
             .doom_loop_recovery
             .map(crate::doom_loop::DoomLoopSignalCollector::new);
         self.prepare_bearer().await;
+        let endpoint = self.responses_endpoint();
         let SentRequest {
             builder,
             sent_bearer,
-        } = self.post(self.endpoint("responses"));
-        let mut http_request = grok_headers
-            .apply(builder)
-            .header(ACCEPT, HeaderValue::from_static("text/event-stream"));
-        if let Some(policy) = self.defaults.doom_loop_recovery {
+        } = self.post(&endpoint);
+        let is_codex = crate::openai_codex_oauth::is_codex_backend_url(&self.base_url);
+        let session_id_for_codex = request
+            .x_grok_session_id
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .or_else(|| (!x_grok_conv_id.is_empty()).then_some(x_grok_conv_id));
+        if is_codex {
+            crate::openai_codex_oauth::apply_codex_request_body(
+                &mut request_body,
+                session_id_for_codex,
+            );
+        }
+        let mut http_request = if is_codex {
+            builder.header(ACCEPT, HeaderValue::from_static("text/event-stream"))
+        } else {
+            grok_headers
+                .apply(builder)
+                .header(ACCEPT, HeaderValue::from_static("text/event-stream"))
+        };
+        if !is_codex
+            && let Some(policy) = self.defaults.doom_loop_recovery
+        {
             http_request = http_request
                 .header(DOOM_LOOP_CHECK_HEADER, policy.window_tokens.to_string())
                 .header(
@@ -1581,7 +1640,21 @@ impl SamplingClient {
                     DEFAULT_EXACT_REPETITION_MIN_TOKENS.to_string(),
                 );
         }
-        let built_request = self.build_json_request(http_request, &request_body).await?;
+        let mut built_request = self.build_json_request(http_request, &request_body).await?;
+        if is_codex
+            && let Some(token) = crate::openai_codex_oauth::credential_from_headers(
+                built_request.headers(),
+                self.defaults.auth_scheme,
+            )
+            .filter(|t| crate::openai_codex_oauth::is_openai_codex_oauth_token(t))
+        {
+            crate::openai_codex_oauth::apply_codex_request_headers(
+                &mut built_request,
+                &token,
+                &model_id,
+                session_id_for_codex,
+            );
+        }
 
         tracing::debug!(
             url = %built_request.url(),
@@ -1605,7 +1678,7 @@ impl SamplingClient {
                     crate::attribution::SamplingConsumer::ResponsesStream,
                     sent_bearer.as_deref(),
                 );
-                let endpoint = self.endpoint("responses");
+                let endpoint = self.responses_endpoint();
                 let body = response.bytes().await.unwrap_or_default();
                 let server_message = user_facing_api_error_message(status, body.as_ref());
                 return Err(auth_rejected(

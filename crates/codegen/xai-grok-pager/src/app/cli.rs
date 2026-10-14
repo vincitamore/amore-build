@@ -3,6 +3,30 @@ use clap::{ArgAction, Parser, Subcommand, ValueHint};
 use clap_complete::Shell;
 use std::net::SocketAddr;
 use std::path::PathBuf;
+
+/// Third-party model providers with their own OAuth login (`amore login
+/// --provider <name>`). Credentials are stored by `xai_grok_login::provider_oauth`
+/// and referenced from model entries as `api_key = "oauth:<name>"`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum LoginProvider {
+    /// ChatGPT Plus/Pro via the OpenAI Codex OAuth browser flow (`openai-codex` alias).
+    #[value(name = "openai", alias = "openai-codex")]
+    OpenAi,
+    /// ChatGPT Plus/Pro via the OpenAI Codex headless device-code flow (`openai-device` alias).
+    #[value(name = "openai-codex-device", alias = "openai-device")]
+    OpenAiCodexDevice,
+}
+
+impl LoginProvider {
+    /// The provider flow identifier passed to `xai_grok_login::provider_oauth::run_provider_login_cli`.
+    pub fn as_arg_str(self) -> &'static str {
+        match self {
+            LoginProvider::OpenAi => "openai",
+            LoginProvider::OpenAiCodexDevice => "openai-codex-device",
+        }
+    }
+}
+
 /// Top-level commands for the pager binary.
 #[derive(Debug, Clone, Subcommand)]
 pub enum Command {
@@ -28,7 +52,7 @@ pub enum Command {
         #[arg(long, hide = true)]
         legacy: bool,
         /// Use Amore OAuth via auth.x.ai.
-        #[arg(long = "oauth", alias = "oidc", conflicts_with_all = ["device_auth"])]
+        #[arg(long = "oauth", alias = "oidc", conflicts_with_all = ["device_auth", "provider"])]
         oauth: bool,
         /// Use device-code authentication for headless/remote environments.
         #[arg(
@@ -41,6 +65,9 @@ pub enum Command {
         /// Field is always present so match arms stay feature-unification-safe; clap registers `--devbox` only when that feature is enabled (`arg(skip)` otherwise → always false).
         #[arg(skip)]
         devbox: bool,
+        /// Sign in with a third-party model provider instead of the xAI account.
+        #[arg(long = "provider", conflicts_with_all = ["oauth"])]
+        provider: Option<LoginProvider>,
     },
     /// Manage MCP server configurations
     Mcp(crate::mcp_cmd::McpArgs),

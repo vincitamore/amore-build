@@ -714,6 +714,24 @@ def cmd_verify(dry_run: bool) -> int:
     _check_file_contains(
         "crates/codegen/xai-grok-sampler/src/client.rs", "is_openrouter_endpoint",
         "OpenRouter chat_completions requests attach session_id and ephemeral cache_control", problems)
+    _check_file_contains(
+        "crates/codegen/xai-grok-login/src/lib.rs", "pub mod provider_oauth;",
+        "xai-grok-login exposes the provider_oauth module (OpenAI Codex OAuth)", problems)
+    _check_file_contains(
+        "crates/codegen/xai-grok-sampler/src/lib.rs", "pub mod openai_codex_oauth;",
+        "xai-grok-sampler exposes the openai_codex_oauth wire module", problems)
+    _check_file_contains(
+        "crates/codegen/xai-grok-sampler/src/client.rs", "openai_codex_oauth::is_codex_backend_url",
+        "SamplingClient routes OpenAI Codex OAuth Responses requests through openai_codex_oauth", problems)
+    _check_file_contains(
+        "crates/codegen/xai-grok-shell/src/agent/config.rs", "provider_oauth::resolve_api_key_reference",
+        "resolve_credentials resolves oauth:<provider> model api_key references", problems)
+    _check_file_contains(
+        "crates/codegen/xai-grok-pager/src/app/cli.rs", "pub enum LoginProvider",
+        "amore login exposes --provider for third-party OAuth", problems)
+    _check_file_contains(
+        "crates/codegen/xai-grok-pager-bin/src/main.rs", "run_provider_login_cli",
+        "main.rs dispatches amore login --provider to provider_oauth", problems)
 
     # remote startup-gate refusal: server-synced layers cannot set required_* that exit at launch
     _check_file_contains(

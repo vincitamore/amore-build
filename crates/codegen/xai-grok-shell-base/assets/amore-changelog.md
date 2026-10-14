@@ -8,6 +8,15 @@ work it describes.
 
 ## v1.0.45
 
+- **OpenAI Codex OAuth login (`amore login --provider openai`)** — signs in with
+  ChatGPT Plus/Pro via OpenAI's Codex OAuth 2.0 PKCE browser flow (loopback
+  callback on `http://localhost:1455/auth/callback` plus manual paste fallback)
+  or headless device-code flow (`--device-auth` / `--provider
+  openai-codex-device`) and stores credentials in
+  `~/.amore/oauth-credentials.json` with compare-and-set token refresh. Model
+  entries reference `api_key = "oauth:openai"` and automatically route through
+  the ChatGPT Codex Responses endpoint (`/codex/responses`) with account/residency
+  headers and Codex body shaping. See `docs/oauth-providers.md`.
 - **OpenRouter prompt-cache sticky routing and pruning stability** —
   `ChatStateActor` latches request-copy tool-result pruning once a session
   crosses 50% of its context window (resetting only on compaction, rewind, or
