@@ -3543,11 +3543,14 @@ impl ConfigModelOverride {
         if self.model_family.is_some() {
             entry.info.model_family.clone_from(&self.model_family);
         }
-        let is_openai_oauth = self
+        let oauth_kind = self
             .api_key
             .as_deref()
-            .and_then(xai_grok_login::provider_oauth::oauth_reference_kind)
-            == Some(xai_grok_login::provider_oauth::ProviderKind::OpenAi);
+            .and_then(xai_grok_login::provider_oauth::oauth_reference_kind);
+        let is_openai_oauth =
+            oauth_kind == Some(xai_grok_login::provider_oauth::ProviderKind::OpenAi);
+        let is_antigravity_oauth =
+            oauth_kind == Some(xai_grok_login::provider_oauth::ProviderKind::GoogleAntigravity);
         if let Some(ref v) = self.base_url {
             entry.info.base_url = v.clone();
             if self.api_base_url.is_none() {
@@ -3555,6 +3558,12 @@ impl ConfigModelOverride {
             }
         } else if is_openai_oauth {
             entry.info.base_url = xai_grok_sampler::openai_codex_oauth::CODEX_BASE_URL.to_owned();
+            if self.api_base_url.is_none() {
+                entry.api_base_url = None;
+            }
+        } else if is_antigravity_oauth {
+            entry.info.base_url =
+                xai_grok_sampler::google_antigravity_oauth::ANTIGRAVITY_DAILY_ENDPOINT.to_owned();
             if self.api_base_url.is_none() {
                 entry.api_base_url = None;
             }
@@ -3584,6 +3593,8 @@ impl ConfigModelOverride {
             entry.info.api_backend = v.clone();
         } else if is_openai_oauth {
             entry.info.api_backend = ApiBackend::Responses;
+        } else if is_antigravity_oauth {
+            entry.info.api_backend = ApiBackend::Messages;
         }
         if !self.extra_headers.is_empty() {
             entry.info.extra_headers = self.extra_headers.clone();
@@ -4355,11 +4366,16 @@ pub(crate) fn resolve_credentials(
 ) -> ResolvedCredentials {
     let info = model.info();
     let (api_key, base_url, auth_type) = if let Some(key) = model.own_credential() {
-        let base_url = if xai_grok_login::provider_oauth::oauth_reference_kind(&key)
-            == Some(xai_grok_login::provider_oauth::ProviderKind::OpenAi)
+        let oauth_kind = xai_grok_login::provider_oauth::oauth_reference_kind(&key);
+        let base_url = if oauth_kind == Some(xai_grok_login::provider_oauth::ProviderKind::OpenAi)
             && (info.base_url.is_empty() || crate::util::is_xai_api_url(&info.base_url))
         {
             xai_grok_sampler::openai_codex_oauth::CODEX_BASE_URL.to_owned()
+        } else if oauth_kind
+            == Some(xai_grok_login::provider_oauth::ProviderKind::GoogleAntigravity)
+            && (info.base_url.is_empty() || crate::util::is_xai_api_url(&info.base_url))
+        {
+            xai_grok_sampler::google_antigravity_oauth::ANTIGRAVITY_DAILY_ENDPOINT.to_owned()
         } else {
             info.base_url.clone()
         };
@@ -4744,14 +4760,21 @@ pub(crate) fn sampling_config_for_model(
         alpha_test_key.as_deref(),
         &credentials.base_url,
     );
-    let is_openai_oauth = model
+    let oauth_kind = model
         .own_credential()
-        .and_then(|key| xai_grok_login::provider_oauth::oauth_reference_kind(&key))
-        == Some(xai_grok_login::provider_oauth::ProviderKind::OpenAi);
-    let api_backend = if is_openai_oauth && info.api_backend == ApiBackend::default() {
-        ApiBackend::Responses
-    } else {
-        info.api_backend.clone()
+        .and_then(|key| xai_grok_login::provider_oauth::oauth_reference_kind(&key));
+    let api_backend = match oauth_kind {
+        Some(xai_grok_login::provider_oauth::ProviderKind::OpenAi)
+            if info.api_backend == ApiBackend::default() =>
+        {
+            ApiBackend::Responses
+        }
+        Some(xai_grok_login::provider_oauth::ProviderKind::GoogleAntigravity)
+            if info.api_backend == ApiBackend::default() =>
+        {
+            ApiBackend::Messages
+        }
+        _ => info.api_backend.clone(),
     };
     let extra_response_includes = response_include_extensions(
         info.supports_backend_search,

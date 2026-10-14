@@ -19,6 +19,7 @@ pub mod config;
 pub mod doom_loop;
 mod doom_loop_recovery;
 pub mod events;
+pub mod google_antigravity_oauth;
 pub mod handle;
 pub mod metrics;
 pub mod openai_codex_oauth;

@@ -397,6 +397,7 @@ struct ClientDefaults {
     auth_scheme: AuthScheme,
     request_compression: RequestCompression,
     stream_tool_calls: bool,
+    reasoning_effort: Option<xai_grok_sampling_types::ReasoningEffort>,
     reasoning_summary: Option<xai_grok_sampling_types::ReasoningSummary>,
     extra_response_includes: Vec<String>,
     doom_loop_recovery: Option<xai_grok_sampling_types::DoomLoopRecoveryPolicy>,
@@ -704,6 +705,7 @@ impl SamplingClient {
             auth_scheme: config.auth_scheme,
             request_compression: config.request_compression,
             stream_tool_calls: config.stream_tool_calls,
+            reasoning_effort: config.reasoning_effort,
             reasoning_summary: config.reasoning_summary,
             extra_response_includes: config.extra_response_includes,
             doom_loop_recovery: config.doom_loop_recovery,
@@ -2266,6 +2268,12 @@ impl SamplingClient {
         Option<ResponseModelMetadata>,
     )> {
         self.apply_conversation_defaults(&mut request)?;
+        if request.reasoning_effort.is_none() {
+            request.reasoning_effort = self.defaults.reasoning_effort;
+        }
+        if crate::google_antigravity_oauth::is_antigravity_backend_url(&self.base_url) {
+            return self.create_antigravity_message_stream(request).await;
+        }
 
         let trace = request.trace.take();
         let x_grok_conv_id = request.x_grok_conv_id.clone();
@@ -2293,12 +2301,285 @@ impl SamplingClient {
         self.create_message_stream(wrapper).await
     }
 
+    async fn create_antigravity_message_stream(
+        &self,
+        mut request: ConversationRequest,
+    ) -> Result<(
+        BoxStream<'static, Result<messages::MessageStreamEvent>>,
+        Option<ResponseModelMetadata>,
+    )> {
+        let endpoint =
+            crate::google_antigravity_oauth::resolve_antigravity_stream_url(&self.base_url);
+        let region = crate::span_timing::stream_span!(
+            "http.create_message_stream",
+            endpoint = %endpoint,
+            model_id = request.model.as_deref().unwrap_or(self.defaults.model.as_str()),
+        );
+        self.adopt_traceparent(region.span(), request.traceparent.as_deref());
+        let mut span_timing = StreamSpanTiming::start(region);
+
+        request.trace.take();
+        self.prepare_bearer().await;
+        let SentRequest {
+            builder,
+            sent_bearer,
+        } = self.post(&endpoint);
+
+        let temp_req = builder.build().map_err(SamplingError::Http)?;
+        let raw_cred = crate::openai_codex_oauth::credential_from_headers(
+            temp_req.headers(),
+            self.defaults.auth_scheme,
+        )
+        .unwrap_or_default();
+        let parsed_cred =
+            crate::google_antigravity_oauth::parse_antigravity_credential(&raw_cred);
+        let (access_token, project_id) = match parsed_cred {
+            Some(c) => (c.access_token, c.project_id),
+            None => (raw_cred, String::new()),
+        };
+
+        let (request_body, wire_model_id, has_thinking) =
+            crate::google_antigravity_oauth::build_antigravity_request_body(
+                &request,
+                &project_id,
+                &self.defaults.model,
+                self.defaults.max_completion_tokens,
+                self.defaults.temperature,
+                self.defaults.top_p,
+                self.defaults.reasoning_effort,
+            );
+
+        let SentRequest { builder, .. } = self.post(&endpoint);
+        let mut built_request = self.build_json_request(builder, &request_body).await?;
+        crate::google_antigravity_oauth::apply_antigravity_headers(
+            built_request.headers_mut(),
+            &access_token,
+            &wire_model_id,
+            has_thinking,
+        );
+
+        Self::log_request_headers(&built_request, "antigravity");
+        let response = self
+            .execute_stream_request(built_request, &mut span_timing)
+            .await?;
+
+        let status = response.status();
+        span_timing
+            .span()
+            .record(STATUS_CODE, status.as_u16() as i64);
+        span_timing.span().record(SUCCESS, status.is_success());
+        if !status.is_success() {
+            if status == reqwest::StatusCode::UNAUTHORIZED {
+                span_timing.span().record(ERROR, "unauthorized (401)");
+                self.record_401_attribution(
+                    crate::attribution::SamplingConsumer::MessagesStream,
+                    sent_bearer.as_deref(),
+                );
+                let body = response.bytes().await.unwrap_or_default();
+                let server_message = user_facing_api_error_message(status, body.as_ref());
+                return Err(auth_rejected(
+                    format!("Unauthorized (401) from {endpoint}: {server_message}"),
+                    sent_bearer.as_deref(),
+                ));
+            }
+            let model_metadata = extract_model_metadata(response.headers());
+            let retry_after_secs = extract_retry_after(response.headers());
+            let should_retry = extract_should_retry(response.headers());
+            let request_id = extract_request_id(response.headers());
+            let bytes = response.bytes().await?;
+            let message = user_facing_api_error_message(status, bytes.as_ref());
+            span_timing.span().record(ERROR, message.as_str());
+            tracing::error!(
+                status = %status,
+                error_message = %message,
+                request_id = ?request_id,
+                body_preview = %Self::body_preview(bytes.as_ref()),
+                model_id = %wire_model_id,
+                "Cloud Code Assist API error"
+            );
+            return Err(SamplingError::Api {
+                status,
+                message,
+                model_metadata,
+                retry_after_secs,
+                should_retry,
+                error_code: parse_error_code(bytes.as_ref()),
+            });
+        }
+
+        let model_metadata = extract_model_metadata(response.headers());
+
+        const UTF8_BOM: &[u8] = &[0xEF, 0xBB, 0xBF];
+        let mut is_first = true;
+        let byte_stream = response.bytes_stream().map(move |result| {
+            result.map(|bytes| {
+                if is_first {
+                    is_first = false;
+                    if bytes.starts_with(UTF8_BOM) {
+                        return bytes.slice(UTF8_BOM.len()..);
+                    }
+                }
+                bytes
+            })
+        });
+
+        let mut event_stream = byte_stream.eventsource();
+        let mut translator =
+            crate::google_antigravity_oauth::AntigravitySseTranslator::new(wire_model_id);
+
+        let events: BoxStream<'static, Result<messages::MessageStreamEvent>> =
+            Box::pin(async_stream::stream! {
+                while let Some(event_res) = event_stream.next().await {
+                    match event_res {
+                        Ok(event) => {
+                            let data = event.data.trim();
+                            if data.is_empty() || data == "[DONE]" {
+                                if data == "[DONE]" {
+                                    break;
+                                }
+                                continue;
+                            }
+                            tracing::info!(
+                                target: crate::sampling_log::TARGET,
+                                event = "sse_chunk",
+                                backend = "antigravity",
+                                data = %data,
+                            );
+                            match translator.push_chunk(data) {
+                                Ok(mapped_events) => {
+                                    for ev in mapped_events {
+                                        yield Ok(ev);
+                                    }
+                                }
+                                Err(e) => {
+                                    tracing::error!(
+                                        error = %e,
+                                        raw_data = %data,
+                                        "Failed to deserialize Cloud Code Assist chunk from stream"
+                                    );
+                                    yield Err(SamplingError::Serialization(e));
+                                    return;
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            yield Err(SamplingError::EventStreamError(e.to_string()));
+                            return;
+                        }
+                    }
+                }
+                for tail_ev in translator.finish() {
+                    yield Ok(tail_ev);
+                }
+            });
+
+        Ok((
+            span_timing.hold_until_first_content(events, message_event_class),
+            model_metadata,
+        ))
+    }
+
     /// Send a conversation request using the Anthropic Messages API (non-streaming).
     pub async fn conversation_messages(
         &self,
         mut request: ConversationRequest,
     ) -> Result<messages::MessagesResponse> {
         self.apply_conversation_defaults(&mut request)?;
+        if crate::google_antigravity_oauth::is_antigravity_backend_url(&self.base_url) {
+            let (mut stream, _) = self.conversation_stream_messages(request).await?;
+            let mut id = String::from("msg_antigravity");
+            let mut model = self.defaults.model.clone();
+            let mut content = Vec::new();
+            let mut stop_reason = None;
+            let mut usage = messages::MessagesUsage::default();
+            let mut blocks: std::collections::BTreeMap<u32, (String, String, String)> =
+                std::collections::BTreeMap::new();
+            while let Some(ev) = stream.next().await {
+                match ev? {
+                    messages::MessageStreamEvent::MessageStart { message } => {
+                        id = message.id;
+                        model = message.model;
+                        usage = message.usage;
+                    }
+                    messages::MessageStreamEvent::ContentBlockStart {
+                        index,
+                        content_block,
+                    } => {
+                        if let messages::ContentBlock::ToolUse {
+                            id: tid, name, ..
+                        } = content_block
+                        {
+                            blocks.insert(index, (tid, name, String::new()));
+                        } else {
+                            blocks.insert(index, (String::new(), String::new(), String::new()));
+                        }
+                    }
+                    messages::MessageStreamEvent::ContentBlockDelta { index, delta } => {
+                        if let Some(entry) = blocks.get_mut(&index) {
+                            match delta {
+                                messages::StreamDelta::TextDelta { text } => entry.2.push_str(&text),
+                                messages::StreamDelta::InputJsonDelta { partial_json } => {
+                                    entry.2.push_str(&partial_json);
+                                }
+                                messages::StreamDelta::ThinkingDelta { thinking } => {
+                                    entry.2.push_str(&thinking);
+                                }
+                                messages::StreamDelta::SignatureDelta { .. } => {}
+                            }
+                        }
+                    }
+                    messages::MessageStreamEvent::ContentBlockStop { index } => {
+                        if let Some((tid, name, acc)) = blocks.remove(&index) {
+                            if !name.is_empty() {
+                                let input =
+                                    serde_json::from_str(&acc).unwrap_or(serde_json::json!({}));
+                                content.push(messages::ContentBlock::ToolUse {
+                                    id: tid,
+                                    name,
+                                    input,
+                                    cache_control: None,
+                                });
+                            } else if !acc.is_empty() {
+                                content.push(messages::ContentBlock::Text {
+                                    text: acc,
+                                    cache_control: None,
+                                });
+                            }
+                        }
+                    }
+                    messages::MessageStreamEvent::MessageDelta { delta, usage: u } => {
+                        stop_reason = delta.stop_reason;
+                        usage.output_tokens = u.output_tokens;
+                        if let Some(inp) = u.input_tokens {
+                            usage.input_tokens = inp;
+                        }
+                        if let Some(cr) = u.cache_read_input_tokens {
+                            usage.cache_read_input_tokens = cr;
+                        }
+                    }
+                    messages::MessageStreamEvent::Error { error } => {
+                        return Err(SamplingError::Api {
+                            status: reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+                            message: error.message,
+                            model_metadata: None,
+                            retry_after_secs: None,
+                            should_retry: None,
+                            error_code: None,
+                        });
+                    }
+                    _ => {}
+                }
+            }
+            return Ok(messages::MessagesResponse {
+                id,
+                r#type: "message".to_owned(),
+                role: "assistant".to_owned(),
+                content,
+                model,
+                stop_reason,
+                usage,
+            });
+        }
 
         let trace = request.trace.take();
         let x_grok_conv_id = request.x_grok_conv_id.clone();

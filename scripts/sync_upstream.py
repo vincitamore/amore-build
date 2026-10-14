@@ -721,13 +721,22 @@ def cmd_verify(dry_run: bool) -> int:
         "OpenRouter chat_completions requests attach session_id and ephemeral cache_control", problems)
     _check_file_contains(
         "crates/codegen/xai-grok-login/src/lib.rs", "pub mod provider_oauth;",
-        "xai-grok-login exposes the provider_oauth module (OpenAI Codex OAuth)", problems)
+        "xai-grok-login exposes the provider_oauth module (OpenAI Codex / Google Antigravity OAuth)", problems)
+    _check_file_contains(
+        "crates/codegen/xai-grok-login/src/provider_oauth/mod.rs", "pub mod google_antigravity;",
+        "provider_oauth exposes the google_antigravity OAuth module", problems)
     _check_file_contains(
         "crates/codegen/xai-grok-sampler/src/lib.rs", "pub mod openai_codex_oauth;",
         "xai-grok-sampler exposes the openai_codex_oauth wire module", problems)
     _check_file_contains(
+        "crates/codegen/xai-grok-sampler/src/lib.rs", "pub mod google_antigravity_oauth;",
+        "xai-grok-sampler exposes the google_antigravity_oauth wire module", problems)
+    _check_file_contains(
         "crates/codegen/xai-grok-sampler/src/client.rs", "openai_codex_oauth::is_codex_backend_url",
         "SamplingClient routes OpenAI Codex OAuth Responses requests through openai_codex_oauth", problems)
+    _check_file_contains(
+        "crates/codegen/xai-grok-sampler/src/client.rs", "google_antigravity_oauth::is_antigravity_backend_url",
+        "SamplingClient routes Google Antigravity OAuth Messages requests through google_antigravity_oauth", problems)
     _check_file_contains(
         "crates/codegen/xai-grok-shell/src/agent/config.rs", "provider_oauth::resolve_api_key_reference",
         "resolve_credentials resolves oauth:<provider> model api_key references", problems)

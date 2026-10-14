@@ -15,6 +15,9 @@ pub enum LoginProvider {
     /// ChatGPT Plus/Pro via the OpenAI Codex headless device-code flow (`openai-device` alias).
     #[value(name = "openai-codex-device", alias = "openai-device")]
     OpenAiCodexDevice,
+    /// Google Antigravity (Gemini 3, Claude, GPT-OSS via Cloud Code Assist; `antigravity` alias).
+    #[value(name = "google-antigravity", alias = "antigravity")]
+    GoogleAntigravity,
 }
 
 impl LoginProvider {
@@ -23,6 +26,7 @@ impl LoginProvider {
         match self {
             LoginProvider::OpenAi => "openai",
             LoginProvider::OpenAiCodexDevice => "openai-codex-device",
+            LoginProvider::GoogleAntigravity => "google-antigravity",
         }
     }
 }

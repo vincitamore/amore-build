@@ -1,28 +1,28 @@
 // Login orchestration + live-token resolution for third-party OAuth providers.
 
 use std::io::IsTerminal as _;
-use std::sync::Mutex;
 
 use anyhow::{Context as _, anyhow};
+use tokio::sync::Mutex;
 
 use super::callback::{self, CallbackCode};
-use super::openai;
 use super::pkce;
 use super::store::{self, ProviderCredentials};
-use super::{LoginFlowKind, ProviderKind, oauth_reference};
+use super::{LoginFlowKind, ProviderKind, google_antigravity, oauth_reference, openai};
 
 /// `amore login --provider <name> [--device-auth]`: run the interactive
 /// provider login and store the resulting credentials.
 pub async fn run_provider_login_cli(provider: &str, force_device: bool) -> anyhow::Result<()> {
     let flow = LoginFlowKind::parse(provider, force_device).ok_or_else(|| {
         anyhow!(
-            "unknown login provider '{provider}' (expected: openai, openai-codex, openai-codex-device)"
+            "unknown login provider '{provider}' (expected: openai, openai-codex, openai-codex-device, google-antigravity, antigravity)"
         )
     })?;
     let kind = flow.provider();
     let creds = match flow {
         LoginFlowKind::OpenAiBrowser => login_openai_browser().await?,
         LoginFlowKind::OpenAiDevice => login_openai_device().await?,
+        LoginFlowKind::GoogleAntigravity => login_google_antigravity_browser().await?,
     };
     let path = store::default_store_path();
     store::store(&path, kind, &creds)
@@ -33,7 +33,10 @@ pub async fn run_provider_login_cli(provider: &str, force_device: bool) -> anyho
         eprintln!("Account: {email}");
     }
     if let Some(acct) = creds.account_id.as_deref() {
-        eprintln!("Workspace: {acct}");
+        match kind {
+            ProviderKind::OpenAi => eprintln!("Workspace: {acct}"),
+            ProviderKind::GoogleAntigravity => eprintln!("Project: {acct}"),
+        }
     }
     if let Some(plan) = creds.org_name.as_deref() {
         eprintln!("Plan: {plan}");
@@ -48,6 +51,9 @@ pub async fn run_provider_login_cli(provider: &str, force_device: bool) -> anyho
 fn provider_display(kind: ProviderKind) -> &'static str {
     match kind {
         ProviderKind::OpenAi => "OpenAI (ChatGPT Plus/Pro via Codex OAuth)",
+        ProviderKind::GoogleAntigravity => {
+            "Google Antigravity (Gemini 3, Claude, GPT-OSS via Cloud Code Assist)"
+        }
     }
 }
 
@@ -149,13 +155,64 @@ async fn login_openai_device() -> anyhow::Result<ProviderCredentials> {
     ))
 }
 
+async fn login_google_antigravity_browser() -> anyhow::Result<ProviderCredentials> {
+    let pkce = pkce::generate_pkce();
+    let state = pkce::generate_state();
+    let enable_stdin = std::io::stdin().is_terminal();
+
+    let listeners = match callback::bind_google_antigravity_callback().await {
+        Ok(listeners) => Some(listeners),
+        Err(err) if enable_stdin => {
+            eprintln!("warning: {err:#}");
+            eprintln!(
+                "Continuing in manual paste mode: complete sign-in in your browser, then paste the final redirect URL here."
+            );
+            None
+        }
+        Err(err) => return Err(err),
+    };
+
+    let redirect_uri = listeners
+        .as_ref()
+        .map(|l| l.redirect_uri.clone())
+        .unwrap_or_else(|| google_antigravity::REDIRECT_URI.to_owned());
+    let auth_url = google_antigravity::authorize_url(&state, &redirect_uri, &pkce.code_challenge);
+
+    eprintln!();
+    eprintln!("Signing in with Google Antigravity (Cloud Code Assist)...");
+    eprintln!();
+    if let Err(e) = webbrowser::open(&auth_url) {
+        tracing::debug!(error = %e, "failed to open browser");
+    }
+    eprintln!("Open this URL to sign in:");
+    eprintln!("  {auth_url}");
+    if enable_stdin {
+        eprintln!();
+        eprintln!(
+            "Paste the redirect URL (or authorization code) here if the browser runs on another machine:"
+        );
+    }
+
+    let CallbackCode {
+        code,
+        state: received,
+    } = callback::wait_for_callback(listeners, &state, enable_stdin).await?;
+    if !received.is_empty() && received != state {
+        return Err(anyhow!("OAuth state mismatch; aborting login"));
+    }
+
+    eprintln!();
+    eprintln!("Exchanging authorization code for tokens...");
+    google_antigravity::exchange_code(&code, &redirect_uri, &pkce.code_verifier).await
+}
+
 // ============================================================================
 // Live token resolution
 // ============================================================================
 
 /// Serialize refreshes within this process. Cross-process races are settled by
 /// the store's compare-and-set instead.
-static REFRESH_LOCK: Mutex<()> = Mutex::new(());
+static REFRESH_LOCK: Mutex<()> = Mutex::const_new(());
 
 /// Load the provider's credentials and refresh them when stale.
 pub(crate) async fn fresh_credentials(kind: ProviderKind) -> anyhow::Result<ProviderCredentials> {
@@ -166,9 +223,7 @@ pub(crate) async fn fresh_credentials(kind: ProviderKind) -> anyhow::Result<Prov
         return Ok(current);
     }
 
-    let _guard = REFRESH_LOCK
-        .lock()
-        .map_err(|_| anyhow!("OAuth refresh lock poisoned"))?;
+    let _guard = REFRESH_LOCK.lock().await;
     let current = match store::load(&path, kind) {
         Some(c) if c.is_fresh(store::now_ms()) => return Ok(c),
         Some(c) => c,
@@ -177,6 +232,7 @@ pub(crate) async fn fresh_credentials(kind: ProviderKind) -> anyhow::Result<Prov
 
     let refreshed = match kind {
         ProviderKind::OpenAi => openai::refresh_token(&current).await,
+        ProviderKind::GoogleAntigravity => google_antigravity::refresh_token(&current).await,
     };
 
     match refreshed {
@@ -246,7 +302,12 @@ pub fn resolve_api_key_reference(key: &str) -> Option<String> {
         return Some(key.to_owned());
     };
     match blocking_fresh_credentials(kind) {
-        Ok(creds) => Some(creds.access),
+        Ok(creds) => match kind {
+            ProviderKind::OpenAi => Some(creds.access),
+            ProviderKind::GoogleAntigravity => {
+                Some(google_antigravity::encode_structured_credential(&creds))
+            }
+        },
         Err(e) => {
             tracing::error!(
                 provider = kind.as_str(),

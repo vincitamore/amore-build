@@ -14,7 +14,7 @@ use axum::extract::Query;
 use axum::routing::get;
 use tokio::net::TcpListener;
 
-use super::openai;
+use super::{google_antigravity, openai};
 
 const WAIT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
 
@@ -82,10 +82,11 @@ fn callback_from_params(params: &HashMap<String, String>) -> Option<CallbackCode
 /// the authorization request carries.
 pub(crate) struct CallbackListeners {
     pub(crate) primary: TcpListener,
-    /// Companion listener on `::1:1455` so browsers resolving `localhost` to IPv6
+    /// Companion listener on `::1` so browsers resolving `localhost` to IPv6
     /// first reach our callback server.
     pub(crate) ipv6: Option<TcpListener>,
     pub(crate) redirect_uri: String,
+    pub(crate) callback_path: &'static str,
 }
 
 /// Bind the OpenAI Codex callback listener on port 1455 (`port_fallback = false`).
@@ -121,6 +122,51 @@ pub(crate) async fn bind_openai_callback() -> anyhow::Result<CallbackListeners> 
         primary,
         ipv6,
         redirect_uri: openai::REDIRECT_URI.to_owned(),
+        callback_path: openai::CALLBACK_PATH,
+    })
+}
+
+/// Bind the Google Antigravity callback listener on `127.0.0.1:51121` with
+/// automatic fallback to a random ephemeral port (`port_fallback = true`).
+///
+/// Desktop Google OAuth clients accept any loopback port on `127.0.0.1`.
+pub(crate) async fn bind_google_antigravity_callback() -> anyhow::Result<CallbackListeners> {
+    let primary = match TcpListener::bind(("127.0.0.1", google_antigravity::CALLBACK_PORT)).await {
+        Ok(listener) => listener,
+        Err(preferred_err) => {
+            tracing::debug!(
+                preferred_port = google_antigravity::CALLBACK_PORT,
+                error = %preferred_err,
+                "preferred Antigravity callback port unavailable; falling back to an ephemeral port"
+            );
+            let fallback = TcpListener::bind(("127.0.0.1", 0u16))
+                .await
+                .context("binding loopback OAuth callback listener for Google Antigravity")?;
+            if let Ok(addr) = fallback.local_addr() {
+                eprintln!(
+                    "Preferred port {} unavailable, using port {}",
+                    google_antigravity::CALLBACK_PORT,
+                    addr.port()
+                );
+            }
+            fallback
+        }
+    };
+    let actual_port = primary
+        .local_addr()
+        .context("reading local address of Google Antigravity callback listener")?
+        .port();
+    let redirect_uri = format!(
+        "http://{}:{}{}",
+        google_antigravity::CALLBACK_HOSTNAME,
+        actual_port,
+        google_antigravity::CALLBACK_PATH
+    );
+    Ok(CallbackListeners {
+        primary,
+        ipv6: None,
+        redirect_uri,
+        callback_path: google_antigravity::CALLBACK_PATH,
     })
 }
 
@@ -133,12 +179,16 @@ pub(crate) async fn wait_for_callback(
 ) -> anyhow::Result<CallbackCode> {
     let (tx, mut rx) = tokio::sync::mpsc::channel::<CallbackEvent>(1);
 
+    let callback_path = listeners
+        .as_ref()
+        .map(|l| l.callback_path)
+        .unwrap_or(openai::CALLBACK_PATH);
     let expected_state_owned = expected_state.to_owned();
     let build_router = |tx: tokio::sync::mpsc::Sender<CallbackEvent>| {
         let expected = expected_state_owned.clone();
         Router::new()
             .route(
-                openai::CALLBACK_PATH,
+                callback_path,
                 get(
                     move |Query(params): Query<HashMap<String, String>>| async move {
                         handle_callback(params, expected.clone(), tx.clone())

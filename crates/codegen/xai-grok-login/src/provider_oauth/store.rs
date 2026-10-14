@@ -124,6 +124,7 @@ fn lookup_provider<'a>(
 ) -> Option<&'a ProviderCredentials> {
     file.providers.get(kind.as_str()).or_else(|| match kind {
         ProviderKind::OpenAi => file.providers.get("openai-codex"),
+        ProviderKind::GoogleAntigravity => file.providers.get("antigravity"),
     })
 }
 
@@ -139,8 +140,13 @@ pub(crate) fn store(
 ) -> std::io::Result<()> {
     let mut file = read_file(path);
     file.version = STORE_VERSION;
-    if matches!(kind, ProviderKind::OpenAi) {
-        file.providers.remove("openai-codex");
+    match kind {
+        ProviderKind::OpenAi => {
+            file.providers.remove("openai-codex");
+        }
+        ProviderKind::GoogleAntigravity => {
+            file.providers.remove("antigravity");
+        }
     }
     file.providers.insert(kind.as_str().to_owned(), creds.clone());
     write_file(path, &file)
@@ -149,8 +155,10 @@ pub(crate) fn store(
 pub(crate) fn clear(path: &Path, kind: ProviderKind) {
     let mut file = read_file(path);
     let removed_primary = file.providers.remove(kind.as_str()).is_some();
-    let removed_alias = matches!(kind, ProviderKind::OpenAi)
-        && file.providers.remove("openai-codex").is_some();
+    let removed_alias = match kind {
+        ProviderKind::OpenAi => file.providers.remove("openai-codex").is_some(),
+        ProviderKind::GoogleAntigravity => file.providers.remove("antigravity").is_some(),
+    };
     if removed_primary || removed_alias {
         let _ = write_file(path, &file);
     }
@@ -170,8 +178,13 @@ pub(crate) fn store_refresh_cas(
         Some(current) if current.refresh == expected_refresh => {
             let mut file = file;
             file.version = STORE_VERSION;
-            if matches!(kind, ProviderKind::OpenAi) {
-                file.providers.remove("openai-codex");
+            match kind {
+                ProviderKind::OpenAi => {
+                    file.providers.remove("openai-codex");
+                }
+                ProviderKind::GoogleAntigravity => {
+                    file.providers.remove("antigravity");
+                }
             }
             file.providers.insert(kind.as_str().to_owned(), creds.clone());
             write_file(path, &file).is_ok()

@@ -1,15 +1,21 @@
-// Third-party OAuth login (OpenAI Codex / ChatGPT Plus & Pro).
+// Third-party OAuth login (OpenAI Codex / ChatGPT Plus & Pro, Google Antigravity).
 //
-// Ported from the omp harness's OpenAI Codex OAuth flow: PKCE browser login on
-// http://localhost:1455/auth/callback, headless device-code login against
-// auth.openai.com/api/accounts/deviceauth/*, JWT identity extraction, and
-// compare-and-set refresh into ~/.amore/oauth-credentials.json.
+// Ported from the omp harness's OAuth flows:
+// - OpenAI Codex: PKCE browser login on http://localhost:1455/auth/callback,
+//   headless device-code login against auth.openai.com/api/accounts/deviceauth/*,
+//   JWT identity extraction, and compare-and-set refresh.
+// - Google Antigravity (Cloud Code Assist): PKCE browser login on
+//   http://127.0.0.1:51121/oauth-callback (with ephemeral port fallback),
+//   userinfo email lookup, Cloud Code Assist loadCodeAssist + free-tier
+//   onboardUser project discovery, and compare-and-set refresh.
 //
-// A model entry sets `api_key = "oauth:openai"` (or `"oauth:openai-codex"`):
-// `resolve_credentials` resolves a fresh access token, and a per-model
+// Credentials persist in ~/.amore/oauth-credentials.json. A model entry sets
+// `api_key = "oauth:openai"` or `api_key = "oauth:google-antigravity"`:
+// `resolve_credentials` resolves a fresh credential, and a per-model
 // `BearerResolver` refreshes on expiry across long-running sessions.
 
 mod callback;
+pub mod google_antigravity;
 mod login;
 pub mod openai;
 mod pkce;
@@ -29,6 +35,8 @@ pub fn oauth_reference_kind(key: &str) -> Option<ProviderKind> {
 pub enum ProviderKind {
     /// ChatGPT Plus/Pro via the OpenAI Codex OAuth client.
     OpenAi,
+    /// Google Antigravity (Cloud Code Assist: Gemini 3, Claude, GPT-OSS).
+    GoogleAntigravity,
 }
 
 /// Login flow variant selected on the CLI.
@@ -38,12 +46,15 @@ pub enum LoginFlowKind {
     OpenAiBrowser,
     /// Headless device-code flow (`openai-codex-device`, or `--device-auth`).
     OpenAiDevice,
+    /// Browser PKCE callback flow for Google Antigravity (`google-antigravity` / `antigravity`).
+    GoogleAntigravity,
 }
 
 impl LoginFlowKind {
     pub fn provider(self) -> ProviderKind {
         match self {
             LoginFlowKind::OpenAiBrowser | LoginFlowKind::OpenAiDevice => ProviderKind::OpenAi,
+            LoginFlowKind::GoogleAntigravity => ProviderKind::GoogleAntigravity,
         }
     }
 
@@ -55,6 +66,7 @@ impl LoginFlowKind {
                 LoginFlowKind::OpenAiBrowser
             }),
             "openai-codex-device" | "openai-device" => Some(LoginFlowKind::OpenAiDevice),
+            "google-antigravity" | "antigravity" => Some(LoginFlowKind::GoogleAntigravity),
             _ => None,
         }
     }
@@ -65,6 +77,7 @@ impl ProviderKind {
     pub fn as_str(self) -> &'static str {
         match self {
             ProviderKind::OpenAi => "openai",
+            ProviderKind::GoogleAntigravity => "google-antigravity",
         }
     }
 
@@ -73,6 +86,7 @@ impl ProviderKind {
             "openai" | "openai-codex" | "openai-codex-device" | "openai-device" => {
                 Some(ProviderKind::OpenAi)
             }
+            "google-antigravity" | "antigravity" => Some(ProviderKind::GoogleAntigravity),
             _ => None,
         }
     }
@@ -86,8 +100,8 @@ impl ProviderKind {
 
 /// The `api_key = "oauth:<provider>"` indirection convention.
 ///
-/// Accepts `oauth:openai`, `oauth:openai-codex`, and colon-terminated forms
-/// (`oauth:openai:`).
+/// Accepts `oauth:openai`, `oauth:openai-codex`, `oauth:google-antigravity`,
+/// `oauth:antigravity`, and colon-terminated forms (`oauth:openai:`).
 pub(crate) fn oauth_reference(key: &str) -> Option<ProviderKind> {
     let value = key.trim().strip_prefix("oauth:")?;
     let name = value.trim_end_matches(':');
@@ -109,6 +123,22 @@ mod tests {
         assert_eq!(
             oauth_reference("oauth:openai-codex:"),
             Some(ProviderKind::OpenAi)
+        );
+        assert_eq!(
+            oauth_reference("oauth:google-antigravity"),
+            Some(ProviderKind::GoogleAntigravity)
+        );
+        assert_eq!(
+            oauth_reference("oauth:google-antigravity:"),
+            Some(ProviderKind::GoogleAntigravity)
+        );
+        assert_eq!(
+            oauth_reference("oauth:antigravity"),
+            Some(ProviderKind::GoogleAntigravity)
+        );
+        assert_eq!(
+            oauth_reference("oauth:antigravity:"),
+            Some(ProviderKind::GoogleAntigravity)
         );
         assert_eq!(oauth_reference("oauth:unknown"), None);
         assert_eq!(oauth_reference("sk-proj-example"), None);
@@ -134,8 +164,20 @@ mod tests {
             Some(LoginFlowKind::OpenAiDevice)
         );
         assert_eq!(
+            LoginFlowKind::parse("google-antigravity", false),
+            Some(LoginFlowKind::GoogleAntigravity)
+        );
+        assert_eq!(
+            LoginFlowKind::parse("antigravity", false),
+            Some(LoginFlowKind::GoogleAntigravity)
+        );
+        assert_eq!(
             ProviderKind::parse(ProviderKind::OpenAi.as_str()),
             Some(ProviderKind::OpenAi)
+        );
+        assert_eq!(
+            ProviderKind::parse(ProviderKind::GoogleAntigravity.as_str()),
+            Some(ProviderKind::GoogleAntigravity)
         );
     }
 }

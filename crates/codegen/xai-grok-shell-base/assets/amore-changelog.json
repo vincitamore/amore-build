@@ -1,5 +1,10 @@
 [
   {
+    "category": "features",
+    "description": "**Google Antigravity OAuth login (`amore login --provider google-antigravity`)** — signs in with Google Antigravity (Cloud Code Assist: Gemini 3, Claude, GPT-OSS) via Google OAuth 2.0 PKCE browser login on `http://127.0.0.1:51121/oauth-callback` (with ephemeral port fallback and manual paste fallback), provisions or discovers the account's `cloudaicompanionProject` via `v1internal:loadCodeAssist` / `v1internal:onboardUser`, and stores credentials in `~/.amore/oauth-credentials.json` with compare-and-set token refresh. Model entries reference `api_key = \"oauth:google-antigravity\"` and route through `/v1internal:streamGenerateContent?alt=sse` on `https://daily-cloudcode-pa.googleapis.com`.",
+    "breaking_change": false
+  },
+  {
     "category": "fixes",
     "description": "**Project rules loader deduplicates `.grok/rules` against `.amore/rules`** — when both `.amore/rules/<name>.md` and legacy `.grok/rules/<name>.md` exist in a project root, the loader skips the `.grok/rules` duplicate so orientation rules are injected once. `iris` adds `forge list|pipeline|dream-acted|review|proposal-resolve` CLI verbs, and Lucerna light chores count by frontmatter `status:`, age inbox items from `created:`, and use a 600s `iris` subprocess timeout.",
     "breaking_change": false
