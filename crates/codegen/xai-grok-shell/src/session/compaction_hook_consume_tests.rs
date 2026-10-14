@@ -8,6 +8,7 @@ fn success_ctx(name: &str, ctx: impl Into<String>) -> HookRunResult {
         hook_name: name.into(),
         elapsed: Duration::from_millis(1),
         http_info: None,
+        system_message: None,
         additional_context: Some(ctx.into()),
     }
 }
@@ -17,6 +18,7 @@ fn success_empty(name: &str) -> HookRunResult {
         hook_name: name.into(),
         elapsed: Duration::from_millis(1),
         http_info: None,
+        system_message: None,
         additional_context: None,
     }
 }
@@ -27,6 +29,7 @@ fn failed(name: &str) -> HookRunResult {
         error: "timeout".into(),
         elapsed: Duration::from_millis(1),
         http_info: None,
+        system_message: None,
     }
 }
 
@@ -34,7 +37,7 @@ fn assert_system_reminder(item: &ConversationItem, expected: &str) {
     assert_eq!(item.text_content(), expected);
     match item {
         ConversationItem::User(u) => {
-            assert_eq!(u.synthetic_reason, Some(SyntheticReason::SystemReminder));
+            assert_eq!(u.synthetic_reason, SyntheticReason::SystemReminder);
         }
         other => panic!("expected system-reminder user item, got {other:?}"),
     }
@@ -92,10 +95,7 @@ fn precompact_empty_keep_with_hook_is_hook_text() {
 
 #[test]
 fn precompact_concatenates_multiple_hook_contexts_after_keep() {
-    let merged = merge_precompact_user_context(
-        Some("keep".into()),
-        &["one".into(), "two".into()],
-    );
+    let merged = merge_precompact_user_context(Some("keep".into()), &["one".into(), "two".into()]);
     assert_eq!(merged.as_deref(), Some("keep\n\none\n\ntwo"));
 }
 
@@ -119,6 +119,7 @@ fn blocked_skipped_and_empty_success_do_not_consume() {
             detail: "no".into(),
             elapsed: Duration::from_millis(1),
             http_info: None,
+            system_message: None,
         },
         HookRunResult::Skipped {
             hook_name: "skipped".into(),
@@ -128,6 +129,7 @@ fn blocked_skipped_and_empty_success_do_not_consume() {
             hook_name: "whitespace".into(),
             elapsed: Duration::from_millis(1),
             http_info: None,
+            system_message: None,
             additional_context: Some("  \n".into()),
         },
     ];
