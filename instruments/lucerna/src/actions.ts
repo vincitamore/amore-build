@@ -251,6 +251,33 @@ export function parseFrontmatter(
   return { ok: true, raw: text.slice(3, end) };
 }
 
+/** Extract a simple scalar frontmatter field value (unquoted/trimmed), or null if absent. */
+export function parseFrontmatterScalar(rawFm: string, key: string): string | null {
+  const re = new RegExp(`^${key}:\\s*(.+?)\\s*$`, "m");
+  const m = rawFm.match(re);
+  if (!m) return null;
+  const val = m[1]!.trim().replace(/^['"]|['"]$/g, "").trim();
+  if (!val || val === "null" || val === "~") return null;
+  return val;
+}
+
+/** Compute age in whole days from frontmatter `created:` (YYYY-MM-DD or ISO), or null if absent/invalid. */
+export function ageDaysFromCreated(filePath: string, nowMs: number = Date.now()): number | null {
+  let text = "";
+  try {
+    text = readFileSync(filePath, "utf-8");
+  } catch {
+    return null;
+  }
+  const fm = parseFrontmatter(text);
+  if (!fm.ok) return null;
+  const created = parseFrontmatterScalar(fm.raw, "created");
+  if (!created) return null;
+  const ts = Date.parse(created);
+  if (Number.isNaN(ts)) return null;
+  return Math.max(0, Math.floor((nowMs - ts) / DAY_MS));
+}
+
 export function surveyOrg(houseRoot: string): {
   inboxOpen: number;
   tasksActive: number;
@@ -258,11 +285,16 @@ export function surveyOrg(houseRoot: string): {
   reminders: number;
   forgeReports: number;
 } {
-  const countSkip = (dir: string, skip: string[]): number => {
+  const countByStatus = (
+    dir: string,
+    skip: string[],
+    allowedStatuses: readonly string[],
+    opts?: { includeStatuslessSubfolders?: readonly string[] },
+  ): number => {
     const root = join(houseRoot, dir);
     if (!existsSync(root)) return 0;
     let n = 0;
-    const walk = (d: string, depth: number) => {
+    const walk = (d: string, depth: number, topSub?: string) => {
       if (depth > 3) return;
       let entries;
       try {
@@ -275,9 +307,29 @@ export function surveyOrg(houseRoot: string): {
         const p = join(d, e.name);
         if (e.isDirectory()) {
           if (skip.includes(e.name)) continue;
-          walk(p, depth + 1);
+          walk(p, depth + 1, depth === 0 ? e.name : topSub);
         } else if (e.name.endsWith(".md")) {
-          n++;
+          let text = "";
+          try {
+            text = readFileSync(p, "utf-8");
+          } catch {
+            continue;
+          }
+          const fm = parseFrontmatter(text);
+          if (!fm.ok) {
+            if (topSub && opts?.includeStatuslessSubfolders?.includes(topSub)) {
+              n++;
+            }
+            continue;
+          }
+          const docType = parseFrontmatterScalar(fm.raw, "type")?.toLowerCase();
+          if (docType === "index") continue;
+          const status = parseFrontmatterScalar(fm.raw, "status")?.toLowerCase();
+          if (status) {
+            if (allowedStatuses.includes(status)) n++;
+          } else if (topSub && opts?.includeStatuslessSubfolders?.includes(topSub)) {
+            n++;
+          }
         }
       }
     };
@@ -286,8 +338,10 @@ export function surveyOrg(houseRoot: string): {
   };
 
   return {
-    inboxOpen: countSkip("inbox", ["resolved"]),
-    tasksActive: countSkip("tasks", ["completed", "archive"]),
+    inboxOpen: countByStatus("inbox", ["resolved"], ["open"], {
+      includeStatuslessSubfolders: ["captures"],
+    }),
+    tasksActive: countByStatus("tasks", ["completed", "archive"], ["active"]),
     tasksCompleted: countMd(join(houseRoot, "tasks", "completed"), 2),
     reminders: countMd(join(houseRoot, "reminders"), 2),
     forgeReports: countMd(join(houseRoot, "forge"), 2),
@@ -435,7 +489,10 @@ export function runInboxAgeReport(
     const thr = thresholds[sub.name] ?? 7;
     for (const file of files) {
       try {
-        const ageDays = Math.floor((now - statSync(join(subPath, file)).mtimeMs) / DAY);
+        const fp = join(subPath, file);
+        const ageDays =
+          ageDaysFromCreated(fp, now) ??
+          Math.floor((now - statSync(fp).mtimeMs) / DAY);
         if (ageDays >= thr) aging.push({ subfolder: sub.name, file, ageDays });
       } catch {
         /* skip */
@@ -572,7 +629,7 @@ export function runIrisEdgesUpdate(opts: IrisEdgesUpdateOptions): ActionResult {
     cwd: opts.houseRoot,
     encoding: "utf-8",
     windowsHide: true,
-    timeout: 120_000,
+    timeout: 600_000,
   };
 
   let status: number | null = null;
@@ -706,7 +763,7 @@ export function runQmdRefresh(
     cwd: houseRoot,
     encoding: "utf-8",
     windowsHide: true,
-    timeout: 300_000,
+    timeout: 600_000,
   };
 
   let status: number | null = null;

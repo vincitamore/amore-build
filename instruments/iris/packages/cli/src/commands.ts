@@ -1348,6 +1348,65 @@ export const COMMANDS: CommandSpec[] = [
     exit: edges.edgesUpdateExit,
   },
 
+  // ── forge (regula forge lifecycle & listing; daemon-independent) ──
+  {
+    name: 'forge list',
+    summary: 'List lightweight forge artifacts (manifests, light dream reports, proposals, recipes)',
+    isWrite: false,
+    booleanFlags: [],
+    flags: {},
+    run: ({ orgRoot }) => {
+      const items = regula.listForge(orgRoot);
+      const pipelineDirs = regula.forgePipelineDirs(orgRoot);
+      return { count: items.length, pipelineDirs, items };
+    },
+  },
+  {
+    name: 'forge pipeline',
+    summary: 'List handle + output artifacts for one forge pipeline (by pipeline name)',
+    isWrite: false,
+    booleanFlags: [],
+    flags: {},
+    run: ({ orgRoot, args }) => {
+      const pipeline = requireRef(args, 'forge pipeline');
+      const items = regula.listForgePipelineDetails(orgRoot, pipeline);
+      return { pipeline, count: items.length, items };
+    },
+  },
+  {
+    name: 'forge dream-acted',
+    summary: 'Mark a light dream artifact acted (status: pending -> acted)',
+    isWrite: true,
+    booleanFlags: [],
+    flags: {},
+    run: ({ orgRoot, args }) => regula.markDreamActed(orgRoot, requireRef(args, 'forge dream-acted')),
+  },
+  {
+    name: 'forge review',
+    summary: 'Mark a dream-pipeline manifest reviewed (review-status: pending -> reviewed)',
+    isWrite: true,
+    booleanFlags: [],
+    flags: {},
+    run: ({ orgRoot, args }) => regula.markPipelineReviewed(orgRoot, requireRef(args, 'forge review')),
+  },
+  {
+    name: 'forge proposal-resolve',
+    summary: 'Resolve a forge proposal (applied|rejected|stale) and move to forge/proposals/<target>/',
+    isWrite: true,
+    booleanFlags: [],
+    flags: {
+      to: 'target proposal status: applied | rejected | stale (or second positional)',
+    },
+    run: ({ orgRoot, args }) => {
+      const ref = requireRef(args, 'forge proposal-resolve');
+      const target = (str(args.flags, 'to') ?? args.positional[1]) as regula.ProposalTarget | undefined;
+      if (!target) {
+        throw new regula.RegulaError('USAGE', 'forge proposal-resolve requires --to <applied|rejected|stale> (or second positional)');
+      }
+      return regula.resolveProposal(orgRoot, ref, target);
+    },
+  },
+
   // ── qmd (managed local semantic search companion) ──
   {
     name: 'qmd setup',

@@ -39,10 +39,10 @@ legacy `$GROK_HOME` still works). Prefer **`env_key`** over a literal
 > true.
 
 > Pricing, model IDs, provider ceilings, and host availability **rot**. Every
-> such fact below is stamped **as of 2026-08-04; re-verify** against the
+> such fact below is stamped **as of 2026-10-14; re-verify** against the
 > linked vendor pages before you rely on them. (The previous revision of this
-> page was stamped 2026-07-31; two of its numbers had already moved by
-> 2026-08-04.)
+> page was stamped 2026-08-04; several numbers moved as OpenRouter added
+> higher-ceiling providers.)
 
 ---
 
@@ -75,8 +75,8 @@ The maintainer's daily driver in this harness.
 | Base URL | `https://openrouter.ai/api/v1` |
 | Auth env | `OPENROUTER_API_KEY` |
 | Context | 1,048,576 tokens |
-| Provider completion ceiling (OpenRouter-reported) | 65,536 |
-| List price (live-queried against `https://openrouter.ai/api/v1/models`) | $0.09 input / $0.18 output / $0.018 cached input, per 1M tokens *(as of 2026-08-04; re-verify)* |
+| Provider completion ceiling (OpenRouter-reported) | 65,536 *(up to 943,718 on some OpenRouter providers; keep `max_completion_tokens` at 65,536 so the output reservation does not crowd out a 1M context window)* |
+| List price (live-queried against `https://openrouter.ai/api/v1/models`) | $0.016 input / $0.64 output / $0.016 cached input, per 1M tokens *(as of 2026-10-14; re-verify — prices vary across OpenRouter providers from $0.014/$0.58 to $0.14/$0.28)* |
 | Keys | https://openrouter.ai/keys |
 | Model card | https://openrouter.ai/deepseek/deepseek-v4-flash-0731 |
 
@@ -177,8 +177,8 @@ max_completion_tokens = 393216
 | Base URL | `https://openrouter.ai/api/v1` |
 | Auth env | `OPENROUTER_API_KEY` |
 | Context | 1,048,576 tokens |
-| Provider completion ceiling (OpenRouter-reported) | 262,144 *(moved from 128,000 since the last stamp; this number tracks OpenRouter's current top provider and drifts)* |
-| List price | $0.76 input / $2.42 output / $0.14 cached input, per 1M tokens *(as of 2026-08-04; re-verify, down from $1.12/$3.52/$0.208 at the 2026-07-31 stamp)* |
+| Provider completion ceiling (OpenRouter-reported) | 262,144 *(up to 943,718 on some OpenRouter providers; keep `max_completion_tokens` at 131,072–262,144 so the output reservation leaves headroom in the 1M context window)* |
+| List price | $0.05 input / $7.00 output / $0.049 cached input on the lowest-input provider, or ~$0.56–$1.40 input / $1.80–$4.40 output across standard providers, per 1M tokens *(as of 2026-10-14; re-verify)* |
 | Model card | https://openrouter.ai/z-ai/glm-5.2 |
 
 ```toml

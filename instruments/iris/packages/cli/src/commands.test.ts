@@ -436,6 +436,20 @@ test('status human formatter renders a compact multi-line summary (counts, no JS
   expect(text).not.toContain('{');
 });
 
+test('forge verbs resolve and classify write/read correctly', () => {
+  expect(resolveOk(['forge', 'list']).name).toBe('forge list');
+  expect(resolveOk(['forge', 'pipeline', 'my-pipe']).name).toBe('forge pipeline');
+  expect(resolveOk(['forge', 'dream-acted', 'forge/dreams/x.md']).name).toBe('forge dream-acted');
+  expect(resolveOk(['forge', 'review', 'forge/dreams/x.manifest.md']).name).toBe('forge review');
+  expect(resolveOk(['forge', 'proposal-resolve', 'forge/proposals/x.md', 'applied']).name).toBe('forge proposal-resolve');
+  const byName = Object.fromEntries(COMMANDS.map((c) => [c.name, c]));
+  expect(byName['forge list'].isWrite).toBe(false);
+  expect(byName['forge pipeline'].isWrite).toBe(false);
+  expect(byName['forge dream-acted'].isWrite).toBe(true);
+  expect(byName['forge review'].isWrite).toBe(true);
+  expect(byName['forge proposal-resolve'].isWrite).toBe(true);
+});
+
 test('every command in the manifest carries hasHumanOutput and it matches the spec', async () => {
   const { manifest } = await import('./commands');
   const m = manifest() as { commands: Array<{ name: string; hasHumanOutput: boolean }> };

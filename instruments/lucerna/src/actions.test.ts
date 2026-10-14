@@ -14,6 +14,7 @@ import {
   ACTION_CATALOG,
   ADMITTED_ACTION_KEYS,
   executeLightAction,
+  surveyOrg,
   runSurveyOrg,
   runSubstrateHealth,
   runInboxAgeReport,
@@ -121,6 +122,67 @@ describe("light actions against synthetic house", () => {
       const body = await Bun.file(r.artifactPath!).text();
       expect(body).toContain("triggered-by: dream");
       expect(body).toContain("dream-action: survey-org");
+    } finally {
+      rmSync(house, { recursive: true, force: true });
+    }
+  });
+
+  test("surveyOrg counts by frontmatter status, includes statusless captures, and skips index", () => {
+    const house = syntheticHouse();
+    try {
+      mkdirSync(join(house, "tasks", "paused"), { recursive: true });
+      writeFileSync(
+        join(house, "tasks", "README.md"),
+        "---\ntype: index\ncreated: 2026-08-01\n---\n# tasks\n",
+        "utf-8",
+      );
+      writeFileSync(
+        join(house, "tasks", "blocked-one.md"),
+        "---\ntype: task\nstatus: blocked\n---\n# Blocked\n",
+        "utf-8",
+      );
+      writeFileSync(
+        join(house, "tasks", "paused", "paused-one.md"),
+        "---\ntype: task\nstatus: paused\n---\n# Paused\n",
+        "utf-8",
+      );
+      writeFileSync(
+        join(house, "inbox", "README.md"),
+        "---\ntype: index\ncreated: 2026-08-01\n---\n# inbox\n",
+        "utf-8",
+      );
+      writeFileSync(
+        join(house, "inbox", "ideas", "open-idea.md"),
+        "---\ntype: inbox\nstatus: open\ncreated: 2026-08-01\n---\n# Open idea\n",
+        "utf-8",
+      );
+      writeFileSync(
+        join(house, "inbox", "ideas", "superseded-idea.md"),
+        "---\ntype: inbox\nstatus: superseded\ncreated: 2026-08-01\n---\n# Superseded\n",
+        "utf-8",
+      );
+      const s = surveyOrg(house);
+      expect(s.tasksActive).toBe(1);
+      // c1.md (statusless capture) + open-idea.md (status: open); old.md in ideas has no status, README is index, superseded-idea is superseded
+      expect(s.inboxOpen).toBe(2);
+    } finally {
+      rmSync(house, { recursive: true, force: true });
+    }
+  });
+
+  test("inbox-age-report ages from frontmatter created before mtime fallback", async () => {
+    const house = syntheticHouse();
+    try {
+      writeFileSync(
+        join(house, "inbox", "ideas", "ancient.md"),
+        "---\ntype: inbox\nstatus: open\ncreated: 2025-01-01\n---\n# Ancient idea\n",
+        "utf-8",
+      );
+      const r = runInboxAgeReport(house);
+      expect(r.ok).toBe(true);
+      const text = await Bun.file(r.artifactPath!).text();
+      expect(text).toContain("ancient.md");
+      expect(text).toContain("Past threshold: 1");
     } finally {
       rmSync(house, { recursive: true, force: true });
     }

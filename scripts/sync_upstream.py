@@ -320,6 +320,11 @@ def cmd_verify(dry_run: bool) -> int:
         print("  ok  .amore is the fork-native project config root (agent load sites)")
     else:
         problems.append("no .amore project-root load site found in agent crates")
+    _check_file_contains(
+        "crates/codegen/xai-grok-agent/src/prompt/agents_md.rs",
+        "native_amore_names",
+        "project rules loader skips .grok/rules duplicate when .amore/rules carries the same stem",
+        problems)
 
     # 2. default home compiled in (xai-dirs, formerly xai-grok-home; paths.rs is a re-export)
     _check_file_contains(

@@ -1,6 +1,11 @@
 [
   {
     "category": "fixes",
+    "description": "**Project rules loader deduplicates `.grok/rules` against `.amore/rules`** — when both `.amore/rules/<name>.md` and legacy `.grok/rules/<name>.md` exist in a project root, the loader skips the `.grok/rules` duplicate so orientation rules are injected once. `iris` adds `forge list|pipeline|dream-acted|review|proposal-resolve` CLI verbs, and Lucerna light chores count by frontmatter `status:`, age inbox items from `created:`, and use a 600s `iris` subprocess timeout.",
+    "breaking_change": false
+  },
+  {
+    "category": "fixes",
     "description": "**Responses SSE keepalive control frames** — the Responses stream reader consumes explicit `keepalive` heartbeats after raw SSE logging and error/doom-loop checks, yielding between control frames so cancellation and progress timeouts remain responsive without counting heartbeats as model output or first-content timing.",
     "breaking_change": false
   },
