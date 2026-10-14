@@ -379,6 +379,50 @@ pub fn resolve_wire_model_and_thinking(
                 )
             }
         }
+        "gemini-2.5-flash-lite" => {
+            if is_off || eff.is_none() {
+                ("gemini-2.5-flash-lite".to_owned(), ThinkingTransport::None)
+            } else {
+                let budget = match eff.unwrap_or(ReasoningEffort::Medium) {
+                    ReasoningEffort::Minimal => 1_024,
+                    ReasoningEffort::Low => 2_048,
+                    ReasoningEffort::Medium => 8_192,
+                    _ => 24_576,
+                };
+                (
+                    "gemini-2.5-flash-lite".to_owned(),
+                    ThinkingTransport::Budget(budget),
+                )
+            }
+        }
+        "gemini-2.5-pro" => {
+            let budget = match eff.unwrap_or(ReasoningEffort::High) {
+                ReasoningEffort::Minimal => 1_024,
+                ReasoningEffort::Low => 2_048,
+                ReasoningEffort::Medium => 8_192,
+                _ => 24_576,
+            };
+            (
+                "gemini-2.5-pro".to_owned(),
+                ThinkingTransport::Budget(budget),
+            )
+        }
+        "gpt-oss-120b" | "gpt-oss-120b-medium" => {
+            if is_off {
+                ("gpt-oss-120b-medium".to_owned(), ThinkingTransport::None)
+            } else {
+                let budget = match eff.unwrap_or(ReasoningEffort::Medium) {
+                    ReasoningEffort::Minimal => 1_024,
+                    ReasoningEffort::Low => 2_048,
+                    ReasoningEffort::Medium => 8_192,
+                    _ => 16_384,
+                };
+                (
+                    "gpt-oss-120b-medium".to_owned(),
+                    ThinkingTransport::Budget(budget),
+                )
+            }
+        }
         _ => {
             // Check gemini-{rev}-flash pattern (e.g. gemini-3.6-flash, gemini-3.7-flash)
             if let Some(rev) = lower
@@ -993,13 +1037,16 @@ pub fn build_antigravity_request_body(
     }
 
     let profile = wire_profile(&wire_model_id);
+    let is_claude_5_5 = wire_model_id.starts_with("claude-opus-5-5")
+        || wire_model_id.starts_with("claude-sonnet-5-5");
+    let claude_cap: u32 = if is_claude_5_5 { 128_000 } else { 64_000 };
     let max_out = profile
         .map(|p| p.max_output_tokens)
         .or(req.max_output_tokens)
         .or(default_max_tokens)
-        .unwrap_or(if is_claude { 64_000 } else { 65_535 });
+        .unwrap_or(if is_claude { claude_cap } else { 65_535 });
     let clamped_max_out = if is_claude {
-        max_out.min(64_000)
+        max_out.min(claude_cap)
     } else {
         max_out
     };

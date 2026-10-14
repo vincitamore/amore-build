@@ -91,20 +91,49 @@ Point any Google Antigravity model entry at `api_key = "oauth:google-antigravity
 (or `"oauth:antigravity"`):
 
 ```toml
-[model.gemini-3-1-pro-antigravity]
+[model.antigravity-gemini-3-1-pro]
 model = "gemini-3.1-pro"
-name = "Gemini 3.1 Pro (Antigravity)"
+name = "Gemini 3.1 Pro Preview (Antigravity OAuth)"
 api_key = "oauth:google-antigravity"
-system_prompt_label = "Amore Build"
-context_window = 200000
+base_url = "https://daily-cloudcode-pa.googleapis.com"
+api_backend = "messages"
+system_prompt_label = "Amore"
+context_window = 1048576
+max_completion_tokens = 65535
 
-[model.claude-opus-4-6-antigravity]
+[model.antigravity-claude-opus-4-6]
 model = "claude-opus-4-6"
-name = "Claude Opus 4.6 (Antigravity)"
+name = "Claude Opus 4.6 (Antigravity OAuth)"
 api_key = "oauth:google-antigravity"
-system_prompt_label = "Amore Build"
-context_window = 200000
+base_url = "https://daily-cloudcode-pa.googleapis.com"
+api_backend = "messages"
+system_prompt_label = "Amore"
+context_window = 250000
+max_completion_tokens = 64000
 ```
+
+| Model ID (`model`) | Display Name | `context_window` | `max_completion_tokens` | Wire Routing / Thinking |
+|---|---|---:|---:|---|
+| `gemini-4-argon` | Gemini 4 Argon | `1048576` | `65536` | `gemini-4-argon-{low,medium,high}` (`thinkingLevel`) |
+| `gemini-3.8-flash` | Gemini 3.8 Flash | `1048576` | `65536` | `gemini-3.8-flash-{low,medium,high}` (`thinkingLevel`) |
+| `gemini-3.7-flash` | Gemini 3.7 Flash | `1048576` | `65536` | `gemini-3.7-flash-{low,medium,high}` (`thinkingLevel`) |
+| `gemini-3.6-flash` | Gemini 3.6 Flash | `1048576` | `65536` | `gemini-3.6-flash-{low,medium,high}` (`thinkingLevel`) |
+| `gemini-3.5-flash` | Gemini 3.5 Flash | `1048576` | `65536` | `gemini-3.5-flash-extra-low` (1000) / `gemini-3.5-flash-low` (4000) / `gemini-3-flash-agent` (10000) |
+| `gemini-3.5-flash-lite` | Gemini 3.5 Flash Lite | `1048576` | `65535` | `thinkingLevel` (`MINIMAL`..`HIGH`) |
+| `gemini-3.1-pro` | Gemini 3.1 Pro Preview | `1048576` | `65535` | `gemini-3.1-pro-low` (1001) / `gemini-pro-agent` (10001) |
+| `gemini-3.1-flash-lite` | Gemini 3.1 Flash Lite | `1048576` | `65535` | `thinkingLevel` (`MINIMAL`..`HIGH`) |
+| `gemini-3-pro` | Gemini 3 Pro | `1048576` | `65535` | `gemini-3-pro-{low,high}` (`thinkingLevel`) |
+| `gemini-3-flash` | Gemini 3 Flash | `1048576` | `65536` | `gemini-3.5-flash-extra-low` (1000) / `gemini-3.5-flash-low` (4000) / `gemini-3-flash-agent` (10000) |
+| `gemini-2.5-pro` | Gemini 2.5 Pro | `1048576` | `65536` | `thinkingBudget` |
+| `gemini-2.5-flash` | Gemini 2.5 Flash | `1048576` | `65535` | `gemini-2.5-flash` / `gemini-2.5-flash-thinking` (`thinkingBudget`) |
+| `gemini-2.5-flash-lite` | Gemini 2.5 Flash-Lite | `1048576` | `65535` | `thinkingBudget` |
+| `claude-opus-5-5` | Claude Opus 5.5 | `1000000` | `128000` | `claude-opus-5-5-{low,medium,high}` (`thinkingBudget`) |
+| `claude-sonnet-5-5` | Claude Sonnet 5.5 | `1000000` | `128000` | `claude-sonnet-5-5-{low,medium,high}` (`thinkingBudget`) |
+| `claude-opus-4-6` | Claude Opus 4.6 | `250000` | `64000` | `claude-opus-4-6-thinking` (`thinkingBudget`) |
+| `claude-sonnet-4-6` | Claude Sonnet 4.6 | `250000` | `64000` | `claude-sonnet-4-6` (`thinkingBudget`) |
+| `claude-opus-4-5` | Claude Opus 4.5 | `200000` | `64000` | `claude-opus-4-5` / `claude-opus-4-5-thinking` (`thinkingBudget`) |
+| `claude-sonnet-4-5` | Claude Sonnet 4.5 | `1000000` | `64000` | `claude-sonnet-4-5` / `claude-sonnet-4-5-thinking` (`thinkingBudget`) |
+| `gpt-oss-120b` | GPT OSS 120B | `131072` | `32768` | `gpt-oss-120b-medium` (`thinkingBudget`) |
 
 When `api_key = "oauth:google-antigravity"` is set on a model entry,
 `base_url` defaults to `https://daily-cloudcode-pa.googleapis.com`,
