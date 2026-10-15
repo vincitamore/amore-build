@@ -43,9 +43,26 @@ pub enum InstructionSource {
 
 /// `filenames` is the (compat-gated) recognized list, precomputed once by the caller so the cwd-to-root walk doesn't re-allocate it per directory.
 /// When all compat cells are on it equals the legacy `AGENT_FILENAMES` list exactly.
+/// When a directory carries an `AGENTS.md` (or `Agents.md`) derived from its sibling `CLAUDE.md`
+/// (`Canonical source: CLAUDE.md` in the header), `AGENTS.md` wins and the top-level `CLAUDE.md`
+/// (`Claude.md`) is skipped so both copies do not inject into the prompt.
 fn find_agent_files(dir: &Path, filenames: &[&str]) -> Vec<PathBuf> {
+    let skip_derived_claude = ["AGENTS.md", "Agents.md"].iter().any(|name| {
+        let p = dir.join(name);
+        p.is_file()
+            && std::fs::read_to_string(&p)
+                .ok()
+                .is_some_and(|s| {
+                    s.get(..512)
+                        .unwrap_or(&s)
+                        .contains("Canonical source: CLAUDE.md")
+                })
+    });
     filenames
         .iter()
+        .filter(|name| {
+            !(skip_derived_claude && matches!(**name, "CLAUDE.md" | "Claude.md"))
+        })
         .filter_map(|name| {
             let path = dir.join(name);
             path.exists().then_some(path)
@@ -54,11 +71,12 @@ fn find_agent_files(dir: &Path, filenames: &[&str]) -> Vec<PathBuf> {
 }
 
 /// Find `*.md` files directly inside each rules directory, sorted alphabetically within a directory.
-/// When a project root carries both `.amore/rules` and legacy `.grok/rules`, a rule file in `.grok/rules`
-/// is skipped when `.amore/rules` already defines a rule with the same filename.
+/// When a project root carries a non-empty `.amore/rules` directory, `.amore/rules` is authoritative
+/// for that root and legacy `.grok/rules` is skipped entirely so `.grok`-only rules do not leak into
+/// `.amore/rules` houses.
 fn find_rules_files(rules_dirs: &[PathBuf]) -> Vec<PathBuf> {
     let mut results = Vec::new();
-    let mut native_amore_names = std::collections::HashSet::new();
+    let mut has_amore_rules = false;
     for rules_dir in rules_dirs {
         if !rules_dir.is_dir() {
             continue;
@@ -73,6 +91,9 @@ fn find_rules_files(rules_dirs: &[PathBuf]) -> Vec<PathBuf> {
             .and_then(|p| p.file_name())
             .and_then(|n| n.to_str())
             .is_some_and(|n| n.eq_ignore_ascii_case(".grok"));
+        if is_grok_rules && has_amore_rules {
+            continue;
+        }
         let mut entries: Vec<PathBuf> = match std::fs::read_dir(rules_dir) {
             Ok(iter) => iter
                 .filter_map(|entry| entry.ok())
@@ -82,24 +103,12 @@ fn find_rules_files(rules_dirs: &[PathBuf]) -> Vec<PathBuf> {
                         .and_then(|ext| ext.to_str())
                         .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
                 })
-                .filter(|p| {
-                    if is_grok_rules
-                        && let Some(name) = p.file_name().and_then(|n| n.to_str())
-                    {
-                        return !native_amore_names.contains(&name.to_ascii_lowercase());
-                    }
-                    true
-                })
                 .collect(),
             Err(_) => continue,
         };
         entries.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
-        if is_amore_rules {
-            for entry in &entries {
-                if let Some(name) = entry.file_name().and_then(|n| n.to_str()) {
-                    native_amore_names.insert(name.to_ascii_lowercase());
-                }
-            }
+        if is_amore_rules && !entries.is_empty() {
+            has_amore_rules = true;
         }
         results.extend(entries);
     }
@@ -555,7 +564,7 @@ mod tests {
     }
 
     #[test]
-    fn find_rules_files_skips_legacy_grok_duplicate_when_amore_rule_exists() {
+    fn find_rules_files_skips_legacy_grok_when_amore_rules_exists() {
         let tmp = tempfile::tempdir().unwrap();
         let amore_rules = tmp.path().join(".amore").join("rules");
         let grok_rules = tmp.path().join(".grok").join("rules");
@@ -563,7 +572,7 @@ mod tests {
         fs::create_dir_all(&grok_rules).unwrap();
         fs::write(amore_rules.join("principle-lattice.md"), "# Native lattice").unwrap();
         fs::write(grok_rules.join("principle-lattice.md"), "# Legacy lattice").unwrap();
-        fs::write(grok_rules.join("legacy-only.md"), "# Legacy only").unwrap();
+        fs::write(grok_rules.join("praxis.md"), "# Legacy praxis").unwrap();
 
         let rules_dirs: Vec<PathBuf> = CompatConfig::default()
             .rules_dirs()
@@ -571,11 +580,35 @@ mod tests {
             .map(|sub| tmp.path().join(sub))
             .collect();
         let files = find_rules_files(&rules_dirs);
-        let [first, second] = files.as_slice() else {
-            panic!("expected native lattice + legacy-only rule, got: {files:?}");
+        let [only] = files.as_slice() else {
+            panic!("expected only native .amore/rules when non-empty, got: {files:?}");
         };
-        assert_eq!(first, &amore_rules.join("principle-lattice.md"));
-        assert_eq!(second, &grok_rules.join("legacy-only.md"));
+        assert_eq!(only, &amore_rules.join("principle-lattice.md"));
+    }
+
+    #[test]
+    fn find_agent_files_skips_claude_md_when_agents_md_is_derived_from_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::write(
+            tmp.path().join("AGENTS.md"),
+            "<!--\nGENERATED FILE: do not edit by hand.\nCanonical source: CLAUDE.md.\n-->\n# Derived\n",
+        )
+        .unwrap();
+        fs::write(tmp.path().join("CLAUDE.md"), "# Canonical").unwrap();
+
+        let files = find_agent_files(tmp.path(), &CompatConfig::default().agent_filenames());
+        assert!(
+            files
+                .iter()
+                .all(|f| !f.file_name().unwrap().eq_ignore_ascii_case("CLAUDE.md")),
+            "CLAUDE.md should be skipped when AGENTS.md is derived from it, got: {files:?}"
+        );
+        assert!(
+            files
+                .iter()
+                .any(|f| f.file_name().unwrap().eq_ignore_ascii_case("AGENTS.md")),
+            "AGENTS.md should still be discovered, got: {files:?}"
+        );
     }
 
     // ── format_agents_md_section tests ──────────────────────────────

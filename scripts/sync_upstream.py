@@ -322,8 +322,13 @@ def cmd_verify(dry_run: bool) -> int:
         problems.append("no .amore project-root load site found in agent crates")
     _check_file_contains(
         "crates/codegen/xai-grok-agent/src/prompt/agents_md.rs",
-        "native_amore_names",
-        "project rules loader skips .grok/rules duplicate when .amore/rules carries the same stem",
+        "has_amore_rules",
+        "project rules loader skips legacy .grok/rules when .amore/rules is non-empty",
+        problems)
+    _check_file_contains(
+        "crates/codegen/xai-grok-agent/src/prompt/agents_md.rs",
+        "skip_derived_claude",
+        "project instructions loader skips CLAUDE.md when AGENTS.md is derived from it",
         problems)
 
     # 2. default home compiled in (xai-dirs, formerly xai-grok-home; paths.rs is a re-export)
